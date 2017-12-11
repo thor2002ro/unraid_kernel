@@ -443,6 +443,9 @@ static void emac_init_adapter(struct emac_adapter *adpt)
 
 	/* default to automatic flow control */
 	adpt->automatic = true;
+
+	/* Disable single-pause-frame mode by default */
+	adpt->single_pause_mode = false;
 }
 
 /* Get the clock */
@@ -766,11 +769,13 @@ static void emac_shutdown(struct platform_device *pdev)
 	struct emac_adapter *adpt = netdev_priv(netdev);
 	struct emac_sgmii *sgmii = &adpt->phy;
 
-	/* Closing the SGMII turns off its interrupts */
-	sgmii->close(adpt);
+	if (netdev->flags & IFF_UP) {
+		/* Closing the SGMII turns off its interrupts */
+		sgmii->close(adpt);
 
-	/* Resetting the MAC turns off all DMA and its interrupts */
-	emac_mac_reset(adpt);
+		/* Resetting the MAC turns off all DMA and its interrupts */
+		emac_mac_reset(adpt);
+	}
 }
 
 static struct platform_driver emac_platform_driver = {

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Xen SMP support
  *
@@ -19,6 +20,7 @@
 #include <linux/irq_work.h>
 #include <linux/tick.h>
 #include <linux/nmi.h>
+#include <linux/cpuhotplug.h>
 
 #include <asm/paravirt.h>
 #include <asm/desc.h>
@@ -413,7 +415,7 @@ static void xen_pv_play_dead(void) /* used only with HOTPLUG_CPU */
 	 */
 	tick_nohz_idle_enter();
 
-	cpu_startup_entry(CPUHP_AP_ONLINE_IDLE);
+	cpuhp_online_idle(CPUHP_AP_ONLINE_IDLE);
 }
 
 #else /* !CONFIG_HOTPLUG_CPU */

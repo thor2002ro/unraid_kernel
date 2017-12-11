@@ -273,17 +273,17 @@ void __init init_arch(bp_tag_t *bp_start)
  * Initialize system. Setup memory and reserve regions.
  */
 
-extern char _end;
-extern char _stext;
+extern char _end[];
+extern char _stext[];
 extern char _WindowVectors_text_start;
 extern char _WindowVectors_text_end;
-extern char _DebugInterruptVector_literal_start;
+extern char _DebugInterruptVector_text_start;
 extern char _DebugInterruptVector_text_end;
-extern char _KernelExceptionVector_literal_start;
+extern char _KernelExceptionVector_text_start;
 extern char _KernelExceptionVector_text_end;
-extern char _UserExceptionVector_literal_start;
+extern char _UserExceptionVector_text_start;
 extern char _UserExceptionVector_text_end;
-extern char _DoubleExceptionVector_literal_start;
+extern char _DoubleExceptionVector_text_start;
 extern char _DoubleExceptionVector_text_end;
 #if XCHAL_EXCM_LEVEL >= 2
 extern char _Level2InterruptVector_text_start;
@@ -317,6 +317,13 @@ static inline int mem_reserve(unsigned long start, unsigned long end)
 
 void __init setup_arch(char **cmdline_p)
 {
+	pr_info("config ID: %08x:%08x\n",
+		get_sr(SREG_EPC), get_sr(SREG_EXCSAVE));
+	if (get_sr(SREG_EPC) != XCHAL_HW_CONFIGID0 ||
+	    get_sr(SREG_EXCSAVE) != XCHAL_HW_CONFIGID1)
+		pr_info("built for config ID: %08x:%08x\n",
+			XCHAL_HW_CONFIGID0, XCHAL_HW_CONFIGID1);
+
 	*cmdline_p = command_line;
 	platform_setup(cmdline_p);
 	strlcpy(boot_command_line, *cmdline_p, COMMAND_LINE_SIZE);
@@ -333,22 +340,22 @@ void __init setup_arch(char **cmdline_p)
 	}
 #endif
 
-	mem_reserve(__pa(&_stext), __pa(&_end));
+	mem_reserve(__pa(_stext), __pa(_end));
 
 #ifdef CONFIG_VECTORS_OFFSET
 	mem_reserve(__pa(&_WindowVectors_text_start),
 		    __pa(&_WindowVectors_text_end));
 
-	mem_reserve(__pa(&_DebugInterruptVector_literal_start),
+	mem_reserve(__pa(&_DebugInterruptVector_text_start),
 		    __pa(&_DebugInterruptVector_text_end));
 
-	mem_reserve(__pa(&_KernelExceptionVector_literal_start),
+	mem_reserve(__pa(&_KernelExceptionVector_text_start),
 		    __pa(&_KernelExceptionVector_text_end));
 
-	mem_reserve(__pa(&_UserExceptionVector_literal_start),
+	mem_reserve(__pa(&_UserExceptionVector_text_start),
 		    __pa(&_UserExceptionVector_text_end));
 
-	mem_reserve(__pa(&_DoubleExceptionVector_literal_start),
+	mem_reserve(__pa(&_DoubleExceptionVector_text_start),
 		    __pa(&_DoubleExceptionVector_text_end));
 
 #if XCHAL_EXCM_LEVEL >= 2
@@ -582,12 +589,14 @@ c_show(struct seq_file *f, void *slot)
 		      "model\t\t: Xtensa " XCHAL_HW_VERSION_NAME "\n"
 		      "core ID\t\t: " XCHAL_CORE_ID "\n"
 		      "build ID\t: 0x%x\n"
+		      "config ID\t: %08x:%08x\n"
 		      "byte order\t: %s\n"
 		      "cpu MHz\t\t: %lu.%02lu\n"
 		      "bogomips\t: %lu.%02lu\n",
 		      num_online_cpus(),
 		      cpumask_pr_args(cpu_online_mask),
 		      XCHAL_BUILD_UNIQUE_ID,
+		      get_sr(SREG_EPC), get_sr(SREG_EXCSAVE),
 		      XCHAL_HAVE_BE ?  "big" : "little",
 		      ccount_freq/1000000,
 		      (ccount_freq/10000) % 100,

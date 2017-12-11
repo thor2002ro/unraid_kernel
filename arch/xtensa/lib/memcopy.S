@@ -9,23 +9,9 @@
  * Copyright (C) 2002 - 2012 Tensilica Inc.
  */
 
+#include <linux/linkage.h>
 #include <variant/core.h>
-
-	.macro	src_b	r, w0, w1
-#ifdef __XTENSA_EB__
-	src	\r, \w0, \w1
-#else
-	src	\r, \w1, \w0
-#endif
-	.endm
-
-	.macro	ssa8	r
-#ifdef __XTENSA_EB__
-	ssa8b	\r
-#else
-	ssa8l	\r
-#endif
-	.endm
+#include <asm/asmmacro.h>
 
 /*
  * void *memcpy(void *dst, const void *src, size_t len);
@@ -123,10 +109,7 @@
 	addi	a5, a5,  2
 	j	.Ldstaligned	# dst is now aligned, return to main algorithm
 
-	.align	4
-	.global	memcpy
-	.type   memcpy,@function
-memcpy:
+ENTRY(memcpy)
 
 	entry	sp, 16		# minimal stack frame
 	# a2/ dst, a3/ src, a4/ len
@@ -209,7 +192,7 @@ memcpy:
 .Lsrcunaligned:
 	_beqz	a4, .Ldone	# avoid loading anything for zero-length copies
 	# copy 16 bytes per iteration for word-aligned dst and unaligned src
-	ssa8	a3		# set shift amount from byte offset
+	__ssa8	a3		# set shift amount from byte offset
 
 /* set to 1 when running on ISS (simulator) with the
    lint or ferret client, or 0 to save a few cycles */
@@ -229,16 +212,16 @@ memcpy:
 .Loop2:
 	l32i	a7, a3,  4
 	l32i	a8, a3,  8
-	src_b	a6, a6, a7
+	__src_b	a6, a6, a7
 	s32i	a6, a5,  0
 	l32i	a9, a3, 12
-	src_b	a7, a7, a8
+	__src_b	a7, a7, a8
 	s32i	a7, a5,  4
 	l32i	a6, a3, 16
-	src_b	a8, a8, a9
+	__src_b	a8, a8, a9
 	s32i	a8, a5,  8
 	addi	a3, a3, 16
-	src_b	a9, a9, a6
+	__src_b	a9, a9, a6
 	s32i	a9, a5, 12
 	addi	a5, a5, 16
 #if !XCHAL_HAVE_LOOPS
@@ -249,10 +232,10 @@ memcpy:
 	# copy 8 bytes
 	l32i	a7, a3,  4
 	l32i	a8, a3,  8
-	src_b	a6, a6, a7
+	__src_b	a6, a6, a7
 	s32i	a6, a5,  0
 	addi	a3, a3,  8
-	src_b	a7, a7, a8
+	__src_b	a7, a7, a8
 	s32i	a7, a5,  4
 	addi	a5, a5,  8
 	mov	a6, a8
@@ -261,7 +244,7 @@ memcpy:
 	# copy 4 bytes
 	l32i	a7, a3,  4
 	addi	a3, a3,  4
-	src_b	a6, a6, a7
+	__src_b	a6, a6, a7
 	s32i	a6, a5,  0
 	addi	a5, a5,  4
 	mov	a6, a7
@@ -288,20 +271,22 @@ memcpy:
 	s8i	a6, a5,  0
 	retw
 
+ENDPROC(memcpy)
 
 /*
  * void bcopy(const void *src, void *dest, size_t n);
  */
-	.align	4
-	.global	bcopy
-	.type   bcopy,@function
-bcopy:
+
+ENTRY(bcopy)
+
 	entry	sp, 16		# minimal stack frame
 	# a2=src, a3=dst, a4=len
 	mov	a5, a3
 	mov	a3, a2
 	mov	a2, a5
 	j	.Lmovecommon	# go to common code for memmove+bcopy
+
+ENDPROC(bcopy)
 
 /*
  * void *memmove(void *dst, const void *src, size_t len);
@@ -391,10 +376,7 @@ bcopy:
 	j	.Lbackdstaligned	# dst is now aligned,
 					# return to main algorithm
 
-	.align	4
-	.global	memmove
-	.type   memmove,@function
-memmove:
+ENTRY(memmove)
 
 	entry	sp, 16		# minimal stack frame
 	# a2/ dst, a3/ src, a4/ len
@@ -485,7 +467,7 @@ memmove:
 .Lbacksrcunaligned:
 	_beqz	a4, .Lbackdone	# avoid loading anything for zero-length copies
 	# copy 16 bytes per iteration for word-aligned dst and unaligned src
-	ssa8	a3		# set shift amount from byte offset
+	__ssa8	a3		# set shift amount from byte offset
 #define SIM_CHECKS_ALIGNMENT	1	/* set to 1 when running on ISS with
 					 * the lint or ferret client, or 0
 					 * to save a few cycles */
@@ -506,15 +488,15 @@ memmove:
 	l32i	a7, a3, 12
 	l32i	a8, a3,  8
 	addi	a5, a5, -16
-	src_b	a6, a7, a6
+	__src_b	a6, a7, a6
 	s32i	a6, a5, 12
 	l32i	a9, a3,  4
-	src_b	a7, a8, a7
+	__src_b	a7, a8, a7
 	s32i	a7, a5,  8
 	l32i	a6, a3,  0
-	src_b	a8, a9, a8
+	__src_b	a8, a9, a8
 	s32i	a8, a5,  4
-	src_b	a9, a6, a9
+	__src_b	a9, a6, a9
 	s32i	a9, a5,  0
 #if !XCHAL_HAVE_LOOPS
 	bne	a3, a10, .backLoop2 # continue loop if a3:src != a10:src_start
@@ -526,9 +508,9 @@ memmove:
 	l32i	a7, a3,  4
 	l32i	a8, a3,  0
 	addi	a5, a5, -8
-	src_b	a6, a7, a6
+	__src_b	a6, a7, a6
 	s32i	a6, a5,  4
-	src_b	a7, a8, a7
+	__src_b	a7, a8, a7
 	s32i	a7, a5,  0
 	mov	a6, a8
 .Lback12:
@@ -537,7 +519,7 @@ memmove:
 	addi	a3, a3, -4
 	l32i	a7, a3,  0
 	addi	a5, a5, -4
-	src_b	a6, a7, a6
+	__src_b	a6, a7, a6
 	s32i	a6, a5,  0
 	mov	a6, a7
 .Lback13:
@@ -566,11 +548,4 @@ memmove:
 	s8i	a6, a5,  0
 	retw
 
-
-/*
- * Local Variables:
- * mode:fundamental
- * comment-start: "# "
- * comment-start-skip: "# *"
- * End:
- */
+ENDPROC(memmove)

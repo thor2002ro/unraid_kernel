@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /* pci_sun4v.c: SUN4V specific PCI controller support.
  *
  * Copyright (C) 2006, 2007, 2008 David S. Miller (davem@davemloft.net)
@@ -673,12 +674,14 @@ static void dma_4v_unmap_sg(struct device *dev, struct scatterlist *sglist,
 static int dma_4v_supported(struct device *dev, u64 device_mask)
 {
 	struct iommu *iommu = dev->archdata.iommu;
-	u64 dma_addr_mask;
+	u64 dma_addr_mask = iommu->dma_addr_mask;
 
-	if (device_mask > DMA_BIT_MASK(32) && iommu->atu)
-		dma_addr_mask = iommu->atu->dma_addr_mask;
-	else
-		dma_addr_mask = iommu->dma_addr_mask;
+	if (device_mask > DMA_BIT_MASK(32)) {
+		if (iommu->atu)
+			dma_addr_mask = iommu->atu->dma_addr_mask;
+		else
+			return 0;
+	}
 
 	if ((device_mask & dma_addr_mask) == dma_addr_mask)
 		return 1;
@@ -1264,8 +1267,6 @@ static int pci_sun4v_probe(struct platform_device *op)
 			 * ATU group, but ATU hcalls won't be available.
 			 */
 			hv_atu = false;
-			pr_err(PFX "Could not register hvapi ATU err=%d\n",
-			       err);
 		} else {
 			pr_info(PFX "Registered hvapi ATU major[%lu] minor[%lu]\n",
 				vatu_major, vatu_minor);

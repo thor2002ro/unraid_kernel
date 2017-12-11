@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_POWERPC_PGTABLE_RADIX_H
 #define _ASM_POWERPC_PGTABLE_RADIX_H
 
@@ -110,6 +111,8 @@
  */
 #define RADIX_VMEMMAP_BASE		(RADIX_VMALLOC_END)
 
+#define RADIX_KERN_IO_START	(RADIX_KERN_VIRT_START + (RADIX_KERN_VIRT_SIZE >> 1))
+
 #ifndef __ASSEMBLY__
 #define RADIX_PTE_TABLE_SIZE	(sizeof(pte_t) << RADIX_PTE_INDEX_SIZE)
 #define RADIX_PMD_TABLE_SIZE	(sizeof(pmd_t) << RADIX_PMD_INDEX_SIZE)
@@ -118,6 +121,7 @@
 
 #ifdef CONFIG_STRICT_KERNEL_RWX
 extern void radix__mark_rodata_ro(void);
+extern void radix__mark_initmem_nx(void);
 #endif
 
 static inline unsigned long __radix_pte_update(pte_t *ptep, unsigned long clr,

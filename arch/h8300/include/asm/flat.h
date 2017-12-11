@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * arch/h8300/asm/include/flat.h -- uClinux flat-format executables
  */
@@ -24,7 +25,7 @@ static inline int flat_get_addr_from_rp(u32 __user *rp, u32 relval, u32 flags,
 					u32 *addr, u32 *persistent)
 {
 	u32 val = get_unaligned((__force u32 *)rp);
-	if (!(flags & FLAT_FLAG_GOTPIC)
+	if (!(flags & FLAT_FLAG_GOTPIC))
 		val &= 0x00ffffff;
 	*addr = val;
 	return 0;

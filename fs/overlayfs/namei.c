@@ -38,7 +38,7 @@ static int ovl_check_redirect(struct dentry *dentry, struct ovl_lookup_data *d,
 			return 0;
 		goto fail;
 	}
-	buf = kzalloc(prelen + res + strlen(post) + 1, GFP_TEMPORARY);
+	buf = kzalloc(prelen + res + strlen(post) + 1, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
 
@@ -103,7 +103,7 @@ static struct ovl_fh *ovl_get_origin_fh(struct dentry *dentry)
 	if (res == 0)
 		return NULL;
 
-	fh = kzalloc(res, GFP_TEMPORARY);
+	fh  = kzalloc(res, GFP_KERNEL);
 	if (!fh)
 		return ERR_PTR(-ENOMEM);
 
@@ -309,7 +309,7 @@ static int ovl_check_origin(struct dentry *upperdentry,
 
 	BUG_ON(*ctrp);
 	if (!*stackp)
-		*stackp = kmalloc(sizeof(struct path), GFP_TEMPORARY);
+		*stackp = kmalloc(sizeof(struct path), GFP_KERNEL);
 	if (!*stackp) {
 		dput(origin);
 		return -ENOMEM;
@@ -397,17 +397,27 @@ int ovl_verify_index(struct dentry *index, struct path *lowerstack,
 	if (!d_inode(index))
 		return 0;
 
-	err = -EISDIR;
-	if (d_is_dir(index))
+	/*
+	 * Directory index entries are going to be used for looking up
+	 * redirected upper dirs by lower dir fh when decoding an overlay
+	 * file handle of a merge dir. Whiteout index entries are going to be
+	 * used as an indication that an exported overlay file handle should
+	 * be treated as stale (i.e. after unlink of the overlay inode).
+	 * We don't know the verification rules for directory and whiteout
+	 * index entries, because they have not been implemented yet, so return
+	 * EINVAL if those entries are found to abort the mount to avoid
+	 * corrupting an index that was created by a newer kernel.
+	 */
+	err = -EINVAL;
+	if (d_is_dir(index) || ovl_is_whiteout(index))
 		goto fail;
 
-	err = -EINVAL;
 	if (index->d_name.len < sizeof(struct ovl_fh)*2)
 		goto fail;
 
 	err = -ENOMEM;
 	len = index->d_name.len / 2;
-	fh = kzalloc(len, GFP_TEMPORARY);
+	fh = kzalloc(len, GFP_KERNEL);
 	if (!fh)
 		goto fail;
 
@@ -436,8 +446,8 @@ out:
 	return err;
 
 fail:
-	pr_warn_ratelimited("overlayfs: failed to verify index (%pd2, err=%i)\n",
-			    index, err);
+	pr_warn_ratelimited("overlayfs: failed to verify index (%pd2, ftype=%x, err=%i)\n",
+			    index, d_inode(index)->i_mode & S_IFMT, err);
 	goto out;
 }
 
@@ -467,7 +477,7 @@ int ovl_get_index_name(struct dentry *origin, struct qstr *name)
 		return PTR_ERR(fh);
 
 	err = -ENOMEM;
-	n = kzalloc(fh->len * 2, GFP_TEMPORARY);
+	n = kzalloc(fh->len * 2, GFP_KERNEL);
 	if (n) {
 		s  = bin2hex(n, fh, fh->len);
 		*name = (struct qstr) QSTR_INIT(n, s - n);
@@ -495,6 +505,11 @@ static struct dentry *ovl_lookup_index(struct dentry *dentry,
 
 	index = lookup_one_len_unlocked(name.name, ofs->indexdir, name.len);
 	if (IS_ERR(index)) {
+		err = PTR_ERR(index);
+		if (err == -ENOENT) {
+			index = NULL;
+			goto out;
+		}
 		pr_warn_ratelimited("overlayfs: failed inode index lookup (ino=%lu, key=%*s, err=%i);\n"
 				    "overlayfs: mount with '-o index=off' to disable inodes index.\n",
 				    d_inode(origin)->i_ino, name.len, name.name,
@@ -502,26 +517,34 @@ static struct dentry *ovl_lookup_index(struct dentry *dentry,
 		goto out;
 	}
 
+	inode = d_inode(index);
 	if (d_is_negative(index)) {
-		if (upper && d_inode(origin)->i_nlink > 1) {
-			pr_warn_ratelimited("overlayfs: hard link with origin but no index (ino=%lu).\n",
-					    d_inode(origin)->i_ino);
-			goto fail;
-		}
-
-		dput(index);
-		index = NULL;
-	} else if (upper && d_inode(index) != d_inode(upper)) {
-		inode = d_inode(index);
-		pr_warn_ratelimited("overlayfs: wrong index found (index ino: %lu, upper ino: %lu).\n",
-				    d_inode(index)->i_ino,
-				    d_inode(upper)->i_ino);
+		goto out_dput;
+	} else if (upper && d_inode(upper) != inode) {
+		goto out_dput;
+	} else if (ovl_dentry_weird(index) || ovl_is_whiteout(index) ||
+		   ((inode->i_mode ^ d_inode(origin)->i_mode) & S_IFMT)) {
+		/*
+		 * Index should always be of the same file type as origin
+		 * except for the case of a whiteout index. A whiteout
+		 * index should only exist if all lower aliases have been
+		 * unlinked, which means that finding a lower origin on lookup
+		 * whose index is a whiteout should be treated as an error.
+		 */
+		pr_warn_ratelimited("overlayfs: bad index found (index=%pd2, ftype=%x, origin ftype=%x).\n",
+				    index, d_inode(index)->i_mode & S_IFMT,
+				    d_inode(origin)->i_mode & S_IFMT);
 		goto fail;
 	}
 
 out:
 	kfree(name.name);
 	return index;
+
+out_dput:
+	dput(index);
+	index = NULL;
+	goto out;
 
 fail:
 	dput(index);
@@ -611,6 +634,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		}
 
 		if (d.redirect) {
+			err = -ENOMEM;
 			upperredirect = kstrdup(d.redirect, GFP_KERNEL);
 			if (!upperredirect)
 				goto out_put_upper;
@@ -623,7 +647,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 	if (!d.stop && poe->numlower) {
 		err = -ENOMEM;
 		stack = kcalloc(ofs->numlower, sizeof(struct path),
-				GFP_TEMPORARY);
+				GFP_KERNEL);
 		if (!stack)
 			goto out_put_upper;
 	}
@@ -685,7 +709,7 @@ struct dentry *ovl_lookup(struct inode *dir, struct dentry *dentry,
 		upperdentry = dget(index);
 
 	if (upperdentry || ctr) {
-		inode = ovl_get_inode(dentry, upperdentry);
+		inode = ovl_get_inode(dentry, upperdentry, index);
 		err = PTR_ERR(inode);
 		if (IS_ERR(inode))
 			goto out_free_oe;
