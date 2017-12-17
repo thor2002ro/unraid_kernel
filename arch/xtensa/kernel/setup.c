@@ -36,6 +36,7 @@
 #endif
 
 #include <asm/bootparam.h>
+#include <asm/kasan.h>
 #include <asm/mmu_context.h>
 #include <asm/pgtable.h>
 #include <asm/processor.h>
@@ -156,7 +157,7 @@ static int __init parse_bootparam(const bp_tag_t* tag)
 	/* Boot parameters must start with a BP_TAG_FIRST tag. */
 
 	if (tag->id != BP_TAG_FIRST) {
-		printk(KERN_WARNING "Invalid boot parameters!\n");
+		pr_warn("Invalid boot parameters!\n");
 		return 0;
 	}
 
@@ -165,15 +166,14 @@ static int __init parse_bootparam(const bp_tag_t* tag)
 	/* Parse all tags. */
 
 	while (tag != NULL && tag->id != BP_TAG_LAST) {
-	 	for (t = &__tagtable_begin; t < &__tagtable_end; t++) {
+		for (t = &__tagtable_begin; t < &__tagtable_end; t++) {
 			if (tag->id == t->tag) {
 				t->parse(tag);
 				break;
 			}
 		}
 		if (t == &__tagtable_end)
-			printk(KERN_WARNING "Ignoring tag "
-			       "0x%08x\n", tag->id);
+			pr_warn("Ignoring tag 0x%08x\n", tag->id);
 		tag = (bp_tag_t*)((unsigned long)(tag + 1) + tag->size);
 	}
 
@@ -207,6 +207,8 @@ static int __init xtensa_dt_io_area(unsigned long node, const char *uname,
 	xtensa_kio_paddr = of_read_ulong(ranges+1, 1);
 	/* round down to nearest 256MB boundary */
 	xtensa_kio_paddr &= 0xf0000000;
+
+	init_kio();
 
 	return 1;
 }
@@ -246,6 +248,14 @@ void __init early_init_devtree(void *params)
 
 void __init init_arch(bp_tag_t *bp_start)
 {
+	/* Initialize MMU. */
+
+	init_mmu();
+
+	/* Initialize initial KASAN shadow map */
+
+	kasan_early_init();
+
 	/* Parse boot parameters */
 
 	if (bp_start)
@@ -263,10 +273,6 @@ void __init init_arch(bp_tag_t *bp_start)
 	/* Early hook for platforms */
 
 	platform_init(bp_start);
-
-	/* Initialize MMU. */
-
-	init_mmu();
 }
 
 /*
@@ -387,7 +393,7 @@ void __init setup_arch(char **cmdline_p)
 #endif
 	parse_early_param();
 	bootmem_init();
-
+	kasan_init();
 	unflatten_and_copy_device_tree();
 
 #ifdef CONFIG_SMP
