@@ -131,6 +131,11 @@ static inline unsigned int cpumask_first(const struct cpumask *srcp)
 	return 0;
 }
 
+static inline unsigned int cpumask_last(const struct cpumask *srcp)
+{
+	return 0;
+}
+
 /* Valid inputs for n are -1 and 0. */
 static inline unsigned int cpumask_next(int n, const struct cpumask *srcp)
 {
@@ -177,6 +182,17 @@ static inline unsigned int cpumask_local_spread(unsigned int i, int node)
 static inline unsigned int cpumask_first(const struct cpumask *srcp)
 {
 	return find_first_bit(cpumask_bits(srcp), nr_cpumask_bits);
+}
+
+/**
+ * cpumask_last - get the last CPU in a cpumask
+ * @srcp:	- the cpumask pointer
+ *
+ * Returns	>= nr_cpumask_bits if no CPUs set.
+ */
+static inline unsigned int cpumask_last(const struct cpumask *srcp)
+{
+	return find_last_bit(cpumask_bits(srcp), nr_cpumask_bits);
 }
 
 unsigned int cpumask_next(int n, const struct cpumask *srcp);
@@ -624,7 +640,7 @@ static inline int cpulist_parse(const char *buf, struct cpumask *dstp)
 /**
  * cpumask_size - size to allocate for a 'struct cpumask' in bytes
  */
-static inline size_t cpumask_size(void)
+static inline unsigned int cpumask_size(void)
 {
 	return BITS_TO_LONGS(nr_cpumask_bits) * sizeof(long);
 }

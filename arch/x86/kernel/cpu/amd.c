@@ -556,6 +556,51 @@ static void bsp_init_amd(struct cpuinfo_x86 *c)
 	}
 }
 
+static void early_detect_mem_encrypt(struct cpuinfo_x86 *c)
+{
+	u64 msr;
+
+	/*
+	 * BIOS support is required for SME and SEV.
+	 *   For SME: If BIOS has enabled SME then adjust x86_phys_bits by
+	 *	      the SME physical address space reduction value.
+	 *	      If BIOS has not enabled SME then don't advertise the
+	 *	      SME feature (set in scattered.c).
+	 *   For SEV: If BIOS has not enabled SEV then don't advertise the
+	 *            SEV feature (set in scattered.c).
+	 *
+	 *   In all cases, since support for SME and SEV requires long mode,
+	 *   don't advertise the feature under CONFIG_X86_32.
+	 */
+	if (cpu_has(c, X86_FEATURE_SME) || cpu_has(c, X86_FEATURE_SEV)) {
+		/* Check if memory encryption is enabled */
+		rdmsrl(MSR_K8_SYSCFG, msr);
+		if (!(msr & MSR_K8_SYSCFG_MEM_ENCRYPT))
+			goto clear_all;
+
+		/*
+		 * Always adjust physical address bits. Even though this
+		 * will be a value above 32-bits this is still done for
+		 * CONFIG_X86_32 so that accurate values are reported.
+		 */
+		c->x86_phys_bits -= (cpuid_ebx(0x8000001f) >> 6) & 0x3f;
+
+		if (IS_ENABLED(CONFIG_X86_32))
+			goto clear_all;
+
+		rdmsrl(MSR_K7_HWCR, msr);
+		if (!(msr & MSR_K7_HWCR_SMMLOCK))
+			goto clear_sev;
+
+		return;
+
+clear_all:
+		clear_cpu_cap(c, X86_FEATURE_SME);
+clear_sev:
+		clear_cpu_cap(c, X86_FEATURE_SEV);
+	}
+}
+
 static void early_init_amd(struct cpuinfo_x86 *c)
 {
 	u32 dummy;
@@ -627,26 +672,7 @@ static void early_init_amd(struct cpuinfo_x86 *c)
 	if (cpu_has_amd_erratum(c, amd_erratum_400))
 		set_cpu_bug(c, X86_BUG_AMD_E400);
 
-	/*
-	 * BIOS support is required for SME. If BIOS has enabled SME then
-	 * adjust x86_phys_bits by the SME physical address space reduction
-	 * value. If BIOS has not enabled SME then don't advertise the
-	 * feature (set in scattered.c). Also, since the SME support requires
-	 * long mode, don't advertise the feature under CONFIG_X86_32.
-	 */
-	if (cpu_has(c, X86_FEATURE_SME)) {
-		u64 msr;
-
-		/* Check if SME is enabled */
-		rdmsrl(MSR_K8_SYSCFG, msr);
-		if (msr & MSR_K8_SYSCFG_MEM_ENCRYPT) {
-			c->x86_phys_bits -= (cpuid_ebx(0x8000001f) >> 6) & 0x3f;
-			if (IS_ENABLED(CONFIG_X86_32))
-				clear_cpu_cap(c, X86_FEATURE_SME);
-		} else {
-			clear_cpu_cap(c, X86_FEATURE_SME);
-		}
-	}
+	early_detect_mem_encrypt(c);
 }
 
 static void init_amd_k8(struct cpuinfo_x86 *c)
@@ -804,8 +830,11 @@ static void init_amd(struct cpuinfo_x86 *c)
 	case 0x17: init_amd_zn(c); break;
 	}
 
-	/* Enable workaround for FXSAVE leak */
-	if (c->x86 >= 6)
+	/*
+	 * Enable workaround for FXSAVE leak on CPUs
+	 * without a XSaveErPtr feature
+	 */
+	if ((c->x86 >= 6) && (!cpu_has(c, X86_FEATURE_XSAVEERPTR)))
 		set_cpu_bug(c, X86_BUG_FXSAVE_LEAK);
 
 	cpu_detect_cache_sizes(c);
@@ -826,8 +855,32 @@ static void init_amd(struct cpuinfo_x86 *c)
 		set_cpu_cap(c, X86_FEATURE_K8);
 
 	if (cpu_has(c, X86_FEATURE_XMM2)) {
-		/* MFENCE stops RDTSC speculation */
-		set_cpu_cap(c, X86_FEATURE_MFENCE_RDTSC);
+		unsigned long long val;
+		int ret;
+
+		/*
+		 * A serializing LFENCE has less overhead than MFENCE, so
+		 * use it for execution serialization.  On families which
+		 * don't have that MSR, LFENCE is already serializing.
+		 * msr_set_bit() uses the safe accessors, too, even if the MSR
+		 * is not present.
+		 */
+		msr_set_bit(MSR_F10H_DECFG,
+			    MSR_F10H_DECFG_LFENCE_SERIALIZE_BIT);
+
+		/*
+		 * Verify that the MSR write was successful (could be running
+		 * under a hypervisor) and only then assume that LFENCE is
+		 * serializing.
+		 */
+		ret = rdmsrl_safe(MSR_F10H_DECFG, &val);
+		if (!ret && (val & MSR_F10H_DECFG_LFENCE_SERIALIZE)) {
+			/* A serializing LFENCE stops RDTSC speculation */
+			set_cpu_cap(c, X86_FEATURE_LFENCE_RDTSC);
+		} else {
+			/* MFENCE stops RDTSC speculation */
+			set_cpu_cap(c, X86_FEATURE_MFENCE_RDTSC);
+		}
 	}
 
 	/*
