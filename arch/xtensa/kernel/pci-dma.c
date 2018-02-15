@@ -147,6 +147,10 @@ static void *xtensa_dma_alloc(struct device *dev, size_t size,
 
 	*handle = phys_to_dma(dev, page_to_phys(page));
 
+	if (attrs & DMA_ATTR_NO_KERNEL_MAPPING) {
+		return page;
+	}
+
 #ifdef CONFIG_MMU
 	if (PageHighMem(page)) {
 		void *p;
@@ -178,8 +182,10 @@ static void xtensa_dma_free(struct device *dev, size_t size, void *vaddr,
 	unsigned long addr = (unsigned long)vaddr;
 	struct page *page;
 
-	if (addr >= XCHAL_KSEG_BYPASS_VADDR &&
-	    addr - XCHAL_KSEG_BYPASS_VADDR < XCHAL_KSEG_SIZE) {
+	if (attrs & DMA_ATTR_NO_KERNEL_MAPPING) {
+		page = vaddr;
+	} else if (addr >= XCHAL_KSEG_BYPASS_VADDR &&
+		   addr - XCHAL_KSEG_BYPASS_VADDR < XCHAL_KSEG_SIZE) {
 		addr += XCHAL_KSEG_CACHED_VADDR - XCHAL_KSEG_BYPASS_VADDR;
 		page = virt_to_page(addr);
 	} else {
