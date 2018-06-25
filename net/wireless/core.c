@@ -95,6 +95,9 @@ static int cfg80211_dev_check_name(struct cfg80211_registered_device *rdev,
 
 	ASSERT_RTNL();
 
+	if (strlen(newname) > NL80211_WIPHY_NAME_MAXLEN)
+		return -EINVAL;
+
 	/* prohibit calling the thing phy%d when %d is not its number */
 	sscanf(newname, PHY_NAME "%d%n", &wiphy_idx, &taken);
 	if (taken == strlen(newname) && wiphy_idx != rdev->wiphy_idx) {
@@ -720,6 +723,10 @@ int wiphy_register(struct wiphy *wiphy)
 	if (WARN_ON(wiphy_ext_feature_isset(&rdev->wiphy,
 					    NL80211_EXT_FEATURE_4WAY_HANDSHAKE_STA_1X) &&
 		    (!rdev->ops->set_pmk || !rdev->ops->del_pmk)))
+		return -EINVAL;
+
+	if (WARN_ON(!(rdev->wiphy.flags & WIPHY_FLAG_SUPPORTS_FW_ROAM) &&
+		    rdev->ops->update_connect_params))
 		return -EINVAL;
 
 	if (wiphy->addresses)
