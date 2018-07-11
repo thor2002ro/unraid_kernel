@@ -365,11 +365,6 @@ ssize_t bch_hprint(char *buf, int64_t v);
 bool bch_is_zero(const char *p, size_t n);
 int bch_parse_uuid(const char *s, char *uuid);
 
-ssize_t bch_snprint_string_list(char *buf, size_t size, const char * const list[],
-			    size_t selected);
-
-ssize_t bch_read_string_list(const char *buf, const char * const list[]);
-
 struct time_stats {
 	spinlock_t	lock;
 	/*
@@ -566,12 +561,6 @@ static inline sector_t bdev_sectors(struct block_device *bdev)
 {
 	return bdev->bd_inode->i_size >> 9;
 }
-
-#define closure_bio_submit(bio, cl)					\
-do {									\
-	closure_get(cl);						\
-	generic_make_request(bio);					\
-} while (0)
 
 uint64_t bch_crc64_update(uint64_t, const void *, size_t);
 uint64_t bch_crc64(const void *, size_t);

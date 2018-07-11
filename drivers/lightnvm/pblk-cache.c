@@ -44,13 +44,15 @@ retry:
 		goto out;
 	}
 
-	if (unlikely(!bio_has_data(bio)))
-		goto out;
-
 	pblk_ppa_set_empty(&w_ctx.ppa);
 	w_ctx.flags = flags;
-	if (bio->bi_opf & REQ_PREFLUSH)
+	if (bio->bi_opf & REQ_PREFLUSH) {
 		w_ctx.flags |= PBLK_FLUSH_ENTRY;
+		pblk_write_kick(pblk);
+	}
+
+	if (unlikely(!bio_has_data(bio)))
+		goto out;
 
 	for (i = 0; i < nr_entries; i++) {
 		void *data = bio_data(bio);
@@ -62,6 +64,8 @@ retry:
 
 		bio_advance(bio, PBLK_EXPOSED_PAGE_SIZE);
 	}
+
+	atomic64_add(nr_entries, &pblk->user_wa);
 
 #ifdef CONFIG_NVM_DEBUG
 	atomic_long_add(nr_entries, &pblk->inflight_writes);
@@ -116,6 +120,8 @@ retry:
 
 	WARN_ONCE(gc_rq->secs_to_gc != valid_entries,
 					"pblk: inconsistent GC write\n");
+
+	atomic64_add(valid_entries, &pblk->gc_wa);
 
 #ifdef CONFIG_NVM_DEBUG
 	atomic_long_add(valid_entries, &pblk->inflight_writes);

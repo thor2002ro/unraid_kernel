@@ -28,15 +28,17 @@ struct mmc_gpio {
 	irqreturn_t (*cd_gpio_isr)(int irq, void *dev_id);
 	char *ro_label;
 	char cd_label[0];
+	u32 cd_debounce_delay_ms;
 };
 
 static irqreturn_t mmc_gpio_cd_irqt(int irq, void *dev_id)
 {
 	/* Schedule a card detection after a debounce timeout */
 	struct mmc_host *host = dev_id;
+	struct mmc_gpio *ctx = host->slot.handler_priv;
 
 	host->trigger_card_event = true;
-	mmc_detect_change(host, msecs_to_jiffies(200));
+	mmc_detect_change(host, msecs_to_jiffies(ctx->cd_debounce_delay_ms));
 
 	return IRQ_HANDLED;
 }
@@ -49,6 +51,7 @@ int mmc_gpio_alloc(struct mmc_host *host)
 
 	if (ctx) {
 		ctx->ro_label = ctx->cd_label + len;
+		ctx->cd_debounce_delay_ms = 200;
 		snprintf(ctx->cd_label, len, "%s cd", dev_name(host->parent));
 		snprintf(ctx->ro_label, len, "%s ro", dev_name(host->parent));
 		host->slot.handler_priv = ctx;
@@ -76,15 +79,22 @@ EXPORT_SYMBOL(mmc_gpio_get_ro);
 int mmc_gpio_get_cd(struct mmc_host *host)
 {
 	struct mmc_gpio *ctx = host->slot.handler_priv;
+	int cansleep;
 
 	if (!ctx || !ctx->cd_gpio)
 		return -ENOSYS;
 
-	if (ctx->override_cd_active_level)
-		return !gpiod_get_raw_value_cansleep(ctx->cd_gpio) ^
-			!!(host->caps2 & MMC_CAP2_CD_ACTIVE_HIGH);
+	cansleep = gpiod_cansleep(ctx->cd_gpio);
+	if (ctx->override_cd_active_level) {
+		int value = cansleep ?
+				gpiod_get_raw_value_cansleep(ctx->cd_gpio) :
+				gpiod_get_raw_value(ctx->cd_gpio);
+		return !value ^ !!(host->caps2 & MMC_CAP2_CD_ACTIVE_HIGH);
+	}
 
-	return gpiod_get_value_cansleep(ctx->cd_gpio);
+	return cansleep ?
+		gpiod_get_value_cansleep(ctx->cd_gpio) :
+		gpiod_get_value(ctx->cd_gpio);
 }
 EXPORT_SYMBOL(mmc_gpio_get_cd);
 
@@ -149,10 +159,29 @@ void mmc_gpiod_request_cd_irq(struct mmc_host *host)
 
 	if (irq < 0)
 		host->caps |= MMC_CAP_NEEDS_POLL;
-	else if ((host->caps & MMC_CAP_CD_WAKE) && !enable_irq_wake(irq))
-		host->slot.cd_wake_enabled = true;
 }
 EXPORT_SYMBOL(mmc_gpiod_request_cd_irq);
+
+int mmc_gpio_set_cd_wake(struct mmc_host *host, bool on)
+{
+	int ret = 0;
+
+	if (!(host->caps & MMC_CAP_CD_WAKE) ||
+	    host->slot.cd_irq < 0 ||
+	    on == host->slot.cd_wake_enabled)
+		return 0;
+
+	if (on) {
+		ret = enable_irq_wake(host->slot.cd_irq);
+		host->slot.cd_wake_enabled = !ret;
+	} else {
+		disable_irq_wake(host->slot.cd_irq);
+		host->slot.cd_wake_enabled = false;
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL(mmc_gpio_set_cd_wake);
 
 /* Register an alternate interrupt service routine for
  * the card-detect GPIO.
@@ -242,7 +271,7 @@ int mmc_gpiod_request_cd(struct mmc_host *host, const char *con_id,
 	if (debounce) {
 		ret = gpiod_set_debounce(desc, debounce);
 		if (ret < 0)
-			return ret;
+			ctx->cd_debounce_delay_ms = debounce;
 	}
 
 	if (gpio_invert)

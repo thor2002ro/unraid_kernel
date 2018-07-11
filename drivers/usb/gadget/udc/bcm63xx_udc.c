@@ -288,8 +288,6 @@ struct bcm63xx_req {
  * @ep0_reply: Pending reply from gadget driver.
  * @ep0_request: Outstanding ep0 request.
  * @debugfs_root: debugfs directory: /sys/kernel/debug/<DRV_MODULE_NAME>.
- * @debugfs_usbd: debugfs file "usbd" for controller state.
- * @debugfs_iudma: debugfs file "usbd" for IUDMA state.
  */
 struct bcm63xx_udc {
 	spinlock_t			lock;
@@ -330,8 +328,6 @@ struct bcm63xx_udc {
 	struct usb_request		*ep0_request;
 
 	struct dentry			*debugfs_root;
-	struct dentry			*debugfs_usbd;
-	struct dentry			*debugfs_iudma;
 };
 
 static const struct usb_ep_ops bcm63xx_udc_ep_ops;
@@ -2158,6 +2154,7 @@ static int bcm63xx_usbd_dbg_show(struct seq_file *s, void *p)
 
 	return 0;
 }
+DEFINE_SHOW_ATTRIBUTE(bcm63xx_usbd_dbg);
 
 /*
  * bcm63xx_iudma_dbg_show - Show IUDMA status and descriptors.
@@ -2238,33 +2235,7 @@ static int bcm63xx_iudma_dbg_show(struct seq_file *s, void *p)
 
 	return 0;
 }
-
-static int bcm63xx_usbd_dbg_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, bcm63xx_usbd_dbg_show, inode->i_private);
-}
-
-static int bcm63xx_iudma_dbg_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, bcm63xx_iudma_dbg_show, inode->i_private);
-}
-
-static const struct file_operations usbd_dbg_fops = {
-	.owner		= THIS_MODULE,
-	.open		= bcm63xx_usbd_dbg_open,
-	.llseek		= seq_lseek,
-	.read		= seq_read,
-	.release	= single_release,
-};
-
-static const struct file_operations iudma_dbg_fops = {
-	.owner		= THIS_MODULE,
-	.open		= bcm63xx_iudma_dbg_open,
-	.llseek		= seq_lseek,
-	.read		= seq_read,
-	.release	= single_release,
-};
-
+DEFINE_SHOW_ATTRIBUTE(bcm63xx_iudma_dbg);
 
 /**
  * bcm63xx_udc_init_debugfs - Create debugfs entries.
@@ -2272,34 +2243,16 @@ static const struct file_operations iudma_dbg_fops = {
  */
 static void bcm63xx_udc_init_debugfs(struct bcm63xx_udc *udc)
 {
-	struct dentry *root, *usbd, *iudma;
+	struct dentry *root;
 
 	if (!IS_ENABLED(CONFIG_USB_GADGET_DEBUG_FS))
 		return;
 
 	root = debugfs_create_dir(udc->gadget.name, NULL);
-	if (IS_ERR(root) || !root)
-		goto err_root;
-
-	usbd = debugfs_create_file("usbd", 0400, root, udc,
-			&usbd_dbg_fops);
-	if (!usbd)
-		goto err_usbd;
-	iudma = debugfs_create_file("iudma", 0400, root, udc,
-			&iudma_dbg_fops);
-	if (!iudma)
-		goto err_iudma;
-
 	udc->debugfs_root = root;
-	udc->debugfs_usbd = usbd;
-	udc->debugfs_iudma = iudma;
-	return;
-err_iudma:
-	debugfs_remove(usbd);
-err_usbd:
-	debugfs_remove(root);
-err_root:
-	dev_err(udc->dev, "debugfs is not available\n");
+
+	debugfs_create_file("usbd", 0400, root, udc, &bcm63xx_usbd_dbg_fops);
+	debugfs_create_file("iudma", 0400, root, udc, &bcm63xx_iudma_dbg_fops);
 }
 
 /**
@@ -2310,12 +2263,7 @@ err_root:
  */
 static void bcm63xx_udc_cleanup_debugfs(struct bcm63xx_udc *udc)
 {
-	debugfs_remove(udc->debugfs_iudma);
-	debugfs_remove(udc->debugfs_usbd);
-	debugfs_remove(udc->debugfs_root);
-	udc->debugfs_iudma = NULL;
-	udc->debugfs_usbd = NULL;
-	udc->debugfs_root = NULL;
+	debugfs_remove_recursive(udc->debugfs_root);
 }
 
 /***********************************************************************

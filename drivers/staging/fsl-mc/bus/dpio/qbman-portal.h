@@ -15,7 +15,7 @@ struct qbman_swp;
 /* qbman software portal descriptor structure */
 struct qbman_swp_desc {
 	void *cena_bar; /* Cache-enabled portal base address */
-	void *cinh_bar; /* Cache-inhibited portal base address */
+	void __iomem *cinh_bar; /* Cache-inhibited portal base address */
 	u32 qman_version;
 };
 
@@ -32,8 +32,8 @@ struct qbman_pull_desc {
 	u8 numf;
 	u8 tok;
 	u8 reserved;
-	u32 dq_src;
-	u64 rsp_addr;
+	__le32 dq_src;
+	__le64 rsp_addr;
 	u64 rsp_addr_virt;
 	u8 padding[40];
 };
@@ -70,17 +70,17 @@ enum qbman_pull_type_e {
 struct qbman_eq_desc {
 	u8 verb;
 	u8 dca;
-	u16 seqnum;
-	u16 orpid;
-	u16 reserved1;
-	u32 tgtid;
-	u32 tag;
-	u16 qdbin;
+	__le16 seqnum;
+	__le16 orpid;
+	__le16 reserved1;
+	__le32 tgtid;
+	__le32 tag;
+	__le16 qdbin;
 	u8 qpri;
 	u8 reserved[3];
 	u8 wae;
 	u8 rspid;
-	u64 rsp_addr;
+	__le64 rsp_addr;
 	u8 fd[32];
 };
 
@@ -88,9 +88,9 @@ struct qbman_eq_desc {
 struct qbman_release_desc {
 	u8 verb;
 	u8 reserved;
-	u16 bpid;
-	u32 reserved2;
-	u64 buf[7];
+	__le16 bpid;
+	__le32 reserved2;
+	__le64 buf[7];
 };
 
 /* Management command result codes */
@@ -102,7 +102,7 @@ struct qbman_release_desc {
 /* portal data structure */
 struct qbman_swp {
 	const struct qbman_swp_desc *desc;
-	void __iomem *addr_cena;
+	void *addr_cena;
 	void __iomem *addr_cinh;
 
 	/* Management commands */

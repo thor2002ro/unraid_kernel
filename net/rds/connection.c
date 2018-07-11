@@ -224,7 +224,7 @@ static struct rds_connection *__rds_conn_create(struct net *net,
 	if (rds_destroy_pending(conn))
 		ret = -ENETDOWN;
 	else
-		ret = trans->conn_alloc(conn, gfp);
+		ret = trans->conn_alloc(conn, GFP_ATOMIC);
 	if (ret) {
 		rcu_read_unlock();
 		kfree(conn->c_path);
@@ -540,9 +540,9 @@ void rds_for_each_conn_info(struct socket *sock, unsigned int len,
 			  struct rds_info_iterator *iter,
 			  struct rds_info_lengths *lens,
 			  int (*visitor)(struct rds_connection *, void *),
+			  u64 *buffer,
 			  size_t item_len)
 {
-	uint64_t buffer[(item_len + 7) / 8];
 	struct hlist_head *head;
 	struct rds_connection *conn;
 	size_t i;
@@ -578,9 +578,9 @@ static void rds_walk_conn_path_info(struct socket *sock, unsigned int len,
 				    struct rds_info_iterator *iter,
 				    struct rds_info_lengths *lens,
 				    int (*visitor)(struct rds_conn_path *, void *),
+				    u64 *buffer,
 				    size_t item_len)
 {
-	u64  buffer[(item_len + 7) / 8];
 	struct hlist_head *head;
 	struct rds_connection *conn;
 	size_t i;
@@ -649,18 +649,29 @@ static void rds_conn_info(struct socket *sock, unsigned int len,
 			  struct rds_info_iterator *iter,
 			  struct rds_info_lengths *lens)
 {
+	u64 buffer[(sizeof(struct rds_info_connection) + 7) / 8];
+
 	rds_walk_conn_path_info(sock, len, iter, lens,
 				rds_conn_info_visitor,
+				buffer,
 				sizeof(struct rds_info_connection));
 }
 
 int rds_conn_init(void)
 {
+	int ret;
+
+	ret = rds_loop_net_init(); /* register pernet callback */
+	if (ret)
+		return ret;
+
 	rds_conn_slab = kmem_cache_create("rds_connection",
 					  sizeof(struct rds_connection),
 					  0, 0, NULL);
-	if (!rds_conn_slab)
+	if (!rds_conn_slab) {
+		rds_loop_net_exit();
 		return -ENOMEM;
+	}
 
 	rds_info_register_func(RDS_INFO_CONNECTIONS, rds_conn_info);
 	rds_info_register_func(RDS_INFO_SEND_MESSAGES,
@@ -673,6 +684,7 @@ int rds_conn_init(void)
 
 void rds_conn_exit(void)
 {
+	rds_loop_net_exit(); /* unregister pernet callback */
 	rds_loop_exit();
 
 	WARN_ON(!hlist_empty(rds_conn_hash));

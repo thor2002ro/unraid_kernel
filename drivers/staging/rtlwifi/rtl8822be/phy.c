@@ -1,18 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
 /******************************************************************************
  *
  * Copyright(c) 2016  Realtek Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
  *
  * Contact Information:
  * wlanfae <wlanfae@realtek.com>
@@ -1251,7 +1240,7 @@ static void _rtl8822be_get_rate_values_of_tx_power_by_rate(
 		RT_TRACE(rtlpriv, COMP_INIT, DBG_DMESG,
 			 "Invalid reg_addr 0x%x in %s()\n", reg_addr, __func__);
 		break;
-	};
+	}
 }
 
 void rtl8822be_store_tx_power_by_rate(struct ieee80211_hw *hw, u32 band,

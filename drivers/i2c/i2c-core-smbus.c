@@ -308,17 +308,21 @@ static void i2c_smbus_try_get_dmabuf(struct i2c_msg *msg, u8 init_val)
 		msg->buf[0] = init_val;
 }
 
-/* Simulate a SMBus command using the i2c protocol
-   No checking of parameters is done!  */
+/*
+ * Simulate a SMBus command using the I2C protocol.
+ * No checking of parameters is done!
+ */
 static s32 i2c_smbus_xfer_emulated(struct i2c_adapter *adapter, u16 addr,
 				   unsigned short flags,
 				   char read_write, u8 command, int size,
 				   union i2c_smbus_data *data)
 {
-	/* So we need to generate a series of msgs. In the case of writing, we
-	  need to use only one message; when reading, we need two. We initialize
-	  most things with sane defaults, to keep the code below somewhat
-	  simpler. */
+	/*
+	 * So we need to generate a series of msgs. In the case of writing, we
+	 * need to use only one message; when reading, we need two. We
+	 * initialize most things with sane defaults, to keep the code below
+	 * somewhat simpler.
+	 */
 	unsigned char msgbuf0[I2C_SMBUS_BLOCK_MAX+3];
 	unsigned char msgbuf1[I2C_SMBUS_BLOCK_MAX+2];
 	int num = read_write == I2C_SMBUS_READ ? 2 : 1;
@@ -461,13 +465,18 @@ static s32 i2c_smbus_xfer_emulated(struct i2c_adapter *adapter, u16 addr,
 
 	status = i2c_transfer(adapter, msg, num);
 	if (status < 0)
-		return status;
+		goto cleanup;
+	if (status != num) {
+		status = -EIO;
+		goto cleanup;
+	}
+	status = 0;
 
 	/* Check PEC if last message is a read */
 	if (i && (msg[num-1].flags & I2C_M_RD)) {
 		status = i2c_smbus_check_pec(partial_pec, &msg[num-1]);
 		if (status < 0)
-			return status;
+			goto cleanup;
 	}
 
 	if (read_write == I2C_SMBUS_READ)
@@ -493,12 +502,13 @@ static s32 i2c_smbus_xfer_emulated(struct i2c_adapter *adapter, u16 addr,
 			break;
 		}
 
+cleanup:
 	if (msg[0].flags & I2C_M_DMA_SAFE)
 		kfree(msg[0].buf);
 	if (msg[1].flags & I2C_M_DMA_SAFE)
 		kfree(msg[1].buf);
 
-	return 0;
+	return status;
 }
 
 /**

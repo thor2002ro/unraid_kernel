@@ -906,13 +906,14 @@ static ssize_t pktgen_if_write(struct file *file,
 	i += len;
 
 	if (debug) {
-		size_t copy = min_t(size_t, count, 1023);
-		char tb[copy + 1];
-		if (copy_from_user(tb, user_buffer, copy))
-			return -EFAULT;
-		tb[copy] = 0;
-		pr_debug("%s,%lu  buffer -:%s:-\n",
-			 name, (unsigned long)count, tb);
+		size_t copy = min_t(size_t, count + 1, 1024);
+		char *tp = strndup_user(user_buffer, copy);
+
+		if (IS_ERR(tp))
+			return PTR_ERR(tp);
+
+		pr_debug("%s,%zu  buffer -:%s:-\n", name, count, tp);
+		kfree(tp);
 	}
 
 	if (!strcmp(name, "min_pkt_size")) {
@@ -3602,7 +3603,8 @@ static int pktgen_add_device(struct pktgen_thread *t, const char *ifname)
 		return -ENOMEM;
 
 	strcpy(pkt_dev->odevname, ifname);
-	pkt_dev->flows = vzalloc_node(MAX_CFLOWS * sizeof(struct flow_state),
+	pkt_dev->flows = vzalloc_node(array_size(MAX_CFLOWS,
+						 sizeof(struct flow_state)),
 				      node);
 	if (pkt_dev->flows == NULL) {
 		kfree(pkt_dev);

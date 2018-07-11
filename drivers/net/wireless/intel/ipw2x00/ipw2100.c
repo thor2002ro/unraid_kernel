@@ -3445,8 +3445,9 @@ static int ipw2100_msg_allocate(struct ipw2100_priv *priv)
 	dma_addr_t p;
 
 	priv->msg_buffers =
-	    kmalloc(IPW_COMMAND_POOL_SIZE * sizeof(struct ipw2100_tx_packet),
-		    GFP_KERNEL);
+	    kmalloc_array(IPW_COMMAND_POOL_SIZE,
+			  sizeof(struct ipw2100_tx_packet),
+			  GFP_KERNEL);
 	if (!priv->msg_buffers)
 		return -ENOMEM;
 
@@ -3538,7 +3539,7 @@ static ssize_t show_pci(struct device *d, struct device_attribute *attr,
 	return out - buf;
 }
 
-static DEVICE_ATTR(pci, S_IRUGO, show_pci, NULL);
+static DEVICE_ATTR(pci, 0444, show_pci, NULL);
 
 static ssize_t show_cfg(struct device *d, struct device_attribute *attr,
 			char *buf)
@@ -3547,7 +3548,7 @@ static ssize_t show_cfg(struct device *d, struct device_attribute *attr,
 	return sprintf(buf, "0x%08x\n", (int)p->config);
 }
 
-static DEVICE_ATTR(cfg, S_IRUGO, show_cfg, NULL);
+static DEVICE_ATTR(cfg, 0444, show_cfg, NULL);
 
 static ssize_t show_status(struct device *d, struct device_attribute *attr,
 			   char *buf)
@@ -3556,7 +3557,7 @@ static ssize_t show_status(struct device *d, struct device_attribute *attr,
 	return sprintf(buf, "0x%08x\n", (int)p->status);
 }
 
-static DEVICE_ATTR(status, S_IRUGO, show_status, NULL);
+static DEVICE_ATTR(status, 0444, show_status, NULL);
 
 static ssize_t show_capability(struct device *d, struct device_attribute *attr,
 			       char *buf)
@@ -3565,7 +3566,7 @@ static ssize_t show_capability(struct device *d, struct device_attribute *attr,
 	return sprintf(buf, "0x%08x\n", (int)p->capability);
 }
 
-static DEVICE_ATTR(capability, S_IRUGO, show_capability, NULL);
+static DEVICE_ATTR(capability, 0444, show_capability, NULL);
 
 #define IPW2100_REG(x) { IPW_ ##x, #x }
 static const struct {
@@ -3732,7 +3733,7 @@ IPW2100_ORD(STAT_TX_HOST_REQUESTS, "requested Host Tx's (MSDU)"),
 	    IPW2100_ORD(ASSOCIATED_AP_PTR,
 				"0 if not associated, else pointer to AP table entry"),
 	    IPW2100_ORD(AVAILABLE_AP_CNT,
-				"AP's decsribed in the AP table"),
+				"AP's described in the AP table"),
 	    IPW2100_ORD(AP_LIST_PTR, "Ptr to list of available APs"),
 	    IPW2100_ORD(STAT_AP_ASSNS, "associations"),
 	    IPW2100_ORD(STAT_ASSN_FAIL, "association failures"),
@@ -3822,7 +3823,7 @@ static ssize_t show_registers(struct device *d, struct device_attribute *attr,
 	return out - buf;
 }
 
-static DEVICE_ATTR(registers, S_IRUGO, show_registers, NULL);
+static DEVICE_ATTR(registers, 0444, show_registers, NULL);
 
 static ssize_t show_hardware(struct device *d, struct device_attribute *attr,
 			     char *buf)
@@ -3863,7 +3864,7 @@ static ssize_t show_hardware(struct device *d, struct device_attribute *attr,
 	return out - buf;
 }
 
-static DEVICE_ATTR(hardware, S_IRUGO, show_hardware, NULL);
+static DEVICE_ATTR(hardware, 0444, show_hardware, NULL);
 
 static ssize_t show_memory(struct device *d, struct device_attribute *attr,
 			   char *buf)
@@ -3957,7 +3958,7 @@ static ssize_t store_memory(struct device *d, struct device_attribute *attr,
 	return count;
 }
 
-static DEVICE_ATTR(memory, S_IWUSR | S_IRUGO, show_memory, store_memory);
+static DEVICE_ATTR(memory, 0644, show_memory, store_memory);
 
 static ssize_t show_ordinals(struct device *d, struct device_attribute *attr,
 			     char *buf)
@@ -3993,7 +3994,7 @@ static ssize_t show_ordinals(struct device *d, struct device_attribute *attr,
 	return len;
 }
 
-static DEVICE_ATTR(ordinals, S_IRUGO, show_ordinals, NULL);
+static DEVICE_ATTR(ordinals, 0444, show_ordinals, NULL);
 
 static ssize_t show_stats(struct device *d, struct device_attribute *attr,
 			  char *buf)
@@ -4014,7 +4015,7 @@ static ssize_t show_stats(struct device *d, struct device_attribute *attr,
 	return out - buf;
 }
 
-static DEVICE_ATTR(stats, S_IRUGO, show_stats, NULL);
+static DEVICE_ATTR(stats, 0444, show_stats, NULL);
 
 static int ipw2100_switch_mode(struct ipw2100_priv *priv, u32 mode)
 {
@@ -4112,7 +4113,7 @@ static ssize_t show_internals(struct device *d, struct device_attribute *attr,
 	return len;
 }
 
-static DEVICE_ATTR(internals, S_IRUGO, show_internals, NULL);
+static DEVICE_ATTR(internals, 0444, show_internals, NULL);
 
 static ssize_t show_bssinfo(struct device *d, struct device_attribute *attr,
 			    char *buf)
@@ -4157,7 +4158,7 @@ static ssize_t show_bssinfo(struct device *d, struct device_attribute *attr,
 	return out - buf;
 }
 
-static DEVICE_ATTR(bssinfo, S_IRUGO, show_bssinfo, NULL);
+static DEVICE_ATTR(bssinfo, 0444, show_bssinfo, NULL);
 
 #ifdef CONFIG_IPW2100_DEBUG
 static ssize_t debug_level_show(struct device_driver *d, char *buf)
@@ -4216,8 +4217,7 @@ static ssize_t store_fatal_error(struct device *d,
 	return count;
 }
 
-static DEVICE_ATTR(fatal_error, S_IWUSR | S_IRUGO, show_fatal_error,
-		   store_fatal_error);
+static DEVICE_ATTR(fatal_error, 0644, show_fatal_error, store_fatal_error);
 
 static ssize_t show_scan_age(struct device *d, struct device_attribute *attr,
 			     char *buf)
@@ -4250,7 +4250,7 @@ static ssize_t store_scan_age(struct device *d, struct device_attribute *attr,
 	return strnlen(buf, count);
 }
 
-static DEVICE_ATTR(scan_age, S_IWUSR | S_IRUGO, show_scan_age, store_scan_age);
+static DEVICE_ATTR(scan_age, 0644, show_scan_age, store_scan_age);
 
 static ssize_t show_rf_kill(struct device *d, struct device_attribute *attr,
 			    char *buf)
@@ -4304,7 +4304,7 @@ static ssize_t store_rf_kill(struct device *d, struct device_attribute *attr,
 	return count;
 }
 
-static DEVICE_ATTR(rf_kill, S_IWUSR | S_IRUGO, show_rf_kill, store_rf_kill);
+static DEVICE_ATTR(rf_kill, 0644, show_rf_kill, store_rf_kill);
 
 static struct attribute *ipw2100_sysfs_entries[] = {
 	&dev_attr_hardware.attr,
@@ -4588,9 +4588,9 @@ static int ipw2100_rx_allocate(struct ipw2100_priv *priv)
 	/*
 	 * allocate packets
 	 */
-	priv->rx_buffers = kmalloc(RX_QUEUE_LENGTH *
-				   sizeof(struct ipw2100_rx_packet),
-				   GFP_KERNEL);
+	priv->rx_buffers = kmalloc_array(RX_QUEUE_LENGTH,
+					 sizeof(struct ipw2100_rx_packet),
+					 GFP_KERNEL);
 	if (!priv->rx_buffers) {
 		IPW_DEBUG_INFO("can't allocate rx packet buffer table\n");
 

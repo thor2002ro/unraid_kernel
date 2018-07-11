@@ -92,6 +92,36 @@ struct crtc_stereo_flags {
 	uint8_t DISABLE_STEREO_DP_SYNC : 1;
 };
 
+enum crc_selection {
+	/* Order must match values expected by hardware */
+	UNION_WINDOW_A_B = 0,
+	UNION_WINDOW_A_NOT_B,
+	UNION_WINDOW_NOT_A_B,
+	UNION_WINDOW_NOT_A_NOT_B,
+	INTERSECT_WINDOW_A_B,
+	INTERSECT_WINDOW_A_NOT_B,
+	INTERSECT_WINDOW_NOT_A_B,
+	INTERSECT_WINDOW_NOT_A_NOT_B,
+};
+
+struct crc_params {
+	/* Regions used to calculate CRC*/
+	uint16_t windowa_x_start;
+	uint16_t windowa_x_end;
+	uint16_t windowa_y_start;
+	uint16_t windowa_y_end;
+
+	uint16_t windowb_x_start;
+	uint16_t windowb_x_end;
+	uint16_t windowb_y_start;
+	uint16_t windowb_y_end;
+
+	enum crc_selection selection;
+
+	bool continuous_mode;
+	bool enable;
+};
+
 struct timing_generator {
 	const struct timing_generator_funcs *funcs;
 	struct dc_bios *bp;
@@ -110,6 +140,9 @@ struct timing_generator_funcs {
 	void (*program_timing)(struct timing_generator *tg,
 							const struct dc_crtc_timing *timing,
 							bool use_vbios);
+	void (*program_vline_interrupt)(struct timing_generator *optc,
+			const struct dc_crtc_timing *dc_crtc_timing,
+			unsigned long long vsync_delta);
 	bool (*enable_crtc)(struct timing_generator *tg);
 	bool (*disable_crtc)(struct timing_generator *tg);
 	bool (*is_counter_moving)(struct timing_generator *tg);
@@ -173,6 +206,21 @@ struct timing_generator_funcs {
 	bool (*is_tg_enabled)(struct timing_generator *tg);
 	bool (*is_optc_underflow_occurred)(struct timing_generator *tg);
 	void (*clear_optc_underflow)(struct timing_generator *tg);
+
+	/**
+	 * Configure CRCs for the given timing generator. Return false if TG is
+	 * not on.
+	 */
+	bool (*configure_crc)(struct timing_generator *tg,
+			       const struct crc_params *params);
+
+	/**
+	 * Get CRCs for the given timing generator. Return false if CRCs are
+	 * not enabled (via configure_crc).
+	 */
+	bool (*get_crc)(struct timing_generator *tg,
+			uint32_t *r_cr, uint32_t *g_y, uint32_t *b_cb);
+
 };
 
 #endif

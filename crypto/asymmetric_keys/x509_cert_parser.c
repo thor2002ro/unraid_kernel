@@ -17,8 +17,8 @@
 #include <linux/oid_registry.h>
 #include <crypto/public_key.h>
 #include "x509_parser.h"
-#include "x509-asn1.h"
-#include "x509_akid-asn1.h"
+#include "x509.asn1.h"
+#include "x509_akid.asn1.h"
 
 struct x509_parse_context {
 	struct x509_certificate	*cert;		/* Certificate being constructed */
@@ -247,6 +247,15 @@ int x509_note_signature(void *context, size_t hdrlen,
 		pr_warn("Got cert with pkey (%u) and sig (%u) algorithm OIDs\n",
 			ctx->algo_oid, ctx->last_oid);
 		return -EINVAL;
+	}
+
+	if (strcmp(ctx->cert->sig->pkey_algo, "rsa") == 0) {
+		/* Discard the BIT STRING metadata */
+		if (vlen < 1 || *(const u8 *)value != 0)
+			return -EBADMSG;
+
+		value++;
+		vlen--;
 	}
 
 	ctx->cert->raw_sig = value;

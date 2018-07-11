@@ -100,7 +100,7 @@ static int mlx5e_test_link_speed(struct mlx5e_priv *priv)
 
 #ifdef CONFIG_INET
 /* loopback test */
-#define MLX5E_TEST_PKT_SIZE (MLX5_MPWRQ_SMALL_PACKET_THRESHOLD - NET_IP_ALIGN)
+#define MLX5E_TEST_PKT_SIZE (MLX5E_RX_MAX_HEAD - NET_IP_ALIGN)
 static const char mlx5e_test_text[ETH_GSTRING_LEN] = "MLX5E SELF TEST";
 #define MLX5E_TEST_MAGIC 0x5AEED15C001ULL
 
@@ -216,7 +216,8 @@ mlx5e_test_loopback_validate(struct sk_buff *skb,
 	if (iph->protocol != IPPROTO_UDP)
 		goto out;
 
-	udph = udp_hdr(skb);
+	/* Don't assume skb_transport_header() was set */
+	udph = (struct udphdr *)((u8 *)iph + 4 * iph->ihl);
 	if (udph->dest != htons(9))
 		goto out;
 
@@ -289,7 +290,7 @@ static int mlx5e_test_loopback(struct mlx5e_priv *priv)
 
 	if (!test_bit(MLX5E_STATE_OPENED, &priv->state)) {
 		netdev_err(priv->netdev,
-			   "\tCan't perform loobpack test while device is down\n");
+			   "\tCan't perform loopback test while device is down\n");
 		return -ENODEV;
 	}
 

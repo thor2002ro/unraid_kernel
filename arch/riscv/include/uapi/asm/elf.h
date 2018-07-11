@@ -21,8 +21,13 @@ typedef struct user_regs_struct elf_gregset_t;
 
 typedef union __riscv_fp_state elf_fpregset_t;
 
-#define ELF_RISCV_R_SYM(r_info) ((r_info) >> 32)
-#define ELF_RISCV_R_TYPE(r_info) ((r_info) & 0xffffffff)
+#if __riscv_xlen == 64
+#define ELF_RISCV_R_SYM(r_info)		ELF64_R_SYM(r_info)
+#define ELF_RISCV_R_TYPE(r_info)	ELF64_R_TYPE(r_info)
+#else
+#define ELF_RISCV_R_SYM(r_info)		ELF32_R_SYM(r_info)
+#define ELF_RISCV_R_TYPE(r_info)	ELF32_R_TYPE(r_info)
+#endif
 
 /*
  * RISC-V relocation types
@@ -79,5 +84,12 @@ typedef union __riscv_fp_state elf_fpregset_t;
 #define R_RISCV_TPREL_I		49
 #define R_RISCV_TPREL_S		50
 #define R_RISCV_RELAX		51
+#define R_RISCV_SUB6		52
+#define R_RISCV_SET6		53
+#define R_RISCV_SET8		54
+#define R_RISCV_SET16		55
+#define R_RISCV_SET32		56
+#define R_RISCV_32_PCREL	57
+
 
 #endif /* _UAPI_ASM_ELF_H */

@@ -10,6 +10,7 @@ enum kcore_type {
 	KCORE_VMALLOC,
 	KCORE_RAM,
 	KCORE_VMEMMAP,
+	KCORE_USER,
 	KCORE_OTHER,
 };
 
@@ -25,6 +26,12 @@ struct vmcore {
 	unsigned long long paddr;
 	unsigned long long size;
 	loff_t offset;
+};
+
+struct vmcoredd_node {
+	struct list_head list;	/* List of dumps */
+	void *buf;		/* Buffer containing device's dump */
+	unsigned int size;	/* Size of the buffer */
 };
 
 #ifdef CONFIG_PROC_KCORE

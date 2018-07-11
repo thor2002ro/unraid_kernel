@@ -499,10 +499,12 @@ static int spacc_aead_setkey(struct crypto_aead *tfm, const u8 *key,
 	memcpy(ctx->hash_ctx, keys.authkey, keys.authkeylen);
 	ctx->hash_key_len = keys.authkeylen;
 
+	memzero_explicit(&keys, sizeof(keys));
 	return 0;
 
 badkey:
 	crypto_aead_set_flags(tfm, CRYPTO_TFM_RES_BAD_KEY_LEN);
+	memzero_explicit(&keys, sizeof(keys));
 	return -EINVAL;
 }
 
@@ -1167,8 +1169,7 @@ static void spacc_spacc_complete(unsigned long data)
 #ifdef CONFIG_PM
 static int spacc_suspend(struct device *dev)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct spacc_engine *engine = platform_get_drvdata(pdev);
+	struct spacc_engine *engine = dev_get_drvdata(dev);
 
 	/*
 	 * We only support standby mode. All we have to do is gate the clock to
@@ -1182,8 +1183,7 @@ static int spacc_suspend(struct device *dev)
 
 static int spacc_resume(struct device *dev)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct spacc_engine *engine = platform_get_drvdata(pdev);
+	struct spacc_engine *engine = dev_get_drvdata(dev);
 
 	return clk_enable(engine->clk);
 }

@@ -131,6 +131,11 @@ static inline int is_ofld_imm(const struct sk_buff *skb)
 	return (skb->len <= SGE_MAX_WR_LEN);
 }
 
+static inline void chcr_init_hctx_per_wr(struct chcr_ahash_req_ctx *reqctx)
+{
+	memset(&reqctx->hctx_wr, 0, sizeof(struct chcr_hctx_per_wr));
+}
+
 static int sg_nents_xlen(struct scatterlist *sg, unsigned int reqlen,
 			 unsigned int entlen,
 			 unsigned int skip)
@@ -158,41 +163,6 @@ static int sg_nents_xlen(struct scatterlist *sg, unsigned int reqlen,
 		sg = sg_next(sg);
 	}
 	return nents;
-}
-
-static inline void chcr_handle_ahash_resp(struct ahash_request *req,
-					  unsigned char *input,
-					  int err)
-{
-	struct chcr_ahash_req_ctx *reqctx = ahash_request_ctx(req);
-	int digestsize, updated_digestsize;
-	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
-	struct uld_ctx *u_ctx = ULD_CTX(h_ctx(tfm));
-
-	if (input == NULL)
-		goto out;
-	digestsize = crypto_ahash_digestsize(crypto_ahash_reqtfm(req));
-	if (reqctx->is_sg_map)
-		chcr_hash_dma_unmap(&u_ctx->lldi.pdev->dev, req);
-	if (reqctx->dma_addr)
-		dma_unmap_single(&u_ctx->lldi.pdev->dev, reqctx->dma_addr,
-				 reqctx->dma_len, DMA_TO_DEVICE);
-	reqctx->dma_addr = 0;
-	updated_digestsize = digestsize;
-	if (digestsize == SHA224_DIGEST_SIZE)
-		updated_digestsize = SHA256_DIGEST_SIZE;
-	else if (digestsize == SHA384_DIGEST_SIZE)
-		updated_digestsize = SHA512_DIGEST_SIZE;
-	if (reqctx->result == 1) {
-		reqctx->result = 0;
-		memcpy(req->result, input + sizeof(struct cpl_fw6_pld),
-		       digestsize);
-	} else {
-		memcpy(reqctx->partial_hash, input + sizeof(struct cpl_fw6_pld),
-		       updated_digestsize);
-	}
-out:
-	req->base.complete(&req->base, err);
 }
 
 static inline int get_aead_subtype(struct crypto_aead *aead)
@@ -233,46 +203,13 @@ static inline void chcr_handle_aead_resp(struct aead_request *req,
 					 int err)
 {
 	struct chcr_aead_reqctx *reqctx = aead_request_ctx(req);
-	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
-	struct uld_ctx *u_ctx = ULD_CTX(a_ctx(tfm));
 
-	chcr_aead_dma_unmap(&u_ctx->lldi.pdev->dev, req, reqctx->op);
-	if (reqctx->b0_dma)
-		dma_unmap_single(&u_ctx->lldi.pdev->dev, reqctx->b0_dma,
-				 reqctx->b0_len, DMA_BIDIRECTIONAL);
+	chcr_aead_common_exit(req);
 	if (reqctx->verify == VERIFY_SW) {
 		chcr_verify_tag(req, input, &err);
 		reqctx->verify = VERIFY_HW;
 	}
 	req->base.complete(&req->base, err);
-}
-
-/*
- *	chcr_handle_resp - Unmap the DMA buffers associated with the request
- *	@req: crypto request
- */
-int chcr_handle_resp(struct crypto_async_request *req, unsigned char *input,
-			 int err)
-{
-	struct crypto_tfm *tfm = req->tfm;
-	struct chcr_context *ctx = crypto_tfm_ctx(tfm);
-	struct adapter *adap = padap(ctx->dev);
-
-	switch (tfm->__crt_alg->cra_flags & CRYPTO_ALG_TYPE_MASK) {
-	case CRYPTO_ALG_TYPE_AEAD:
-		chcr_handle_aead_resp(aead_request_cast(req), input, err);
-		break;
-
-	case CRYPTO_ALG_TYPE_ABLKCIPHER:
-		 err = chcr_handle_cipher_resp(ablkcipher_request_cast(req),
-					       input, err);
-		break;
-
-	case CRYPTO_ALG_TYPE_AHASH:
-		chcr_handle_ahash_resp(ahash_request_cast(req), input, err);
-		}
-	atomic_inc(&adap->chcr_stats.complete);
-	return err;
 }
 
 static void get_aes_decrypt_key(unsigned char *dec_key,
@@ -563,7 +500,6 @@ static void  ulptx_walk_add_sg(struct ulptx_walk *walk,
 
 	if (!len)
 		return;
-
 	while (sg && skip) {
 		if (sg_dma_len(sg) <= skip) {
 			skip -= sg_dma_len(sg);
@@ -653,6 +589,35 @@ static int generate_copy_rrkey(struct ablk_ctx *ablkctx,
 	}
 	return 0;
 }
+
+static int chcr_hash_ent_in_wr(struct scatterlist *src,
+			     unsigned int minsg,
+			     unsigned int space,
+			     unsigned int srcskip)
+{
+	int srclen = 0;
+	int srcsg = minsg;
+	int soffset = 0, sless;
+
+	if (sg_dma_len(src) == srcskip) {
+		src = sg_next(src);
+		srcskip = 0;
+	}
+	while (src && space > (sgl_ent_len[srcsg + 1])) {
+		sless = min_t(unsigned int, sg_dma_len(src) - soffset -	srcskip,
+							CHCR_SRC_SG_SIZE);
+		srclen += sless;
+		soffset += sless;
+		srcsg++;
+		if (sg_dma_len(src) == (soffset + srcskip)) {
+			src = sg_next(src);
+			soffset = 0;
+			srcskip = 0;
+		}
+	}
+	return srclen;
+}
+
 static int chcr_sg_ent_in_wr(struct scatterlist *src,
 			     struct scatterlist *dst,
 			     unsigned int minsg,
@@ -662,13 +627,12 @@ static int chcr_sg_ent_in_wr(struct scatterlist *src,
 {
 	int srclen = 0, dstlen = 0;
 	int srcsg = minsg, dstsg = minsg;
-	int offset = 0, less;
+	int offset = 0, soffset = 0, less, sless = 0;
 
 	if (sg_dma_len(src) == srcskip) {
 		src = sg_next(src);
 		srcskip = 0;
 	}
-
 	if (sg_dma_len(dst) == dstskip) {
 		dst = sg_next(dst);
 		dstskip = 0;
@@ -676,7 +640,9 @@ static int chcr_sg_ent_in_wr(struct scatterlist *src,
 
 	while (src && dst &&
 	       space > (sgl_ent_len[srcsg + 1] + dsgl_ent_len[dstsg])) {
-		srclen += (sg_dma_len(src) - srcskip);
+		sless = min_t(unsigned int, sg_dma_len(src) - srcskip - soffset,
+				CHCR_SRC_SG_SIZE);
+		srclen += sless;
 		srcsg++;
 		offset = 0;
 		while (dst && ((dstsg + 1) <= MAX_DSGL_ENT) &&
@@ -687,15 +653,20 @@ static int chcr_sg_ent_in_wr(struct scatterlist *src,
 				     dstskip, CHCR_DST_SG_SIZE);
 			dstlen += less;
 			offset += less;
-			if (offset == sg_dma_len(dst)) {
+			if ((offset + dstskip) == sg_dma_len(dst)) {
 				dst = sg_next(dst);
 				offset = 0;
 			}
 			dstsg++;
 			dstskip = 0;
 		}
-		src = sg_next(src);
-		srcskip = 0;
+		soffset += sless;
+		if ((soffset + srcskip) == sg_dma_len(src)) {
+			src = sg_next(src);
+			srcskip = 0;
+			soffset = 0;
+		}
+
 	}
 	return min(srclen, dstlen);
 }
@@ -711,6 +682,7 @@ static int chcr_cipher_fallback(struct crypto_skcipher *cipher,
 	int err;
 
 	SKCIPHER_REQUEST_ON_STACK(subreq, cipher);
+
 	skcipher_request_set_tfm(subreq, cipher);
 	skcipher_request_set_callback(subreq, flags, NULL, NULL);
 	skcipher_request_set_crypt(subreq, src, dst,
@@ -783,15 +755,15 @@ static struct sk_buff *create_cipher_wr(struct cipher_wr_param *wrparam)
 
 	nents = sg_nents_xlen(reqctx->dstsg,  wrparam->bytes, CHCR_DST_SG_SIZE,
 			      reqctx->dst_ofst);
-	dst_size = get_space_for_phys_dsgl(nents + 1);
-	kctx_len = (DIV_ROUND_UP(ablkctx->enckey_len, 16) * 16);
+	dst_size = get_space_for_phys_dsgl(nents);
+	kctx_len = roundup(ablkctx->enckey_len, 16);
 	transhdr_len = CIPHER_TRANSHDR_SIZE(kctx_len, dst_size);
 	nents = sg_nents_xlen(reqctx->srcsg, wrparam->bytes,
 				  CHCR_SRC_SG_SIZE, reqctx->src_ofst);
-	temp = reqctx->imm ? (DIV_ROUND_UP((IV + wrparam->req->nbytes), 16)
-			      * 16) : (sgl_len(nents + MIN_CIPHER_SG) * 8);
+	temp = reqctx->imm ? roundup(wrparam->bytes, 16) :
+				     (sgl_len(nents) * 8);
 	transhdr_len += temp;
-	transhdr_len = DIV_ROUND_UP(transhdr_len, 16) * 16;
+	transhdr_len = roundup(transhdr_len, 16);
 	skb = alloc_skb(SGE_MAX_WR_LEN, flags);
 	if (!skb) {
 		error = -ENOMEM;
@@ -811,7 +783,7 @@ static struct sk_buff *create_cipher_wr(struct cipher_wr_param *wrparam)
 							 ablkctx->ciph_mode,
 							 0, 0, IV >> 1);
 	chcr_req->sec_cpl.ivgen_hdrlen = FILL_SEC_CPL_IVGEN_HDRLEN(0, 0, 0,
-							  0, 0, dst_size);
+							  0, 1, dst_size);
 
 	chcr_req->key_ctx.ctx_hdr = ablkctx->key_ctx_hdr;
 	if ((reqctx->op == CHCR_DECRYPT_OP) &&
@@ -841,12 +813,19 @@ static struct sk_buff *create_cipher_wr(struct cipher_wr_param *wrparam)
 	chcr_add_cipher_dst_ent(wrparam->req, phys_cpl, wrparam, wrparam->qid);
 
 	atomic_inc(&adap->chcr_stats.cipher_rqst);
-	temp = sizeof(struct cpl_rx_phys_dsgl) + dst_size + kctx_len
-		+(reqctx->imm ? (IV + wrparam->bytes) : 0);
+	temp = sizeof(struct cpl_rx_phys_dsgl) + dst_size + kctx_len + IV
+		+ (reqctx->imm ? (wrparam->bytes) : 0);
 	create_wreq(c_ctx(tfm), chcr_req, &(wrparam->req->base), reqctx->imm, 0,
 		    transhdr_len, temp,
 			ablkctx->ciph_mode == CHCR_SCMD_CIPHER_MODE_AES_CBC);
 	reqctx->skb = skb;
+
+	if (reqctx->op && (ablkctx->ciph_mode ==
+			   CHCR_SCMD_CIPHER_MODE_AES_CBC))
+		sg_pcopy_to_buffer(wrparam->req->src,
+			sg_nents(wrparam->req->src), wrparam->req->info, 16,
+			reqctx->processed + wrparam->bytes - AES_BLOCK_SIZE);
+
 	return skb;
 err:
 	return ERR_PTR(error);
@@ -1038,7 +1017,7 @@ static int chcr_update_tweak(struct ablkcipher_request *req, u8 *iv,
 	ret = crypto_cipher_setkey(cipher, key, keylen);
 	if (ret)
 		goto out;
-	/*H/W sends the encrypted IV in dsgl when AADIVDROP bit is 0*/
+	crypto_cipher_encrypt_one(cipher, iv, iv);
 	for (i = 0; i < round8; i++)
 		gf128mul_x8_ble((le128 *)iv, (le128 *)iv);
 
@@ -1070,9 +1049,8 @@ static int chcr_update_cipher_iv(struct ablkcipher_request *req,
 		ret = chcr_update_tweak(req, iv, 0);
 	else if (subtype == CRYPTO_ALG_SUB_TYPE_CBC) {
 		if (reqctx->op)
-			sg_pcopy_to_buffer(req->src, sg_nents(req->src), iv,
-					   16,
-					   reqctx->processed - AES_BLOCK_SIZE);
+			/*Updated before sending last WR*/
+			memcpy(iv, req->info, AES_BLOCK_SIZE);
 		else
 			memcpy(iv, &fw6_pld->data[2], AES_BLOCK_SIZE);
 	}
@@ -1100,11 +1078,8 @@ static int chcr_final_cipher_iv(struct ablkcipher_request *req,
 	else if (subtype == CRYPTO_ALG_SUB_TYPE_XTS)
 		ret = chcr_update_tweak(req, iv, 1);
 	else if (subtype == CRYPTO_ALG_SUB_TYPE_CBC) {
-		if (reqctx->op)
-			sg_pcopy_to_buffer(req->src, sg_nents(req->src), iv,
-					   16,
-					   reqctx->processed - AES_BLOCK_SIZE);
-		else
+		/*Already updated for Decrypt*/
+		if (!reqctx->op)
 			memcpy(iv, &fw6_pld->data[2], AES_BLOCK_SIZE);
 
 	}
@@ -1133,31 +1108,19 @@ static int chcr_handle_cipher_resp(struct ablkcipher_request *req,
 		goto complete;
 	}
 
-	if (unlikely(cxgb4_is_crypto_q_full(u_ctx->lldi.ports[0],
-					    c_ctx(tfm)->tx_qidx))) {
-		if (!(req->base.flags & CRYPTO_TFM_REQ_MAY_BACKLOG)) {
-			err = -EBUSY;
-			goto unmap;
-		}
-
-	}
 	if (!reqctx->imm) {
-		bytes = chcr_sg_ent_in_wr(reqctx->srcsg, reqctx->dstsg, 1,
-					  SPACE_LEFT(ablkctx->enckey_len),
+		bytes = chcr_sg_ent_in_wr(reqctx->srcsg, reqctx->dstsg, 0,
+					  CIP_SPACE_LEFT(ablkctx->enckey_len),
 					  reqctx->src_ofst, reqctx->dst_ofst);
 		if ((bytes + reqctx->processed) >= req->nbytes)
 			bytes  = req->nbytes - reqctx->processed;
 		else
-			bytes = ROUND_16(bytes);
+			bytes = rounddown(bytes, 16);
 	} else {
 		/*CTR mode counter overfloa*/
 		bytes  = req->nbytes - reqctx->processed;
 	}
-	dma_sync_single_for_cpu(&ULD_CTX(c_ctx(tfm))->lldi.pdev->dev,
-				reqctx->iv_dma, IV, DMA_BIDIRECTIONAL);
 	err = chcr_update_cipher_iv(req, fw6_pld, reqctx->iv);
-	dma_sync_single_for_device(&ULD_CTX(c_ctx(tfm))->lldi.pdev->dev,
-				   reqctx->iv_dma, IV, DMA_BIDIRECTIONAL);
 	if (err)
 		goto unmap;
 
@@ -1232,9 +1195,8 @@ static int process_cipher(struct ablkcipher_request *req,
 
 		dnents = sg_nents_xlen(req->dst, req->nbytes,
 				       CHCR_DST_SG_SIZE, 0);
-		dnents += 1; // IV
 		phys_dsgl = get_space_for_phys_dsgl(dnents);
-		kctx_len = (DIV_ROUND_UP(ablkctx->enckey_len, 16) * 16);
+		kctx_len = roundup(ablkctx->enckey_len, 16);
 		transhdr_len = CIPHER_TRANSHDR_SIZE(kctx_len, phys_dsgl);
 		reqctx->imm = (transhdr_len + IV + req->nbytes) <=
 			SGE_MAX_WR_LEN;
@@ -1245,14 +1207,13 @@ static int process_cipher(struct ablkcipher_request *req,
 	}
 
 	if (!reqctx->imm) {
-		bytes = chcr_sg_ent_in_wr(req->src, req->dst,
-					  MIN_CIPHER_SG,
-					  SPACE_LEFT(ablkctx->enckey_len),
+		bytes = chcr_sg_ent_in_wr(req->src, req->dst, 0,
+					  CIP_SPACE_LEFT(ablkctx->enckey_len),
 					  0, 0);
 		if ((bytes + reqctx->processed) >= req->nbytes)
 			bytes  = req->nbytes - reqctx->processed;
 		else
-			bytes = ROUND_16(bytes);
+			bytes = rounddown(bytes, 16);
 	} else {
 		bytes = req->nbytes;
 	}
@@ -1282,7 +1243,7 @@ static int process_cipher(struct ablkcipher_request *req,
 					   req->src,
 					   req->dst,
 					   req->nbytes,
-					   req->info,
+					   reqctx->iv,
 					   op_type);
 		goto error;
 	}
@@ -1313,13 +1274,14 @@ static int chcr_aes_encrypt(struct ablkcipher_request *req)
 {
 	struct crypto_ablkcipher *tfm = crypto_ablkcipher_reqtfm(req);
 	struct sk_buff *skb = NULL;
-	int err;
+	int err, isfull = 0;
 	struct uld_ctx *u_ctx = ULD_CTX(c_ctx(tfm));
 
 	if (unlikely(cxgb4_is_crypto_q_full(u_ctx->lldi.ports[0],
 					    c_ctx(tfm)->tx_qidx))) {
+		isfull = 1;
 		if (!(req->base.flags & CRYPTO_TFM_REQ_MAY_BACKLOG))
-			return -EBUSY;
+			return -ENOSPC;
 	}
 
 	err = process_cipher(req, u_ctx->lldi.rxq_ids[c_ctx(tfm)->rx_qidx],
@@ -1329,7 +1291,7 @@ static int chcr_aes_encrypt(struct ablkcipher_request *req)
 	skb->dev = u_ctx->lldi.ports[0];
 	set_wr_txq(skb, CPL_PRIORITY_DATA, c_ctx(tfm)->tx_qidx);
 	chcr_send_wr(skb);
-	return -EINPROGRESS;
+	return isfull ? -EBUSY : -EINPROGRESS;
 }
 
 static int chcr_aes_decrypt(struct ablkcipher_request *req)
@@ -1337,12 +1299,13 @@ static int chcr_aes_decrypt(struct ablkcipher_request *req)
 	struct crypto_ablkcipher *tfm = crypto_ablkcipher_reqtfm(req);
 	struct uld_ctx *u_ctx = ULD_CTX(c_ctx(tfm));
 	struct sk_buff *skb = NULL;
-	int err;
+	int err, isfull = 0;
 
 	if (unlikely(cxgb4_is_crypto_q_full(u_ctx->lldi.ports[0],
 					    c_ctx(tfm)->tx_qidx))) {
+		isfull = 1;
 		if (!(req->base.flags & CRYPTO_TFM_REQ_MAY_BACKLOG))
-			return -EBUSY;
+			return -ENOSPC;
 	}
 
 	 err = process_cipher(req, u_ctx->lldi.rxq_ids[c_ctx(tfm)->rx_qidx],
@@ -1352,7 +1315,7 @@ static int chcr_aes_decrypt(struct ablkcipher_request *req)
 	skb->dev = u_ctx->lldi.ports[0];
 	set_wr_txq(skb, CPL_PRIORITY_DATA, c_ctx(tfm)->tx_qidx);
 	chcr_send_wr(skb);
-	return -EINPROGRESS;
+	return isfull ? -EBUSY : -EINPROGRESS;
 }
 
 static int chcr_device_init(struct chcr_context *ctx)
@@ -1503,35 +1466,24 @@ static struct sk_buff *create_hash_wr(struct ahash_request *req,
 	struct uld_ctx *u_ctx = ULD_CTX(h_ctx(tfm));
 	struct chcr_wr *chcr_req;
 	struct ulptx_sgl *ulptx;
-	unsigned int nents = 0, transhdr_len, iopad_alignment = 0;
-	unsigned int digestsize = crypto_ahash_digestsize(tfm);
-	unsigned int kctx_len = 0, temp = 0;
-	u8 hash_size_in_response = 0;
+	unsigned int nents = 0, transhdr_len;
+	unsigned int temp = 0;
 	gfp_t flags = req->base.flags & CRYPTO_TFM_REQ_MAY_SLEEP ? GFP_KERNEL :
 		GFP_ATOMIC;
 	struct adapter *adap = padap(h_ctx(tfm)->dev);
 	int error = 0;
 
-	iopad_alignment = KEYCTX_ALIGN_PAD(digestsize);
-	kctx_len = param->alg_prm.result_size + iopad_alignment;
-	if (param->opad_needed)
-		kctx_len += param->alg_prm.result_size + iopad_alignment;
-
-	if (req_ctx->result)
-		hash_size_in_response = digestsize;
-	else
-		hash_size_in_response = param->alg_prm.result_size;
-	transhdr_len = HASH_TRANSHDR_SIZE(kctx_len);
-	req_ctx->imm = (transhdr_len + param->bfr_len + param->sg_len) <=
-		SGE_MAX_WR_LEN;
-	nents = sg_nents_xlen(req->src, param->sg_len, CHCR_SRC_SG_SIZE, 0);
+	transhdr_len = HASH_TRANSHDR_SIZE(param->kctx_len);
+	req_ctx->hctx_wr.imm = (transhdr_len + param->bfr_len +
+				param->sg_len) <= SGE_MAX_WR_LEN;
+	nents = sg_nents_xlen(req_ctx->hctx_wr.srcsg, param->sg_len,
+		      CHCR_SRC_SG_SIZE, req_ctx->hctx_wr.src_ofst);
 	nents += param->bfr_len ? 1 : 0;
-	transhdr_len += req_ctx->imm ? (DIV_ROUND_UP((param->bfr_len +
-			param->sg_len), 16) * 16) :
-			(sgl_len(nents) * 8);
-	transhdr_len = DIV_ROUND_UP(transhdr_len, 16) * 16;
+	transhdr_len += req_ctx->hctx_wr.imm ? roundup(param->bfr_len +
+				param->sg_len, 16) : (sgl_len(nents) * 8);
+	transhdr_len = roundup(transhdr_len, 16);
 
-	skb = alloc_skb(SGE_MAX_WR_LEN, flags);
+	skb = alloc_skb(transhdr_len, flags);
 	if (!skb)
 		return ERR_PTR(-ENOMEM);
 	chcr_req = __skb_put_zero(skb, transhdr_len);
@@ -1563,33 +1515,33 @@ static struct sk_buff *create_hash_wr(struct ahash_request *req,
 	chcr_req->key_ctx.ctx_hdr = FILL_KEY_CTX_HDR(CHCR_KEYCTX_NO_KEY,
 					    param->alg_prm.mk_size, 0,
 					    param->opad_needed,
-					    ((kctx_len +
+					    ((param->kctx_len +
 					     sizeof(chcr_req->key_ctx)) >> 4));
 	chcr_req->sec_cpl.scmd1 = cpu_to_be64((u64)param->scmd1);
-	ulptx = (struct ulptx_sgl *)((u8 *)(chcr_req + 1) + kctx_len +
+	ulptx = (struct ulptx_sgl *)((u8 *)(chcr_req + 1) + param->kctx_len +
 				     DUMMY_BYTES);
 	if (param->bfr_len != 0) {
-		req_ctx->dma_addr = dma_map_single(&u_ctx->lldi.pdev->dev,
-					  req_ctx->reqbfr, param->bfr_len,
-					  DMA_TO_DEVICE);
+		req_ctx->hctx_wr.dma_addr =
+			dma_map_single(&u_ctx->lldi.pdev->dev, req_ctx->reqbfr,
+				       param->bfr_len, DMA_TO_DEVICE);
 		if (dma_mapping_error(&u_ctx->lldi.pdev->dev,
-				       req_ctx->dma_addr)) {
+				       req_ctx->hctx_wr. dma_addr)) {
 			error = -ENOMEM;
 			goto err;
 		}
-		req_ctx->dma_len = param->bfr_len;
+		req_ctx->hctx_wr.dma_len = param->bfr_len;
 	} else {
-		req_ctx->dma_addr = 0;
+		req_ctx->hctx_wr.dma_addr = 0;
 	}
 	chcr_add_hash_src_ent(req, ulptx, param);
 	/* Request upto max wr size */
-	temp = kctx_len + DUMMY_BYTES + (req_ctx->imm ? (param->sg_len
-					+ param->bfr_len) : 0);
+	temp = param->kctx_len + DUMMY_BYTES + (req_ctx->hctx_wr.imm ?
+				(param->sg_len + param->bfr_len) : 0);
 	atomic_inc(&adap->chcr_stats.digest_rqst);
-	create_wreq(h_ctx(tfm), chcr_req, &req->base, req_ctx->imm,
-		    hash_size_in_response, transhdr_len,
+	create_wreq(h_ctx(tfm), chcr_req, &req->base, req_ctx->hctx_wr.imm,
+		    param->hash_size, transhdr_len,
 		    temp,  0);
-	req_ctx->skb = skb;
+	req_ctx->hctx_wr.skb = skb;
 	return skb;
 err:
 	kfree_skb(skb);
@@ -1605,15 +1557,15 @@ static int chcr_ahash_update(struct ahash_request *req)
 	u8 remainder = 0, bs;
 	unsigned int nbytes = req->nbytes;
 	struct hash_wr_param params;
-	int error;
+	int error, isfull = 0;
 
 	bs = crypto_tfm_alg_blocksize(crypto_ahash_tfm(rtfm));
-
 	u_ctx = ULD_CTX(h_ctx(rtfm));
 	if (unlikely(cxgb4_is_crypto_q_full(u_ctx->lldi.ports[0],
 					    h_ctx(rtfm)->tx_qidx))) {
+		isfull = 1;
 		if (!(req->base.flags & CRYPTO_TFM_REQ_MAY_BACKLOG))
-			return -EBUSY;
+			return -ENOSPC;
 	}
 
 	if (nbytes + req_ctx->reqlen >= bs) {
@@ -1625,17 +1577,26 @@ static int chcr_ahash_update(struct ahash_request *req)
 		req_ctx->reqlen += nbytes;
 		return 0;
 	}
+	chcr_init_hctx_per_wr(req_ctx);
 	error = chcr_hash_dma_map(&u_ctx->lldi.pdev->dev, req);
 	if (error)
 		return -ENOMEM;
+	get_alg_config(&params.alg_prm, crypto_ahash_digestsize(rtfm));
+	params.kctx_len = roundup(params.alg_prm.result_size, 16);
+	params.sg_len = chcr_hash_ent_in_wr(req->src, !!req_ctx->reqlen,
+				     HASH_SPACE_LEFT(params.kctx_len), 0);
+	if (params.sg_len > req->nbytes)
+		params.sg_len = req->nbytes;
+	params.sg_len = rounddown(params.sg_len + req_ctx->reqlen, bs) -
+			req_ctx->reqlen;
 	params.opad_needed = 0;
 	params.more = 1;
 	params.last = 0;
-	params.sg_len = nbytes - req_ctx->reqlen;
 	params.bfr_len = req_ctx->reqlen;
 	params.scmd1 = 0;
-	get_alg_config(&params.alg_prm, crypto_ahash_digestsize(rtfm));
-	req_ctx->result = 0;
+	req_ctx->hctx_wr.srcsg = req->src;
+
+	params.hash_size = params.alg_prm.result_size;
 	req_ctx->data_len += params.sg_len + params.bfr_len;
 	skb = create_hash_wr(req, &params);
 	if (IS_ERR(skb)) {
@@ -1643,6 +1604,7 @@ static int chcr_ahash_update(struct ahash_request *req)
 		goto unmap;
 	}
 
+	req_ctx->hctx_wr.processed += params.sg_len;
 	if (remainder) {
 		/* Swap buffers */
 		swap(req_ctx->reqbfr, req_ctx->skbfr);
@@ -1655,7 +1617,7 @@ static int chcr_ahash_update(struct ahash_request *req)
 	set_wr_txq(skb, CPL_PRIORITY_DATA, h_ctx(rtfm)->tx_qidx);
 	chcr_send_wr(skb);
 
-	return -EINPROGRESS;
+	return isfull ? -EBUSY : -EINPROGRESS;
 unmap:
 	chcr_hash_dma_unmap(&u_ctx->lldi.pdev->dev, req);
 	return error;
@@ -1680,16 +1642,27 @@ static int chcr_ahash_final(struct ahash_request *req)
 	struct uld_ctx *u_ctx = NULL;
 	u8 bs = crypto_tfm_alg_blocksize(crypto_ahash_tfm(rtfm));
 
+	chcr_init_hctx_per_wr(req_ctx);
 	u_ctx = ULD_CTX(h_ctx(rtfm));
 	if (is_hmac(crypto_ahash_tfm(rtfm)))
 		params.opad_needed = 1;
 	else
 		params.opad_needed = 0;
 	params.sg_len = 0;
+	req_ctx->hctx_wr.isfinal = 1;
 	get_alg_config(&params.alg_prm, crypto_ahash_digestsize(rtfm));
-	req_ctx->result = 1;
+	params.kctx_len = roundup(params.alg_prm.result_size, 16);
+	if (is_hmac(crypto_ahash_tfm(rtfm))) {
+		params.opad_needed = 1;
+		params.kctx_len *= 2;
+	} else {
+		params.opad_needed = 0;
+	}
+
+	req_ctx->hctx_wr.result = 1;
 	params.bfr_len = req_ctx->reqlen;
 	req_ctx->data_len += params.bfr_len + params.sg_len;
+	req_ctx->hctx_wr.srcsg = req->src;
 	if (req_ctx->reqlen == 0) {
 		create_last_hash_block(req_ctx->reqbfr, bs, req_ctx->data_len);
 		params.last = 0;
@@ -1702,10 +1675,11 @@ static int chcr_ahash_final(struct ahash_request *req)
 		params.last = 1;
 		params.more = 0;
 	}
+	params.hash_size = crypto_ahash_digestsize(rtfm);
 	skb = create_hash_wr(req, &params);
 	if (IS_ERR(skb))
 		return PTR_ERR(skb);
-
+	req_ctx->reqlen = 0;
 	skb->dev = u_ctx->lldi.ports[0];
 	set_wr_txq(skb, CPL_PRIORITY_DATA, h_ctx(rtfm)->tx_qidx);
 	chcr_send_wr(skb);
@@ -1720,52 +1694,75 @@ static int chcr_ahash_finup(struct ahash_request *req)
 	struct sk_buff *skb;
 	struct hash_wr_param params;
 	u8  bs;
-	int error;
+	int error, isfull = 0;
 
 	bs = crypto_tfm_alg_blocksize(crypto_ahash_tfm(rtfm));
 	u_ctx = ULD_CTX(h_ctx(rtfm));
 
 	if (unlikely(cxgb4_is_crypto_q_full(u_ctx->lldi.ports[0],
 					    h_ctx(rtfm)->tx_qidx))) {
+		isfull = 1;
 		if (!(req->base.flags & CRYPTO_TFM_REQ_MAY_BACKLOG))
-			return -EBUSY;
+			return -ENOSPC;
+	}
+	chcr_init_hctx_per_wr(req_ctx);
+	error = chcr_hash_dma_map(&u_ctx->lldi.pdev->dev, req);
+	if (error)
+		return -ENOMEM;
+
+	get_alg_config(&params.alg_prm, crypto_ahash_digestsize(rtfm));
+	params.kctx_len = roundup(params.alg_prm.result_size, 16);
+	if (is_hmac(crypto_ahash_tfm(rtfm))) {
+		params.kctx_len *= 2;
+		params.opad_needed = 1;
+	} else {
+		params.opad_needed = 0;
 	}
 
-	if (is_hmac(crypto_ahash_tfm(rtfm)))
-		params.opad_needed = 1;
-	else
-		params.opad_needed = 0;
-
-	params.sg_len = req->nbytes;
+	params.sg_len = chcr_hash_ent_in_wr(req->src, !!req_ctx->reqlen,
+				    HASH_SPACE_LEFT(params.kctx_len), 0);
+	if (params.sg_len < req->nbytes) {
+		if (is_hmac(crypto_ahash_tfm(rtfm))) {
+			params.kctx_len /= 2;
+			params.opad_needed = 0;
+		}
+		params.last = 0;
+		params.more = 1;
+		params.sg_len = rounddown(params.sg_len + req_ctx->reqlen, bs)
+					- req_ctx->reqlen;
+		params.hash_size = params.alg_prm.result_size;
+		params.scmd1 = 0;
+	} else {
+		params.last = 1;
+		params.more = 0;
+		params.sg_len = req->nbytes;
+		params.hash_size = crypto_ahash_digestsize(rtfm);
+		params.scmd1 = req_ctx->data_len + req_ctx->reqlen +
+				params.sg_len;
+	}
 	params.bfr_len = req_ctx->reqlen;
-	get_alg_config(&params.alg_prm, crypto_ahash_digestsize(rtfm));
 	req_ctx->data_len += params.bfr_len + params.sg_len;
-	req_ctx->result = 1;
+	req_ctx->hctx_wr.result = 1;
+	req_ctx->hctx_wr.srcsg = req->src;
 	if ((req_ctx->reqlen + req->nbytes) == 0) {
 		create_last_hash_block(req_ctx->reqbfr, bs, req_ctx->data_len);
 		params.last = 0;
 		params.more = 1;
 		params.scmd1 = 0;
 		params.bfr_len = bs;
-	} else {
-		params.scmd1 = req_ctx->data_len;
-		params.last = 1;
-		params.more = 0;
 	}
-	error = chcr_hash_dma_map(&u_ctx->lldi.pdev->dev, req);
-	if (error)
-		return -ENOMEM;
-
 	skb = create_hash_wr(req, &params);
 	if (IS_ERR(skb)) {
 		error = PTR_ERR(skb);
 		goto unmap;
 	}
+	req_ctx->reqlen = 0;
+	req_ctx->hctx_wr.processed += params.sg_len;
 	skb->dev = u_ctx->lldi.ports[0];
 	set_wr_txq(skb, CPL_PRIORITY_DATA, h_ctx(rtfm)->tx_qidx);
 	chcr_send_wr(skb);
 
-	return -EINPROGRESS;
+	return isfull ? -EBUSY : -EINPROGRESS;
 unmap:
 	chcr_hash_dma_unmap(&u_ctx->lldi.pdev->dev, req);
 	return error;
@@ -1779,7 +1776,7 @@ static int chcr_ahash_digest(struct ahash_request *req)
 	struct sk_buff *skb;
 	struct hash_wr_param params;
 	u8  bs;
-	int error;
+	int error, isfull = 0;
 
 	rtfm->init(req);
 	bs = crypto_tfm_alg_blocksize(crypto_ahash_tfm(rtfm));
@@ -1787,25 +1784,47 @@ static int chcr_ahash_digest(struct ahash_request *req)
 	u_ctx = ULD_CTX(h_ctx(rtfm));
 	if (unlikely(cxgb4_is_crypto_q_full(u_ctx->lldi.ports[0],
 					    h_ctx(rtfm)->tx_qidx))) {
+		isfull = 1;
 		if (!(req->base.flags & CRYPTO_TFM_REQ_MAY_BACKLOG))
-			return -EBUSY;
+			return -ENOSPC;
 	}
 
-	if (is_hmac(crypto_ahash_tfm(rtfm)))
-		params.opad_needed = 1;
-	else
-		params.opad_needed = 0;
+	chcr_init_hctx_per_wr(req_ctx);
 	error = chcr_hash_dma_map(&u_ctx->lldi.pdev->dev, req);
 	if (error)
 		return -ENOMEM;
 
-	params.last = 0;
-	params.more = 0;
-	params.sg_len = req->nbytes;
-	params.bfr_len = 0;
-	params.scmd1 = 0;
 	get_alg_config(&params.alg_prm, crypto_ahash_digestsize(rtfm));
-	req_ctx->result = 1;
+	params.kctx_len = roundup(params.alg_prm.result_size, 16);
+	if (is_hmac(crypto_ahash_tfm(rtfm))) {
+		params.kctx_len *= 2;
+		params.opad_needed = 1;
+	} else {
+		params.opad_needed = 0;
+	}
+	params.sg_len = chcr_hash_ent_in_wr(req->src, !!req_ctx->reqlen,
+				HASH_SPACE_LEFT(params.kctx_len), 0);
+	if (params.sg_len < req->nbytes) {
+		if (is_hmac(crypto_ahash_tfm(rtfm))) {
+			params.kctx_len /= 2;
+			params.opad_needed = 0;
+		}
+		params.last = 0;
+		params.more = 1;
+		params.scmd1 = 0;
+		params.sg_len = rounddown(params.sg_len, bs);
+		params.hash_size = params.alg_prm.result_size;
+	} else {
+		params.sg_len = req->nbytes;
+		params.hash_size = crypto_ahash_digestsize(rtfm);
+		params.last = 1;
+		params.more = 0;
+		params.scmd1 = req->nbytes + req_ctx->data_len;
+
+	}
+	params.bfr_len = 0;
+	req_ctx->hctx_wr.result = 1;
+	req_ctx->hctx_wr.srcsg = req->src;
 	req_ctx->data_len += params.bfr_len + params.sg_len;
 
 	if (req->nbytes == 0) {
@@ -1819,15 +1838,156 @@ static int chcr_ahash_digest(struct ahash_request *req)
 		error = PTR_ERR(skb);
 		goto unmap;
 	}
+	req_ctx->hctx_wr.processed += params.sg_len;
 	skb->dev = u_ctx->lldi.ports[0];
 	set_wr_txq(skb, CPL_PRIORITY_DATA, h_ctx(rtfm)->tx_qidx);
 	chcr_send_wr(skb);
-	return -EINPROGRESS;
+	return isfull ? -EBUSY : -EINPROGRESS;
 unmap:
 	chcr_hash_dma_unmap(&u_ctx->lldi.pdev->dev, req);
 	return error;
 }
 
+static int chcr_ahash_continue(struct ahash_request *req)
+{
+	struct chcr_ahash_req_ctx *reqctx = ahash_request_ctx(req);
+	struct chcr_hctx_per_wr *hctx_wr = &reqctx->hctx_wr;
+	struct crypto_ahash *rtfm = crypto_ahash_reqtfm(req);
+	struct uld_ctx *u_ctx = NULL;
+	struct sk_buff *skb;
+	struct hash_wr_param params;
+	u8  bs;
+	int error;
+
+	bs = crypto_tfm_alg_blocksize(crypto_ahash_tfm(rtfm));
+	u_ctx = ULD_CTX(h_ctx(rtfm));
+	get_alg_config(&params.alg_prm, crypto_ahash_digestsize(rtfm));
+	params.kctx_len = roundup(params.alg_prm.result_size, 16);
+	if (is_hmac(crypto_ahash_tfm(rtfm))) {
+		params.kctx_len *= 2;
+		params.opad_needed = 1;
+	} else {
+		params.opad_needed = 0;
+	}
+	params.sg_len = chcr_hash_ent_in_wr(hctx_wr->srcsg, 0,
+					    HASH_SPACE_LEFT(params.kctx_len),
+					    hctx_wr->src_ofst);
+	if ((params.sg_len + hctx_wr->processed) > req->nbytes)
+		params.sg_len = req->nbytes - hctx_wr->processed;
+	if (!hctx_wr->result ||
+	    ((params.sg_len + hctx_wr->processed) < req->nbytes)) {
+		if (is_hmac(crypto_ahash_tfm(rtfm))) {
+			params.kctx_len /= 2;
+			params.opad_needed = 0;
+		}
+		params.last = 0;
+		params.more = 1;
+		params.sg_len = rounddown(params.sg_len, bs);
+		params.hash_size = params.alg_prm.result_size;
+		params.scmd1 = 0;
+	} else {
+		params.last = 1;
+		params.more = 0;
+		params.hash_size = crypto_ahash_digestsize(rtfm);
+		params.scmd1 = reqctx->data_len + params.sg_len;
+	}
+	params.bfr_len = 0;
+	reqctx->data_len += params.sg_len;
+	skb = create_hash_wr(req, &params);
+	if (IS_ERR(skb)) {
+		error = PTR_ERR(skb);
+		goto err;
+	}
+	hctx_wr->processed += params.sg_len;
+	skb->dev = u_ctx->lldi.ports[0];
+	set_wr_txq(skb, CPL_PRIORITY_DATA, h_ctx(rtfm)->tx_qidx);
+	chcr_send_wr(skb);
+	return 0;
+err:
+	return error;
+}
+
+static inline void chcr_handle_ahash_resp(struct ahash_request *req,
+					  unsigned char *input,
+					  int err)
+{
+	struct chcr_ahash_req_ctx *reqctx = ahash_request_ctx(req);
+	struct chcr_hctx_per_wr *hctx_wr = &reqctx->hctx_wr;
+	int digestsize, updated_digestsize;
+	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
+	struct uld_ctx *u_ctx = ULD_CTX(h_ctx(tfm));
+
+	if (input == NULL)
+		goto out;
+	digestsize = crypto_ahash_digestsize(crypto_ahash_reqtfm(req));
+	updated_digestsize = digestsize;
+	if (digestsize == SHA224_DIGEST_SIZE)
+		updated_digestsize = SHA256_DIGEST_SIZE;
+	else if (digestsize == SHA384_DIGEST_SIZE)
+		updated_digestsize = SHA512_DIGEST_SIZE;
+
+	if (hctx_wr->dma_addr) {
+		dma_unmap_single(&u_ctx->lldi.pdev->dev, hctx_wr->dma_addr,
+				 hctx_wr->dma_len, DMA_TO_DEVICE);
+		hctx_wr->dma_addr = 0;
+	}
+	if (hctx_wr->isfinal || ((hctx_wr->processed + reqctx->reqlen) ==
+				 req->nbytes)) {
+		if (hctx_wr->result == 1) {
+			hctx_wr->result = 0;
+			memcpy(req->result, input + sizeof(struct cpl_fw6_pld),
+			       digestsize);
+		} else {
+			memcpy(reqctx->partial_hash,
+			       input + sizeof(struct cpl_fw6_pld),
+			       updated_digestsize);
+
+		}
+		goto unmap;
+	}
+	memcpy(reqctx->partial_hash, input + sizeof(struct cpl_fw6_pld),
+	       updated_digestsize);
+
+	err = chcr_ahash_continue(req);
+	if (err)
+		goto unmap;
+	return;
+unmap:
+	if (hctx_wr->is_sg_map)
+		chcr_hash_dma_unmap(&u_ctx->lldi.pdev->dev, req);
+
+
+out:
+	req->base.complete(&req->base, err);
+}
+
+/*
+ *	chcr_handle_resp - Unmap the DMA buffers associated with the request
+ *	@req: crypto request
+ */
+int chcr_handle_resp(struct crypto_async_request *req, unsigned char *input,
+			 int err)
+{
+	struct crypto_tfm *tfm = req->tfm;
+	struct chcr_context *ctx = crypto_tfm_ctx(tfm);
+	struct adapter *adap = padap(ctx->dev);
+
+	switch (tfm->__crt_alg->cra_flags & CRYPTO_ALG_TYPE_MASK) {
+	case CRYPTO_ALG_TYPE_AEAD:
+		chcr_handle_aead_resp(aead_request_cast(req), input, err);
+		break;
+
+	case CRYPTO_ALG_TYPE_ABLKCIPHER:
+		 err = chcr_handle_cipher_resp(ablkcipher_request_cast(req),
+					       input, err);
+		break;
+
+	case CRYPTO_ALG_TYPE_AHASH:
+		chcr_handle_ahash_resp(ahash_request_cast(req), input, err);
+		}
+	atomic_inc(&adap->chcr_stats.complete);
+	return err;
+}
 static int chcr_ahash_export(struct ahash_request *areq, void *out)
 {
 	struct chcr_ahash_req_ctx *req_ctx = ahash_request_ctx(areq);
@@ -1835,11 +1995,10 @@ static int chcr_ahash_export(struct ahash_request *areq, void *out)
 
 	state->reqlen = req_ctx->reqlen;
 	state->data_len = req_ctx->data_len;
-	state->is_sg_map = 0;
-	state->result = 0;
 	memcpy(state->bfr1, req_ctx->reqbfr, req_ctx->reqlen);
 	memcpy(state->partial_hash, req_ctx->partial_hash,
 	       CHCR_HASH_MAX_DIGEST_SIZE);
+	chcr_init_hctx_per_wr(state);
 		return 0;
 }
 
@@ -1852,11 +2011,10 @@ static int chcr_ahash_import(struct ahash_request *areq, const void *in)
 	req_ctx->data_len = state->data_len;
 	req_ctx->reqbfr = req_ctx->bfr1;
 	req_ctx->skbfr = req_ctx->bfr2;
-	req_ctx->is_sg_map = 0;
-	req_ctx->result = 0;
 	memcpy(req_ctx->bfr1, state->bfr1, CHCR_HASH_MAX_BLOCK_SIZE_128);
 	memcpy(req_ctx->partial_hash, state->partial_hash,
 	       CHCR_HASH_MAX_DIGEST_SIZE);
+	chcr_init_hctx_per_wr(req_ctx);
 	return 0;
 }
 
@@ -1953,10 +2111,8 @@ static int chcr_sha_init(struct ahash_request *areq)
 	req_ctx->reqlen = 0;
 	req_ctx->reqbfr = req_ctx->bfr1;
 	req_ctx->skbfr = req_ctx->bfr2;
-	req_ctx->skb = NULL;
-	req_ctx->result = 0;
-	req_ctx->is_sg_map = 0;
 	copy_hash_init_values(req_ctx->partial_hash, digestsize);
+
 	return 0;
 }
 
@@ -2017,22 +2173,35 @@ static void chcr_hmac_cra_exit(struct crypto_tfm *tfm)
 	}
 }
 
-static int chcr_aead_common_init(struct aead_request *req,
-				 unsigned short op_type)
+inline void chcr_aead_common_exit(struct aead_request *req)
+{
+	struct chcr_aead_reqctx  *reqctx = aead_request_ctx(req);
+	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
+	struct uld_ctx *u_ctx = ULD_CTX(a_ctx(tfm));
+
+	chcr_aead_dma_unmap(&u_ctx->lldi.pdev->dev, req, reqctx->op);
+}
+
+static int chcr_aead_common_init(struct aead_request *req)
 {
 	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
 	struct chcr_aead_ctx *aeadctx = AEAD_CTX(a_ctx(tfm));
 	struct chcr_aead_reqctx  *reqctx = aead_request_ctx(req);
-	int error = -EINVAL;
 	unsigned int authsize = crypto_aead_authsize(tfm);
+	int error = -EINVAL;
 
 	/* validate key size */
 	if (aeadctx->enckey_len == 0)
 		goto err;
-	if (op_type && req->cryptlen < authsize)
+	if (reqctx->op && req->cryptlen < authsize)
 		goto err;
+	if (reqctx->b0_len)
+		reqctx->scratch_pad = reqctx->iv + IV;
+	else
+		reqctx->scratch_pad = NULL;
+
 	error = chcr_aead_dma_map(&ULD_CTX(a_ctx(tfm))->lldi.pdev->dev, req,
-				  op_type);
+				  reqctx->op);
 	if (error) {
 		error = -ENOMEM;
 		goto err;
@@ -2069,7 +2238,7 @@ static int chcr_aead_fallback(struct aead_request *req, unsigned short op_type)
 	aead_request_set_tfm(subreq, aeadctx->sw_cipher);
 	aead_request_set_callback(subreq, req->base.flags,
 				  req->base.complete, req->base.data);
-	 aead_request_set_crypt(subreq, req->src, req->dst, req->cryptlen,
+	aead_request_set_crypt(subreq, req->src, req->dst, req->cryptlen,
 				 req->iv);
 	 aead_request_set_ad(subreq, req->assoclen);
 	return op_type ? crypto_aead_decrypt(subreq) :
@@ -2078,8 +2247,7 @@ static int chcr_aead_fallback(struct aead_request *req, unsigned short op_type)
 
 static struct sk_buff *create_authenc_wr(struct aead_request *req,
 					 unsigned short qid,
-					 int size,
-					 unsigned short op_type)
+					 int size)
 {
 	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
 	struct chcr_aead_ctx *aeadctx = AEAD_CTX(a_ctx(tfm));
@@ -2103,18 +2271,20 @@ static struct sk_buff *create_authenc_wr(struct aead_request *req,
 	if (req->cryptlen == 0)
 		return NULL;
 
-	reqctx->b0_dma = 0;
-	if (subtype == CRYPTO_ALG_SUB_TYPE_CBC_NULL ||
-	subtype == CRYPTO_ALG_SUB_TYPE_CTR_NULL) {
-		null = 1;
-		assoclen = 0;
-	}
-	error = chcr_aead_common_init(req, op_type);
+	reqctx->b0_len = 0;
+	error = chcr_aead_common_init(req);
 	if (error)
 		return ERR_PTR(error);
+
+	if (subtype == CRYPTO_ALG_SUB_TYPE_CBC_NULL ||
+		subtype == CRYPTO_ALG_SUB_TYPE_CTR_NULL) {
+		null = 1;
+		assoclen = 0;
+		reqctx->aad_nents = 0;
+	}
 	dnents = sg_nents_xlen(req->dst, assoclen, CHCR_DST_SG_SIZE, 0);
 	dnents += sg_nents_xlen(req->dst, req->cryptlen +
-		(op_type ? -authsize : authsize), CHCR_DST_SG_SIZE,
+		(reqctx->op ? -authsize : authsize), CHCR_DST_SG_SIZE,
 		req->assoclen);
 	dnents += MIN_AUTH_SG; // For IV
 
@@ -2124,18 +2294,17 @@ static struct sk_buff *create_authenc_wr(struct aead_request *req,
 	transhdr_len = CIPHER_TRANSHDR_SIZE(kctx_len, dst_size);
 	reqctx->imm = (transhdr_len + assoclen + IV + req->cryptlen) <
 			SGE_MAX_WR_LEN;
-	temp = reqctx->imm ? (DIV_ROUND_UP((assoclen + IV + req->cryptlen), 16)
-			* 16) : (sgl_len(reqctx->src_nents + reqctx->aad_nents
+	temp = reqctx->imm ? roundup(assoclen + IV + req->cryptlen, 16)
+			: (sgl_len(reqctx->src_nents + reqctx->aad_nents
 			+ MIN_GCM_SG) * 8);
 	transhdr_len += temp;
-	transhdr_len = DIV_ROUND_UP(transhdr_len, 16) * 16;
+	transhdr_len = roundup(transhdr_len, 16);
 
 	if (chcr_aead_need_fallback(req, dnents, T6_MAX_AAD_SIZE,
-				    transhdr_len, op_type)) {
+				    transhdr_len, reqctx->op)) {
 		atomic_inc(&adap->chcr_stats.fallback);
-		chcr_aead_dma_unmap(&ULD_CTX(a_ctx(tfm))->lldi.pdev->dev, req,
-				    op_type);
-		return ERR_PTR(chcr_aead_fallback(req, op_type));
+		chcr_aead_common_exit(req);
+		return ERR_PTR(chcr_aead_fallback(req, reqctx->op));
 	}
 	skb = alloc_skb(SGE_MAX_WR_LEN, flags);
 	if (!skb) {
@@ -2145,7 +2314,7 @@ static struct sk_buff *create_authenc_wr(struct aead_request *req,
 
 	chcr_req = __skb_put_zero(skb, transhdr_len);
 
-	temp  = (op_type == CHCR_ENCRYPT_OP) ? 0 : authsize;
+	temp  = (reqctx->op == CHCR_ENCRYPT_OP) ? 0 : authsize;
 
 	/*
 	 * Input order	is AAD,IV and Payload. where IV should be included as
@@ -2169,8 +2338,8 @@ static struct sk_buff *create_authenc_wr(struct aead_request *req,
 		temp = CHCR_SCMD_CIPHER_MODE_AES_CTR;
 	else
 		temp = CHCR_SCMD_CIPHER_MODE_AES_CBC;
-	chcr_req->sec_cpl.seqno_numivs = FILL_SEC_CPL_SCMD0_SEQNO(op_type,
-					(op_type == CHCR_ENCRYPT_OP) ? 1 : 0,
+	chcr_req->sec_cpl.seqno_numivs = FILL_SEC_CPL_SCMD0_SEQNO(reqctx->op,
+					(reqctx->op == CHCR_ENCRYPT_OP) ? 1 : 0,
 					temp,
 					actx->auth_mode, aeadctx->hmac_ctrl,
 					IV >> 1);
@@ -2178,7 +2347,7 @@ static struct sk_buff *create_authenc_wr(struct aead_request *req,
 					 0, 0, dst_size);
 
 	chcr_req->key_ctx.ctx_hdr = aeadctx->key_ctx_hdr;
-	if (op_type == CHCR_ENCRYPT_OP ||
+	if (reqctx->op == CHCR_ENCRYPT_OP ||
 		subtype == CRYPTO_ALG_SUB_TYPE_CTR_SHA ||
 		subtype == CRYPTO_ALG_SUB_TYPE_CTR_NULL)
 		memcpy(chcr_req->key_ctx.key, aeadctx->key,
@@ -2187,9 +2356,8 @@ static struct sk_buff *create_authenc_wr(struct aead_request *req,
 		memcpy(chcr_req->key_ctx.key, actx->dec_rrkey,
 		       aeadctx->enckey_len);
 
-	memcpy(chcr_req->key_ctx.key + (DIV_ROUND_UP(aeadctx->enckey_len, 16) <<
-					4), actx->h_iopad, kctx_len -
-				(DIV_ROUND_UP(aeadctx->enckey_len, 16) << 4));
+	memcpy(chcr_req->key_ctx.key + roundup(aeadctx->enckey_len, 16),
+	       actx->h_iopad, kctx_len - roundup(aeadctx->enckey_len, 16));
 	if (subtype == CRYPTO_ALG_SUB_TYPE_CTR_SHA ||
 	    subtype == CRYPTO_ALG_SUB_TYPE_CTR_NULL) {
 		memcpy(reqctx->iv, aeadctx->nonce, CTR_RFC3686_NONCE_SIZE);
@@ -2202,20 +2370,18 @@ static struct sk_buff *create_authenc_wr(struct aead_request *req,
 	}
 	phys_cpl = (struct cpl_rx_phys_dsgl *)((u8 *)(chcr_req + 1) + kctx_len);
 	ulptx = (struct ulptx_sgl *)((u8 *)(phys_cpl + 1) + dst_size);
-	chcr_add_aead_dst_ent(req, phys_cpl, assoclen, op_type, qid);
-	chcr_add_aead_src_ent(req, ulptx, assoclen, op_type);
+	chcr_add_aead_dst_ent(req, phys_cpl, assoclen, qid);
+	chcr_add_aead_src_ent(req, ulptx, assoclen);
 	atomic_inc(&adap->chcr_stats.cipher_rqst);
 	temp = sizeof(struct cpl_rx_phys_dsgl) + dst_size +
 		kctx_len + (reqctx->imm ? (assoclen + IV + req->cryptlen) : 0);
 	create_wreq(a_ctx(tfm), chcr_req, &req->base, reqctx->imm, size,
 		   transhdr_len, temp, 0);
 	reqctx->skb = skb;
-	reqctx->op = op_type;
 
 	return skb;
 err:
-	chcr_aead_dma_unmap(&ULD_CTX(a_ctx(tfm))->lldi.pdev->dev, req,
-			    op_type);
+	chcr_aead_common_exit(req);
 
 	return ERR_PTR(error);
 }
@@ -2234,11 +2400,14 @@ int chcr_aead_dma_map(struct device *dev,
 				-authsize : authsize);
 	if (!req->cryptlen || !dst_size)
 		return 0;
-	reqctx->iv_dma = dma_map_single(dev, reqctx->iv, IV,
+	reqctx->iv_dma = dma_map_single(dev, reqctx->iv, (IV + reqctx->b0_len),
 					DMA_BIDIRECTIONAL);
 	if (dma_mapping_error(dev, reqctx->iv_dma))
 		return -ENOMEM;
-
+	if (reqctx->b0_len)
+		reqctx->b0_dma = reqctx->iv_dma + IV;
+	else
+		reqctx->b0_dma = 0;
 	if (req->src == req->dst) {
 		error = dma_map_sg(dev, req->src, sg_nents(req->src),
 				   DMA_BIDIRECTIONAL);
@@ -2278,7 +2447,7 @@ void chcr_aead_dma_unmap(struct device *dev,
 	if (!req->cryptlen || !dst_size)
 		return;
 
-	dma_unmap_single(dev, reqctx->iv_dma, IV,
+	dma_unmap_single(dev, reqctx->iv_dma, (IV + reqctx->b0_len),
 					DMA_BIDIRECTIONAL);
 	if (req->src == req->dst) {
 		dma_unmap_sg(dev, req->src, sg_nents(req->src),
@@ -2293,8 +2462,7 @@ void chcr_aead_dma_unmap(struct device *dev,
 
 void chcr_add_aead_src_ent(struct aead_request *req,
 			   struct ulptx_sgl *ulptx,
-			   unsigned int assoclen,
-			   unsigned short op_type)
+			   unsigned int assoclen)
 {
 	struct ulptx_walk ulp_walk;
 	struct chcr_aead_reqctx  *reqctx = aead_request_ctx(req);
@@ -2302,7 +2470,7 @@ void chcr_add_aead_src_ent(struct aead_request *req,
 	if (reqctx->imm) {
 		u8 *buf = (u8 *)ulptx;
 
-		if (reqctx->b0_dma) {
+		if (reqctx->b0_len) {
 			memcpy(buf, reqctx->scratch_pad, reqctx->b0_len);
 			buf += reqctx->b0_len;
 		}
@@ -2315,7 +2483,7 @@ void chcr_add_aead_src_ent(struct aead_request *req,
 				   buf, req->cryptlen, req->assoclen);
 	} else {
 		ulptx_walk_init(&ulp_walk, ulptx);
-		if (reqctx->b0_dma)
+		if (reqctx->b0_len)
 			ulptx_walk_add_page(&ulp_walk, reqctx->b0_len,
 					    &reqctx->b0_dma);
 		ulptx_walk_add_sg(&ulp_walk, req->src, assoclen, 0);
@@ -2329,7 +2497,6 @@ void chcr_add_aead_src_ent(struct aead_request *req,
 void chcr_add_aead_dst_ent(struct aead_request *req,
 			   struct cpl_rx_phys_dsgl *phys_cpl,
 			   unsigned int assoclen,
-			   unsigned short op_type,
 			   unsigned short qid)
 {
 	struct chcr_aead_reqctx  *reqctx = aead_request_ctx(req);
@@ -2339,32 +2506,30 @@ void chcr_add_aead_dst_ent(struct aead_request *req,
 	u32 temp;
 
 	dsgl_walk_init(&dsgl_walk, phys_cpl);
-	if (reqctx->b0_dma)
+	if (reqctx->b0_len)
 		dsgl_walk_add_page(&dsgl_walk, reqctx->b0_len, &reqctx->b0_dma);
 	dsgl_walk_add_sg(&dsgl_walk, req->dst, assoclen, 0);
 	dsgl_walk_add_page(&dsgl_walk, IV, &reqctx->iv_dma);
-	temp = req->cryptlen + (op_type ? -authsize : authsize);
+	temp = req->cryptlen + (reqctx->op ? -authsize : authsize);
 	dsgl_walk_add_sg(&dsgl_walk, req->dst, temp, req->assoclen);
 	dsgl_walk_end(&dsgl_walk, qid);
 }
 
 void chcr_add_cipher_src_ent(struct ablkcipher_request *req,
-			     struct ulptx_sgl *ulptx,
+			     void *ulptx,
 			     struct  cipher_wr_param *wrparam)
 {
 	struct ulptx_walk ulp_walk;
 	struct chcr_blkcipher_req_ctx *reqctx = ablkcipher_request_ctx(req);
+	u8 *buf = ulptx;
 
+	memcpy(buf, reqctx->iv, IV);
+	buf += IV;
 	if (reqctx->imm) {
-		u8 *buf = (u8 *)ulptx;
-
-		memcpy(buf, reqctx->iv, IV);
-		buf += IV;
 		sg_pcopy_to_buffer(req->src, sg_nents(req->src),
 				   buf, wrparam->bytes, reqctx->processed);
 	} else {
-		ulptx_walk_init(&ulp_walk, ulptx);
-		ulptx_walk_add_page(&ulp_walk, IV, &reqctx->iv_dma);
+		ulptx_walk_init(&ulp_walk, (struct ulptx_sgl *)buf);
 		ulptx_walk_add_sg(&ulp_walk, reqctx->srcsg, wrparam->bytes,
 				  reqctx->src_ofst);
 		reqctx->srcsg = ulp_walk.last_sg;
@@ -2382,7 +2547,6 @@ void chcr_add_cipher_dst_ent(struct ablkcipher_request *req,
 	struct dsgl_walk dsgl_walk;
 
 	dsgl_walk_init(&dsgl_walk, phys_cpl);
-	dsgl_walk_add_page(&dsgl_walk, IV, &reqctx->iv_dma);
 	dsgl_walk_add_sg(&dsgl_walk, reqctx->dstsg, wrparam->bytes,
 			 reqctx->dst_ofst);
 	reqctx->dstsg = dsgl_walk.last_sg;
@@ -2398,22 +2562,26 @@ void chcr_add_hash_src_ent(struct ahash_request *req,
 	struct ulptx_walk ulp_walk;
 	struct chcr_ahash_req_ctx *reqctx = ahash_request_ctx(req);
 
-	if (reqctx->imm) {
+	if (reqctx->hctx_wr.imm) {
 		u8 *buf = (u8 *)ulptx;
 
 		if (param->bfr_len) {
 			memcpy(buf, reqctx->reqbfr, param->bfr_len);
 			buf += param->bfr_len;
 		}
-		sg_pcopy_to_buffer(req->src, sg_nents(req->src),
-				   buf, param->sg_len, 0);
+
+		sg_pcopy_to_buffer(reqctx->hctx_wr.srcsg,
+				   sg_nents(reqctx->hctx_wr.srcsg), buf,
+				   param->sg_len, 0);
 	} else {
 		ulptx_walk_init(&ulp_walk, ulptx);
 		if (param->bfr_len)
 			ulptx_walk_add_page(&ulp_walk, param->bfr_len,
-					    &reqctx->dma_addr);
-		ulptx_walk_add_sg(&ulp_walk, req->src, param->sg_len,
-				  0);
+					    &reqctx->hctx_wr.dma_addr);
+		ulptx_walk_add_sg(&ulp_walk, reqctx->hctx_wr.srcsg,
+				  param->sg_len, reqctx->hctx_wr.src_ofst);
+		reqctx->hctx_wr.srcsg = ulp_walk.last_sg;
+		reqctx->hctx_wr.src_ofst = ulp_walk.last_sg_len;
 		ulptx_walk_end(&ulp_walk);
 	}
 }
@@ -2430,7 +2598,7 @@ int chcr_hash_dma_map(struct device *dev,
 			   DMA_TO_DEVICE);
 	if (!error)
 		return -ENOMEM;
-	req_ctx->is_sg_map = 1;
+	req_ctx->hctx_wr.is_sg_map = 1;
 	return 0;
 }
 
@@ -2444,7 +2612,7 @@ void chcr_hash_dma_unmap(struct device *dev,
 
 	dma_unmap_sg(dev, req->src, sg_nents(req->src),
 			   DMA_TO_DEVICE);
-	req_ctx->is_sg_map = 0;
+	req_ctx->hctx_wr.is_sg_map = 0;
 
 }
 
@@ -2452,12 +2620,6 @@ int chcr_cipher_dma_map(struct device *dev,
 			struct ablkcipher_request *req)
 {
 	int error;
-	struct chcr_blkcipher_req_ctx *reqctx = ablkcipher_request_ctx(req);
-
-	reqctx->iv_dma = dma_map_single(dev, reqctx->iv, IV,
-					DMA_BIDIRECTIONAL);
-	if (dma_mapping_error(dev, reqctx->iv_dma))
-		return -ENOMEM;
 
 	if (req->src == req->dst) {
 		error = dma_map_sg(dev, req->src, sg_nents(req->src),
@@ -2480,17 +2642,12 @@ int chcr_cipher_dma_map(struct device *dev,
 
 	return 0;
 err:
-	dma_unmap_single(dev, reqctx->iv_dma, IV, DMA_BIDIRECTIONAL);
 	return -ENOMEM;
 }
 
 void chcr_cipher_dma_unmap(struct device *dev,
 			   struct ablkcipher_request *req)
 {
-	struct chcr_blkcipher_req_ctx *reqctx = ablkcipher_request_ctx(req);
-
-	dma_unmap_single(dev, reqctx->iv_dma, IV,
-					DMA_BIDIRECTIONAL);
 	if (req->src == req->dst) {
 		dma_unmap_sg(dev, req->src, sg_nents(req->src),
 				   DMA_BIDIRECTIONAL);
@@ -2560,7 +2717,8 @@ static inline int crypto_ccm_check_iv(const u8 *iv)
 static int ccm_format_packet(struct aead_request *req,
 			     struct chcr_aead_ctx *aeadctx,
 			     unsigned int sub_type,
-			     unsigned short op_type)
+			     unsigned short op_type,
+			     unsigned int assoclen)
 {
 	struct chcr_aead_reqctx *reqctx = aead_request_ctx(req);
 	int rc = 0;
@@ -2570,13 +2728,13 @@ static int ccm_format_packet(struct aead_request *req,
 		memcpy(reqctx->iv + 1, &aeadctx->salt[0], 3);
 		memcpy(reqctx->iv + 4, req->iv, 8);
 		memset(reqctx->iv + 12, 0, 4);
-		*((unsigned short *)(reqctx->scratch_pad + 16)) =
-			htons(req->assoclen - 8);
 	} else {
 		memcpy(reqctx->iv, req->iv, 16);
-		*((unsigned short *)(reqctx->scratch_pad + 16)) =
-			htons(req->assoclen);
 	}
+	if (assoclen)
+		*((unsigned short *)(reqctx->scratch_pad + 16)) =
+				htons(assoclen);
+
 	generate_b0(req, aeadctx, op_type);
 	/* zero the ctr value */
 	memset(reqctx->iv + 15 - reqctx->iv[0], 0, reqctx->iv[0] + 1);
@@ -2636,10 +2794,10 @@ static void fill_sec_cpl_for_aead(struct cpl_tx_sec_pdu *sec_cpl,
 					0, dst_size);
 }
 
-int aead_ccm_validate_input(unsigned short op_type,
-			    struct aead_request *req,
-			    struct chcr_aead_ctx *aeadctx,
-			    unsigned int sub_type)
+static int aead_ccm_validate_input(unsigned short op_type,
+				   struct aead_request *req,
+				   struct chcr_aead_ctx *aeadctx,
+				   unsigned int sub_type)
 {
 	if (sub_type != CRYPTO_ALG_SUB_TYPE_AEAD_RFC4309) {
 		if (crypto_ccm_check_iv(req->iv)) {
@@ -2658,8 +2816,7 @@ int aead_ccm_validate_input(unsigned short op_type,
 
 static struct sk_buff *create_aead_ccm_wr(struct aead_request *req,
 					  unsigned short qid,
-					  int size,
-					  unsigned short op_type)
+					  int size)
 {
 	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
 	struct chcr_aead_ctx *aeadctx = AEAD_CTX(a_ctx(tfm));
@@ -2677,42 +2834,39 @@ static struct sk_buff *create_aead_ccm_wr(struct aead_request *req,
 		GFP_ATOMIC;
 	struct adapter *adap = padap(a_ctx(tfm)->dev);
 
-	reqctx->b0_dma = 0;
 	sub_type = get_aead_subtype(tfm);
 	if (sub_type == CRYPTO_ALG_SUB_TYPE_AEAD_RFC4309)
 		assoclen -= 8;
-	error = chcr_aead_common_init(req, op_type);
+	reqctx->b0_len = CCM_B0_SIZE + (assoclen ? CCM_AAD_FIELD_SIZE : 0);
+	error = chcr_aead_common_init(req);
 	if (error)
 		return ERR_PTR(error);
 
-
-	reqctx->b0_len = CCM_B0_SIZE + (assoclen ? CCM_AAD_FIELD_SIZE : 0);
-	error = aead_ccm_validate_input(op_type, req, aeadctx, sub_type);
+	error = aead_ccm_validate_input(reqctx->op, req, aeadctx, sub_type);
 	if (error)
 		goto err;
 	dnents = sg_nents_xlen(req->dst, assoclen, CHCR_DST_SG_SIZE, 0);
 	dnents += sg_nents_xlen(req->dst, req->cryptlen
-			+ (op_type ? -authsize : authsize),
+			+ (reqctx->op ? -authsize : authsize),
 			CHCR_DST_SG_SIZE, req->assoclen);
 	dnents += MIN_CCM_SG; // For IV and B0
 	dst_size = get_space_for_phys_dsgl(dnents);
-	kctx_len = ((DIV_ROUND_UP(aeadctx->enckey_len, 16)) << 4) * 2;
+	kctx_len = roundup(aeadctx->enckey_len, 16) * 2;
 	transhdr_len = CIPHER_TRANSHDR_SIZE(kctx_len, dst_size);
 	reqctx->imm = (transhdr_len + assoclen + IV + req->cryptlen +
 		       reqctx->b0_len) <= SGE_MAX_WR_LEN;
-	temp = reqctx->imm ? (DIV_ROUND_UP((assoclen + IV + req->cryptlen +
-				reqctx->b0_len), 16) * 16) :
+	temp = reqctx->imm ? roundup(assoclen + IV + req->cryptlen +
+				     reqctx->b0_len, 16) :
 		(sgl_len(reqctx->src_nents + reqctx->aad_nents +
 				    MIN_CCM_SG) *  8);
 	transhdr_len += temp;
-	transhdr_len = DIV_ROUND_UP(transhdr_len, 16) * 16;
+	transhdr_len = roundup(transhdr_len, 16);
 
 	if (chcr_aead_need_fallback(req, dnents, T6_MAX_AAD_SIZE -
-				    reqctx->b0_len, transhdr_len, op_type)) {
+				    reqctx->b0_len, transhdr_len, reqctx->op)) {
 		atomic_inc(&adap->chcr_stats.fallback);
-		chcr_aead_dma_unmap(&ULD_CTX(a_ctx(tfm))->lldi.pdev->dev, req,
-				    op_type);
-		return ERR_PTR(chcr_aead_fallback(req, op_type));
+		chcr_aead_common_exit(req);
+		return ERR_PTR(chcr_aead_fallback(req, reqctx->op));
 	}
 	skb = alloc_skb(SGE_MAX_WR_LEN,  flags);
 
@@ -2723,30 +2877,20 @@ static struct sk_buff *create_aead_ccm_wr(struct aead_request *req,
 
 	chcr_req = (struct chcr_wr *) __skb_put_zero(skb, transhdr_len);
 
-	fill_sec_cpl_for_aead(&chcr_req->sec_cpl, dst_size, req, op_type);
+	fill_sec_cpl_for_aead(&chcr_req->sec_cpl, dst_size, req, reqctx->op);
 
 	chcr_req->key_ctx.ctx_hdr = aeadctx->key_ctx_hdr;
 	memcpy(chcr_req->key_ctx.key, aeadctx->key, aeadctx->enckey_len);
-	memcpy(chcr_req->key_ctx.key + (DIV_ROUND_UP(aeadctx->enckey_len, 16) *
-					16), aeadctx->key, aeadctx->enckey_len);
+	memcpy(chcr_req->key_ctx.key + roundup(aeadctx->enckey_len, 16),
+			aeadctx->key, aeadctx->enckey_len);
 
 	phys_cpl = (struct cpl_rx_phys_dsgl *)((u8 *)(chcr_req + 1) + kctx_len);
 	ulptx = (struct ulptx_sgl *)((u8 *)(phys_cpl + 1) + dst_size);
-	error = ccm_format_packet(req, aeadctx, sub_type, op_type);
+	error = ccm_format_packet(req, aeadctx, sub_type, reqctx->op, assoclen);
 	if (error)
 		goto dstmap_fail;
-
-	reqctx->b0_dma = dma_map_single(&ULD_CTX(a_ctx(tfm))->lldi.pdev->dev,
-					&reqctx->scratch_pad, reqctx->b0_len,
-					DMA_BIDIRECTIONAL);
-	if (dma_mapping_error(&ULD_CTX(a_ctx(tfm))->lldi.pdev->dev,
-			      reqctx->b0_dma)) {
-		error = -ENOMEM;
-		goto dstmap_fail;
-	}
-
-	chcr_add_aead_dst_ent(req, phys_cpl, assoclen, op_type, qid);
-	chcr_add_aead_src_ent(req, ulptx, assoclen, op_type);
+	chcr_add_aead_dst_ent(req, phys_cpl, assoclen, qid);
+	chcr_add_aead_src_ent(req, ulptx, assoclen);
 
 	atomic_inc(&adap->chcr_stats.aead_rqst);
 	temp = sizeof(struct cpl_rx_phys_dsgl) + dst_size +
@@ -2755,20 +2899,18 @@ static struct sk_buff *create_aead_ccm_wr(struct aead_request *req,
 	create_wreq(a_ctx(tfm), chcr_req, &req->base, reqctx->imm, 0,
 		    transhdr_len, temp, 0);
 	reqctx->skb = skb;
-	reqctx->op = op_type;
 
 	return skb;
 dstmap_fail:
 	kfree_skb(skb);
 err:
-	chcr_aead_dma_unmap(&ULD_CTX(a_ctx(tfm))->lldi.pdev->dev, req, op_type);
+	chcr_aead_common_exit(req);
 	return ERR_PTR(error);
 }
 
 static struct sk_buff *create_gcm_wr(struct aead_request *req,
 				     unsigned short qid,
-				     int size,
-				     unsigned short op_type)
+				     int size)
 {
 	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
 	struct chcr_aead_ctx *aeadctx = AEAD_CTX(a_ctx(tfm));
@@ -2788,32 +2930,31 @@ static struct sk_buff *create_gcm_wr(struct aead_request *req,
 	if (get_aead_subtype(tfm) == CRYPTO_ALG_SUB_TYPE_AEAD_RFC4106)
 		assoclen = req->assoclen - 8;
 
-	reqctx->b0_dma = 0;
-	error = chcr_aead_common_init(req, op_type);
+	reqctx->b0_len = 0;
+	error = chcr_aead_common_init(req);
 	if (error)
 		return ERR_PTR(error);
 	dnents = sg_nents_xlen(req->dst, assoclen, CHCR_DST_SG_SIZE, 0);
 	dnents += sg_nents_xlen(req->dst, req->cryptlen +
-				(op_type ? -authsize : authsize),
+				(reqctx->op ? -authsize : authsize),
 				CHCR_DST_SG_SIZE, req->assoclen);
 	dnents += MIN_GCM_SG; // For IV
 	dst_size = get_space_for_phys_dsgl(dnents);
-	kctx_len = ((DIV_ROUND_UP(aeadctx->enckey_len, 16)) << 4) +
-		AEAD_H_SIZE;
+	kctx_len = roundup(aeadctx->enckey_len, 16) + AEAD_H_SIZE;
 	transhdr_len = CIPHER_TRANSHDR_SIZE(kctx_len, dst_size);
 	reqctx->imm = (transhdr_len + assoclen + IV + req->cryptlen) <=
 			SGE_MAX_WR_LEN;
-	temp = reqctx->imm ? (DIV_ROUND_UP((assoclen + IV +
-	req->cryptlen), 16) * 16) : (sgl_len(reqctx->src_nents +
-				reqctx->aad_nents + MIN_GCM_SG) * 8);
+	temp = reqctx->imm ? roundup(assoclen + IV + req->cryptlen, 16) :
+		(sgl_len(reqctx->src_nents +
+		reqctx->aad_nents + MIN_GCM_SG) * 8);
 	transhdr_len += temp;
-	transhdr_len = DIV_ROUND_UP(transhdr_len, 16) * 16;
+	transhdr_len = roundup(transhdr_len, 16);
 	if (chcr_aead_need_fallback(req, dnents, T6_MAX_AAD_SIZE,
-			    transhdr_len, op_type)) {
+			    transhdr_len, reqctx->op)) {
+
 		atomic_inc(&adap->chcr_stats.fallback);
-		chcr_aead_dma_unmap(&ULD_CTX(a_ctx(tfm))->lldi.pdev->dev, req,
-				    op_type);
-		return ERR_PTR(chcr_aead_fallback(req, op_type));
+		chcr_aead_common_exit(req);
+		return ERR_PTR(chcr_aead_fallback(req, reqctx->op));
 	}
 	skb = alloc_skb(SGE_MAX_WR_LEN, flags);
 	if (!skb) {
@@ -2824,7 +2965,7 @@ static struct sk_buff *create_gcm_wr(struct aead_request *req,
 	chcr_req = __skb_put_zero(skb, transhdr_len);
 
 	//Offset of tag from end
-	temp = (op_type == CHCR_ENCRYPT_OP) ? 0 : authsize;
+	temp = (reqctx->op == CHCR_ENCRYPT_OP) ? 0 : authsize;
 	chcr_req->sec_cpl.op_ivinsrtofst = FILL_SEC_CPL_OP_IVINSR(
 					a_ctx(tfm)->dev->rx_channel_id, 2,
 					(assoclen + 1));
@@ -2837,7 +2978,7 @@ static struct sk_buff *create_gcm_wr(struct aead_request *req,
 			FILL_SEC_CPL_AUTHINSERT(0, assoclen + IV + 1,
 						temp, temp);
 	chcr_req->sec_cpl.seqno_numivs =
-			FILL_SEC_CPL_SCMD0_SEQNO(op_type, (op_type ==
+			FILL_SEC_CPL_SCMD0_SEQNO(reqctx->op, (reqctx->op ==
 					CHCR_ENCRYPT_OP) ? 1 : 0,
 					CHCR_SCMD_CIPHER_MODE_AES_GCM,
 					CHCR_SCMD_AUTH_MODE_GHASH,
@@ -2846,8 +2987,8 @@ static struct sk_buff *create_gcm_wr(struct aead_request *req,
 					0, 0, dst_size);
 	chcr_req->key_ctx.ctx_hdr = aeadctx->key_ctx_hdr;
 	memcpy(chcr_req->key_ctx.key, aeadctx->key, aeadctx->enckey_len);
-	memcpy(chcr_req->key_ctx.key + (DIV_ROUND_UP(aeadctx->enckey_len, 16) *
-				16), GCM_CTX(aeadctx)->ghash_h, AEAD_H_SIZE);
+	memcpy(chcr_req->key_ctx.key + roundup(aeadctx->enckey_len, 16),
+	       GCM_CTX(aeadctx)->ghash_h, AEAD_H_SIZE);
 
 	/* prepare a 16 byte iv */
 	/* S   A   L  T |  IV | 0x00000001 */
@@ -2863,19 +3004,18 @@ static struct sk_buff *create_gcm_wr(struct aead_request *req,
 	phys_cpl = (struct cpl_rx_phys_dsgl *)((u8 *)(chcr_req + 1) + kctx_len);
 	ulptx = (struct ulptx_sgl *)((u8 *)(phys_cpl + 1) + dst_size);
 
-	chcr_add_aead_dst_ent(req, phys_cpl, assoclen, op_type, qid);
-	chcr_add_aead_src_ent(req, ulptx, assoclen, op_type);
+	chcr_add_aead_dst_ent(req, phys_cpl, assoclen, qid);
+	chcr_add_aead_src_ent(req, ulptx, assoclen);
 	atomic_inc(&adap->chcr_stats.aead_rqst);
 	temp = sizeof(struct cpl_rx_phys_dsgl) + dst_size +
 		kctx_len + (reqctx->imm ? (assoclen + IV + req->cryptlen) : 0);
 	create_wreq(a_ctx(tfm), chcr_req, &req->base, reqctx->imm, size,
 		    transhdr_len, temp, reqctx->verify);
 	reqctx->skb = skb;
-	reqctx->op = op_type;
 	return skb;
 
 err:
-	chcr_aead_dma_unmap(&ULD_CTX(a_ctx(tfm))->lldi.pdev->dev, req, op_type);
+	chcr_aead_common_exit(req);
 	return ERR_PTR(error);
 }
 
@@ -3067,11 +3207,10 @@ static int chcr_ccm_common_setkey(struct crypto_aead *aead,
 	unsigned char ck_size, mk_size;
 	int key_ctx_size = 0;
 
-	key_ctx_size = sizeof(struct _key_ctx) +
-		((DIV_ROUND_UP(keylen, 16)) << 4)  * 2;
+	key_ctx_size = sizeof(struct _key_ctx) + roundup(keylen, 16) * 2;
 	if (keylen == AES_KEYSIZE_128) {
-		mk_size = CHCR_KEYCTX_CIPHER_KEY_SIZE_128;
 		ck_size = CHCR_KEYCTX_CIPHER_KEY_SIZE_128;
+		mk_size = CHCR_KEYCTX_MAC_KEY_SIZE_128;
 	} else if (keylen == AES_KEYSIZE_192) {
 		ck_size = CHCR_KEYCTX_CIPHER_KEY_SIZE_192;
 		mk_size = CHCR_KEYCTX_MAC_KEY_SIZE_192;
@@ -3178,10 +3317,9 @@ static int chcr_gcm_setkey(struct crypto_aead *aead, const u8 *key,
 
 	memcpy(aeadctx->key, key, keylen);
 	aeadctx->enckey_len = keylen;
-	key_ctx_size = sizeof(struct _key_ctx) +
-		((DIV_ROUND_UP(keylen, 16)) << 4) +
+	key_ctx_size = sizeof(struct _key_ctx) + roundup(keylen, 16) +
 		AEAD_H_SIZE;
-		aeadctx->key_ctx_hdr = FILL_KEY_CTX_HDR(ck_size,
+	aeadctx->key_ctx_hdr = FILL_KEY_CTX_HDR(ck_size,
 						CHCR_KEYCTX_MAC_KEY_SIZE_128,
 						0, 0,
 						key_ctx_size >> 4);
@@ -3281,10 +3419,12 @@ static int chcr_authenc_setkey(struct crypto_aead *authenc, const u8 *key,
 	if (IS_ERR(base_hash)) {
 		pr_err("chcr : Base driver cannot be loaded\n");
 		aeadctx->enckey_len = 0;
+		memzero_explicit(&keys, sizeof(keys));
 		return -EINVAL;
 	}
 	{
 		SHASH_DESC_ON_STACK(shash, base_hash);
+
 		shash->tfm = base_hash;
 		shash->flags = crypto_shash_get_flags(base_hash);
 		bs = crypto_shash_blocksize(base_hash);
@@ -3325,17 +3465,19 @@ static int chcr_authenc_setkey(struct crypto_aead *authenc, const u8 *key,
 		chcr_change_order(actx->h_iopad, param.result_size);
 		chcr_change_order(o_ptr, param.result_size);
 		key_ctx_len = sizeof(struct _key_ctx) +
-			((DIV_ROUND_UP(keys.enckeylen, 16)) << 4) +
+			roundup(keys.enckeylen, 16) +
 			(param.result_size + align) * 2;
 		aeadctx->key_ctx_hdr = FILL_KEY_CTX_HDR(ck_size, param.mk_size,
 						0, 1, key_ctx_len >> 4);
 		actx->auth_mode = param.auth_mode;
 		chcr_free_shash(base_hash);
 
+		memzero_explicit(&keys, sizeof(keys));
 		return 0;
 	}
 out:
 	aeadctx->enckey_len = 0;
+	memzero_explicit(&keys, sizeof(keys));
 	if (!IS_ERR(base_hash))
 		chcr_free_shash(base_hash);
 	return -EINVAL;
@@ -3393,26 +3535,27 @@ static int chcr_aead_digest_null_setkey(struct crypto_aead *authenc,
 		get_aes_decrypt_key(actx->dec_rrkey, aeadctx->key,
 				aeadctx->enckey_len << 3);
 	}
-	key_ctx_len =  sizeof(struct _key_ctx)
-		+ ((DIV_ROUND_UP(keys.enckeylen, 16)) << 4);
+	key_ctx_len =  sizeof(struct _key_ctx) + roundup(keys.enckeylen, 16);
 
 	aeadctx->key_ctx_hdr = FILL_KEY_CTX_HDR(ck_size, CHCR_KEYCTX_NO_KEY, 0,
 						0, key_ctx_len >> 4);
 	actx->auth_mode = CHCR_SCMD_AUTH_MODE_NOP;
+	memzero_explicit(&keys, sizeof(keys));
 	return 0;
 out:
 	aeadctx->enckey_len = 0;
+	memzero_explicit(&keys, sizeof(keys));
 	return -EINVAL;
 }
 
 static int chcr_aead_op(struct aead_request *req,
-			unsigned short op_type,
 			int size,
 			create_wr_t create_wr_fn)
 {
 	struct crypto_aead *tfm = crypto_aead_reqtfm(req);
 	struct uld_ctx *u_ctx;
 	struct sk_buff *skb;
+	int isfull = 0;
 
 	if (!a_ctx(tfm)->dev) {
 		pr_err("chcr : %s : No crypto device.\n", __func__);
@@ -3421,13 +3564,13 @@ static int chcr_aead_op(struct aead_request *req,
 	u_ctx = ULD_CTX(a_ctx(tfm));
 	if (cxgb4_is_crypto_q_full(u_ctx->lldi.ports[0],
 				   a_ctx(tfm)->tx_qidx)) {
+		isfull = 1;
 		if (!(req->base.flags & CRYPTO_TFM_REQ_MAY_BACKLOG))
-			return -EBUSY;
+			return -ENOSPC;
 	}
 
 	/* Form a WR from req */
-	skb = create_wr_fn(req, u_ctx->lldi.rxq_ids[a_ctx(tfm)->rx_qidx], size,
-			   op_type);
+	skb = create_wr_fn(req, u_ctx->lldi.rxq_ids[a_ctx(tfm)->rx_qidx], size);
 
 	if (IS_ERR(skb) || !skb)
 		return PTR_ERR(skb);
@@ -3435,7 +3578,7 @@ static int chcr_aead_op(struct aead_request *req,
 	skb->dev = u_ctx->lldi.ports[0];
 	set_wr_txq(skb, CPL_PRIORITY_DATA, a_ctx(tfm)->tx_qidx);
 	chcr_send_wr(skb);
-	return -EINPROGRESS;
+	return isfull ? -EBUSY : -EINPROGRESS;
 }
 
 static int chcr_aead_encrypt(struct aead_request *req)
@@ -3444,21 +3587,19 @@ static int chcr_aead_encrypt(struct aead_request *req)
 	struct chcr_aead_reqctx *reqctx = aead_request_ctx(req);
 
 	reqctx->verify = VERIFY_HW;
+	reqctx->op = CHCR_ENCRYPT_OP;
 
 	switch (get_aead_subtype(tfm)) {
 	case CRYPTO_ALG_SUB_TYPE_CTR_SHA:
 	case CRYPTO_ALG_SUB_TYPE_CBC_SHA:
 	case CRYPTO_ALG_SUB_TYPE_CBC_NULL:
 	case CRYPTO_ALG_SUB_TYPE_CTR_NULL:
-		return chcr_aead_op(req, CHCR_ENCRYPT_OP, 0,
-				    create_authenc_wr);
+		return chcr_aead_op(req, 0, create_authenc_wr);
 	case CRYPTO_ALG_SUB_TYPE_AEAD_CCM:
 	case CRYPTO_ALG_SUB_TYPE_AEAD_RFC4309:
-		return chcr_aead_op(req, CHCR_ENCRYPT_OP, 0,
-				    create_aead_ccm_wr);
+		return chcr_aead_op(req, 0, create_aead_ccm_wr);
 	default:
-		return chcr_aead_op(req, CHCR_ENCRYPT_OP, 0,
-				    create_gcm_wr);
+		return chcr_aead_op(req, 0, create_gcm_wr);
 	}
 }
 
@@ -3476,21 +3617,18 @@ static int chcr_aead_decrypt(struct aead_request *req)
 		size = 0;
 		reqctx->verify = VERIFY_HW;
 	}
-
+	reqctx->op = CHCR_DECRYPT_OP;
 	switch (get_aead_subtype(tfm)) {
 	case CRYPTO_ALG_SUB_TYPE_CBC_SHA:
 	case CRYPTO_ALG_SUB_TYPE_CTR_SHA:
 	case CRYPTO_ALG_SUB_TYPE_CBC_NULL:
 	case CRYPTO_ALG_SUB_TYPE_CTR_NULL:
-		return chcr_aead_op(req, CHCR_DECRYPT_OP, size,
-				    create_authenc_wr);
+		return chcr_aead_op(req, size, create_authenc_wr);
 	case CRYPTO_ALG_SUB_TYPE_AEAD_CCM:
 	case CRYPTO_ALG_SUB_TYPE_AEAD_RFC4309:
-		return chcr_aead_op(req, CHCR_DECRYPT_OP, size,
-				    create_aead_ccm_wr);
+		return chcr_aead_op(req, size, create_aead_ccm_wr);
 	default:
-		return chcr_aead_op(req, CHCR_DECRYPT_OP, size,
-				    create_gcm_wr);
+		return chcr_aead_op(req, size, create_gcm_wr);
 	}
 }
 

@@ -179,8 +179,7 @@ static void gr_seq_ep_show(struct seq_file *seq, struct gr_ep *ep)
 	seq_puts(seq, "\n");
 }
 
-
-static int gr_seq_show(struct seq_file *seq, void *v)
+static int gr_dfs_show(struct seq_file *seq, void *v)
 {
 	struct gr_udc *dev = seq->private;
 	u32 control = gr_read32(&dev->regs->control);
@@ -203,34 +202,19 @@ static int gr_seq_show(struct seq_file *seq, void *v)
 
 	return 0;
 }
-
-static int gr_dfs_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, gr_seq_show, inode->i_private);
-}
-
-static const struct file_operations gr_dfs_fops = {
-	.owner		= THIS_MODULE,
-	.open		= gr_dfs_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
+DEFINE_SHOW_ATTRIBUTE(gr_dfs);
 
 static void gr_dfs_create(struct gr_udc *dev)
 {
 	const char *name = "gr_udc_state";
 
 	dev->dfs_root = debugfs_create_dir(dev_name(dev->dev), NULL);
-	dev->dfs_state = debugfs_create_file(name, 0444, dev->dfs_root, dev,
-					     &gr_dfs_fops);
+	debugfs_create_file(name, 0444, dev->dfs_root, dev, &gr_dfs_fops);
 }
 
 static void gr_dfs_delete(struct gr_udc *dev)
 {
-	/* Handles NULL and ERR pointers internally */
-	debugfs_remove(dev->dfs_state);
-	debugfs_remove(dev->dfs_root);
+	debugfs_remove_recursive(dev->dfs_root);
 }
 
 #else /* !CONFIG_USB_GADGET_DEBUG_FS */

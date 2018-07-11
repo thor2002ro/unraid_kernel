@@ -87,10 +87,10 @@ typedef void (*dm_resume_fn) (struct dm_target *ti);
 typedef void (*dm_status_fn) (struct dm_target *ti, status_type_t status_type,
 			      unsigned status_flags, char *result, unsigned maxlen);
 
-typedef int (*dm_message_fn) (struct dm_target *ti, unsigned argc, char **argv);
+typedef int (*dm_message_fn) (struct dm_target *ti, unsigned argc, char **argv,
+			      char *result, unsigned maxlen);
 
-typedef int (*dm_prepare_ioctl_fn) (struct dm_target *ti,
-			    struct block_device **bdev, fmode_t *mode);
+typedef int (*dm_prepare_ioctl_fn) (struct dm_target *ti, struct block_device **bdev);
 
 /*
  * These iteration functions are typically used to check (and combine)
@@ -133,7 +133,7 @@ typedef int (*dm_busy_fn) (struct dm_target *ti);
  */
 typedef long (*dm_dax_direct_access_fn) (struct dm_target *ti, pgoff_t pgoff,
 		long nr_pages, void **kaddr, pfn_t *pfn);
-typedef size_t (*dm_dax_copy_from_iter_fn)(struct dm_target *ti, pgoff_t pgoff,
+typedef size_t (*dm_dax_copy_iter_fn)(struct dm_target *ti, pgoff_t pgoff,
 		void *addr, size_t bytes, struct iov_iter *i);
 #define PAGE_SECTORS (PAGE_SIZE / 512)
 
@@ -184,7 +184,8 @@ struct target_type {
 	dm_iterate_devices_fn iterate_devices;
 	dm_io_hints_fn io_hints;
 	dm_dax_direct_access_fn direct_access;
-	dm_dax_copy_from_iter_fn dax_copy_from_iter;
+	dm_dax_copy_iter_fn dax_copy_from_iter;
+	dm_dax_copy_iter_fn dax_copy_to_iter;
 
 	/* For internal device-mapper use. */
 	struct list_head list;
@@ -265,6 +266,12 @@ struct dm_target {
 	 * The bio number can be accessed with dm_bio_get_target_bio_nr.
 	 */
 	unsigned num_discard_bios;
+
+	/*
+	 * The number of secure erase bios that will be submitted to the target.
+	 * The bio number can be accessed with dm_bio_get_target_bio_nr.
+	 */
+	unsigned num_secure_erase_bios;
 
 	/*
 	 * The number of WRITE SAME bios that will be submitted to the target.
@@ -541,8 +548,6 @@ do {									\
 
 #define DMEMIT(x...) sz += ((sz >= maxlen) ? \
 			  0 : scnprintf(result + sz, maxlen - sz, x))
-
-#define SECTOR_SHIFT 9
 
 /*
  * Definitions of return values from target end_io function.

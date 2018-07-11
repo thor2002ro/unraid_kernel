@@ -179,7 +179,7 @@ static const struct nfp_et_stat nfp_mac_et_stats[] = {
 
 #define NN_ET_GLOBAL_STATS_LEN ARRAY_SIZE(nfp_net_et_stats)
 #define NN_ET_SWITCH_STATS_LEN 9
-#define NN_RVEC_GATHER_STATS	8
+#define NN_RVEC_GATHER_STATS	9
 #define NN_RVEC_PER_Q_STATS	3
 
 static void nfp_net_get_nspinfo(struct nfp_app *app, char *version)
@@ -437,7 +437,7 @@ static int nfp_net_set_ringparam(struct net_device *netdev,
 	return nfp_net_set_ring_size(nn, rxd_cnt, txd_cnt);
 }
 
-static __printf(2, 3) u8 *nfp_pr_et(u8 *data, const char *fmt, ...)
+__printf(2, 3) u8 *nfp_pr_et(u8 *data, const char *fmt, ...)
 {
 	va_list args;
 
@@ -468,6 +468,7 @@ static u8 *nfp_vnic_get_sw_stats_strings(struct net_device *netdev, u8 *data)
 
 	data = nfp_pr_et(data, "hw_rx_csum_ok");
 	data = nfp_pr_et(data, "hw_rx_csum_inner_ok");
+	data = nfp_pr_et(data, "hw_rx_csum_complete");
 	data = nfp_pr_et(data, "hw_rx_csum_err");
 	data = nfp_pr_et(data, "rx_replace_buf_alloc_fail");
 	data = nfp_pr_et(data, "hw_tx_csum");
@@ -493,18 +494,19 @@ static u64 *nfp_vnic_get_sw_stats(struct net_device *netdev, u64 *data)
 			data[0] = nn->r_vecs[i].rx_pkts;
 			tmp[0] = nn->r_vecs[i].hw_csum_rx_ok;
 			tmp[1] = nn->r_vecs[i].hw_csum_rx_inner_ok;
-			tmp[2] = nn->r_vecs[i].hw_csum_rx_error;
-			tmp[3] = nn->r_vecs[i].rx_replace_buf_alloc_fail;
+			tmp[2] = nn->r_vecs[i].hw_csum_rx_complete;
+			tmp[3] = nn->r_vecs[i].hw_csum_rx_error;
+			tmp[4] = nn->r_vecs[i].rx_replace_buf_alloc_fail;
 		} while (u64_stats_fetch_retry(&nn->r_vecs[i].rx_sync, start));
 
 		do {
 			start = u64_stats_fetch_begin(&nn->r_vecs[i].tx_sync);
 			data[1] = nn->r_vecs[i].tx_pkts;
 			data[2] = nn->r_vecs[i].tx_busy;
-			tmp[4] = nn->r_vecs[i].hw_csum_tx;
-			tmp[5] = nn->r_vecs[i].hw_csum_tx_inner;
-			tmp[6] = nn->r_vecs[i].tx_gather;
-			tmp[7] = nn->r_vecs[i].tx_lso;
+			tmp[5] = nn->r_vecs[i].hw_csum_tx;
+			tmp[6] = nn->r_vecs[i].hw_csum_tx_inner;
+			tmp[7] = nn->r_vecs[i].tx_gather;
+			tmp[8] = nn->r_vecs[i].tx_lso;
 		} while (u64_stats_fetch_retry(&nn->r_vecs[i].tx_sync, start));
 
 		data += NN_RVEC_PER_Q_STATS;
@@ -635,6 +637,7 @@ static void nfp_net_get_strings(struct net_device *netdev,
 						     nn->dp.num_tx_rings,
 						     false);
 		data = nfp_mac_get_stats_strings(netdev, data);
+		data = nfp_app_port_get_stats_strings(nn->port, data);
 		break;
 	}
 }
@@ -649,6 +652,7 @@ nfp_net_get_stats(struct net_device *netdev, struct ethtool_stats *stats,
 	data = nfp_vnic_get_hw_stats(data, nn->dp.ctrl_bar,
 				     nn->dp.num_rx_rings, nn->dp.num_tx_rings);
 	data = nfp_mac_get_stats(netdev, data);
+	data = nfp_app_port_get_stats(nn->port, data);
 }
 
 static int nfp_net_get_sset_count(struct net_device *netdev, int sset)
@@ -660,7 +664,8 @@ static int nfp_net_get_sset_count(struct net_device *netdev, int sset)
 		return nfp_vnic_get_sw_stats_count(netdev) +
 		       nfp_vnic_get_hw_stats_count(nn->dp.num_rx_rings,
 						   nn->dp.num_tx_rings) +
-		       nfp_mac_get_stats_count(netdev);
+		       nfp_mac_get_stats_count(netdev) +
+		       nfp_app_port_get_stats_count(nn->port);
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -677,6 +682,7 @@ static void nfp_port_get_strings(struct net_device *netdev,
 			data = nfp_vnic_get_hw_stats_strings(data, 0, 0, true);
 		else
 			data = nfp_mac_get_stats_strings(netdev, data);
+		data = nfp_app_port_get_stats_strings(port, data);
 		break;
 	}
 }
@@ -691,6 +697,7 @@ nfp_port_get_stats(struct net_device *netdev, struct ethtool_stats *stats,
 		data = nfp_vnic_get_hw_stats(data, port->vnic, 0, 0);
 	else
 		data = nfp_mac_get_stats(netdev, data);
+	data = nfp_app_port_get_stats(port, data);
 }
 
 static int nfp_port_get_sset_count(struct net_device *netdev, int sset)
@@ -704,6 +711,7 @@ static int nfp_port_get_sset_count(struct net_device *netdev, int sset)
 			count = nfp_vnic_get_hw_stats_count(0, 0);
 		else
 			count = nfp_mac_get_stats_count(netdev);
+		count += nfp_app_port_get_stats_count(port);
 		return count;
 	default:
 		return -EOPNOTSUPP;

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2017 Netronome Systems, Inc.
+ * Copyright (C) 2016-2018 Netronome Systems, Inc.
  *
  * This software is dual licensed under the GNU General License Version 2,
  * June 1991 as shown in the file COPYING in the top-level directory of this
@@ -57,6 +57,126 @@
 #include "../nfp_net.h"
 
 static int
+nfp_map_ptr_record(struct nfp_app_bpf *bpf, struct nfp_prog *nfp_prog,
+		   struct bpf_map *map)
+{
+	struct nfp_bpf_neutral_map *record;
+	int err;
+
+	/* Map record paths are entered via ndo, update side is protected. */
+	ASSERT_RTNL();
+
+	/* Reuse path - other offloaded program is already tracking this map. */
+	record = rhashtable_lookup_fast(&bpf->maps_neutral, &map,
+					nfp_bpf_maps_neutral_params);
+	if (record) {
+		nfp_prog->map_records[nfp_prog->map_records_cnt++] = record;
+		record->count++;
+		return 0;
+	}
+
+	/* Grab a single ref to the map for our record.  The prog destroy ndo
+	 * happens after free_used_maps().
+	 */
+	map = bpf_map_inc(map, false);
+	if (IS_ERR(map))
+		return PTR_ERR(map);
+
+	record = kmalloc(sizeof(*record), GFP_KERNEL);
+	if (!record) {
+		err = -ENOMEM;
+		goto err_map_put;
+	}
+
+	record->ptr = map;
+	record->count = 1;
+
+	err = rhashtable_insert_fast(&bpf->maps_neutral, &record->l,
+				     nfp_bpf_maps_neutral_params);
+	if (err)
+		goto err_free_rec;
+
+	nfp_prog->map_records[nfp_prog->map_records_cnt++] = record;
+
+	return 0;
+
+err_free_rec:
+	kfree(record);
+err_map_put:
+	bpf_map_put(map);
+	return err;
+}
+
+static void
+nfp_map_ptrs_forget(struct nfp_app_bpf *bpf, struct nfp_prog *nfp_prog)
+{
+	bool freed = false;
+	int i;
+
+	ASSERT_RTNL();
+
+	for (i = 0; i < nfp_prog->map_records_cnt; i++) {
+		if (--nfp_prog->map_records[i]->count) {
+			nfp_prog->map_records[i] = NULL;
+			continue;
+		}
+
+		WARN_ON(rhashtable_remove_fast(&bpf->maps_neutral,
+					       &nfp_prog->map_records[i]->l,
+					       nfp_bpf_maps_neutral_params));
+		freed = true;
+	}
+
+	if (freed) {
+		synchronize_rcu();
+
+		for (i = 0; i < nfp_prog->map_records_cnt; i++)
+			if (nfp_prog->map_records[i]) {
+				bpf_map_put(nfp_prog->map_records[i]->ptr);
+				kfree(nfp_prog->map_records[i]);
+			}
+	}
+
+	kfree(nfp_prog->map_records);
+	nfp_prog->map_records = NULL;
+	nfp_prog->map_records_cnt = 0;
+}
+
+static int
+nfp_map_ptrs_record(struct nfp_app_bpf *bpf, struct nfp_prog *nfp_prog,
+		    struct bpf_prog *prog)
+{
+	int i, cnt, err;
+
+	/* Quickly count the maps we will have to remember */
+	cnt = 0;
+	for (i = 0; i < prog->aux->used_map_cnt; i++)
+		if (bpf_map_offload_neutral(prog->aux->used_maps[i]))
+			cnt++;
+	if (!cnt)
+		return 0;
+
+	nfp_prog->map_records = kmalloc_array(cnt,
+					      sizeof(nfp_prog->map_records[0]),
+					      GFP_KERNEL);
+	if (!nfp_prog->map_records)
+		return -ENOMEM;
+
+	for (i = 0; i < prog->aux->used_map_cnt; i++)
+		if (bpf_map_offload_neutral(prog->aux->used_maps[i])) {
+			err = nfp_map_ptr_record(bpf, nfp_prog,
+						 prog->aux->used_maps[i]);
+			if (err) {
+				nfp_map_ptrs_forget(bpf, nfp_prog);
+				return err;
+			}
+		}
+	WARN_ON(cnt != nfp_prog->map_records_cnt);
+
+	return 0;
+}
+
+static int
 nfp_prog_prepare(struct nfp_prog *nfp_prog, const struct bpf_insn *prog,
 		 unsigned int cnt)
 {
@@ -70,6 +190,8 @@ nfp_prog_prepare(struct nfp_prog *nfp_prog, const struct bpf_insn *prog,
 
 		meta->insn = prog[i];
 		meta->n = i;
+		if (is_mbpf_indir_shift(meta))
+			meta->umin = U64_MAX;
 
 		list_add_tail(&meta->l, &nfp_prog->insns);
 	}
@@ -151,7 +273,7 @@ static int nfp_bpf_translate(struct nfp_net *nn, struct bpf_prog *prog)
 	prog->aux->offload->jited_len = nfp_prog->prog_len * sizeof(u64);
 	prog->aux->offload->jited_image = nfp_prog->prog;
 
-	return 0;
+	return nfp_map_ptrs_record(nfp_prog->bpf, nfp_prog, prog);
 }
 
 static int nfp_bpf_destroy(struct nfp_net *nn, struct bpf_prog *prog)
@@ -159,9 +281,45 @@ static int nfp_bpf_destroy(struct nfp_net *nn, struct bpf_prog *prog)
 	struct nfp_prog *nfp_prog = prog->aux->offload->dev_priv;
 
 	kvfree(nfp_prog->prog);
+	nfp_map_ptrs_forget(nfp_prog->bpf, nfp_prog);
 	nfp_prog_free(nfp_prog);
 
 	return 0;
+}
+
+/* Atomic engine requires values to be in big endian, we need to byte swap
+ * the value words used with xadd.
+ */
+static void nfp_map_bpf_byte_swap(struct nfp_bpf_map *nfp_map, void *value)
+{
+	u32 *word = value;
+	unsigned int i;
+
+	for (i = 0; i < DIV_ROUND_UP(nfp_map->offmap->map.value_size, 4); i++)
+		if (nfp_map->use_map[i] == NFP_MAP_USE_ATOMIC_CNT)
+			word[i] = (__force u32)cpu_to_be32(word[i]);
+}
+
+static int
+nfp_bpf_map_lookup_entry(struct bpf_offloaded_map *offmap,
+			 void *key, void *value)
+{
+	int err;
+
+	err = nfp_bpf_ctrl_lookup_entry(offmap, key, value);
+	if (err)
+		return err;
+
+	nfp_map_bpf_byte_swap(offmap->dev_priv, value);
+	return 0;
+}
+
+static int
+nfp_bpf_map_update_entry(struct bpf_offloaded_map *offmap,
+			 void *key, void *value, u64 flags)
+{
+	nfp_map_bpf_byte_swap(offmap->dev_priv, value);
+	return nfp_bpf_ctrl_update_entry(offmap, key, value, flags);
 }
 
 static int
@@ -183,8 +341,8 @@ nfp_bpf_map_delete_elem(struct bpf_offloaded_map *offmap, void *key)
 
 static const struct bpf_map_dev_ops nfp_bpf_map_ops = {
 	.map_get_next_key	= nfp_bpf_map_get_next_key,
-	.map_lookup_elem	= nfp_bpf_ctrl_lookup_entry,
-	.map_update_elem	= nfp_bpf_ctrl_update_entry,
+	.map_lookup_elem	= nfp_bpf_map_lookup_entry,
+	.map_update_elem	= nfp_bpf_map_update_entry,
 	.map_delete_elem	= nfp_bpf_map_delete_elem,
 };
 
@@ -192,6 +350,7 @@ static int
 nfp_bpf_map_alloc(struct nfp_app_bpf *bpf, struct bpf_offloaded_map *offmap)
 {
 	struct nfp_bpf_map *nfp_map;
+	unsigned int use_map_size;
 	long long int res;
 
 	if (!bpf->maps.types)
@@ -226,7 +385,10 @@ nfp_bpf_map_alloc(struct nfp_app_bpf *bpf, struct bpf_offloaded_map *offmap)
 		return -ENOMEM;
 	}
 
-	nfp_map = kzalloc(sizeof(*nfp_map), GFP_USER);
+	use_map_size = DIV_ROUND_UP(offmap->map.value_size, 4) *
+		       FIELD_SIZEOF(struct nfp_bpf_map, use_map[0]);
+
+	nfp_map = kzalloc(sizeof(*nfp_map) + use_map_size, GFP_USER);
 	if (!nfp_map)
 		return -ENOMEM;
 
@@ -279,6 +441,53 @@ int nfp_ndo_bpf(struct nfp_app *app, struct nfp_net *nn, struct netdev_bpf *bpf)
 	default:
 		return -EINVAL;
 	}
+}
+
+static unsigned long
+nfp_bpf_perf_event_copy(void *dst, const void *src,
+			unsigned long off, unsigned long len)
+{
+	memcpy(dst, src + off, len);
+	return 0;
+}
+
+int nfp_bpf_event_output(struct nfp_app_bpf *bpf, struct sk_buff *skb)
+{
+	struct cmsg_bpf_event *cbe = (void *)skb->data;
+	u32 pkt_size, data_size;
+	struct bpf_map *map;
+
+	if (skb->len < sizeof(struct cmsg_bpf_event))
+		goto err_drop;
+
+	pkt_size = be32_to_cpu(cbe->pkt_size);
+	data_size = be32_to_cpu(cbe->data_size);
+	map = (void *)(unsigned long)be64_to_cpu(cbe->map_ptr);
+
+	if (skb->len < sizeof(struct cmsg_bpf_event) + pkt_size + data_size)
+		goto err_drop;
+	if (cbe->hdr.ver != CMSG_MAP_ABI_VERSION)
+		goto err_drop;
+
+	rcu_read_lock();
+	if (!rhashtable_lookup_fast(&bpf->maps_neutral, &map,
+				    nfp_bpf_maps_neutral_params)) {
+		rcu_read_unlock();
+		pr_warn("perf event: dest map pointer %px not recognized, dropping event\n",
+			map);
+		goto err_drop;
+	}
+
+	bpf_event_output(map, be32_to_cpu(cbe->cpu_id),
+			 &cbe->data[round_up(pkt_size, 4)], data_size,
+			 cbe->data, pkt_size, nfp_bpf_perf_event_copy);
+	rcu_read_unlock();
+
+	dev_consume_skb_any(skb);
+	return 0;
+err_drop:
+	dev_kfree_skb_any(skb);
+	return -EINVAL;
 }
 
 static int

@@ -13,6 +13,7 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/sysctl.h>
+#include <linux/uaccess.h>
 
 #include <asm/cpufeature.h>
 #include <asm/insn.h>
@@ -20,8 +21,6 @@
 #include <asm/system_misc.h>
 #include <asm/traps.h>
 #include <asm/kprobes.h>
-#include <linux/uaccess.h>
-#include <asm/cpufeature.h>
 
 #define CREATE_TRACE_POINTS
 #include "trace-events-emulation.h"
@@ -235,8 +234,8 @@ static void __init register_insn_emulation_sysctl(void)
 	struct insn_emulation *insn;
 	struct ctl_table *insns_sysctl, *sysctl;
 
-	insns_sysctl = kzalloc(sizeof(*sysctl) * (nr_insn_emulated + 1),
-			      GFP_KERNEL);
+	insns_sysctl = kcalloc(nr_insn_emulated + 1, sizeof(*sysctl),
+			       GFP_KERNEL);
 
 	raw_spin_lock_irqsave(&insn_emulation_lock, flags);
 	list_for_each_entry(insn, &insn_emulation, node) {
@@ -370,6 +369,7 @@ static unsigned int __kprobes aarch32_check_condition(u32 opcode, u32 psr)
 static int swp_handler(struct pt_regs *regs, u32 instr)
 {
 	u32 destreg, data, type, address = 0;
+	const void __user *user_ptr;
 	int rn, rt2, res = 0;
 
 	perf_sw_event(PERF_COUNT_SW_EMULATION_FAULTS, 1, regs, regs->pc);
@@ -401,7 +401,8 @@ static int swp_handler(struct pt_regs *regs, u32 instr)
 		aarch32_insn_extract_reg_num(instr, A32_RT2_OFFSET), data);
 
 	/* Check access in reasonable access range for both SWP and SWPB */
-	if (!access_ok(VERIFY_WRITE, (address & ~3), 4)) {
+	user_ptr = (const void __user *)(unsigned long)(address & ~3);
+	if (!access_ok(VERIFY_WRITE, user_ptr, 4)) {
 		pr_debug("SWP{B} emulation: access to 0x%08x not allowed!\n",
 			address);
 		goto fault;
@@ -427,7 +428,7 @@ ret:
 
 fault:
 	pr_debug("SWP{B} emulation: access caused memory abort!\n");
-	arm64_notify_segfault(regs, address);
+	arm64_notify_segfault(address);
 
 	return 0;
 }

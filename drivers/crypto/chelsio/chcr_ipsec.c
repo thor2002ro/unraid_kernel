@@ -346,22 +346,26 @@ inline void *copy_cpltx_pktxt(struct sk_buff *skb,
 				struct net_device *dev,
 				void *pos)
 {
+	struct cpl_tx_pkt_core *cpl;
+	struct sge_eth_txq *q;
 	struct adapter *adap;
 	struct port_info *pi;
-	struct sge_eth_txq *q;
-	struct cpl_tx_pkt_core *cpl;
-	u64 cntrl = 0;
 	u32 ctrl0, qidx;
+	u64 cntrl = 0;
+	int left;
 
 	pi = netdev_priv(dev);
 	adap = pi->adapter;
 	qidx = skb->queue_mapping;
 	q = &adap->sge.ethtxq[qidx + pi->first_qset];
 
+	left = (void *)q->q.stat - pos;
+	if (!left)
+		pos = q->q.desc;
+
 	cpl = (struct cpl_tx_pkt_core *)pos;
 
-	if (skb->ip_summed == CHECKSUM_PARTIAL)
-		cntrl = TXPKT_L4CSUM_DIS_F | TXPKT_IPCSUM_DIS_F;
+	cntrl = TXPKT_L4CSUM_DIS_F | TXPKT_IPCSUM_DIS_F;
 	ctrl0 = TXPKT_OPCODE_V(CPL_TX_PKT_XT) | TXPKT_INTF_V(pi->tx_chan) |
 			       TXPKT_PF_V(adap->pf);
 	if (skb_vlan_tag_present(skb)) {
@@ -383,18 +387,17 @@ inline void *copy_key_cpltx_pktxt(struct sk_buff *skb,
 				void *pos,
 				struct ipsec_sa_entry *sa_entry)
 {
-	struct adapter *adap;
-	struct port_info *pi;
-	struct sge_eth_txq *q;
-	unsigned int len, qidx;
 	struct _key_ctx *key_ctx;
 	int left, eoq, key_len;
+	struct sge_eth_txq *q;
+	struct adapter *adap;
+	struct port_info *pi;
+	unsigned int qidx;
 
 	pi = netdev_priv(dev);
 	adap = pi->adapter;
 	qidx = skb->queue_mapping;
 	q = &adap->sge.ethtxq[qidx + pi->first_qset];
-	len = sa_entry->enckey_len + sizeof(struct cpl_tx_pkt_core);
 	key_len = sa_entry->kctx_len;
 
 	/* end of queue, reset pos to start of queue */
@@ -412,19 +415,14 @@ inline void *copy_key_cpltx_pktxt(struct sk_buff *skb,
 	pos += sizeof(struct _key_ctx);
 	left -= sizeof(struct _key_ctx);
 
-	if (likely(len <= left)) {
+	if (likely(key_len <= left)) {
 		memcpy(key_ctx->key, sa_entry->key, key_len);
 		pos += key_len;
 	} else {
-		if (key_len <= left) {
-			memcpy(pos, sa_entry->key, key_len);
-			pos += key_len;
-		} else {
-			memcpy(pos, sa_entry->key, left);
-			memcpy(q->q.desc, sa_entry->key + left,
-			       key_len - left);
-			pos = (u8 *)q->q.desc + (key_len - left);
-		}
+		memcpy(pos, sa_entry->key, left);
+		memcpy(q->q.desc, sa_entry->key + left,
+		       key_len - left);
+		pos = (u8 *)q->q.desc + (key_len - left);
 	}
 	/* Copy CPL TX PKT XT */
 	pos = copy_cpltx_pktxt(skb, dev, pos);
@@ -475,7 +473,7 @@ inline void *chcr_crypto_wreq(struct sk_buff *skb,
 	wr->req.ulptx.len = htonl(DIV_ROUND_UP(flits, 2)  - 1);
 
 	/* Sub-command */
-	wr->req.sc_imm.cmd_more = FILL_CMD_MORE(immdatalen);
+	wr->req.sc_imm.cmd_more = FILL_CMD_MORE(!immdatalen);
 	wr->req.sc_imm.len = cpu_to_be32(sizeof(struct cpl_tx_sec_pdu) +
 					 sizeof(wr->req.key_ctx) +
 					 kctx_len +

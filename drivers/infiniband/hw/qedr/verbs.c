@@ -84,58 +84,6 @@ int qedr_iw_query_gid(struct ib_device *ibdev, u8 port,
 	return 0;
 }
 
-int qedr_query_gid(struct ib_device *ibdev, u8 port, int index,
-		   union ib_gid *sgid)
-{
-	struct qedr_dev *dev = get_qedr_dev(ibdev);
-	int rc = 0;
-
-	if (!rdma_cap_roce_gid_table(ibdev, port))
-		return -ENODEV;
-
-	rc = ib_get_cached_gid(ibdev, port, index, sgid, NULL);
-	if (rc == -EAGAIN) {
-		memcpy(sgid, &zgid, sizeof(*sgid));
-		return 0;
-	}
-
-	DP_DEBUG(dev, QEDR_MSG_INIT, "query gid: index=%d %llx:%llx\n", index,
-		 sgid->global.interface_id, sgid->global.subnet_prefix);
-
-	return rc;
-}
-
-int qedr_add_gid(struct ib_device *device, u8 port_num,
-		 unsigned int index, const union ib_gid *gid,
-		 const struct ib_gid_attr *attr, void **context)
-{
-	if (!rdma_cap_roce_gid_table(device, port_num))
-		return -EINVAL;
-
-	if (port_num > QEDR_MAX_PORT)
-		return -EINVAL;
-
-	if (!context)
-		return -EINVAL;
-
-	return 0;
-}
-
-int qedr_del_gid(struct ib_device *device, u8 port_num,
-		 unsigned int index, void **context)
-{
-	if (!rdma_cap_roce_gid_table(device, port_num))
-		return -EINVAL;
-
-	if (port_num > QEDR_MAX_PORT)
-		return -EINVAL;
-
-	if (!context)
-		return -EINVAL;
-
-	return 0;
-}
-
 int qedr_query_device(struct ib_device *ibdev,
 		      struct ib_device_attr *attr, struct ib_udata *udata)
 {
@@ -453,49 +401,47 @@ int qedr_mmap(struct ib_ucontext *context, struct vm_area_struct *vma)
 {
 	struct qedr_ucontext *ucontext = get_qedr_ucontext(context);
 	struct qedr_dev *dev = get_qedr_dev(context->device);
-	unsigned long vm_page = vma->vm_pgoff << PAGE_SHIFT;
-	u64 unmapped_db = dev->db_phys_addr;
+	unsigned long phys_addr = vma->vm_pgoff << PAGE_SHIFT;
 	unsigned long len = (vma->vm_end - vma->vm_start);
-	int rc = 0;
-	bool found;
+	unsigned long dpi_start;
+
+	dpi_start = dev->db_phys_addr + (ucontext->dpi * ucontext->dpi_size);
 
 	DP_DEBUG(dev, QEDR_MSG_INIT,
-		 "qedr_mmap called vm_page=0x%lx vm_pgoff=0x%lx unmapped_db=0x%llx db_size=%x, len=%lx\n",
-		 vm_page, vma->vm_pgoff, unmapped_db, dev->db_size, len);
-	if (vma->vm_start & (PAGE_SIZE - 1)) {
-		DP_ERR(dev, "Vma_start not page aligned = %ld\n",
-		       vma->vm_start);
+		 "mmap invoked with vm_start=0x%pK, vm_end=0x%pK,vm_pgoff=0x%pK; dpi_start=0x%pK dpi_size=0x%x\n",
+		 (void *)vma->vm_start, (void *)vma->vm_end,
+		 (void *)vma->vm_pgoff, (void *)dpi_start, ucontext->dpi_size);
+
+	if ((vma->vm_start & (PAGE_SIZE - 1)) || (len & (PAGE_SIZE - 1))) {
+		DP_ERR(dev,
+		       "failed mmap, addresses must be page aligned: start=0x%pK, end=0x%pK\n",
+		       (void *)vma->vm_start, (void *)vma->vm_end);
 		return -EINVAL;
 	}
 
-	found = qedr_search_mmap(ucontext, vm_page, len);
-	if (!found) {
-		DP_ERR(dev, "Vma_pgoff not found in mapped array = %ld\n",
+	if (!qedr_search_mmap(ucontext, phys_addr, len)) {
+		DP_ERR(dev, "failed mmap, vm_pgoff=0x%lx is not authorized\n",
 		       vma->vm_pgoff);
 		return -EINVAL;
 	}
 
-	DP_DEBUG(dev, QEDR_MSG_INIT, "Mapping doorbell bar\n");
-
-	if ((vm_page >= unmapped_db) && (vm_page <= (unmapped_db +
-						     dev->db_size))) {
-		DP_DEBUG(dev, QEDR_MSG_INIT, "Mapping doorbell bar\n");
-		if (vma->vm_flags & VM_READ) {
-			DP_ERR(dev, "Trying to map doorbell bar for read\n");
-			return -EPERM;
-		}
-
-		vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
-
-		rc = io_remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
-					PAGE_SIZE, vma->vm_page_prot);
-	} else {
-		DP_DEBUG(dev, QEDR_MSG_INIT, "Mapping chains\n");
-		rc = remap_pfn_range(vma, vma->vm_start,
-				     vma->vm_pgoff, len, vma->vm_page_prot);
+	if (phys_addr < dpi_start ||
+	    ((phys_addr + len) > (dpi_start + ucontext->dpi_size))) {
+		DP_ERR(dev,
+		       "failed mmap, pages are outside of dpi; page address=0x%pK, dpi_start=0x%pK, dpi_size=0x%x\n",
+		       (void *)phys_addr, (void *)dpi_start,
+		       ucontext->dpi_size);
+		return -EINVAL;
 	}
-	DP_DEBUG(dev, QEDR_MSG_INIT, "qedr_mmap return code: %d\n", rc);
-	return rc;
+
+	if (vma->vm_flags & VM_READ) {
+		DP_ERR(dev, "failed mmap, cannot map doorbell bar for read\n");
+		return -EINVAL;
+	}
+
+	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
+	return io_remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff, len,
+				  vma->vm_page_prot);
 }
 
 struct ib_pd *qedr_alloc_pd(struct ib_device *ibdev,
@@ -525,9 +471,9 @@ struct ib_pd *qedr_alloc_pd(struct ib_device *ibdev,
 	pd->pd_id = pd_id;
 
 	if (udata && context) {
-		struct qedr_alloc_pd_uresp uresp;
-
-		uresp.pd_id = pd_id;
+		struct qedr_alloc_pd_uresp uresp = {
+			.pd_id = pd_id,
+		};
 
 		rc = qedr_ib_copy_to_udata(udata, &uresp, sizeof(uresp));
 		if (rc) {
@@ -856,8 +802,6 @@ static inline void qedr_init_cq_params(struct qedr_cq *cq,
 
 static void doorbell_cq(struct qedr_cq *cq, u32 cons, u8 flags)
 {
-	/* Flush data before signalling doorbell */
-	wmb();
 	cq->db.data.agg_flags = flags;
 	cq->db.data.value = cpu_to_le32(cons);
 	writeq(cq->db.raw, cq->db_addr);
@@ -1145,46 +1089,41 @@ static inline int get_gid_info_from_table(struct ib_qp *ibqp,
 	if (rc)
 		return rc;
 
-	if (!memcmp(&gid, &zgid, sizeof(gid)))
-		return -ENOENT;
+	qp_params->vlan_id = rdma_vlan_dev_vlan_id(gid_attr.ndev);
 
-	if (gid_attr.ndev) {
-		qp_params->vlan_id = rdma_vlan_dev_vlan_id(gid_attr.ndev);
-
-		dev_put(gid_attr.ndev);
-		nw_type = ib_gid_to_network_type(gid_attr.gid_type, &gid);
-		switch (nw_type) {
-		case RDMA_NETWORK_IPV6:
-			memcpy(&qp_params->sgid.bytes[0], &gid.raw[0],
-			       sizeof(qp_params->sgid));
-			memcpy(&qp_params->dgid.bytes[0],
-			       &grh->dgid,
-			       sizeof(qp_params->dgid));
-			qp_params->roce_mode = ROCE_V2_IPV6;
-			SET_FIELD(qp_params->modify_flags,
-				  QED_ROCE_MODIFY_QP_VALID_ROCE_MODE, 1);
-			break;
-		case RDMA_NETWORK_IB:
-			memcpy(&qp_params->sgid.bytes[0], &gid.raw[0],
-			       sizeof(qp_params->sgid));
-			memcpy(&qp_params->dgid.bytes[0],
-			       &grh->dgid,
-			       sizeof(qp_params->dgid));
-			qp_params->roce_mode = ROCE_V1;
-			break;
-		case RDMA_NETWORK_IPV4:
-			memset(&qp_params->sgid, 0, sizeof(qp_params->sgid));
-			memset(&qp_params->dgid, 0, sizeof(qp_params->dgid));
-			ipv4_addr = qedr_get_ipv4_from_gid(gid.raw);
-			qp_params->sgid.ipv4_addr = ipv4_addr;
-			ipv4_addr =
-			    qedr_get_ipv4_from_gid(grh->dgid.raw);
-			qp_params->dgid.ipv4_addr = ipv4_addr;
-			SET_FIELD(qp_params->modify_flags,
-				  QED_ROCE_MODIFY_QP_VALID_ROCE_MODE, 1);
-			qp_params->roce_mode = ROCE_V2_IPV4;
-			break;
-		}
+	dev_put(gid_attr.ndev);
+	nw_type = ib_gid_to_network_type(gid_attr.gid_type, &gid);
+	switch (nw_type) {
+	case RDMA_NETWORK_IPV6:
+		memcpy(&qp_params->sgid.bytes[0], &gid.raw[0],
+		       sizeof(qp_params->sgid));
+		memcpy(&qp_params->dgid.bytes[0],
+		       &grh->dgid,
+		       sizeof(qp_params->dgid));
+		qp_params->roce_mode = ROCE_V2_IPV6;
+		SET_FIELD(qp_params->modify_flags,
+			  QED_ROCE_MODIFY_QP_VALID_ROCE_MODE, 1);
+		break;
+	case RDMA_NETWORK_IB:
+		memcpy(&qp_params->sgid.bytes[0], &gid.raw[0],
+		       sizeof(qp_params->sgid));
+		memcpy(&qp_params->dgid.bytes[0],
+		       &grh->dgid,
+		       sizeof(qp_params->dgid));
+		qp_params->roce_mode = ROCE_V1;
+		break;
+	case RDMA_NETWORK_IPV4:
+		memset(&qp_params->sgid, 0, sizeof(qp_params->sgid));
+		memset(&qp_params->dgid, 0, sizeof(qp_params->dgid));
+		ipv4_addr = qedr_get_ipv4_from_gid(gid.raw);
+		qp_params->sgid.ipv4_addr = ipv4_addr;
+		ipv4_addr =
+		    qedr_get_ipv4_from_gid(grh->dgid.raw);
+		qp_params->dgid.ipv4_addr = ipv4_addr;
+		SET_FIELD(qp_params->modify_flags,
+			  QED_ROCE_MODIFY_QP_VALID_ROCE_MODE, 1);
+		qp_params->roce_mode = ROCE_V2_IPV4;
+		break;
 	}
 
 	for (i = 0; i < 4; i++) {
@@ -1675,7 +1614,7 @@ static int qedr_create_kernel_qp(struct qedr_dev *dev,
 	qp->sq.max_wr = min_t(u32, attrs->cap.max_send_wr * dev->wq_multiplier,
 			      dev->attr.max_sqe);
 
-	qp->wqe_wr_id = kzalloc(qp->sq.max_wr * sizeof(*qp->wqe_wr_id),
+	qp->wqe_wr_id = kcalloc(qp->sq.max_wr, sizeof(*qp->wqe_wr_id),
 				GFP_KERNEL);
 	if (!qp->wqe_wr_id) {
 		DP_ERR(dev, "create qp: failed SQ shadow memory allocation\n");
@@ -1693,7 +1632,7 @@ static int qedr_create_kernel_qp(struct qedr_dev *dev,
 	qp->rq.max_wr = (u16) max_t(u32, attrs->cap.max_recv_wr, 1);
 
 	/* Allocate driver internal RQ array */
-	qp->rqe_wr_id = kzalloc(qp->rq.max_wr * sizeof(*qp->rqe_wr_id),
+	qp->rqe_wr_id = kcalloc(qp->rq.max_wr, sizeof(*qp->rqe_wr_id),
 				GFP_KERNEL);
 	if (!qp->rqe_wr_id) {
 		DP_ERR(dev,
@@ -1841,14 +1780,15 @@ static void qedr_reset_qp_hwq_info(struct qedr_qp_hwq_info *qph)
 
 static int qedr_update_qp_state(struct qedr_dev *dev,
 				struct qedr_qp *qp,
+				enum qed_roce_qp_state cur_state,
 				enum qed_roce_qp_state new_state)
 {
 	int status = 0;
 
-	if (new_state == qp->state)
+	if (new_state == cur_state)
 		return 0;
 
-	switch (qp->state) {
+	switch (cur_state) {
 	case QED_ROCE_QP_STATE_RESET:
 		switch (new_state) {
 		case QED_ROCE_QP_STATE_INIT:
@@ -1869,7 +1809,6 @@ static int qedr_update_qp_state(struct qedr_dev *dev,
 			 */
 
 			if (rdma_protocol_roce(&dev->ibdev, 1)) {
-				wmb();
 				writel(qp->rq.db_data.raw, qp->rq.db);
 				/* Make sure write takes effect */
 				mmiowb();
@@ -1955,6 +1894,7 @@ int qedr_modify_qp(struct ib_qp *ibqp, struct ib_qp_attr *attr,
 	struct qedr_dev *dev = get_qedr_dev(&qp->dev->ibdev);
 	const struct ib_global_route *grh = rdma_ah_read_grh(&attr->ah_attr);
 	enum ib_qp_state old_qp_state, new_qp_state;
+	enum qed_roce_qp_state cur_state;
 	int rc = 0;
 
 	DP_DEBUG(dev, QEDR_MSG_QP,
@@ -2017,6 +1957,9 @@ int qedr_modify_qp(struct ib_qp *ibqp, struct ib_qp_attr *attr,
 	}
 
 	if (attr_mask & (IB_QP_AV | IB_QP_PATH_MTU)) {
+		if (rdma_protocol_iwarp(&dev->ibdev, 1))
+			return -EINVAL;
+
 		if (attr_mask & IB_QP_PATH_MTU) {
 			if (attr->path_mtu < IB_MTU_256 ||
 			    attr->path_mtu > IB_MTU_4096) {
@@ -2086,18 +2029,23 @@ int qedr_modify_qp(struct ib_qp *ibqp, struct ib_qp_attr *attr,
 		SET_FIELD(qp_params.modify_flags,
 			  QED_ROCE_MODIFY_QP_VALID_ACK_TIMEOUT, 1);
 
-		qp_params.ack_timeout = attr->timeout;
-		if (attr->timeout) {
-			u32 temp;
-
-			temp = 4096 * (1UL << attr->timeout) / 1000 / 1000;
-			/* FW requires [msec] */
-			qp_params.ack_timeout = temp;
-		} else {
-			/* Infinite */
+		/* The received timeout value is an exponent used like this:
+		 *    "12.7.34 LOCAL ACK TIMEOUT
+		 *    Value representing the transport (ACK) timeout for use by
+		 *    the remote, expressed as: 4.096 * 2^timeout [usec]"
+		 * The FW expects timeout in msec so we need to divide the usec
+		 * result by 1000. We'll approximate 1000~2^10, and 4.096 ~ 2^2,
+		 * so we get: 2^2 * 2^timeout / 2^10 = 2^(timeout - 8).
+		 * The value of zero means infinite so we use a 'max_t' to make
+		 * sure that sub 1 msec values will be configured as 1 msec.
+		 */
+		if (attr->timeout)
+			qp_params.ack_timeout =
+					1 << max_t(int, attr->timeout - 8, 0);
+		else
 			qp_params.ack_timeout = 0;
-		}
 	}
+
 	if (attr_mask & IB_QP_RETRY_CNT) {
 		SET_FIELD(qp_params.modify_flags,
 			  QED_ROCE_MODIFY_QP_VALID_RETRY_CNT, 1);
@@ -2170,13 +2118,25 @@ int qedr_modify_qp(struct ib_qp *ibqp, struct ib_qp_attr *attr,
 		qp->dest_qp_num = attr->dest_qp_num;
 	}
 
+	cur_state = qp->state;
+
+	/* Update the QP state before the actual ramrod to prevent a race with
+	 * fast path. Modifying the QP state to error will cause the device to
+	 * flush the CQEs and while polling the flushed CQEs will considered as
+	 * a potential issue if the QP isn't in error state.
+	 */
+	if ((attr_mask & IB_QP_STATE) && qp->qp_type != IB_QPT_GSI &&
+	    !udata && qp_params.new_state == QED_ROCE_QP_STATE_ERR)
+		qp->state = QED_ROCE_QP_STATE_ERR;
+
 	if (qp->qp_type != IB_QPT_GSI)
 		rc = dev->ops->rdma_modify_qp(dev->rdma_ctx,
 					      qp->qed_qp, &qp_params);
 
 	if (attr_mask & IB_QP_STATE) {
 		if ((qp->qp_type != IB_QPT_GSI) && (!udata))
-			rc = qedr_update_qp_state(dev, qp, qp_params.new_state);
+			rc = qedr_update_qp_state(dev, qp, cur_state,
+						  qp_params.new_state);
 		qp->state = qp_params.new_state;
 	}
 
@@ -2620,7 +2580,7 @@ static int qedr_set_page(struct ib_mr *ibmr, u64 addr)
 	u32 pbes_in_page;
 
 	if (unlikely(mr->npages == mr->info.pbl_info.num_pbes)) {
-		DP_ERR(mr->dev, "qedr_set_page failes when %d\n", mr->npages);
+		DP_ERR(mr->dev, "qedr_set_page fails when %d\n", mr->npages);
 		return -ENOMEM;
 	}
 
@@ -3034,6 +2994,11 @@ static int __qedr_post_send(struct ib_qp *ibqp, struct ib_send_wr *wr,
 
 	switch (wr->opcode) {
 	case IB_WR_SEND_WITH_IMM:
+		if (unlikely(rdma_protocol_iwarp(&dev->ibdev, 1))) {
+			rc = -EINVAL;
+			*bad_wr = wr;
+			break;
+		}
 		wqe->req_type = RDMA_SQ_REQ_TYPE_SEND_WITH_IMM;
 		swqe = (struct rdma_sq_send_wqe_1st *)wqe;
 		swqe->wqe_size = 2;
@@ -3075,6 +3040,11 @@ static int __qedr_post_send(struct ib_qp *ibqp, struct ib_send_wr *wr,
 		break;
 
 	case IB_WR_RDMA_WRITE_WITH_IMM:
+		if (unlikely(rdma_protocol_iwarp(&dev->ibdev, 1))) {
+			rc = -EINVAL;
+			*bad_wr = wr;
+			break;
+		}
 		wqe->req_type = RDMA_SQ_REQ_TYPE_RDMA_WR_WITH_IMM;
 		rwqe = (struct rdma_sq_rdma_wqe_1st *)wqe;
 
@@ -3245,8 +3215,15 @@ int qedr_post_send(struct ib_qp *ibqp, struct ib_send_wr *wr,
 	 * vane. However this is not harmful (as long as the producer value is
 	 * unchanged). For performance reasons we avoid checking for this
 	 * redundant doorbell.
+	 *
+	 * qp->wqe_wr_id is accessed during qedr_poll_cq, as
+	 * soon as we give the doorbell, we could get a completion
+	 * for this wr, therefore we need to make sure that the
+	 * memory is updated before giving the doorbell.
+	 * During qedr_poll_cq, rmb is called before accessing the
+	 * cqe. This covers for the smp_rmb as well.
 	 */
-	wmb();
+	smp_wmb();
 	writel(qp->sq.db_data.raw, qp->sq.db);
 
 	/* Make sure write sticks */
@@ -3302,7 +3279,7 @@ int qedr_post_recv(struct ib_qp *ibqp, struct ib_recv_wr *wr,
 				SET_FIELD(flags, RDMA_RQ_SGE_NUM_SGES,
 					  wr->num_sge);
 
-			SET_FIELD(flags, RDMA_RQ_SGE_L_KEY,
+			SET_FIELD(flags, RDMA_RQ_SGE_L_KEY_LO,
 				  wr->sg_list[i].lkey);
 
 			RQ_SGE_SET(rqe, wr->sg_list[i].addr,
@@ -3321,7 +3298,7 @@ int qedr_post_recv(struct ib_qp *ibqp, struct ib_recv_wr *wr,
 			/* First one must include the number
 			 * of SGE in the list
 			 */
-			SET_FIELD(flags, RDMA_RQ_SGE_L_KEY, 0);
+			SET_FIELD(flags, RDMA_RQ_SGE_L_KEY_LO, 0);
 			SET_FIELD(flags, RDMA_RQ_SGE_NUM_SGES, 1);
 
 			RQ_SGE_SET(rqe, 0, 0, flags);
@@ -3333,8 +3310,14 @@ int qedr_post_recv(struct ib_qp *ibqp, struct ib_recv_wr *wr,
 
 		qedr_inc_sw_prod(&qp->rq);
 
-		/* Flush all the writes before signalling doorbell */
-		wmb();
+		/* qp->rqe_wr_id is accessed during qedr_poll_cq, as
+		 * soon as we give the doorbell, we could get a completion
+		 * for this wr, therefore we need to make sure that the
+		 * memory is update before giving the doorbell.
+		 * During qedr_poll_cq, rmb is called before accessing the
+		 * cqe. This covers for the smp_rmb as well.
+		 */
+		smp_wmb();
 
 		qp->rq.db_data.data.value++;
 
@@ -3685,7 +3668,7 @@ static int process_resp_flush(struct qedr_qp *qp, struct qedr_cq *cq,
 static void try_consume_resp_cqe(struct qedr_cq *cq, struct qedr_qp *qp,
 				 struct rdma_cqe_responder *resp, int *update)
 {
-	if (le16_to_cpu(resp->rq_cons) == qp->rq.wqe_cons) {
+	if (le16_to_cpu(resp->rq_cons_or_srq_id) == qp->rq.wqe_cons) {
 		consume_cqe(cq);
 		*update |= 1;
 	}
@@ -3700,7 +3683,7 @@ static int qedr_poll_cq_resp(struct qedr_dev *dev, struct qedr_qp *qp,
 
 	if (resp->status == RDMA_CQE_RESP_STS_WORK_REQUEST_FLUSHED_ERR) {
 		cnt = process_resp_flush(qp, cq, num_entries, wc,
-					 resp->rq_cons);
+					 resp->rq_cons_or_srq_id);
 		try_consume_resp_cqe(cq, qp, resp, update);
 	} else {
 		cnt = process_resp_one(dev, qp, cq, wc, resp);
@@ -3724,7 +3707,7 @@ int qedr_poll_cq(struct ib_cq *ibcq, int num_entries, struct ib_wc *wc)
 {
 	struct qedr_dev *dev = get_qedr_dev(ibcq->device);
 	struct qedr_cq *cq = get_qedr_cq(ibcq);
-	union rdma_cqe *cqe = cq->latest_cqe;
+	union rdma_cqe *cqe;
 	u32 old_cons, new_cons;
 	unsigned long flags;
 	int update = 0;
@@ -3741,6 +3724,7 @@ int qedr_poll_cq(struct ib_cq *ibcq, int num_entries, struct ib_wc *wc)
 		return qedr_gsi_poll_cq(ibcq, num_entries, wc);
 
 	spin_lock_irqsave(&cq->cq_lock, flags);
+	cqe = cq->latest_cqe;
 	old_cons = qed_chain_get_cons_idx_u32(&cq->pbl);
 	while (num_entries && is_valid_cqe(cq, cqe)) {
 		struct qedr_qp *qp;

@@ -277,10 +277,6 @@ static int ds1511_rtc_read_time(struct device *dev, struct rtc_time *rtc_tm)
 
 	rtc_tm->tm_mon--;
 
-	if (rtc_valid_tm(rtc_tm) < 0) {
-		dev_err(dev, "retrieved date/time is not valid.\n");
-		rtc_time_to_tm(0, rtc_tm);
-	}
 	return 0;
 }
 
@@ -318,8 +314,7 @@ ds1511_rtc_update_alarm(struct rtc_plat_data *pdata)
 static int
 ds1511_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct rtc_plat_data *pdata = platform_get_drvdata(pdev);
+	struct rtc_plat_data *pdata = dev_get_drvdata(dev);
 
 	if (pdata->irq <= 0)
 		return -EINVAL;
@@ -338,8 +333,7 @@ ds1511_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 static int
 ds1511_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct rtc_plat_data *pdata = platform_get_drvdata(pdev);
+	struct rtc_plat_data *pdata = dev_get_drvdata(dev);
 
 	if (pdata->irq <= 0)
 		return -EINVAL;
@@ -377,8 +371,7 @@ ds1511_interrupt(int irq, void *dev_id)
 
 static int ds1511_rtc_alarm_irq_enable(struct device *dev, unsigned int enabled)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct rtc_plat_data *pdata = platform_get_drvdata(pdev);
+	struct rtc_plat_data *pdata = dev_get_drvdata(dev);
 
 	if (pdata->irq <= 0)
 		return -EINVAL;
@@ -422,20 +415,20 @@ static int ds1511_nvram_write(void *priv, unsigned int pos, void *buf,
 	return 0;
 }
 
-static struct nvmem_config ds1511_nvmem_cfg = {
-	.name = "ds1511_nvram",
-	.word_size = 1,
-	.stride = 1,
-	.size = DS1511_RAM_MAX,
-	.reg_read = ds1511_nvram_read,
-	.reg_write = ds1511_nvram_write,
-};
-
 static int ds1511_rtc_probe(struct platform_device *pdev)
 {
 	struct resource *res;
 	struct rtc_plat_data *pdata;
 	int ret = 0;
+	struct nvmem_config ds1511_nvmem_cfg = {
+		.name = "ds1511_nvram",
+		.word_size = 1,
+		.stride = 1,
+		.size = DS1511_RAM_MAX,
+		.reg_read = ds1511_nvram_read,
+		.reg_write = ds1511_nvram_write,
+		.priv = &pdev->dev,
+	};
 
 	pdata = devm_kzalloc(&pdev->dev, sizeof(*pdata), GFP_KERNEL);
 	if (!pdata)
@@ -478,13 +471,13 @@ static int ds1511_rtc_probe(struct platform_device *pdev)
 
 	pdata->rtc->ops = &ds1511_rtc_ops;
 
-	ds1511_nvmem_cfg.priv = &pdev->dev;
-	pdata->rtc->nvmem_config = &ds1511_nvmem_cfg;
 	pdata->rtc->nvram_old_abi = true;
 
 	ret = rtc_register_device(pdata->rtc);
 	if (ret)
 		return ret;
+
+	rtc_nvmem_register(pdata->rtc, &ds1511_nvmem_cfg);
 
 	/*
 	 * if the platform has an interrupt in mind for this device,

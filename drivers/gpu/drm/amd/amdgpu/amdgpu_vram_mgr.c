@@ -89,11 +89,43 @@ static u64 amdgpu_vram_mgr_vis_size(struct amdgpu_device *adev,
 	uint64_t start = node->start << PAGE_SHIFT;
 	uint64_t end = (node->size + node->start) << PAGE_SHIFT;
 
-	if (start >= adev->mc.visible_vram_size)
+	if (start >= adev->gmc.visible_vram_size)
 		return 0;
 
-	return (end > adev->mc.visible_vram_size ?
-		adev->mc.visible_vram_size : end) - start;
+	return (end > adev->gmc.visible_vram_size ?
+		adev->gmc.visible_vram_size : end) - start;
+}
+
+/**
+ * amdgpu_vram_mgr_bo_invisible_size - CPU invisible BO size
+ *
+ * @bo: &amdgpu_bo buffer object (must be in VRAM)
+ *
+ * Returns:
+ * How much of the given &amdgpu_bo buffer object lies in CPU invisible VRAM.
+ */
+u64 amdgpu_vram_mgr_bo_invisible_size(struct amdgpu_bo *bo)
+{
+	struct amdgpu_device *adev = amdgpu_ttm_adev(bo->tbo.bdev);
+	struct ttm_mem_reg *mem = &bo->tbo.mem;
+	struct drm_mm_node *nodes = mem->mm_node;
+	unsigned pages = mem->num_pages;
+	u64 usage = 0;
+
+	if (adev->gmc.visible_vram_size == adev->gmc.real_vram_size)
+		return 0;
+
+	if (mem->start >= adev->gmc.visible_vram_size >> PAGE_SHIFT)
+		return amdgpu_bo_size(bo);
+
+	while (nodes && pages) {
+		usage += nodes->size << PAGE_SHIFT;
+		usage -= amdgpu_vram_mgr_vis_size(adev, nodes);
+		pages -= nodes->size;
+		++nodes;
+	}
+
+	return usage;
 }
 
 /**
@@ -135,7 +167,8 @@ static int amdgpu_vram_mgr_new(struct ttm_mem_type_manager *man,
 		num_nodes = DIV_ROUND_UP(mem->num_pages, pages_per_node);
 	}
 
-	nodes = kcalloc(num_nodes, sizeof(*nodes), GFP_KERNEL);
+	nodes = kvmalloc_array(num_nodes, sizeof(*nodes),
+			       GFP_KERNEL | __GFP_ZERO);
 	if (!nodes)
 		return -ENOMEM;
 
@@ -190,7 +223,7 @@ error:
 		drm_mm_remove_node(&nodes[i]);
 	spin_unlock(&mgr->lock);
 
-	kfree(nodes);
+	kvfree(nodes);
 	return r == -ENOSPC ? 0 : r;
 }
 
@@ -229,7 +262,7 @@ static void amdgpu_vram_mgr_del(struct ttm_mem_type_manager *man,
 	atomic64_sub(usage, &mgr->usage);
 	atomic64_sub(vis_usage, &mgr->vis_usage);
 
-	kfree(mem->mm_node);
+	kvfree(mem->mm_node);
 	mem->mm_node = NULL;
 }
 

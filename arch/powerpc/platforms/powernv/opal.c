@@ -490,9 +490,12 @@ void pnv_platform_error_reboot(struct pt_regs *regs, const char *msg)
 	 *    opal to trigger checkstop explicitly for error analysis.
 	 *    The FSP PRD component would have already got notified
 	 *    about this error through other channels.
+	 * 4. We are running on a newer skiboot that by default does
+	 *    not cause a checkstop, drops us back to the kernel to
+	 *    extract context and state at the time of the error.
 	 */
 
-	ppc_md.restart(NULL);
+	panic(msg);
 }
 
 int opal_machine_check(struct pt_regs *regs)
@@ -537,21 +540,15 @@ int opal_hmi_exception_early(struct pt_regs *regs)
 /* HMI exception handler called in virtual mode during check_irq_replay. */
 int opal_handle_hmi_exception(struct pt_regs *regs)
 {
-	s64 rc;
-	__be64 evt = 0;
-
 	/*
 	 * Check if HMI event is available.
-	 * if Yes, then call opal_poll_events to pull opal messages and
-	 * process them.
+	 * if Yes, then wake kopald to process them.
 	 */
 	if (!local_paca->hmi_event_available)
 		return 0;
 
 	local_paca->hmi_event_available = 0;
-	rc = opal_poll_events(&evt);
-	if (rc == OPAL_SUCCESS && evt)
-		opal_handle_events(be64_to_cpu(evt));
+	opal_wake_poller();
 
 	return 1;
 }
@@ -754,14 +751,19 @@ static void __init opal_imc_init_dev(void)
 static int kopald(void *unused)
 {
 	unsigned long timeout = msecs_to_jiffies(opal_heartbeat) + 1;
-	__be64 events;
 
 	set_freezable();
 	do {
 		try_to_freeze();
-		opal_poll_events(&events);
-		opal_handle_events(be64_to_cpu(events));
-		schedule_timeout_interruptible(timeout);
+
+		opal_handle_events();
+
+		set_current_state(TASK_INTERRUPTIBLE);
+		if (opal_have_pending_events())
+			__set_current_state(TASK_RUNNING);
+		else
+			schedule_timeout(timeout);
+
 	} while (!kthread_should_stop());
 
 	return 0;
@@ -820,6 +822,9 @@ static int __init opal_init(void)
 
 	/* Create i2c platform devices */
 	opal_pdev_init("ibm,opal-i2c");
+
+	/* Handle non-volatile memory devices */
+	opal_pdev_init("pmem-region");
 
 	/* Setup a heatbeat thread if requested by OPAL */
 	opal_init_heartbeat();

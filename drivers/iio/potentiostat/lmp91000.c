@@ -1,17 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * lmp91000.c - Support for Texas Instruments digital potentiostats
  *
- * Copyright (C) 2016 Matt Ranostay <mranostay@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
+ * Copyright (C) 2016, 2018
+ * Author: Matt Ranostay <matt.ranostay@konsulko.com>
  *
  * TODO: bias voltage + polarity control, and multiple chip support
  */
@@ -419,12 +411,14 @@ static int lmp91000_remove(struct i2c_client *client)
 
 static const struct of_device_id lmp91000_of_match[] = {
 	{ .compatible = "ti,lmp91000", },
+	{ .compatible = "ti,lmp91002", },
 	{ },
 };
 MODULE_DEVICE_TABLE(of, lmp91000_of_match);
 
 static const struct i2c_device_id lmp91000_id[] = {
 	{ "lmp91000", 0 },
+	{ "lmp91002", 0 },
 	{}
 };
 MODULE_DEVICE_TABLE(i2c, lmp91000_id);
@@ -440,6 +434,6 @@ static struct i2c_driver lmp91000_driver = {
 };
 module_i2c_driver(lmp91000_driver);
 
-MODULE_AUTHOR("Matt Ranostay <mranostay@gmail.com>");
+MODULE_AUTHOR("Matt Ranostay <matt.ranostay@konsulko.com>");
 MODULE_DESCRIPTION("LMP91000 digital potentiostat");
 MODULE_LICENSE("GPL");

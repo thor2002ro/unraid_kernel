@@ -23,7 +23,7 @@ CFLAGS_REMOVE_sclp_early_core.o	+= $(CC_FLAGS_EXPOLINE)
 
 obj-y += ctrlchar.o keyboard.o defkeymap.o sclp.o sclp_rw.o sclp_quiesce.o \
 	 sclp_cmd.o sclp_config.o sclp_cpi_sys.o sclp_ocf.o sclp_ctl.o \
-	 sclp_early.o sclp_early_core.o
+	 sclp_early.o sclp_early_core.o sclp_sd.o
 
 obj-$(CONFIG_TN3270) += raw3270.o
 obj-$(CONFIG_TN3270_CONSOLE) += con3270.o
@@ -54,3 +54,6 @@ obj-$(CONFIG_CRASH_DUMP) += sclp_sdias.o zcore.o
 
 hmcdrv-objs := hmcdrv_mod.o hmcdrv_dev.o hmcdrv_ftp.o hmcdrv_cache.o diag_ftp.o sclp_ftp.o
 obj-$(CONFIG_HMC_DRV) += hmcdrv.o
+
+chkbss := sclp_early_core.o
+include $(srctree)/arch/s390/scripts/Makefile.chkbss

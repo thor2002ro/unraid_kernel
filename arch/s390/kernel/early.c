@@ -34,32 +34,6 @@
 static void __init setup_boot_command_line(void);
 
 /*
- * Get the TOD clock running.
- */
-static void __init reset_tod_clock(void)
-{
-	u64 time;
-
-	if (store_tod_clock(&time) == 0)
-		return;
-	/* TOD clock not running. Set the clock to Unix Epoch. */
-	if (set_tod_clock(TOD_UNIX_EPOCH) != 0 || store_tod_clock(&time) != 0)
-		disabled_wait(0);
-
-	memset(tod_clock_base, 0, 16);
-	*(__u64 *) &tod_clock_base[1] = TOD_UNIX_EPOCH;
-	S390_lowcore.last_update_clock = TOD_UNIX_EPOCH;
-}
-
-/*
- * Clear bss memory
- */
-static noinline __init void clear_bss_section(void)
-{
-	memset(__bss_start, 0, __bss_stop - __bss_start);
-}
-
-/*
  * Initialize storage key for kernel pages
  */
 static noinline __init void init_kernel_storage_key(void)
@@ -67,7 +41,7 @@ static noinline __init void init_kernel_storage_key(void)
 #if PAGE_DEFAULT_KEY
 	unsigned long end_pfn, init_pfn;
 
-	end_pfn = PFN_UP(__pa(&_end));
+	end_pfn = PFN_UP(__pa(_end));
 
 	for (init_pfn = 0 ; init_pfn < end_pfn; init_pfn++)
 		page_set_storage_key(init_pfn << PAGE_SHIFT,
@@ -242,8 +216,6 @@ static __init void detect_machine_facilities(void)
 		S390_lowcore.machine_flags |= MACHINE_FLAG_EDAT2;
 	if (test_facility(3))
 		S390_lowcore.machine_flags |= MACHINE_FLAG_IDTE;
-	if (test_facility(40))
-		S390_lowcore.machine_flags |= MACHINE_FLAG_LPP;
 	if (test_facility(50) && test_facility(73)) {
 		S390_lowcore.machine_flags |= MACHINE_FLAG_TE;
 		__ctl_set_bit(0, 55);
@@ -312,67 +284,6 @@ static int __init cad_setup(char *str)
 }
 early_param("cad", cad_setup);
 
-static __init void memmove_early(void *dst, const void *src, size_t n)
-{
-	unsigned long addr;
-	long incr;
-	psw_t old;
-
-	if (!n)
-		return;
-	incr = 1;
-	if (dst > src) {
-		incr = -incr;
-		dst += n - 1;
-		src += n - 1;
-	}
-	old = S390_lowcore.program_new_psw;
-	S390_lowcore.program_new_psw.mask = __extract_psw();
-	asm volatile(
-		"	larl	%[addr],1f\n"
-		"	stg	%[addr],%[psw_pgm_addr]\n"
-		"0:     mvc	0(1,%[dst]),0(%[src])\n"
-		"	agr	%[dst],%[incr]\n"
-		"	agr	%[src],%[incr]\n"
-		"	brctg	%[n],0b\n"
-		"1:\n"
-		: [addr] "=&d" (addr),
-		  [psw_pgm_addr] "=Q" (S390_lowcore.program_new_psw.addr),
-		  [dst] "+&a" (dst), [src] "+&a" (src),  [n] "+d" (n)
-		: [incr] "d" (incr)
-		: "cc", "memory");
-	S390_lowcore.program_new_psw = old;
-}
-
-static __init noinline void ipl_save_parameters(void)
-{
-	void *src, *dst;
-
-	src = (void *)(unsigned long) S390_lowcore.ipl_parmblock_ptr;
-	dst = (void *) IPL_PARMBLOCK_ORIGIN;
-	memmove_early(dst, src, PAGE_SIZE);
-	S390_lowcore.ipl_parmblock_ptr = IPL_PARMBLOCK_ORIGIN;
-}
-
-static __init noinline void rescue_initrd(void)
-{
-#ifdef CONFIG_BLK_DEV_INITRD
-	unsigned long min_initrd_addr = (unsigned long) _end + (4UL << 20);
-	/*
-	 * Just like in case of IPL from VM reader we make sure there is a
-	 * gap of 4MB between end of kernel and start of initrd.
-	 * That way we can also be sure that saving an NSS will succeed,
-	 * which however only requires different segments.
-	 */
-	if (!INITRD_START || !INITRD_SIZE)
-		return;
-	if (INITRD_START >= min_initrd_addr)
-		return;
-	memmove_early((void *) min_initrd_addr, (void *) INITRD_START, INITRD_SIZE);
-	INITRD_START = min_initrd_addr;
-#endif
-}
-
 /* Set up boot command line */
 static void __init append_to_cmdline(size_t (*ipl_data)(char *, size_t))
 {
@@ -422,11 +333,6 @@ static void __init setup_boot_command_line(void)
 
 void __init startup_init(void)
 {
-	reset_tod_clock();
-	ipl_save_parameters();
-	rescue_initrd();
-	clear_bss_section();
-	ipl_verify_parameters();
 	time_early_init();
 	init_kernel_storage_key();
 	lockdep_off();
@@ -434,7 +340,7 @@ void __init startup_init(void)
 	setup_facility_list();
 	detect_machine_type();
 	setup_arch_string();
-	ipl_update_parameters();
+	ipl_store_parameters();
 	setup_boot_command_line();
 	detect_diag9c();
 	detect_diag44();

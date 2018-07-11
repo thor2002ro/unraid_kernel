@@ -94,13 +94,6 @@ static int hash__init_new_context(struct mm_struct *mm)
 		return index;
 
 	/*
-	 * In the case of exec, use the default limit,
-	 * otherwise inherit it from the mm we are duplicating.
-	 */
-	if (!mm->context.slb_addr_limit)
-		mm->context.slb_addr_limit = DEFAULT_MAP_WINDOW_USER64;
-
-	/*
 	 * The old code would re-promote on fork, we don't do that when using
 	 * slices as it could cause problem promoting slices that have been
 	 * forced down to 4K.
@@ -115,7 +108,7 @@ static int hash__init_new_context(struct mm_struct *mm)
 	 * check against 0 is OK.
 	 */
 	if (mm->context.id == 0)
-		slice_set_user_psize(mm, mmu_virtual_psize);
+		slice_init_new_context_exec(mm);
 
 	subpage_prot_init_new_context(mm);
 
@@ -166,13 +159,13 @@ int init_new_context(struct task_struct *tsk, struct mm_struct *mm)
 
 	mm->context.id = index;
 
-#ifdef CONFIG_PPC_64K_PAGES
 	mm->context.pte_frag = NULL;
-#endif
+	mm->context.pmd_frag = NULL;
 #ifdef CONFIG_SPAPR_TCE_IOMMU
 	mm_iommu_init(mm);
 #endif
 	atomic_set(&mm->context.active_cpus, 0);
+	atomic_set(&mm->context.copros, 0);
 
 	return 0;
 }
@@ -185,16 +178,23 @@ void __destroy_context(int context_id)
 }
 EXPORT_SYMBOL_GPL(__destroy_context);
 
-#ifdef CONFIG_PPC_64K_PAGES
-static void destroy_pagetable_page(struct mm_struct *mm)
+static void destroy_contexts(mm_context_t *ctx)
+{
+	int index, context_id;
+
+	spin_lock(&mmu_context_lock);
+	for (index = 0; index < ARRAY_SIZE(ctx->extended_id); index++) {
+		context_id = ctx->extended_id[index];
+		if (context_id)
+			ida_remove(&mmu_context_ida, context_id);
+	}
+	spin_unlock(&mmu_context_lock);
+}
+
+static void pte_frag_destroy(void *pte_frag)
 {
 	int count;
-	void *pte_frag;
 	struct page *page;
-
-	pte_frag = mm->context.pte_frag;
-	if (!pte_frag)
-		return;
 
 	page = virt_to_page(pte_frag);
 	/* drop all the pending references */
@@ -206,12 +206,34 @@ static void destroy_pagetable_page(struct mm_struct *mm)
 	}
 }
 
-#else
-static inline void destroy_pagetable_page(struct mm_struct *mm)
+static void pmd_frag_destroy(void *pmd_frag)
 {
+	int count;
+	struct page *page;
+
+	page = virt_to_page(pmd_frag);
+	/* drop all the pending references */
+	count = ((unsigned long)pmd_frag & ~PAGE_MASK) >> PMD_FRAG_SIZE_SHIFT;
+	/* We allow PTE_FRAG_NR fragments from a PTE page */
+	if (page_ref_sub_and_test(page, PMD_FRAG_NR - count)) {
+		pgtable_pmd_page_dtor(page);
+		free_unref_page(page);
+	}
+}
+
+static void destroy_pagetable_page(struct mm_struct *mm)
+{
+	void *frag;
+
+	frag = mm->context.pte_frag;
+	if (frag)
+		pte_frag_destroy(frag);
+
+	frag = mm->context.pmd_frag;
+	if (frag)
+		pmd_frag_destroy(frag);
 	return;
 }
-#endif
 
 void destroy_context(struct mm_struct *mm)
 {
@@ -223,7 +245,7 @@ void destroy_context(struct mm_struct *mm)
 	else
 		subpage_prot_free(mm);
 	destroy_pagetable_page(mm);
-	__destroy_context(mm->context.id);
+	destroy_contexts(&mm->context);
 	mm->context.id = MMU_NO_CONTEXT;
 }
 

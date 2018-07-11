@@ -349,8 +349,12 @@ static irqreturn_t pciefd_irq_handler(int irq, void *arg)
 		priv->tx_pages_free++;
 		spin_unlock_irqrestore(&priv->tx_lock, flags);
 
-		/* wake producer up */
-		netif_wake_queue(priv->ucan.ndev);
+		/* wake producer up (only if enough room in echo_skb array) */
+		spin_lock_irqsave(&priv->ucan.echo_lock, flags);
+		if (!priv->ucan.can.echo_skb[priv->ucan.echo_idx])
+			netif_wake_queue(priv->ucan.ndev);
+
+		spin_unlock_irqrestore(&priv->ucan.echo_lock, flags);
 	}
 
 	/* re-enable Rx DMA transfer for this CAN */
@@ -748,8 +752,7 @@ static int peak_pciefd_probe(struct pci_dev *pdev,
 		can_count = 1;
 
 	/* allocate board structure object */
-	pciefd = devm_kzalloc(&pdev->dev, sizeof(*pciefd) +
-			      can_count * sizeof(*pciefd->can),
+	pciefd = devm_kzalloc(&pdev->dev, struct_size(pciefd, can, can_count),
 			      GFP_KERNEL);
 	if (!pciefd) {
 		err = -ENOMEM;

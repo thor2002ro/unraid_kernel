@@ -30,14 +30,13 @@
 #include <drm/drmP.h>
 #include <drm/amdgpu_drm.h>
 #include "amdgpu.h"
+#include "amdgpu_display.h"
 
 void amdgpu_gem_object_free(struct drm_gem_object *gobj)
 {
 	struct amdgpu_bo *robj = gem_to_amdgpu_bo(gobj);
 
 	if (robj) {
-		if (robj->gem_base.import_attach)
-			drm_prime_gem_destroy(&robj->gem_base, robj->tbo.sg);
 		amdgpu_mn_unregister(robj);
 		amdgpu_bo_unref(&robj);
 	}
@@ -45,22 +44,30 @@ void amdgpu_gem_object_free(struct drm_gem_object *gobj)
 
 int amdgpu_gem_object_create(struct amdgpu_device *adev, unsigned long size,
 			     int alignment, u32 initial_domain,
-			     u64 flags, bool kernel,
+			     u64 flags, enum ttm_bo_type type,
 			     struct reservation_object *resv,
 			     struct drm_gem_object **obj)
 {
 	struct amdgpu_bo *bo;
+	struct amdgpu_bo_param bp;
 	int r;
 
+	memset(&bp, 0, sizeof(bp));
 	*obj = NULL;
 	/* At least align on page size */
 	if (alignment < PAGE_SIZE) {
 		alignment = PAGE_SIZE;
 	}
 
+	bp.size = size;
+	bp.byte_align = alignment;
+	bp.type = type;
+	bp.resv = resv;
+	bp.preferred_domain = initial_domain;
 retry:
-	r = amdgpu_bo_create(adev, size, alignment, kernel, initial_domain,
-			     flags, NULL, resv, 0, &bo);
+	bp.flags = flags;
+	bp.domain = initial_domain;
+	r = amdgpu_bo_create(adev, &bp, &bo);
 	if (r) {
 		if (r != -ERESTARTSYS) {
 			if (flags & AMDGPU_GEM_CREATE_CPU_ACCESS_REQUIRED) {
@@ -223,17 +230,19 @@ int amdgpu_gem_create_ioctl(struct drm_device *dev, void *data,
 		return -EINVAL;
 
 	/* reject invalid gem domains */
-	if (args->in.domains & ~(AMDGPU_GEM_DOMAIN_CPU |
-				 AMDGPU_GEM_DOMAIN_GTT |
-				 AMDGPU_GEM_DOMAIN_VRAM |
-				 AMDGPU_GEM_DOMAIN_GDS |
-				 AMDGPU_GEM_DOMAIN_GWS |
-				 AMDGPU_GEM_DOMAIN_OA))
+	if (args->in.domains & ~AMDGPU_GEM_DOMAIN_MASK)
 		return -EINVAL;
 
 	/* create a gem object to contain this object in */
 	if (args->in.domains & (AMDGPU_GEM_DOMAIN_GDS |
 	    AMDGPU_GEM_DOMAIN_GWS | AMDGPU_GEM_DOMAIN_OA)) {
+		if (flags & AMDGPU_GEM_CREATE_VM_ALWAYS_VALID) {
+			/* if gds bo is created from user space, it must be
+			 * passed to bo list
+			 */
+			DRM_ERROR("GDS bo cannot be per-vm-bo\n");
+			return -EINVAL;
+		}
 		flags |= AMDGPU_GEM_CREATE_NO_CPU_ACCESS;
 		if (args->in.domains == AMDGPU_GEM_DOMAIN_GDS)
 			size = size << AMDGPU_GDS_SHIFT;
@@ -523,12 +532,13 @@ static void amdgpu_gem_va_update_vm(struct amdgpu_device *adev,
 		goto error;
 
 	if (operation == AMDGPU_VA_OP_MAP ||
-	    operation == AMDGPU_VA_OP_REPLACE)
+	    operation == AMDGPU_VA_OP_REPLACE) {
 		r = amdgpu_vm_bo_update(adev, bo_va, false);
+		if (r)
+			goto error;
+	}
 
 	r = amdgpu_vm_update_directories(adev, vm);
-	if (r)
-		goto error;
 
 error:
 	if (r && r != -ERESTARTSYS)
@@ -634,7 +644,7 @@ int amdgpu_gem_va_ioctl(struct drm_device *dev, void *data,
 		if (r)
 			goto error_backoff;
 
-		va_flags = amdgpu_vm_get_pte_flags(adev, args->flags);
+		va_flags = amdgpu_gmc_get_pte_flags(adev, args->flags);
 		r = amdgpu_vm_bo_map(adev, bo_va, args->va_address,
 				     args->offset_in_bo, args->map_size,
 				     va_flags);
@@ -654,7 +664,7 @@ int amdgpu_gem_va_ioctl(struct drm_device *dev, void *data,
 		if (r)
 			goto error_backoff;
 
-		va_flags = amdgpu_vm_get_pte_flags(adev, args->flags);
+		va_flags = amdgpu_gmc_get_pte_flags(adev, args->flags);
 		r = amdgpu_vm_bo_replace_map(adev, bo_va, args->va_address,
 					     args->offset_in_bo, args->map_size,
 					     va_flags);
@@ -747,15 +757,16 @@ int amdgpu_mode_dumb_create(struct drm_file *file_priv,
 	struct amdgpu_device *adev = dev->dev_private;
 	struct drm_gem_object *gobj;
 	uint32_t handle;
+	u32 domain;
 	int r;
 
 	args->pitch = amdgpu_align_pitch(adev, args->width,
 					 DIV_ROUND_UP(args->bpp, 8), 0);
 	args->size = (u64)args->pitch * args->height;
 	args->size = ALIGN(args->size, PAGE_SIZE);
-
-	r = amdgpu_gem_object_create(adev, args->size, 0,
-				     AMDGPU_GEM_DOMAIN_VRAM,
+	domain = amdgpu_bo_get_preferred_pin_domain(adev,
+				amdgpu_display_supported_domains(adev));
+	r = amdgpu_gem_object_create(adev, args->size, 0, domain,
 				     AMDGPU_GEM_CREATE_CPU_ACCESS_REQUIRED,
 				     false, NULL, &gobj);
 	if (r)
@@ -772,16 +783,23 @@ int amdgpu_mode_dumb_create(struct drm_file *file_priv,
 }
 
 #if defined(CONFIG_DEBUG_FS)
+
+#define amdgpu_debugfs_gem_bo_print_flag(m, bo, flag)	\
+	if (bo->flags & (AMDGPU_GEM_CREATE_ ## flag)) {	\
+		seq_printf((m), " " #flag);		\
+	}
+
 static int amdgpu_debugfs_gem_bo_info(int id, void *ptr, void *data)
 {
 	struct drm_gem_object *gobj = ptr;
 	struct amdgpu_bo *bo = gem_to_amdgpu_bo(gobj);
 	struct seq_file *m = data;
 
+	struct dma_buf_attachment *attachment;
+	struct dma_buf *dma_buf;
 	unsigned domain;
 	const char *placement;
 	unsigned pin_count;
-	uint64_t offset;
 
 	domain = amdgpu_mem_type_to_domain(bo->tbo.mem.mem_type);
 	switch (domain) {
@@ -799,13 +817,27 @@ static int amdgpu_debugfs_gem_bo_info(int id, void *ptr, void *data)
 	seq_printf(m, "\t0x%08x: %12ld byte %s",
 		   id, amdgpu_bo_size(bo), placement);
 
-	offset = READ_ONCE(bo->tbo.mem.start);
-	if (offset != AMDGPU_BO_INVALID_OFFSET)
-		seq_printf(m, " @ 0x%010Lx", offset);
-
 	pin_count = READ_ONCE(bo->pin_count);
 	if (pin_count)
 		seq_printf(m, " pin count %d", pin_count);
+
+	dma_buf = READ_ONCE(bo->gem_base.dma_buf);
+	attachment = READ_ONCE(bo->gem_base.import_attach);
+
+	if (attachment)
+		seq_printf(m, " imported from %p", dma_buf);
+	else if (dma_buf)
+		seq_printf(m, " exported as %p", dma_buf);
+
+	amdgpu_debugfs_gem_bo_print_flag(m, bo, CPU_ACCESS_REQUIRED);
+	amdgpu_debugfs_gem_bo_print_flag(m, bo, NO_CPU_ACCESS);
+	amdgpu_debugfs_gem_bo_print_flag(m, bo, CPU_GTT_USWC);
+	amdgpu_debugfs_gem_bo_print_flag(m, bo, VRAM_CLEARED);
+	amdgpu_debugfs_gem_bo_print_flag(m, bo, SHADOW);
+	amdgpu_debugfs_gem_bo_print_flag(m, bo, VRAM_CONTIGUOUS);
+	amdgpu_debugfs_gem_bo_print_flag(m, bo, VM_ALWAYS_VALID);
+	amdgpu_debugfs_gem_bo_print_flag(m, bo, EXPLICIT_SYNC);
+
 	seq_printf(m, "\n");
 
 	return 0;

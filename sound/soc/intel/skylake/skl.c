@@ -94,6 +94,32 @@ static void skl_enable_miscbdcge(struct device *dev, bool enable)
 	update_pci_dword(pci, AZX_PCIREG_CGCTL, AZX_CGCTL_MISCBDCGE_MASK, val);
 }
 
+/**
+ * skl_clock_power_gating: Enable/Disable clock and power gating
+ *
+ * @dev: Device pointer
+ * @enable: Enable/Disable flag
+ */
+static void skl_clock_power_gating(struct device *dev, bool enable)
+{
+	struct pci_dev *pci = to_pci_dev(dev);
+	struct hdac_ext_bus *ebus = pci_get_drvdata(pci);
+	struct hdac_bus *bus = ebus_to_hbus(ebus);
+	u32 val;
+
+	/* Update PDCGE bit of CGCTL register */
+	val = enable ? AZX_CGCTL_ADSPDCGE : 0;
+	update_pci_dword(pci, AZX_PCIREG_CGCTL, AZX_CGCTL_ADSPDCGE, val);
+
+	/* Update L1SEN bit of EM2 register */
+	val = enable ? AZX_REG_VS_EM2_L1SEN : 0;
+	snd_hdac_chip_updatel(bus, VS_EM2, AZX_REG_VS_EM2_L1SEN, val);
+
+	/* Update ADSPPGD bit of PGCTL register */
+	val = enable ? 0 : AZX_PGCTL_ADSPPGD;
+	update_pci_dword(pci, AZX_PCIREG_PGCTL, AZX_PGCTL_ADSPPGD, val);
+}
+
 /*
  * While performing reset, controller may not come back properly causing
  * issues, so recommendation is to set CGCTL.MISCBDCGE to 0 then do reset
@@ -101,10 +127,17 @@ static void skl_enable_miscbdcge(struct device *dev, bool enable)
  */
 static int skl_init_chip(struct hdac_bus *bus, bool full_reset)
 {
+	struct hdac_ext_bus *ebus = hbus_to_ebus(bus);
+	struct hdac_ext_link *hlink;
 	int ret;
 
 	skl_enable_miscbdcge(bus->dev, false);
 	ret = snd_hdac_bus_init_chip(bus, full_reset);
+
+	/* Reset stream-to-link mapping */
+	list_for_each_entry(hlink, &ebus->hlink_list, list)
+		bus->io_ops->reg_writel(0, hlink->ml_addr + AZX_REG_ML_LOSIDV);
+
 	skl_enable_miscbdcge(bus->dev, true);
 
 	return ret;
@@ -916,6 +949,7 @@ static int skl_probe(struct pci_dev *pci,
 			goto out_nhlt_free;
 		}
 		skl->skl_sst->enable_miscbdcge = skl_enable_miscbdcge;
+		skl->skl_sst->clock_power_gating = skl_clock_power_gating;
 	}
 	if (bus->mlcap)
 		snd_hdac_ext_bus_get_ml_capabilities(ebus);
@@ -1017,6 +1051,11 @@ static struct snd_soc_acpi_codecs kbl_5663_5514_codecs = {
 	.codecs = {"10EC5663", "10EC5514"}
 };
 
+static struct snd_soc_acpi_codecs kbl_7219_98357_codecs = {
+	.num_codecs = 1,
+	.codecs = {"MX98357A"}
+};
+
 static struct skl_machine_pdata cnl_pdata = {
 	.use_tplg_pcm = true,
 };
@@ -1104,6 +1143,14 @@ static struct snd_soc_acpi_mach sst_kbl_devdata[] = {
 		.id = "10EC5663",
 		.drv_name = "kbl_rt5663",
 		.fw_filename = "intel/dsp_fw_kbl.bin",
+	},
+	{
+		.id = "DLGS7219",
+		.drv_name = "kbl_da7219_max98357a",
+		.fw_filename = "intel/dsp_fw_kbl.bin",
+		.machine_quirk = snd_soc_acpi_codec_list,
+		.quirk_data = &kbl_7219_98357_codecs,
+		.pdata = &skl_dmic_data
 	},
 
 	{}

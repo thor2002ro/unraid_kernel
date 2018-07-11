@@ -27,6 +27,9 @@
 #include "nbio_v6_1.h"
 #include "nbio_v7_0.h"
 
+#define SOC15_FLUSH_GPU_TLB_NUM_WREG		4
+#define SOC15_FLUSH_GPU_TLB_NUM_REG_WAIT	1
+
 extern const struct amd_ip_funcs soc15_common_ip_funcs;
 
 struct soc15_reg_golden {
@@ -52,5 +55,6 @@ void soc15_program_register_sequence(struct amdgpu_device *adev,
 					     const u32 array_size);
 
 int vega10_reg_base_init(struct amdgpu_device *adev);
+int vega20_reg_base_init(struct amdgpu_device *adev);
 
 #endif

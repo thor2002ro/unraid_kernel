@@ -922,8 +922,8 @@ static int tg3_ape_send_event(struct tg3 *tp, u32 event)
 	if (!(apedata & APE_FW_STATUS_READY))
 		return -EAGAIN;
 
-	/* Wait for up to 1 millisecond for APE to service previous event. */
-	err = tg3_ape_event_lock(tp, 1000);
+	/* Wait for up to 20 millisecond for APE to service previous event. */
+	err = tg3_ape_event_lock(tp, 20000);
 	if (err)
 		return err;
 
@@ -946,6 +946,7 @@ static void tg3_ape_driver_state_change(struct tg3 *tp, int kind)
 
 	switch (kind) {
 	case RESET_KIND_INIT:
+		tg3_ape_write32(tp, TG3_APE_HOST_HEARTBEAT_COUNT, tp->ape_hb++);
 		tg3_ape_write32(tp, TG3_APE_HOST_SEG_SIG,
 				APE_HOST_SEG_SIG_MAGIC);
 		tg3_ape_write32(tp, TG3_APE_HOST_SEG_LEN,
@@ -962,13 +963,6 @@ static void tg3_ape_driver_state_change(struct tg3 *tp, int kind)
 		event = APE_EVENT_STATUS_STATE_START;
 		break;
 	case RESET_KIND_SHUTDOWN:
-		/* With the interface we are currently using,
-		 * APE does not track driver state.  Wiping
-		 * out the HOST SEGMENT SIGNATURE forces
-		 * the APE to assume OS absent status.
-		 */
-		tg3_ape_write32(tp, TG3_APE_HOST_SEG_SIG, 0x0);
-
 		if (device_may_wakeup(&tp->pdev->dev) &&
 		    tg3_flag(tp, WOL_ENABLE)) {
 			tg3_ape_write32(tp, TG3_APE_HOST_WOL_SPEED,
@@ -988,6 +982,18 @@ static void tg3_ape_driver_state_change(struct tg3 *tp, int kind)
 	event |= APE_EVENT_STATUS_DRIVER_EVNT | APE_EVENT_STATUS_STATE_CHNGE;
 
 	tg3_ape_send_event(tp, event);
+}
+
+static void tg3_send_ape_heartbeat(struct tg3 *tp,
+				   unsigned long interval)
+{
+	/* Check if hb interval has exceeded */
+	if (!tg3_flag(tp, ENABLE_APE) ||
+	    time_before(jiffies, tp->ape_hb_jiffies + interval))
+		return;
+
+	tg3_ape_write32(tp, TG3_APE_HOST_HEARTBEAT_COUNT, tp->ape_hb++);
+	tp->ape_hb_jiffies = jiffies;
 }
 
 static void tg3_disable_ints(struct tg3 *tp)
@@ -7262,6 +7268,7 @@ static int tg3_poll_msix(struct napi_struct *napi, int budget)
 		}
 	}
 
+	tg3_send_ape_heartbeat(tp, TG3_APE_HB_INTERVAL << 1);
 	return work_done;
 
 tx_recovery:
@@ -7344,6 +7351,7 @@ static int tg3_poll(struct napi_struct *napi, int budget)
 		}
 	}
 
+	tg3_send_ape_heartbeat(tp, TG3_APE_HB_INTERVAL << 1);
 	return work_done;
 
 tx_recovery:
@@ -8623,8 +8631,9 @@ static int tg3_mem_tx_acquire(struct tg3 *tp)
 		tnapi++;
 
 	for (i = 0; i < tp->txq_cnt; i++, tnapi++) {
-		tnapi->tx_buffers = kzalloc(sizeof(struct tg3_tx_ring_info) *
-					    TG3_TX_RING_SIZE, GFP_KERNEL);
+		tnapi->tx_buffers = kcalloc(TG3_TX_RING_SIZE,
+					    sizeof(struct tg3_tx_ring_info),
+					    GFP_KERNEL);
 		if (!tnapi->tx_buffers)
 			goto err_out;
 
@@ -8725,14 +8734,15 @@ static void tg3_free_consistent(struct tg3 *tp)
 	tg3_mem_rx_release(tp);
 	tg3_mem_tx_release(tp);
 
-	/* Protect tg3_get_stats64() from reading freed tp->hw_stats. */
-	tg3_full_lock(tp, 0);
+	/* tp->hw_stats can be referenced safely:
+	 *     1. under rtnl_lock
+	 *     2. or under tp->lock if TG3_FLAG_INIT_COMPLETE is set.
+	 */
 	if (tp->hw_stats) {
 		dma_free_coherent(&tp->pdev->dev, sizeof(struct tg3_hw_stats),
 				  tp->hw_stats, tp->stats_mapping);
 		tp->hw_stats = NULL;
 	}
-	tg3_full_unlock(tp);
 }
 
 /*
@@ -10732,7 +10742,7 @@ static int tg3_reset_hw(struct tg3 *tp, bool reset_phy)
 	if (tg3_flag(tp, ENABLE_APE))
 		/* Write our heartbeat update interval to APE. */
 		tg3_ape_write32(tp, TG3_APE_HOST_HEARTBEAT_INT_MS,
-				APE_HOST_HEARTBEAT_INT_DISABLE);
+				APE_HOST_HEARTBEAT_INT_5SEC);
 
 	tg3_write_sig_post_reset(tp, RESET_KIND_INIT);
 
@@ -10791,11 +10801,11 @@ static ssize_t tg3_show_temp(struct device *dev,
 }
 
 
-static SENSOR_DEVICE_ATTR(temp1_input, S_IRUGO, tg3_show_temp, NULL,
+static SENSOR_DEVICE_ATTR(temp1_input, 0444, tg3_show_temp, NULL,
 			  TG3_TEMP_SENSOR_OFFSET);
-static SENSOR_DEVICE_ATTR(temp1_crit, S_IRUGO, tg3_show_temp, NULL,
+static SENSOR_DEVICE_ATTR(temp1_crit, 0444, tg3_show_temp, NULL,
 			  TG3_TEMP_CAUTION_OFFSET);
-static SENSOR_DEVICE_ATTR(temp1_max, S_IRUGO, tg3_show_temp, NULL,
+static SENSOR_DEVICE_ATTR(temp1_max, 0444, tg3_show_temp, NULL,
 			  TG3_TEMP_MAX_OFFSET);
 
 static struct attribute *tg3_attrs[] = {
@@ -11076,6 +11086,9 @@ static void tg3_timer(struct timer_list *t)
 		}
 		tp->asf_counter = tp->asf_multiplier;
 	}
+
+	/* Update the APE heartbeat every 5 seconds.*/
+	tg3_send_ape_heartbeat(tp, TG3_APE_HB_INTERVAL);
 
 	spin_unlock(&tp->lock);
 
@@ -14167,7 +14180,7 @@ static void tg3_get_stats64(struct net_device *dev,
 	struct tg3 *tp = netdev_priv(dev);
 
 	spin_lock_bh(&tp->lock);
-	if (!tp->hw_stats) {
+	if (!tp->hw_stats || !tg3_flag(tp, INIT_COMPLETE)) {
 		*stats = tp->net_stats_prev;
 		spin_unlock_bh(&tp->lock);
 		return;
@@ -16653,6 +16666,8 @@ static int tg3_get_invariants(struct tg3 *tp, const struct pci_device_id *ent)
 				       pci_state_reg);
 
 		tg3_ape_lock_init(tp);
+		tp->ape_hb_interval =
+			msecs_to_jiffies(APE_HOST_HEARTBEAT_INT_5SEC);
 	}
 
 	/* Set up tp->grc_local_ctrl before calling

@@ -201,7 +201,7 @@ config BLK_DEV_DM_BUILTIN
 config BLK_DEV_DM
 	tristate "Device mapper support"
 	select BLK_DEV_DM_BUILTIN
-	select DAX
+	depends on DAX || DAX=n
 	---help---
 	  Device-mapper is a low level volume manager.  It works by allowing
 	  people to specify mappings for ranges of logical sectors.  Various
@@ -333,6 +333,17 @@ config DM_CACHE_SMQ
          reads over writes.  This SMQ policy (vs MQ) offers the promise
          of less memory utilization, improved performance and increased
          adaptability in the face of changing workloads.
+
+config DM_WRITECACHE
+	tristate "Writecache target"
+	depends on BLK_DEV_DM
+	---help---
+	   The writecache target caches writes on persistent memory or SSD.
+	   It is intended for databases or other programs that need extremely
+	   low commit latency.
+
+	   The writecache target doesn't cache reads because reads are supposed
+	   to be cached in standard RAM.
 
 config DM_ERA
        tristate "Era target (EXPERIMENTAL)"

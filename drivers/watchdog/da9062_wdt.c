@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Watchdog device driver for DA9062 and DA9061 PMICs
  * Copyright (C) 2015  Dialog Semiconductor Ltd.
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/kernel.h>
@@ -38,13 +30,7 @@ static const unsigned int wdt_timeout[] = { 0, 2, 4, 8, 16, 32, 65, 131 };
 struct da9062_watchdog {
 	struct da9062 *hw;
 	struct watchdog_device wdtdev;
-	unsigned long j_time_stamp;
 };
-
-static void da9062_set_window_start(struct da9062_watchdog *wdt)
-{
-	wdt->j_time_stamp = jiffies;
-}
 
 static unsigned int da9062_wdt_timeout_to_sel(unsigned int secs)
 {
@@ -66,8 +52,6 @@ static int da9062_reset_watchdog_timer(struct da9062_watchdog *wdt)
 			   DA9062AA_CONTROL_F,
 			   DA9062AA_WATCHDOG_MASK,
 			   DA9062AA_WATCHDOG_MASK);
-
-	da9062_set_window_start(wdt);
 
 	return ret;
 }
@@ -239,8 +223,6 @@ static int da9062_wdt_probe(struct platform_device *pdev)
 			"watchdog registration failed (%d)\n", ret);
 		return ret;
 	}
-
-	da9062_set_window_start(wdt);
 
 	return da9062_wdt_ping(&wdt->wdtdev);
 }

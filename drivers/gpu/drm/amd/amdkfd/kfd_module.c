@@ -43,6 +43,10 @@ static const struct kgd2kfd_calls kgd2kfd = {
 	.interrupt	= kgd2kfd_interrupt,
 	.suspend	= kgd2kfd_suspend,
 	.resume		= kgd2kfd_resume,
+	.quiesce_mm	= kgd2kfd_quiesce_mm,
+	.resume_mm	= kgd2kfd_resume_mm,
+	.schedule_evict_and_restore_process =
+			  kgd2kfd_schedule_evict_and_restore_process,
 };
 
 int sched_policy = KFD_SCHED_POLICY_HWS;
@@ -69,10 +73,20 @@ module_param(send_sigterm, int, 0444);
 MODULE_PARM_DESC(send_sigterm,
 	"Send sigterm to HSA process on unhandled exception (0 = disable, 1 = enable)");
 
+int debug_largebar;
+module_param(debug_largebar, int, 0444);
+MODULE_PARM_DESC(debug_largebar,
+	"Debug large-bar flag used to simulate large-bar capability on non-large bar machine (0 = disable, 1 = enable)");
+
 int ignore_crat;
 module_param(ignore_crat, int, 0444);
 MODULE_PARM_DESC(ignore_crat,
 	"Ignore CRAT table during KFD initialization (0 = use CRAT (default), 1 = ignore CRAT)");
+
+int vega10_noretry;
+module_param_named(noretry, vega10_noretry, int, 0644);
+MODULE_PARM_DESC(noretry,
+	"Set sh_mem_config.retry_disable on Vega10 (0 = retry enabled (default), 1 = retry disabled)");
 
 static int amdkfd_init_completed;
 
@@ -126,7 +140,9 @@ static int __init kfd_module_init(void)
 	if (err < 0)
 		goto err_topology;
 
-	kfd_process_create_wq();
+	err = kfd_process_create_wq();
+	if (err < 0)
+		goto err_create_wq;
 
 	kfd_debugfs_init();
 
@@ -136,6 +152,8 @@ static int __init kfd_module_init(void)
 
 	return 0;
 
+err_create_wq:
+	kfd_topology_shutdown();
 err_topology:
 	kfd_chardev_exit();
 err_ioctl:

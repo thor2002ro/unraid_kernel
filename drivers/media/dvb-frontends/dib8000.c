@@ -2677,7 +2677,7 @@ static void dib8000_viterbi_state(struct dib8000_state *state, u8 onoff)
 static void dib8000_set_dds(struct dib8000_state *state, s32 offset_khz)
 {
 	s16 unit_khz_dds_val;
-	u32 abs_offset_khz = ABS(offset_khz);
+	u32 abs_offset_khz = abs(offset_khz);
 	u32 dds = state->cfg.pll->ifreq & 0x1ffffff;
 	u8 invert = !!(state->cfg.pll->ifreq & (1 << 25));
 	u8 ratio;
@@ -4271,12 +4271,12 @@ static int dib8000_i2c_enumeration(struct i2c_adapter *host, int no_of_demods,
 	u8 new_addr = 0;
 	struct i2c_device client = {.adap = host };
 
-	client.i2c_write_buffer = kzalloc(4 * sizeof(u8), GFP_KERNEL);
+	client.i2c_write_buffer = kzalloc(4, GFP_KERNEL);
 	if (!client.i2c_write_buffer) {
 		dprintk("%s: not enough memory\n", __func__);
 		return -ENOMEM;
 	}
-	client.i2c_read_buffer = kzalloc(4 * sizeof(u8), GFP_KERNEL);
+	client.i2c_read_buffer = kzalloc(4, GFP_KERNEL);
 	if (!client.i2c_read_buffer) {
 		dprintk("%s: not enough memory\n", __func__);
 		ret = -ENOMEM;

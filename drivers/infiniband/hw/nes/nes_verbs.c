@@ -2254,8 +2254,9 @@ static struct ib_mr *nes_reg_user_mr(struct ib_pd *pd, u64 start, u64 length,
 								ibmr = ERR_PTR(-ENOMEM);
 								goto reg_user_mr_err;
 							}
-							root_vpbl.leaf_vpbl = kzalloc(sizeof(*root_vpbl.leaf_vpbl)*1024,
-									GFP_KERNEL);
+							root_vpbl.leaf_vpbl = kcalloc(1024,
+										      sizeof(*root_vpbl.leaf_vpbl),
+										      GFP_KERNEL);
 							if (!root_vpbl.leaf_vpbl) {
 								ib_umem_release(region);
 								pci_free_consistent(nesdev->pcidev, 8192, root_vpbl.pbl_vbase,
@@ -3854,6 +3855,7 @@ int nes_register_ofa_device(struct nes_ib_device *nesibdev)
 	struct nes_adapter *nesadapter = nesdev->nesadapter;
 	int i, ret;
 
+	nesvnic->nesibdev->ibdev.driver_id = RDMA_DRIVER_NES;
 	ret = ib_register_device(&nesvnic->nesibdev->ibdev, NULL);
 	if (ret) {
 		return ret;

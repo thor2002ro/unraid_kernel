@@ -350,7 +350,7 @@ static struct bus_type serdev_bus_type = {
 };
 
 /**
- * serdev_controller_alloc() - Allocate a new serdev device
+ * serdev_device_alloc() - Allocate a new serdev device
  * @ctrl:	associated controller
  *
  * Caller is responsible for either calling serdev_device_add() to add the
@@ -617,6 +617,7 @@ EXPORT_SYMBOL_GPL(__serdev_device_driver_register);
 static void __exit serdev_exit(void)
 {
 	bus_unregister(&serdev_bus_type);
+	ida_destroy(&ctrl_ida);
 }
 module_exit(serdev_exit);
 

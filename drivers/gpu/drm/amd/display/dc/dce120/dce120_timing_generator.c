@@ -27,7 +27,8 @@
 
 #include "dce/dce_12_0_offset.h"
 #include "dce/dce_12_0_sh_mask.h"
-#include "soc15ip.h"
+#include "soc15_hw_ip.h"
+#include "vega10_ip_offset.h"
 
 #include "dc_types.h"
 #include "dc_bios_types.h"
@@ -569,18 +570,18 @@ void dce120_timing_generator_set_drr(
 				0x180);
 
 	} else {
-		CRTC_REG_UPDATE(
-				CRTC0_CRTC_V_TOTAL_MIN,
-				CRTC_V_TOTAL_MIN, 0);
-		CRTC_REG_UPDATE(
-				CRTC0_CRTC_V_TOTAL_MAX,
-				CRTC_V_TOTAL_MAX, 0);
 		CRTC_REG_SET_N(CRTC0_CRTC_V_TOTAL_CONTROL, 5,
 				FD(CRTC0_CRTC_V_TOTAL_CONTROL__CRTC_V_TOTAL_MIN_SEL), 0,
 				FD(CRTC0_CRTC_V_TOTAL_CONTROL__CRTC_V_TOTAL_MAX_SEL), 0,
 				FD(CRTC0_CRTC_V_TOTAL_CONTROL__CRTC_FORCE_LOCK_ON_EVENT), 0,
 				FD(CRTC0_CRTC_V_TOTAL_CONTROL__CRTC_FORCE_LOCK_TO_MASTER_VSYNC), 0,
 				FD(CRTC0_CRTC_V_TOTAL_CONTROL__CRTC_SET_V_TOTAL_MIN_MASK), 0);
+		CRTC_REG_UPDATE(
+				CRTC0_CRTC_V_TOTAL_MIN,
+				CRTC_V_TOTAL_MIN, 0);
+		CRTC_REG_UPDATE(
+				CRTC0_CRTC_V_TOTAL_MAX,
+				CRTC_V_TOTAL_MAX, 0);
 		CRTC_REG_UPDATE(
 				CRTC0_CRTC_STATIC_SCREEN_CONTROL,
 				CRTC_STATIC_SCREEN_EVENT_MASK,

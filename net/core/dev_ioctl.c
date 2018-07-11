@@ -285,16 +285,9 @@ static int dev_ifsioc(struct net *net, struct ifreq *ifr, unsigned int cmd)
 		if (ifr->ifr_qlen < 0)
 			return -EINVAL;
 		if (dev->tx_queue_len ^ ifr->ifr_qlen) {
-			unsigned int orig_len = dev->tx_queue_len;
-
-			dev->tx_queue_len = ifr->ifr_qlen;
-			err = call_netdevice_notifiers(
-					NETDEV_CHANGE_TX_QUEUE_LEN, dev);
-			err = notifier_to_errno(err);
-			if (err) {
-				dev->tx_queue_len = orig_len;
+			err = dev_change_tx_queue_len(dev, ifr->ifr_qlen);
+			if (err)
 				return err;
-			}
 		}
 		return 0;
 
@@ -402,8 +395,6 @@ int dev_ioctl(struct net *net, unsigned int cmd, struct ifreq *ifr, bool *need_c
 	if (colon)
 		*colon = 0;
 
-	dev_load(net, ifr->ifr_name);
-
 	/*
 	 *	See which interface the caller is talking about.
 	 */
@@ -423,6 +414,7 @@ int dev_ioctl(struct net *net, unsigned int cmd, struct ifreq *ifr, bool *need_c
 	case SIOCGIFMAP:
 	case SIOCGIFINDEX:
 	case SIOCGIFTXQLEN:
+		dev_load(net, ifr->ifr_name);
 		rcu_read_lock();
 		ret = dev_ifsioc_locked(net, ifr, cmd);
 		rcu_read_unlock();
@@ -431,6 +423,7 @@ int dev_ioctl(struct net *net, unsigned int cmd, struct ifreq *ifr, bool *need_c
 		return ret;
 
 	case SIOCETHTOOL:
+		dev_load(net, ifr->ifr_name);
 		rtnl_lock();
 		ret = dev_ethtool(net, ifr);
 		rtnl_unlock();
@@ -447,6 +440,7 @@ int dev_ioctl(struct net *net, unsigned int cmd, struct ifreq *ifr, bool *need_c
 	case SIOCGMIIPHY:
 	case SIOCGMIIREG:
 	case SIOCSIFNAME:
+		dev_load(net, ifr->ifr_name);
 		if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
 			return -EPERM;
 		rtnl_lock();
@@ -494,6 +488,7 @@ int dev_ioctl(struct net *net, unsigned int cmd, struct ifreq *ifr, bool *need_c
 		/* fall through */
 	case SIOCBONDSLAVEINFOQUERY:
 	case SIOCBONDINFOQUERY:
+		dev_load(net, ifr->ifr_name);
 		rtnl_lock();
 		ret = dev_ifsioc(net, ifr, cmd);
 		rtnl_unlock();
@@ -518,6 +513,7 @@ int dev_ioctl(struct net *net, unsigned int cmd, struct ifreq *ifr, bool *need_c
 		    cmd == SIOCGHWTSTAMP ||
 		    (cmd >= SIOCDEVPRIVATE &&
 		     cmd <= SIOCDEVPRIVATE + 15)) {
+			dev_load(net, ifr->ifr_name);
 			rtnl_lock();
 			ret = dev_ifsioc(net, ifr, cmd);
 			rtnl_unlock();

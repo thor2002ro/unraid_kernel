@@ -119,6 +119,7 @@ enum port {
 	PORT_C,
 	PORT_D,
 	PORT_E,
+	PORT_F,
 
 	I915_MAX_PORTS
 };
@@ -138,6 +139,17 @@ enum dpio_phy {
 
 #define I915_NUM_PHYS_VLV 2
 
+enum aux_ch {
+	AUX_CH_A,
+	AUX_CH_B,
+	AUX_CH_C,
+	AUX_CH_D,
+	_AUX_CH_E, /* does not exist */
+	AUX_CH_F,
+};
+
+#define aux_ch_name(a) ((a) + 'A')
+
 enum intel_display_power_domain {
 	POWER_DOMAIN_PIPE_A,
 	POWER_DOMAIN_PIPE_B,
@@ -156,11 +168,13 @@ enum intel_display_power_domain {
 	POWER_DOMAIN_PORT_DDI_C_LANES,
 	POWER_DOMAIN_PORT_DDI_D_LANES,
 	POWER_DOMAIN_PORT_DDI_E_LANES,
+	POWER_DOMAIN_PORT_DDI_F_LANES,
 	POWER_DOMAIN_PORT_DDI_A_IO,
 	POWER_DOMAIN_PORT_DDI_B_IO,
 	POWER_DOMAIN_PORT_DDI_C_IO,
 	POWER_DOMAIN_PORT_DDI_D_IO,
 	POWER_DOMAIN_PORT_DDI_E_IO,
+	POWER_DOMAIN_PORT_DDI_F_IO,
 	POWER_DOMAIN_PORT_DSI,
 	POWER_DOMAIN_PORT_CRT,
 	POWER_DOMAIN_PORT_OTHER,
@@ -171,6 +185,8 @@ enum intel_display_power_domain {
 	POWER_DOMAIN_AUX_B,
 	POWER_DOMAIN_AUX_C,
 	POWER_DOMAIN_AUX_D,
+	POWER_DOMAIN_AUX_F,
+	POWER_DOMAIN_AUX_IO_A,
 	POWER_DOMAIN_GMBUS,
 	POWER_DOMAIN_MODESET,
 	POWER_DOMAIN_GT_IRQ,
@@ -201,6 +217,10 @@ struct intel_link_m_n {
 #define for_each_pipe_masked(__dev_priv, __p, __mask) \
 	for ((__p) = 0; (__p) < INTEL_INFO(__dev_priv)->num_pipes; (__p)++) \
 		for_each_if((__mask) & BIT(__p))
+
+#define for_each_cpu_transcoder_masked(__dev_priv, __t, __mask) \
+	for ((__t) = 0; (__t) < I915_MAX_TRANSCODERS; (__t)++)	\
+		for_each_if ((__mask) & (1 << (__t)))
 
 #define for_each_universal_plane(__dev_priv, __pipe, __p)		\
 	for ((__p) = 0;							\

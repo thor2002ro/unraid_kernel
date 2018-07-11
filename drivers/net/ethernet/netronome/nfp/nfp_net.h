@@ -391,6 +391,7 @@ struct nfp_net_rx_ring {
  * @rx_drops:	    Number of packets dropped on RX due to lack of resources
  * @hw_csum_rx_ok:  Counter of packets where the HW checksum was OK
  * @hw_csum_rx_inner_ok: Counter of packets where the inner HW checksum was OK
+ * @hw_csum_rx_complete: Counter of packets with CHECKSUM_COMPLETE reported
  * @hw_csum_rx_error:	 Counter of packets with bad checksums
  * @tx_sync:	    Seqlock for atomic updates of TX stats
  * @tx_pkts:	    Number of Transmitted packets
@@ -434,7 +435,7 @@ struct nfp_net_r_vector {
 	u64 rx_drops;
 	u64 hw_csum_rx_ok;
 	u64 hw_csum_rx_inner_ok;
-	u64 hw_csum_rx_error;
+	u64 hw_csum_rx_complete;
 
 	struct nfp_net_tx_ring *xdp_ring;
 
@@ -446,6 +447,7 @@ struct nfp_net_r_vector {
 	u64 tx_gather;
 	u64 tx_lso;
 
+	u64 hw_csum_rx_error;
 	u64 rx_replace_buf_alloc_fail;
 	u64 tx_errors;
 	u64 tx_busy;
@@ -543,6 +545,7 @@ struct nfp_net_dp {
 /**
  * struct nfp_net - NFP network device structure
  * @dp:			Datapath structure
+ * @id:			vNIC id within the PF (0 for VFs)
  * @fw_ver:		Firmware version
  * @cap:                Capabilities advertised by the Firmware
  * @max_mtu:            Maximum support MTU advertised by the Firmware
@@ -587,6 +590,8 @@ struct nfp_net_dp {
  * @vnic_list:		Entry on device vNIC list
  * @pdev:		Backpointer to PCI device
  * @app:		APP handle if available
+ * @vnic_no_name:	For non-port PF vNIC make ndo_get_phys_port_name return
+ *			-EOPNOTSUPP to keep backwards compatibility (set by app)
  * @port:		Pointer to nfp_port structure if vNIC is a port
  * @app_priv:		APP private data for this vNIC
  */
@@ -594,6 +599,8 @@ struct nfp_net {
 	struct nfp_net_dp dp;
 
 	struct nfp_net_fw_version fw_ver;
+
+	u32 id;
 
 	u32 cap;
 	u32 max_mtu;
@@ -657,6 +664,8 @@ struct nfp_net {
 
 	struct pci_dev *pdev;
 	struct nfp_app *app;
+
+	bool vnic_no_name;
 
 	struct nfp_port *port;
 
@@ -907,7 +916,7 @@ int nfp_net_ring_reconfig(struct nfp_net *nn, struct nfp_net_dp *new,
 void nfp_net_debugfs_create(void);
 void nfp_net_debugfs_destroy(void);
 struct dentry *nfp_net_debugfs_device_add(struct pci_dev *pdev);
-void nfp_net_debugfs_vnic_add(struct nfp_net *nn, struct dentry *ddir, int id);
+void nfp_net_debugfs_vnic_add(struct nfp_net *nn, struct dentry *ddir);
 void nfp_net_debugfs_dir_clean(struct dentry **dir);
 #else
 static inline void nfp_net_debugfs_create(void)
@@ -924,7 +933,7 @@ static inline struct dentry *nfp_net_debugfs_device_add(struct pci_dev *pdev)
 }
 
 static inline void
-nfp_net_debugfs_vnic_add(struct nfp_net *nn, struct dentry *ddir, int id)
+nfp_net_debugfs_vnic_add(struct nfp_net *nn, struct dentry *ddir)
 {
 }
 

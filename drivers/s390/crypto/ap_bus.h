@@ -17,7 +17,7 @@
 #include <linux/types.h>
 #include <asm/ap.h>
 
-#define AP_DEVICES 64		/* Number of AP devices. */
+#define AP_DEVICES 256		/* Number of AP devices. */
 #define AP_DOMAINS 256		/* Number of AP domains. */
 #define AP_RESET_TIMEOUT (HZ*0.7)	/* Time in ticks for reset timeouts. */
 #define AP_CONFIG_TIME 30	/* Time in seconds between AP bus rescans. */
@@ -198,11 +198,18 @@ struct ap_message {
  */
 static inline void ap_init_message(struct ap_message *ap_msg)
 {
-	ap_msg->psmid = 0;
-	ap_msg->length = 0;
-	ap_msg->rc = 0;
-	ap_msg->special = 0;
-	ap_msg->receive = NULL;
+	memset(ap_msg, 0, sizeof(*ap_msg));
+}
+
+/**
+ * ap_release_message() - Release ap_message.
+ * Releases all memory used internal within the ap_message struct
+ * Currently this is the message and private field.
+ */
+static inline void ap_release_message(struct ap_message *ap_msg)
+{
+	kzfree(ap_msg->message);
+	kzfree(ap_msg->private);
 }
 
 #define for_each_ap_card(_ac) \
@@ -239,8 +246,5 @@ void ap_queue_resume(struct ap_device *ap_dev);
 
 struct ap_card *ap_card_create(int id, int queue_depth, int raw_device_type,
 			       int comp_device_type, unsigned int functions);
-
-int ap_module_init(void);
-void ap_module_exit(void);
 
 #endif /* _AP_BUS_H_ */

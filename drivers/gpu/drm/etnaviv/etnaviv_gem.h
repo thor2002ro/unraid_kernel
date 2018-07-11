@@ -1,17 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2015 Etnaviv Project
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2015-2018 Etnaviv Project
  */
 
 #ifndef __ETNAVIV_GEM_H__
@@ -94,6 +83,9 @@ struct etnaviv_gem_submit_bo {
 	u32 flags;
 	struct etnaviv_gem_object *obj;
 	struct etnaviv_vram_mapping *mapping;
+	struct dma_fence *excl;
+	unsigned int nr_shared;
+	struct dma_fence **shared;
 };
 
 /* Created per submit-ioctl, to track bo's and cmdstream bufs, etc,
@@ -101,9 +93,11 @@ struct etnaviv_gem_submit_bo {
  * make it easier to unwind when things go wrong, etc).
  */
 struct etnaviv_gem_submit {
+	struct drm_sched_job sched_job;
 	struct kref refcount;
 	struct etnaviv_gpu *gpu;
 	struct dma_fence *out_fence, *in_fence;
+	int out_fence_id;
 	struct list_head node; /* GPU active submit list */
 	struct etnaviv_cmdbuf cmdbuf;
 	bool runtime_resumed;

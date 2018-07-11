@@ -180,7 +180,7 @@ int copy_thread_tls(unsigned long clone_flags, unsigned long usp,
 	return 0;
 }
 
-#ifdef CONFIG_CC_STACKPROTECTOR
+#ifdef CONFIG_STACKPROTECTOR
 #include <linux/stackprotector.h>
 unsigned long __stack_chk_guard __read_mostly;
 EXPORT_SYMBOL(__stack_chk_guard);
@@ -721,6 +721,10 @@ int mips_set_process_fp_mode(struct task_struct *task, unsigned int value)
 	if (value & ~known_bits)
 		return -EOPNOTSUPP;
 
+	/* Setting FRE without FR is not supported.  */
+	if ((value & (PR_FP_MODE_FR | PR_FP_MODE_FRE)) == PR_FP_MODE_FRE)
+		return -EOPNOTSUPP;
+
 	/* Avoid inadvertently triggering emulation */
 	if ((value & PR_FP_MODE_FR) && raw_cpu_has_fpu &&
 	    !(raw_current_cpu_data.fpu_id & MIPS_FPIR_F64))
@@ -780,6 +784,8 @@ int mips_set_process_fp_mode(struct task_struct *task, unsigned int value)
 	/* Allow threads to use FP again */
 	atomic_set(&task->mm->context.fp_mode_switching, 0);
 	preempt_enable();
+
+	wake_up_var(&task->mm->context.fp_mode_switching);
 
 	return 0;
 }

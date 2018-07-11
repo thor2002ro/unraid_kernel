@@ -471,6 +471,7 @@ struct parser_exec_state {
 	 * used when ret from 2nd level batch buffer
 	 */
 	int saved_buf_addr_type;
+	bool is_ctx_wa;
 
 	struct cmd_info *info;
 
@@ -812,15 +813,31 @@ static inline bool is_force_nonpriv_mmio(unsigned int offset)
 }
 
 static int force_nonpriv_reg_handler(struct parser_exec_state *s,
-				     unsigned int offset, unsigned int index)
+		unsigned int offset, unsigned int index, char *cmd)
 {
 	struct intel_gvt *gvt = s->vgpu->gvt;
-	unsigned int data = cmd_val(s, index + 1);
+	unsigned int data;
+	u32 ring_base;
+	u32 nopid;
+	struct drm_i915_private *dev_priv = s->vgpu->gvt->dev_priv;
 
-	if (!intel_gvt_in_force_nonpriv_whitelist(gvt, data)) {
+	if (!strcmp(cmd, "lri"))
+		data = cmd_val(s, index + 1);
+	else {
+		gvt_err("Unexpected forcenonpriv 0x%x write from cmd %s\n",
+			offset, cmd);
+		return -EINVAL;
+	}
+
+	ring_base = dev_priv->engine[s->ring_id]->mmio_base;
+	nopid = i915_mmio_reg_offset(RING_NOPID(ring_base));
+
+	if (!intel_gvt_in_force_nonpriv_whitelist(gvt, data) &&
+			data != nopid) {
 		gvt_err("Unexpected forcenonpriv 0x%x LRI write, value=0x%x\n",
 			offset, data);
-		return -EPERM;
+		patch_value(s, cmd_ptr(s, index), nopid);
+		return 0;
 	}
 	return 0;
 }
@@ -868,7 +885,7 @@ static int cmd_reg_handler(struct parser_exec_state *s,
 		return -EINVAL;
 
 	if (is_force_nonpriv_mmio(offset) &&
-		force_nonpriv_reg_handler(s, offset, index))
+		force_nonpriv_reg_handler(s, offset, index, cmd))
 		return -EPERM;
 
 	if (offset == i915_mmio_reg_offset(DERRMR) ||
@@ -1079,6 +1096,7 @@ static int cmd_handler_mi_user_interrupt(struct parser_exec_state *s)
 {
 	set_bit(cmd_interrupt_events[s->ring_id].mi_user_interrupt,
 			s->workload->pending_events);
+	patch_value(s, cmd_ptr(s, 0), MI_NOOP);
 	return 0;
 }
 
@@ -1602,7 +1620,8 @@ static int batch_buffer_needs_scan(struct parser_exec_state *s)
 	if (IS_BROADWELL(gvt->dev_priv) || IS_SKYLAKE(gvt->dev_priv)
 		|| IS_KABYLAKE(gvt->dev_priv)) {
 		/* BDW decides privilege based on address space */
-		if (cmd_val(s, 0) & (1 << 8))
+		if (cmd_val(s, 0) & (1 << 8) &&
+			!(s->vgpu->scan_nonprivbb & (1 << s->ring_id)))
 			return 0;
 	}
 	return 1;
@@ -1616,6 +1635,8 @@ static int find_bb_size(struct parser_exec_state *s, unsigned long *bb_size)
 	bool bb_end = false;
 	struct intel_vgpu *vgpu = s->vgpu;
 	u32 cmd;
+	struct intel_vgpu_mm *mm = (s->buf_addr_type == GTT_BUFFER) ?
+		s->vgpu->gtt.ggtt_mm : s->workload->shadow_mm;
 
 	*bb_size = 0;
 
@@ -1627,18 +1648,22 @@ static int find_bb_size(struct parser_exec_state *s, unsigned long *bb_size)
 	cmd = cmd_val(s, 0);
 	info = get_cmd_info(s->vgpu->gvt, cmd, s->ring_id);
 	if (info == NULL) {
-		gvt_vgpu_err("unknown cmd 0x%x, opcode=0x%x\n",
-				cmd, get_opcode(cmd, s->ring_id));
+		gvt_vgpu_err("unknown cmd 0x%x, opcode=0x%x, addr_type=%s, ring %d, workload=%p\n",
+				cmd, get_opcode(cmd, s->ring_id),
+				(s->buf_addr_type == PPGTT_BUFFER) ?
+				"ppgtt" : "ggtt", s->ring_id, s->workload);
 		return -EBADRQC;
 	}
 	do {
-		if (copy_gma_to_hva(s->vgpu, s->vgpu->gtt.ggtt_mm,
+		if (copy_gma_to_hva(s->vgpu, mm,
 				gma, gma + 4, &cmd) < 0)
 			return -EFAULT;
 		info = get_cmd_info(s->vgpu->gvt, cmd, s->ring_id);
 		if (info == NULL) {
-			gvt_vgpu_err("unknown cmd 0x%x, opcode=0x%x\n",
-				cmd, get_opcode(cmd, s->ring_id));
+			gvt_vgpu_err("unknown cmd 0x%x, opcode=0x%x, addr_type=%s, ring %d, workload=%p\n",
+				cmd, get_opcode(cmd, s->ring_id),
+				(s->buf_addr_type == PPGTT_BUFFER) ?
+				"ppgtt" : "ggtt", s->ring_id, s->workload);
 			return -EBADRQC;
 		}
 
@@ -1664,6 +1689,9 @@ static int perform_bb_shadow(struct parser_exec_state *s)
 	unsigned long gma = 0;
 	unsigned long bb_size;
 	int ret = 0;
+	struct intel_vgpu_mm *mm = (s->buf_addr_type == GTT_BUFFER) ?
+		s->vgpu->gtt.ggtt_mm : s->workload->shadow_mm;
+	unsigned long gma_start_offset = 0;
 
 	/* get the start gm address of the batch buffer */
 	gma = get_gma_bb_from_cmd(s, 1);
@@ -1678,8 +1706,24 @@ static int perform_bb_shadow(struct parser_exec_state *s)
 	if (!bb)
 		return -ENOMEM;
 
+	bb->ppgtt = (s->buf_addr_type == GTT_BUFFER) ? false : true;
+
+	/* the gma_start_offset stores the batch buffer's start gma's
+	 * offset relative to page boundary. so for non-privileged batch
+	 * buffer, the shadowed gem object holds exactly the same page
+	 * layout as original gem object. This is for the convience of
+	 * replacing the whole non-privilged batch buffer page to this
+	 * shadowed one in PPGTT at the same gma address. (this replacing
+	 * action is not implemented yet now, but may be necessary in
+	 * future).
+	 * for prileged batch buffer, we just change start gma address to
+	 * that of shadowed page.
+	 */
+	if (bb->ppgtt)
+		gma_start_offset = gma & ~I915_GTT_PAGE_MASK;
+
 	bb->obj = i915_gem_object_create(s->vgpu->gvt->dev_priv,
-					 roundup(bb_size, PAGE_SIZE));
+			 roundup(bb_size + gma_start_offset, PAGE_SIZE));
 	if (IS_ERR(bb->obj)) {
 		ret = PTR_ERR(bb->obj);
 		goto err_free_bb;
@@ -1700,9 +1744,9 @@ static int perform_bb_shadow(struct parser_exec_state *s)
 		bb->clflush &= ~CLFLUSH_BEFORE;
 	}
 
-	ret = copy_gma_to_hva(s->vgpu, s->vgpu->gtt.ggtt_mm,
+	ret = copy_gma_to_hva(s->vgpu, mm,
 			      gma, gma + bb_size,
-			      bb->va);
+			      bb->va + gma_start_offset);
 	if (ret < 0) {
 		gvt_vgpu_err("fail to copy guest ring buffer\n");
 		ret = -EFAULT;
@@ -1715,6 +1759,11 @@ static int perform_bb_shadow(struct parser_exec_state *s)
 	bb->accessing = true;
 	bb->bb_start_cmd_va = s->ip_va;
 
+	if ((s->buf_type == BATCH_BUFFER_INSTRUCTION) && (!s->is_ctx_wa))
+		bb->bb_offset = s->ip_va - s->rb_va;
+	else
+		bb->bb_offset = 0;
+
 	/*
 	 * ip_va saves the virtual address of the shadow batch buffer, while
 	 * ip_gma saves the graphics address of the original batch buffer.
@@ -1723,7 +1772,7 @@ static int perform_bb_shadow(struct parser_exec_state *s)
 	 * buffer's gma in pair. After all, we don't want to pin the shadow
 	 * buffer here (too early).
 	 */
-	s->ip_va = bb->va;
+	s->ip_va = bb->va + gma_start_offset;
 	s->ip_gma = gma;
 	return 0;
 err_unmap:
@@ -2462,15 +2511,18 @@ static int cmd_parser_exec(struct parser_exec_state *s)
 
 	info = get_cmd_info(s->vgpu->gvt, cmd, s->ring_id);
 	if (info == NULL) {
-		gvt_vgpu_err("unknown cmd 0x%x, opcode=0x%x\n",
-				cmd, get_opcode(cmd, s->ring_id));
+		gvt_vgpu_err("unknown cmd 0x%x, opcode=0x%x, addr_type=%s, ring %d, workload=%p\n",
+				cmd, get_opcode(cmd, s->ring_id),
+				(s->buf_addr_type == PPGTT_BUFFER) ?
+				"ppgtt" : "ggtt", s->ring_id, s->workload);
 		return -EBADRQC;
 	}
 
 	s->info = info;
 
 	trace_gvt_command(vgpu->id, s->ring_id, s->ip_gma, s->ip_va,
-			  cmd_length(s), s->buf_type);
+			  cmd_length(s), s->buf_type, s->buf_addr_type,
+			  s->workload, info->name);
 
 	if (info->handler) {
 		ret = info->handler(s);
@@ -2571,6 +2623,7 @@ static int scan_workload(struct intel_vgpu_workload *workload)
 	s.ring_tail = gma_tail;
 	s.rb_va = workload->shadow_ring_buffer_va;
 	s.workload = workload;
+	s.is_ctx_wa = false;
 
 	if ((bypass_scan_mask & (1 << workload->ring_id)) ||
 		gma_head == gma_tail)
@@ -2624,6 +2677,7 @@ static int scan_wa_ctx(struct intel_shadow_wa_ctx *wa_ctx)
 	s.ring_tail = gma_tail;
 	s.rb_va = wa_ctx->indirect_ctx.shadow_va;
 	s.workload = workload;
+	s.is_ctx_wa = true;
 
 	if (!intel_gvt_ggtt_validate_range(s.vgpu, s.ring_start, s.ring_size)) {
 		ret = -EINVAL;
@@ -2855,6 +2909,7 @@ static int init_cmd_table(struct intel_gvt *gvt)
 		if (info) {
 			gvt_err("%s %s duplicated\n", e->info->name,
 					info->name);
+			kfree(e);
 			return -EEXIST;
 		}
 

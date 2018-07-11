@@ -6,6 +6,7 @@
  * GPL LICENSE SUMMARY
  *
  * Copyright(c) 2017 Intel Deutschland GmbH
+ * Copyright(c) 2018 Intel Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -26,6 +27,7 @@
  * BSD LICENSE
  *
  * Copyright(c) 2017 Intel Deutschland GmbH
+ * Copyright(c) 2018 Intel Corporation
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -68,6 +70,7 @@
 struct iwl_fw_runtime_ops {
 	int (*dump_start)(void *ctx);
 	void (*dump_end)(void *ctx);
+	bool (*fw_running)(void *ctx);
 };
 
 #define MAX_NUM_LMAC 2
@@ -150,6 +153,10 @@ void iwl_fw_runtime_init(struct iwl_fw_runtime *fwrt, struct iwl_trans *trans,
 
 void iwl_fw_runtime_exit(struct iwl_fw_runtime *fwrt);
 
+void iwl_fw_runtime_suspend(struct iwl_fw_runtime *fwrt);
+
+void iwl_fw_runtime_resume(struct iwl_fw_runtime *fwrt);
+
 static inline void iwl_fw_set_current_image(struct iwl_fw_runtime *fwrt,
 					    enum iwl_ucode_type cur_fw_img)
 {
@@ -163,6 +170,5 @@ void iwl_get_shared_mem_conf(struct iwl_fw_runtime *fwrt);
 
 void iwl_fwrt_handle_notification(struct iwl_fw_runtime *fwrt,
 				  struct iwl_rx_cmd_buffer *rxb);
-struct iwl_nvm_data *iwl_fw_get_nvm(struct iwl_fw_runtime *fwrt);
 
 #endif /* __iwl_fw_runtime_h__ */

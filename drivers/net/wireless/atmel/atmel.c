@@ -1482,18 +1482,6 @@ static int atmel_proc_show(struct seq_file *m, void *v)
 	return 0;
 }
 
-static int atmel_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, atmel_proc_show, PDE_DATA(inode));
-}
-
-static const struct file_operations atmel_proc_fops = {
-	.open		= atmel_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
 static const struct net_device_ops atmel_netdev_ops = {
 	.ndo_open 		= atmel_open,
 	.ndo_stop		= atmel_close,
@@ -1614,7 +1602,8 @@ struct net_device *init_atmel_card(unsigned short irq, unsigned long port,
 
 	netif_carrier_off(dev);
 
-	if (!proc_create_data("driver/atmel", 0, NULL, &atmel_proc_fops, priv))
+	if (!proc_create_single_data("driver/atmel", 0, NULL, atmel_proc_show,
+			priv))
 		printk(KERN_WARNING "atmel: unable to create /proc entry.\n");
 
 	printk(KERN_INFO "%s: Atmel at76c50x. Version %d.%d. MAC %pM\n",
@@ -3861,7 +3850,7 @@ static int reset_atmel_card(struct net_device *dev)
 
 	   set all the Mib values which matter in the card to match
 	   their settings in the atmel_private structure. Some of these
-	   can be altered on the fly, but many (WEP, infrastucture or ad-hoc)
+	   can be altered on the fly, but many (WEP, infrastructure or ad-hoc)
 	   can only be changed by tearing down the world and coming back through
 	   here.
 

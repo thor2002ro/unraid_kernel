@@ -55,7 +55,6 @@ static int zx_vl_plane_atomic_check(struct drm_plane *plane,
 	struct drm_framebuffer *fb = plane_state->fb;
 	struct drm_crtc *crtc = plane_state->crtc;
 	struct drm_crtc_state *crtc_state;
-	struct drm_rect clip;
 	int min_scale = FRAC_16_16(1, 8);
 	int max_scale = FRAC_16_16(8, 1);
 
@@ -75,13 +74,8 @@ static int zx_vl_plane_atomic_check(struct drm_plane *plane,
 	if (!plane_state->crtc)
 		return -EINVAL;
 
-	clip.x1 = 0;
-	clip.y1 = 0;
-	clip.x2 = crtc_state->adjusted_mode.hdisplay;
-	clip.y2 = crtc_state->adjusted_mode.vdisplay;
-
 	return drm_atomic_helper_check_plane_state(plane_state, crtc_state,
-						   &clip, min_scale, max_scale,
+						   min_scale, max_scale,
 						   true, true);
 }
 
@@ -274,7 +268,7 @@ static void zx_plane_atomic_disable(struct drm_plane *plane,
 	struct zx_plane *zplane = to_zx_plane(plane);
 	void __iomem *hbsc = zplane->hbsc;
 
-	zx_vou_layer_disable(plane);
+	zx_vou_layer_disable(plane, old_state);
 
 	/* Disable HBSC block */
 	zx_writel_mask(hbsc + HBSC_CTRL0, HBSC_CTRL_EN, 0);
@@ -292,7 +286,6 @@ static int zx_gl_plane_atomic_check(struct drm_plane *plane,
 	struct drm_framebuffer *fb = plane_state->fb;
 	struct drm_crtc *crtc = plane_state->crtc;
 	struct drm_crtc_state *crtc_state;
-	struct drm_rect clip;
 
 	if (!crtc || !fb)
 		return 0;
@@ -310,13 +303,7 @@ static int zx_gl_plane_atomic_check(struct drm_plane *plane,
 	if (!plane_state->crtc)
 		return -EINVAL;
 
-	clip.x1 = 0;
-	clip.y1 = 0;
-	clip.x2 = crtc_state->adjusted_mode.hdisplay;
-	clip.y2 = crtc_state->adjusted_mode.vdisplay;
-
 	return drm_atomic_helper_check_plane_state(plane_state, crtc_state,
-						   &clip,
 						   DRM_PLANE_HELPER_NO_SCALING,
 						   DRM_PLANE_HELPER_NO_SCALING,
 						   false, true);

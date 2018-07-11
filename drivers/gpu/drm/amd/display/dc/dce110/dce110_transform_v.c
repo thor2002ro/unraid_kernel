@@ -30,6 +30,8 @@
 #include "dce/dce_11_0_sh_mask.h"
 
 #define SCLV_PHASES 64
+#define DC_LOGGER \
+	xfm->ctx->logger
 
 struct sclv_ratios_inits {
 	uint32_t h_int_scale_ratio_luma;
@@ -371,13 +373,13 @@ static void calculate_inits(
 	struct rect *chroma_viewport)
 {
 	inits->h_int_scale_ratio_luma =
-		dal_fixed31_32_u2d19(data->ratios.horz) << 5;
+		dc_fixpt_u2d19(data->ratios.horz) << 5;
 	inits->v_int_scale_ratio_luma =
-		dal_fixed31_32_u2d19(data->ratios.vert) << 5;
+		dc_fixpt_u2d19(data->ratios.vert) << 5;
 	inits->h_int_scale_ratio_chroma =
-		dal_fixed31_32_u2d19(data->ratios.horz_c) << 5;
+		dc_fixpt_u2d19(data->ratios.horz_c) << 5;
 	inits->v_int_scale_ratio_chroma =
-		dal_fixed31_32_u2d19(data->ratios.vert_c) << 5;
+		dc_fixpt_u2d19(data->ratios.vert_c) << 5;
 
 	inits->h_init_luma.integer = 1;
 	inits->v_init_luma.integer = 1;
@@ -670,8 +672,7 @@ static void dce110_xfmv_set_pixel_storage_depth(
 	if (!(xfm_dce->lb_pixel_depth_supported & depth)) {
 		/*we should use unsupported capabilities
 		 *  unless it is required by w/a*/
-		dm_logger_write(xfm->ctx->logger, LOG_WARNING,
-			"%s: Capability not supported",
+		DC_LOG_WARNING("%s: Capability not supported",
 			__func__);
 	}
 }

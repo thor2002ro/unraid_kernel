@@ -98,8 +98,9 @@ int octeon_init_instr_queue(struct octeon_device *oct,
 	iq->request_list = vmalloc_node((sizeof(*iq->request_list) * num_descs),
 					       numa_node);
 	if (!iq->request_list)
-		iq->request_list = vmalloc(sizeof(*iq->request_list) *
-						  num_descs);
+		iq->request_list =
+			vmalloc(array_size(num_descs,
+					   sizeof(*iq->request_list)));
 	if (!iq->request_list) {
 		lio_dma_free(oct, q_size, iq->base_addr, iq->base_addr_dma);
 		dev_err(&oct->pci_dev->dev, "Alloc failed for IQ[%d] nr free list\n",
@@ -366,6 +367,7 @@ int
 lio_process_iq_request_list(struct octeon_device *oct,
 			    struct octeon_instr_queue *iq, u32 napi_budget)
 {
+	struct cavium_wq *cwq = &oct->dma_comp_wq;
 	int reqtype;
 	void *buf;
 	u32 old = iq->flush_index;
@@ -449,6 +451,10 @@ lio_process_iq_request_list(struct octeon_device *oct,
 		octeon_report_tx_completion_to_bql(iq->app_ctx, pkts_compl,
 						   bytes_compl);
 	iq->flush_index = old;
+
+	if (atomic_read(&oct->response_list
+			[OCTEON_ORDERED_SC_LIST].pending_req_count))
+		queue_delayed_work(cwq->wq, &cwq->wk.work, msecs_to_jiffies(1));
 
 	return inst_count;
 }
@@ -623,7 +629,8 @@ octeon_prepare_soft_command(struct octeon_device *oct,
 		pki_ih3->tag     = LIO_CONTROL;
 		pki_ih3->tagtype = ATOMIC_TAG;
 		pki_ih3->qpg         =
-			oct->instr_queue[sc->iq_no]->txpciq.s.qpg;
+			oct->instr_queue[sc->iq_no]->txpciq.s.ctrl_qpg;
+
 		pki_ih3->pm          = 0x7;
 		pki_ih3->sl          = 8;
 

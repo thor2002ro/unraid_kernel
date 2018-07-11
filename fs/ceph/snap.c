@@ -594,9 +594,9 @@ int __ceph_finish_cap_snap(struct ceph_inode_info *ci,
 
 	BUG_ON(capsnap->writing);
 	capsnap->size = inode->i_size;
-	capsnap->mtime = inode->i_mtime;
-	capsnap->atime = inode->i_atime;
-	capsnap->ctime = inode->i_ctime;
+	capsnap->mtime = timespec64_to_timespec(inode->i_mtime);
+	capsnap->atime = timespec64_to_timespec(inode->i_atime);
+	capsnap->ctime = timespec64_to_timespec(inode->i_ctime);
 	capsnap->time_warp_seq = ci->i_time_warp_seq;
 	capsnap->truncate_size = ci->i_truncate_size;
 	capsnap->truncate_seq = ci->i_truncate_seq;
@@ -931,6 +931,8 @@ void ceph_handle_snap(struct ceph_mds_client *mdsc,
 			list_add(&ci->i_snap_realm_item,
 				 &realm->inodes_with_caps);
 			ci->i_snap_realm = realm;
+			if (realm->ino == ci->i_vino.ino)
+                                realm->inode = inode;
 			spin_unlock(&realm->inodes_with_caps_lock);
 
 			spin_unlock(&ci->i_ceph_lock);

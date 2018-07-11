@@ -11,8 +11,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <linux/compiler.h>
-#include <linux/types.h>
-#include "namespaces.h"
+#include <sys/types.h>
 
 /* General helper functions */
 void usage(const char *err) __noreturn;
@@ -26,6 +25,7 @@ static inline void *zalloc(size_t size)
 #define zfree(ptr) ({ free(*ptr); *ptr = NULL; })
 
 struct dirent;
+struct nsinfo;
 struct strlist;
 
 int mkdir_p(char *path, mode_t mode);
@@ -43,7 +43,9 @@ size_t hex_width(u64 v);
 int hex2u64(const char *ptr, u64 *val);
 
 extern unsigned int page_size;
-extern int cacheline_size;
+int __pure cacheline_size(void);
+
+int sysctl__max_stack(void);
 
 int fetch_kernel_version(unsigned int *puint,
 			 char *str, size_t str_sz);

@@ -5,6 +5,8 @@
 #include <linux/sched/signal.h>
 #include <linux/uaccess.h>
 #include <uapi/misc/ocxl.h>
+#include <asm/reg.h>
+#include <asm/switch_to.h>
 #include "ocxl_internal.h"
 
 
@@ -102,10 +104,98 @@ static long afu_ioctl_attach(struct ocxl_context *ctx,
 	return rc;
 }
 
+static long afu_ioctl_get_metadata(struct ocxl_context *ctx,
+		struct ocxl_ioctl_metadata __user *uarg)
+{
+	struct ocxl_ioctl_metadata arg;
+
+	memset(&arg, 0, sizeof(arg));
+
+	arg.version = 0;
+
+	arg.afu_version_major = ctx->afu->config.version_major;
+	arg.afu_version_minor = ctx->afu->config.version_minor;
+	arg.pasid = ctx->pasid;
+	arg.pp_mmio_size = ctx->afu->config.pp_mmio_stride;
+	arg.global_mmio_size = ctx->afu->config.global_mmio_size;
+
+	if (copy_to_user(uarg, &arg, sizeof(arg)))
+		return -EFAULT;
+
+	return 0;
+}
+
+#ifdef CONFIG_PPC64
+static long afu_ioctl_enable_p9_wait(struct ocxl_context *ctx,
+		struct ocxl_ioctl_p9_wait __user *uarg)
+{
+	struct ocxl_ioctl_p9_wait arg;
+
+	memset(&arg, 0, sizeof(arg));
+
+	if (cpu_has_feature(CPU_FTR_P9_TIDR)) {
+		enum ocxl_context_status status;
+
+		// Locks both status & tidr
+		mutex_lock(&ctx->status_mutex);
+		if (!ctx->tidr) {
+			if (set_thread_tidr(current)) {
+				mutex_unlock(&ctx->status_mutex);
+				return -ENOENT;
+			}
+
+			ctx->tidr = current->thread.tidr;
+		}
+
+		status = ctx->status;
+		mutex_unlock(&ctx->status_mutex);
+
+		if (status == ATTACHED) {
+			int rc;
+			struct link *link = ctx->afu->fn->link;
+
+			rc = ocxl_link_update_pe(link, ctx->pasid, ctx->tidr);
+			if (rc)
+				return rc;
+		}
+
+		arg.thread_id = ctx->tidr;
+	} else
+		return -ENOENT;
+
+	if (copy_to_user(uarg, &arg, sizeof(arg)))
+		return -EFAULT;
+
+	return 0;
+}
+#endif
+
+
+static long afu_ioctl_get_features(struct ocxl_context *ctx,
+		struct ocxl_ioctl_features __user *uarg)
+{
+	struct ocxl_ioctl_features arg;
+
+	memset(&arg, 0, sizeof(arg));
+
+#ifdef CONFIG_PPC64
+	if (cpu_has_feature(CPU_FTR_P9_TIDR))
+		arg.flags[0] |= OCXL_IOCTL_FEATURES_FLAGS0_P9_WAIT;
+#endif
+
+	if (copy_to_user(uarg, &arg, sizeof(arg)))
+		return -EFAULT;
+
+	return 0;
+}
+
 #define CMD_STR(x) (x == OCXL_IOCTL_ATTACH ? "ATTACH" :			\
 			x == OCXL_IOCTL_IRQ_ALLOC ? "IRQ_ALLOC" :	\
 			x == OCXL_IOCTL_IRQ_FREE ? "IRQ_FREE" :		\
 			x == OCXL_IOCTL_IRQ_SET_FD ? "IRQ_SET_FD" :	\
+			x == OCXL_IOCTL_GET_METADATA ? "GET_METADATA" :	\
+			x == OCXL_IOCTL_ENABLE_P9_WAIT ? "ENABLE_P9_WAIT" :	\
+			x == OCXL_IOCTL_GET_FEATURES ? "GET_FEATURES" :	\
 			"UNKNOWN")
 
 static long afu_ioctl(struct file *file, unsigned int cmd,
@@ -133,8 +223,10 @@ static long afu_ioctl(struct file *file, unsigned int cmd,
 		if (!rc) {
 			rc = copy_to_user((u64 __user *) args, &irq_offset,
 					sizeof(irq_offset));
-			if (rc)
+			if (rc) {
 				ocxl_afu_irq_free(ctx, irq_offset);
+				return -EFAULT;
+			}
 		}
 		break;
 
@@ -155,6 +247,23 @@ static long afu_ioctl(struct file *file, unsigned int cmd,
 			return -EINVAL;
 		rc = ocxl_afu_irq_set_fd(ctx, irq_fd.irq_offset,
 					irq_fd.eventfd);
+		break;
+
+	case OCXL_IOCTL_GET_METADATA:
+		rc = afu_ioctl_get_metadata(ctx,
+				(struct ocxl_ioctl_metadata __user *) args);
+		break;
+
+#ifdef CONFIG_PPC64
+	case OCXL_IOCTL_ENABLE_P9_WAIT:
+		rc = afu_ioctl_enable_p9_wait(ctx,
+				(struct ocxl_ioctl_p9_wait __user *) args);
+		break;
+#endif
+
+	case OCXL_IOCTL_GET_FEATURES:
+		rc = afu_ioctl_get_features(ctx,
+				(struct ocxl_ioctl_features __user *) args);
 		break;
 
 	default:
@@ -277,7 +386,7 @@ static ssize_t afu_read(struct file *file, char __user *buf, size_t count,
 	struct ocxl_context *ctx = file->private_data;
 	struct ocxl_kernel_event_header header;
 	ssize_t rc;
-	size_t used = 0;
+	ssize_t used = 0;
 	DEFINE_WAIT(event_wait);
 
 	memset(&header, 0, sizeof(header));
@@ -329,7 +438,7 @@ static ssize_t afu_read(struct file *file, char __user *buf, size_t count,
 
 	used += sizeof(header);
 
-	rc = (ssize_t) used;
+	rc = used;
 	return rc;
 }
 

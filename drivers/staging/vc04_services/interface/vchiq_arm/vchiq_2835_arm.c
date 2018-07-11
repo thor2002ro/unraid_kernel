@@ -77,7 +77,17 @@ struct vchiq_pagelist_info {
 };
 
 static void __iomem *g_regs;
-static unsigned int g_cache_line_size = sizeof(CACHE_LINE_SIZE);
+/* This value is the size of the L2 cache lines as understood by the
+ * VPU firmware, which determines the required alignment of the
+ * offsets/sizes in pagelists.
+ *
+ * Modern VPU firmware looks for a DT "cache-line-size" property in
+ * the VCHIQ node and will overwrite it with the actual L2 cache size,
+ * which the kernel must then respect.  That property was rejected
+ * upstream, so we have to use the VPU firmware's compatibility value
+ * of 32.
+ */
+static unsigned int g_cache_line_size = 32;
 static unsigned int g_fragments_size;
 static char *g_fragments_base;
 static char *g_free_fragments;
@@ -116,14 +126,6 @@ int vchiq_platform_init(struct platform_device *pdev, VCHIQ_STATE_T *state)
 
 	if (err < 0)
 		return err;
-
-	err = of_property_read_u32(dev->of_node, "cache-line-size",
-				   &g_cache_line_size);
-
-	if (err) {
-		dev_err(dev, "Missing cache-line-size property\n");
-		return -ENODEV;
-	}
 
 	g_fragments_size = 2 * g_cache_line_size;
 
@@ -473,7 +475,7 @@ create_pagelist(char __user *buf, size_t count, unsigned short type)
 		/* do not try and release vmalloc pages */
 	} else {
 		actual_pages = get_user_pages_fast(
-				          (unsigned long)buf & PAGE_MASK,
+					  (unsigned long)buf & PAGE_MASK,
 					  num_pages,
 					  type == PAGELIST_READ,
 					  pages);
@@ -580,8 +582,8 @@ free_pagelist(struct vchiq_pagelist_info *pagelistinfo,
 	struct page **pages    = pagelistinfo->pages;
 	unsigned int num_pages = pagelistinfo->num_pages;
 
-	vchiq_log_trace(vchiq_arm_log_level, "free_pagelist - %pK, %d",
-			pagelistinfo->pagelist, actual);
+	vchiq_log_trace(vchiq_arm_log_level, "%s - %pK, %d",
+			__func__, pagelistinfo->pagelist, actual);
 
 	/*
 	 * NOTE: dma_unmap_sg must be called before the

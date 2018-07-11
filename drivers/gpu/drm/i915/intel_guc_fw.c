@@ -165,7 +165,7 @@ static int guc_xfer_ucode(struct intel_guc *guc, struct i915_vma *vma)
 	I915_WRITE(DMA_COPY_SIZE, guc_fw->header_size + guc_fw->ucode_size);
 
 	/* Set the source address for the new blob */
-	offset = guc_ggtt_offset(vma) + guc_fw->header_offset;
+	offset = intel_guc_ggtt_offset(guc, vma) + guc_fw->header_offset;
 	I915_WRITE(DMA_ADDR_0_LOW, lower_32_bits(offset));
 	I915_WRITE(DMA_ADDR_0_HIGH, upper_32_bits(offset) & 0xFFFF);
 
@@ -269,15 +269,14 @@ static int guc_fw_xfer(struct intel_uc_fw *guc_fw, struct i915_vma *vma)
 }
 
 /**
- * intel_guc_fw_upload() - finish preparing the GuC for activity
+ * intel_guc_fw_upload() - load GuC uCode to device
  * @guc: intel_guc structure
  *
- * Called during driver loading and also after a GPU reset.
+ * Called from intel_uc_init_hw() during driver load, resume from sleep and
+ * after a GPU reset.
  *
- * The main action required here it to load the GuC uCode into the device.
- * The firmware image should have already been fetched into memory by the
- * earlier call to intel_guc_init(), so here we need only check that
- * worked, and then transfer the image to the h/w.
+ * The firmware image should have already been fetched into memory, so only
+ * check that fetch succeeded, and then transfer the image to the h/w.
  *
  * Return:	non-zero code on error
  */

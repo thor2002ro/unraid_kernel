@@ -16,101 +16,6 @@
 
 #include "pblk.h"
 
-void pblk_submit_rec(struct work_struct *work)
-{
-	struct pblk_rec_ctx *recovery =
-			container_of(work, struct pblk_rec_ctx, ws_rec);
-	struct pblk *pblk = recovery->pblk;
-	struct nvm_tgt_dev *dev = pblk->dev;
-	struct nvm_rq *rqd = recovery->rqd;
-	struct pblk_c_ctx *c_ctx = nvm_rq_to_pdu(rqd);
-	int max_secs = nvm_max_phys_sects(dev);
-	struct bio *bio;
-	unsigned int nr_rec_secs;
-	unsigned int pgs_read;
-	int ret;
-
-	nr_rec_secs = bitmap_weight((unsigned long int *)&rqd->ppa_status,
-								max_secs);
-
-	bio = bio_alloc(GFP_KERNEL, nr_rec_secs);
-
-	bio->bi_iter.bi_sector = 0;
-	bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
-	rqd->bio = bio;
-	rqd->nr_ppas = nr_rec_secs;
-
-	pgs_read = pblk_rb_read_to_bio_list(&pblk->rwb, bio, &recovery->failed,
-								nr_rec_secs);
-	if (pgs_read != nr_rec_secs) {
-		pr_err("pblk: could not read recovery entries\n");
-		goto err;
-	}
-
-	if (pblk_setup_w_rec_rq(pblk, rqd, c_ctx)) {
-		pr_err("pblk: could not setup recovery request\n");
-		goto err;
-	}
-
-#ifdef CONFIG_NVM_DEBUG
-	atomic_long_add(nr_rec_secs, &pblk->recov_writes);
-#endif
-
-	ret = pblk_submit_io(pblk, rqd);
-	if (ret) {
-		pr_err("pblk: I/O submission failed: %d\n", ret);
-		goto err;
-	}
-
-	mempool_free(recovery, pblk->rec_pool);
-	return;
-
-err:
-	bio_put(bio);
-	pblk_free_rqd(pblk, rqd, PBLK_WRITE);
-}
-
-int pblk_recov_setup_rq(struct pblk *pblk, struct pblk_c_ctx *c_ctx,
-			struct pblk_rec_ctx *recovery, u64 *comp_bits,
-			unsigned int comp)
-{
-	struct nvm_tgt_dev *dev = pblk->dev;
-	int max_secs = nvm_max_phys_sects(dev);
-	struct nvm_rq *rec_rqd;
-	struct pblk_c_ctx *rec_ctx;
-	int nr_entries = c_ctx->nr_valid + c_ctx->nr_padded;
-
-	rec_rqd = pblk_alloc_rqd(pblk, PBLK_WRITE);
-	rec_ctx = nvm_rq_to_pdu(rec_rqd);
-
-	/* Copy completion bitmap, but exclude the first X completed entries */
-	bitmap_shift_right((unsigned long int *)&rec_rqd->ppa_status,
-				(unsigned long int *)comp_bits,
-				comp, max_secs);
-
-	/* Save the context for the entries that need to be re-written and
-	 * update current context with the completed entries.
-	 */
-	rec_ctx->sentry = pblk_rb_wrap_pos(&pblk->rwb, c_ctx->sentry + comp);
-	if (comp >= c_ctx->nr_valid) {
-		rec_ctx->nr_valid = 0;
-		rec_ctx->nr_padded = nr_entries - comp;
-
-		c_ctx->nr_padded = comp - c_ctx->nr_valid;
-	} else {
-		rec_ctx->nr_valid = c_ctx->nr_valid - comp;
-		rec_ctx->nr_padded = c_ctx->nr_padded;
-
-		c_ctx->nr_valid = comp;
-		c_ctx->nr_padded = 0;
-	}
-
-	recovery->rqd = rec_rqd;
-	recovery->pblk = pblk;
-
-	return 0;
-}
-
 int pblk_recov_check_emeta(struct pblk *pblk, struct line_emeta *emeta_buf)
 {
 	u32 crc;
@@ -188,7 +93,7 @@ static int pblk_calc_sec_in_line(struct pblk *pblk, struct pblk_line *line)
 	int nr_bb = bitmap_weight(line->blk_bitmap, lm->blk_per_line);
 
 	return lm->sec_per_line - lm->smeta_sec - lm->emeta_sec[0] -
-				nr_bb * geo->sec_per_chk;
+				nr_bb * geo->clba;
 }
 
 struct pblk_recov_alloc {
@@ -236,7 +141,7 @@ next_read_rq:
 	rq_ppas = pblk_calc_secs(pblk, left_ppas, 0);
 	if (!rq_ppas)
 		rq_ppas = pblk->min_write_pgs;
-	rq_len = rq_ppas * geo->sec_size;
+	rq_len = rq_ppas * geo->csecs;
 
 	bio = bio_map_kern(dev->q, data, rq_len, GFP_KERNEL);
 	if (IS_ERR(bio))
@@ -355,7 +260,7 @@ static int pblk_recov_pad_oob(struct pblk *pblk, struct pblk_line *line,
 	if (!pad_rq)
 		return -ENOMEM;
 
-	data = vzalloc(pblk->max_write_pgs * geo->sec_size);
+	data = vzalloc(array_size(pblk->max_write_pgs, geo->csecs));
 	if (!data) {
 		ret = -ENOMEM;
 		goto free_rq;
@@ -372,7 +277,7 @@ next_pad_rq:
 		goto fail_free_pad;
 	}
 
-	rq_len = rq_ppas * geo->sec_size;
+	rq_len = rq_ppas * geo->csecs;
 
 	meta_list = nvm_dev_dma_alloc(dev->parent, GFP_KERNEL, &dma_meta_list);
 	if (!meta_list) {
@@ -513,7 +418,7 @@ next_rq:
 	rq_ppas = pblk_calc_secs(pblk, left_ppas, 0);
 	if (!rq_ppas)
 		rq_ppas = pblk->min_write_pgs;
-	rq_len = rq_ppas * geo->sec_size;
+	rq_len = rq_ppas * geo->csecs;
 
 	bio = bio_map_kern(dev->q, data, rq_len, GFP_KERNEL);
 	if (IS_ERR(bio))
@@ -644,7 +549,7 @@ next_rq:
 	rq_ppas = pblk_calc_secs(pblk, left_ppas, 0);
 	if (!rq_ppas)
 		rq_ppas = pblk->min_write_pgs;
-	rq_len = rq_ppas * geo->sec_size;
+	rq_len = rq_ppas * geo->csecs;
 
 	bio = bio_map_kern(dev->q, data, rq_len, GFP_KERNEL);
 	if (IS_ERR(bio))
@@ -749,7 +654,7 @@ static int pblk_recov_l2p_from_oob(struct pblk *pblk, struct pblk_line *line)
 	ppa_list = (void *)(meta_list) + pblk_dma_meta_size;
 	dma_ppa_list = dma_meta_list + pblk_dma_meta_size;
 
-	data = kcalloc(pblk->max_write_pgs, geo->sec_size, GFP_KERNEL);
+	data = kcalloc(pblk->max_write_pgs, geo->csecs, GFP_KERNEL);
 	if (!data) {
 		ret = -ENOMEM;
 		goto free_meta_list;
@@ -826,6 +731,75 @@ static u64 pblk_line_emeta_start(struct pblk *pblk, struct pblk_line *line)
 	return emeta_start;
 }
 
+static int pblk_recov_check_line_version(struct pblk *pblk,
+					 struct line_emeta *emeta)
+{
+	struct line_header *header = &emeta->header;
+
+	if (header->version_major != EMETA_VERSION_MAJOR) {
+		pr_err("pblk: line major version mismatch: %d, expected: %d\n",
+		       header->version_major, EMETA_VERSION_MAJOR);
+		return 1;
+	}
+
+#ifdef NVM_DEBUG
+	if (header->version_minor > EMETA_VERSION_MINOR)
+		pr_info("pblk: newer line minor version found: %d\n", line_v);
+#endif
+
+	return 0;
+}
+
+static void pblk_recov_wa_counters(struct pblk *pblk,
+				   struct line_emeta *emeta)
+{
+	struct pblk_line_meta *lm = &pblk->lm;
+	struct line_header *header = &emeta->header;
+	struct wa_counters *wa = emeta_to_wa(lm, emeta);
+
+	/* WA counters were introduced in emeta version 0.2 */
+	if (header->version_major > 0 || header->version_minor >= 2) {
+		u64 user = le64_to_cpu(wa->user);
+		u64 pad = le64_to_cpu(wa->pad);
+		u64 gc = le64_to_cpu(wa->gc);
+
+		atomic64_set(&pblk->user_wa, user);
+		atomic64_set(&pblk->pad_wa, pad);
+		atomic64_set(&pblk->gc_wa, gc);
+
+		pblk->user_rst_wa = user;
+		pblk->pad_rst_wa = pad;
+		pblk->gc_rst_wa = gc;
+	}
+}
+
+static int pblk_line_was_written(struct pblk_line *line,
+			    struct pblk *pblk)
+{
+
+	struct pblk_line_meta *lm = &pblk->lm;
+	struct nvm_tgt_dev *dev = pblk->dev;
+	struct nvm_geo *geo = &dev->geo;
+	struct nvm_chk_meta *chunk;
+	struct ppa_addr bppa;
+	int smeta_blk;
+
+	if (line->state == PBLK_LINESTATE_BAD)
+		return 0;
+
+	smeta_blk = find_first_zero_bit(line->blk_bitmap, lm->blk_per_line);
+	if (smeta_blk >= lm->blk_per_line)
+		return 0;
+
+	bppa = pblk->luns[smeta_blk].bppa;
+	chunk = &line->chks[pblk_ppa_to_pos(geo, bppa)];
+
+	if (chunk->state & NVM_CHK_ST_FREE)
+		return 0;
+
+	return 1;
+}
+
 struct pblk_line *pblk_recov_l2p(struct pblk *pblk)
 {
 	struct pblk_line_meta *lm = &pblk->lm;
@@ -862,6 +836,9 @@ struct pblk_line *pblk_recov_l2p(struct pblk *pblk)
 		line->lun_bitmap = ((void *)(smeta_buf)) +
 						sizeof(struct line_smeta);
 
+		if (!pblk_line_was_written(line, pblk))
+			continue;
+
 		/* Lines that cannot be read are assumed as not written here */
 		if (pblk_line_read_smeta(pblk, line))
 			continue;
@@ -873,9 +850,9 @@ struct pblk_line *pblk_recov_l2p(struct pblk *pblk)
 		if (le32_to_cpu(smeta_buf->header.identifier) != PBLK_MAGIC)
 			continue;
 
-		if (smeta_buf->header.version != SMETA_VERSION) {
+		if (smeta_buf->header.version_major != SMETA_VERSION_MAJOR) {
 			pr_err("pblk: found incompatible line version %u\n",
-					le16_to_cpu(smeta_buf->header.version));
+					smeta_buf->header.version_major);
 			return ERR_PTR(-EINVAL);
 		}
 
@@ -942,6 +919,11 @@ struct pblk_line *pblk_recov_l2p(struct pblk *pblk)
 			pblk_recov_l2p_from_oob(pblk, line);
 			goto next;
 		}
+
+		if (pblk_recov_check_line_version(pblk, line->emeta->buf))
+			return ERR_PTR(-EINVAL);
+
+		pblk_recov_wa_counters(pblk, line->emeta->buf);
 
 		if (pblk_recov_l2p_from_emeta(pblk, line))
 			pblk_recov_l2p_from_oob(pblk, line);

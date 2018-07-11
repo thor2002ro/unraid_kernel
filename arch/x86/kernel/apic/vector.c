@@ -134,21 +134,40 @@ static void apic_update_vector(struct irq_data *irqd, unsigned int newvec,
 {
 	struct apic_chip_data *apicd = apic_chip_data(irqd);
 	struct irq_desc *desc = irq_data_to_desc(irqd);
+	bool managed = irqd_affinity_is_managed(irqd);
 
 	lockdep_assert_held(&vector_lock);
 
 	trace_vector_update(irqd->irq, newvec, newcpu, apicd->vector,
 			    apicd->cpu);
 
-	/* Setup the vector move, if required  */
-	if (apicd->vector && cpu_online(apicd->cpu)) {
+	/*
+	 * If there is no vector associated or if the associated vector is
+	 * the shutdown vector, which is associated to make PCI/MSI
+	 * shutdown mode work, then there is nothing to release. Clear out
+	 * prev_vector for this and the offlined target case.
+	 */
+	apicd->prev_vector = 0;
+	if (!apicd->vector || apicd->vector == MANAGED_IRQ_SHUTDOWN_VECTOR)
+		goto setnew;
+	/*
+	 * If the target CPU of the previous vector is online, then mark
+	 * the vector as move in progress and store it for cleanup when the
+	 * first interrupt on the new vector arrives. If the target CPU is
+	 * offline then the regular release mechanism via the cleanup
+	 * vector is not possible and the vector can be immediately freed
+	 * in the underlying matrix allocator.
+	 */
+	if (cpu_online(apicd->cpu)) {
 		apicd->move_in_progress = true;
 		apicd->prev_vector = apicd->vector;
 		apicd->prev_cpu = apicd->cpu;
 	} else {
-		apicd->prev_vector = 0;
+		irq_matrix_free(vector_matrix, apicd->cpu, apicd->vector,
+				managed);
 	}
 
+setnew:
 	apicd->vector = newvec;
 	apicd->cpu = newcpu;
 	BUG_ON(!IS_ERR_OR_NULL(per_cpu(vector_irq, newcpu)[newvec]));
@@ -215,6 +234,15 @@ static int allocate_vector(struct irq_data *irqd, const struct cpumask *dest)
 	 */
 	if (vector && cpu_online(cpu) && cpumask_test_cpu(cpu, dest))
 		return 0;
+
+	/*
+	 * Careful here. @apicd might either have move_in_progress set or
+	 * be enqueued for cleanup. Assigning a new vector would either
+	 * leave a stale vector on some CPU around or in case of a pending
+	 * cleanup corrupt the hlist.
+	 */
+	if (apicd->move_in_progress || !hlist_unhashed(&apicd->clist))
+		return -EBUSY;
 
 	vector = irq_matrix_alloc(vector_matrix, dest, resvd, &cpu);
 	if (vector > 0)
@@ -560,8 +588,7 @@ error:
 static void x86_vector_debug_show(struct seq_file *m, struct irq_domain *d,
 				  struct irq_data *irqd, int ind)
 {
-	unsigned int cpu, vector, prev_cpu, prev_vector;
-	struct apic_chip_data *apicd;
+	struct apic_chip_data apicd;
 	unsigned long flags;
 	int irq;
 
@@ -577,24 +604,26 @@ static void x86_vector_debug_show(struct seq_file *m, struct irq_domain *d,
 		return;
 	}
 
-	apicd = irqd->chip_data;
-	if (!apicd) {
+	if (!irqd->chip_data) {
 		seq_printf(m, "%*sVector: Not assigned\n", ind, "");
 		return;
 	}
 
 	raw_spin_lock_irqsave(&vector_lock, flags);
-	cpu = apicd->cpu;
-	vector = apicd->vector;
-	prev_cpu = apicd->prev_cpu;
-	prev_vector = apicd->prev_vector;
+	memcpy(&apicd, irqd->chip_data, sizeof(apicd));
 	raw_spin_unlock_irqrestore(&vector_lock, flags);
-	seq_printf(m, "%*sVector: %5u\n", ind, "", vector);
-	seq_printf(m, "%*sTarget: %5u\n", ind, "", cpu);
-	if (prev_vector) {
-		seq_printf(m, "%*sPrevious vector: %5u\n", ind, "", prev_vector);
-		seq_printf(m, "%*sPrevious target: %5u\n", ind, "", prev_cpu);
+
+	seq_printf(m, "%*sVector: %5u\n", ind, "", apicd.vector);
+	seq_printf(m, "%*sTarget: %5u\n", ind, "", apicd.cpu);
+	if (apicd.prev_vector) {
+		seq_printf(m, "%*sPrevious vector: %5u\n", ind, "", apicd.prev_vector);
+		seq_printf(m, "%*sPrevious target: %5u\n", ind, "", apicd.prev_cpu);
 	}
+	seq_printf(m, "%*smove_in_progress: %u\n", ind, "", apicd.move_in_progress ? 1 : 0);
+	seq_printf(m, "%*sis_managed:       %u\n", ind, "", apicd.is_managed ? 1 : 0);
+	seq_printf(m, "%*scan_reserve:      %u\n", ind, "", apicd.can_reserve ? 1 : 0);
+	seq_printf(m, "%*shas_reserved:     %u\n", ind, "", apicd.has_reserved ? 1 : 0);
+	seq_printf(m, "%*scleanup_pending:  %u\n", ind, "", !hlist_unhashed(&apicd.clist));
 }
 #endif
 
@@ -781,11 +810,16 @@ static int apic_retrigger_irq(struct irq_data *irqd)
 	return 1;
 }
 
+void apic_ack_irq(struct irq_data *irqd)
+{
+	irq_move_irq(irqd);
+	ack_APIC_irq();
+}
+
 void apic_ack_edge(struct irq_data *irqd)
 {
 	irq_complete_move(irqd_cfg(irqd));
-	irq_move_irq(irqd);
-	ack_APIC_irq();
+	apic_ack_irq(irqd);
 }
 
 static struct irq_chip lapic_controller = {

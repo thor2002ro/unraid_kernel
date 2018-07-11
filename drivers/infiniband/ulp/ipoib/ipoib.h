@@ -193,11 +193,6 @@ struct ipoib_tx_buf {
 	u64		mapping[MAX_SKB_FRAGS + 1];
 };
 
-struct ipoib_cm_tx_buf {
-	struct sk_buff *skb;
-	u64		mapping;
-};
-
 struct ib_cm_id;
 
 struct ipoib_cm_data {
@@ -420,6 +415,7 @@ struct ipoib_ah {
 	struct list_head   list;
 	struct kref	   ref;
 	unsigned	   last_send;
+	int  		   valid;
 };
 
 struct ipoib_path {
@@ -436,7 +432,6 @@ struct ipoib_path {
 
 	struct rb_node	      rb_node;
 	struct list_head      list;
-	int  		      valid;
 };
 
 struct ipoib_neigh {

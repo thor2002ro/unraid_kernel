@@ -556,7 +556,8 @@ static int ena_refill_rx_bufs(struct ena_ring *rx_ring, u32 num)
 		 * issue a doorbell
 		 */
 		wmb();
-		ena_com_write_sq_doorbell(rx_ring->ena_com_io_sq);
+		ena_com_write_sq_doorbell(rx_ring->ena_com_io_sq, true);
+		mmiowb();
 	}
 
 	rx_ring->next_to_use = next_to_use;
@@ -2151,7 +2152,7 @@ static netdev_tx_t ena_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	if (netif_xmit_stopped(txq) || !skb->xmit_more) {
 		/* trigger the dma engine */
-		ena_com_write_sq_doorbell(tx_ring->ena_com_io_sq);
+		ena_com_write_sq_doorbell(tx_ring->ena_com_io_sq, false);
 		u64_stats_update_begin(&tx_ring->syncp);
 		tx_ring->tx_stats.doorbells++;
 		u64_stats_update_end(&tx_ring->syncp);
@@ -3385,32 +3386,6 @@ err_disable_device:
 }
 
 /*****************************************************************************/
-static int ena_sriov_configure(struct pci_dev *dev, int numvfs)
-{
-	int rc;
-
-	if (numvfs > 0) {
-		rc = pci_enable_sriov(dev, numvfs);
-		if (rc != 0) {
-			dev_err(&dev->dev,
-				"pci_enable_sriov failed to enable: %d vfs with the error: %d\n",
-				numvfs, rc);
-			return rc;
-		}
-
-		return numvfs;
-	}
-
-	if (numvfs == 0) {
-		pci_disable_sriov(dev);
-		return 0;
-	}
-
-	return -EINVAL;
-}
-
-/*****************************************************************************/
-/*****************************************************************************/
 
 /* ena_remove - Device Removal Routine
  * @pdev: PCI device information struct
@@ -3525,7 +3500,7 @@ static struct pci_driver ena_pci_driver = {
 	.suspend    = ena_suspend,
 	.resume     = ena_resume,
 #endif
-	.sriov_configure = ena_sriov_configure,
+	.sriov_configure = pci_sriov_configure_simple,
 };
 
 static int __init ena_init(void)

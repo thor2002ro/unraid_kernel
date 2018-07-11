@@ -152,25 +152,25 @@ struct rhashtable_params {
 /**
  * struct rhashtable - Hash table handle
  * @tbl: Bucket table
- * @nelems: Number of elements in table
  * @key_len: Key length for hashfn
- * @p: Configuration parameters
  * @max_elems: Maximum number of elements in table
+ * @p: Configuration parameters
  * @rhlist: True if this is an rhltable
  * @run_work: Deferred worker to expand/shrink asynchronously
  * @mutex: Mutex to protect current/future table swapping
  * @lock: Spin lock to protect walker list
+ * @nelems: Number of elements in table
  */
 struct rhashtable {
 	struct bucket_table __rcu	*tbl;
-	atomic_t			nelems;
 	unsigned int			key_len;
-	struct rhashtable_params	p;
 	unsigned int			max_elems;
+	struct rhashtable_params	p;
 	bool				rhlist;
 	struct work_struct		run_work;
 	struct mutex                    mutex;
 	spinlock_t			lock;
+	atomic_t			nelems;
 };
 
 /**
@@ -766,8 +766,10 @@ slow_path:
 		if (!key ||
 		    (params.obj_cmpfn ?
 		     params.obj_cmpfn(&arg, rht_obj(ht, head)) :
-		     rhashtable_compare(&arg, rht_obj(ht, head))))
+		     rhashtable_compare(&arg, rht_obj(ht, head)))) {
+			pprev = &head->next;
 			continue;
+		}
 
 		data = rht_obj(ht, head);
 
@@ -834,9 +836,8 @@ out:
  *
  * It is safe to call this function from atomic context.
  *
- * Will trigger an automatic deferred table resizing if the size grows
- * beyond the watermark indicated by grow_decision() which can be passed
- * to rhashtable_init().
+ * Will trigger an automatic deferred table resizing if residency in the
+ * table grows beyond 70%.
  */
 static inline int rhashtable_insert_fast(
 	struct rhashtable *ht, struct rhash_head *obj,
@@ -864,9 +865,8 @@ static inline int rhashtable_insert_fast(
  *
  * It is safe to call this function from atomic context.
  *
- * Will trigger an automatic deferred table resizing if the size grows
- * beyond the watermark indicated by grow_decision() which can be passed
- * to rhashtable_init().
+ * Will trigger an automatic deferred table resizing if residency in the
+ * table grows beyond 70%.
  */
 static inline int rhltable_insert_key(
 	struct rhltable *hlt, const void *key, struct rhlist_head *list,
@@ -888,9 +888,8 @@ static inline int rhltable_insert_key(
  *
  * It is safe to call this function from atomic context.
  *
- * Will trigger an automatic deferred table resizing if the size grows
- * beyond the watermark indicated by grow_decision() which can be passed
- * to rhashtable_init().
+ * Will trigger an automatic deferred table resizing if residency in the
+ * table grows beyond 70%.
  */
 static inline int rhltable_insert(
 	struct rhltable *hlt, struct rhlist_head *list,
@@ -920,9 +919,8 @@ static inline int rhltable_insert(
  *
  * It is safe to call this function from atomic context.
  *
- * Will trigger an automatic deferred table resizing if the size grows
- * beyond the watermark indicated by grow_decision() which can be passed
- * to rhashtable_init().
+ * Will trigger an automatic deferred table resizing if residency in the
+ * table grows beyond 70%.
  */
 static inline int rhashtable_lookup_insert_fast(
 	struct rhashtable *ht, struct rhash_head *obj,
@@ -979,9 +977,8 @@ static inline void *rhashtable_lookup_get_insert_fast(
  *
  * Lookups may occur in parallel with hashtable mutations and resizing.
  *
- * Will trigger an automatic deferred table resizing if the size grows
- * beyond the watermark indicated by grow_decision() which can be passed
- * to rhashtable_init().
+ * Will trigger an automatic deferred table resizing if residency in the
+ * table grows beyond 70%.
  *
  * Returns zero on success.
  */
@@ -1132,8 +1129,8 @@ static inline int __rhashtable_remove_fast(
  * walk the bucket chain upon removal. The removal operation is thus
  * considerable slow if the hash table is not correctly sized.
  *
- * Will automatically shrink the table via rhashtable_expand() if the
- * shrink_decision function specified at rhashtable_init() returns true.
+ * Will automatically shrink the table if permitted when residency drops
+ * below 30%.
  *
  * Returns zero on success, -ENOENT if the entry could not be found.
  */
@@ -1154,8 +1151,8 @@ static inline int rhashtable_remove_fast(
  * walk the bucket chain upon removal. The removal operation is thus
  * considerable slow if the hash table is not correctly sized.
  *
- * Will automatically shrink the table via rhashtable_expand() if the
- * shrink_decision function specified at rhashtable_init() returns true.
+ * Will automatically shrink the table if permitted when residency drops
+ * below 30%
  *
  * Returns zero on success, -ENOENT if the entry could not be found.
  */
@@ -1271,8 +1268,9 @@ static inline int rhashtable_walk_init(struct rhashtable *ht,
  * For a completely stable walk you should construct your own data
  * structure outside the hash table.
  *
- * This function may sleep so you must not call it from interrupt
- * context or with spin locks held.
+ * This function may be called from any process context, including
+ * non-preemptable context, but cannot be called from softirq or
+ * hardirq context.
  *
  * You must call rhashtable_walk_exit after this function returns.
  */

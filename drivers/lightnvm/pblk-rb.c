@@ -38,7 +38,7 @@ void pblk_rb_data_free(struct pblk_rb *rb)
 /*
  * Initialize ring buffer. The data and metadata buffers must be previously
  * allocated and their size must be a power of two
- * (Documentation/circular-buffers.txt)
+ * (Documentation/core-api/circular-buffers.rst)
  */
 int pblk_rb_init(struct pblk_rb *rb, struct pblk_rb_entry *rb_entry_base,
 		 unsigned int power_size, unsigned int power_seg_sz)
@@ -142,10 +142,9 @@ static void clean_wctx(struct pblk_w_ctx *w_ctx)
 {
 	int flags;
 
-try:
 	flags = READ_ONCE(w_ctx->flags);
-	if (!(flags & PBLK_SUBMITTED_ENTRY))
-		goto try;
+	WARN_ONCE(!(flags & PBLK_SUBMITTED_ENTRY),
+			"pblk: overwriting unsubmitted data\n");
 
 	/* Release flags on context. Protect from writes and reads */
 	smp_store_release(&w_ctx->flags, PBLK_WRITABLE_ENTRY);
@@ -350,15 +349,18 @@ void pblk_rb_write_entry_gc(struct pblk_rb *rb, void *data,
 }
 
 static int pblk_rb_flush_point_set(struct pblk_rb *rb, struct bio *bio,
-				  unsigned int pos)
+				   unsigned int pos)
 {
 	struct pblk_rb_entry *entry;
 	unsigned int sync, flush_point;
 
+	pblk_rb_sync_init(rb, NULL);
 	sync = READ_ONCE(rb->sync);
 
-	if (pos == sync)
+	if (pos == sync) {
+		pblk_rb_sync_end(rb, NULL);
 		return 0;
+	}
 
 #ifdef CONFIG_NVM_DEBUG
 	atomic_inc(&rb->inflight_flush_point);
@@ -366,8 +368,6 @@ static int pblk_rb_flush_point_set(struct pblk_rb *rb, struct bio *bio,
 
 	flush_point = (pos == 0) ? (rb->nr_entries - 1) : (pos - 1);
 	entry = &rb->entries[flush_point];
-
-	pblk_rb_sync_init(rb, NULL);
 
 	/* Protect flush points */
 	smp_store_release(&rb->flush_point, flush_point);
@@ -419,7 +419,7 @@ void pblk_rb_flush(struct pblk_rb *rb)
 	if (pblk_rb_flush_point_set(rb, NULL, mem))
 		return;
 
-	pblk_write_should_kick(pblk);
+	pblk_write_kick(pblk);
 }
 
 static int pblk_rb_may_write_flush(struct pblk_rb *rb, unsigned int nr_entries,
@@ -437,9 +437,7 @@ static int pblk_rb_may_write_flush(struct pblk_rb *rb, unsigned int nr_entries,
 	if (bio->bi_opf & REQ_PREFLUSH) {
 		struct pblk *pblk = container_of(rb, struct pblk, rwb);
 
-#ifdef CONFIG_NVM_DEBUG
-		atomic_long_inc(&pblk->nr_flush);
-#endif
+		atomic64_inc(&pblk->nr_flush);
 		if (pblk_rb_flush_point_set(&pblk->rwb, bio, mem))
 			*io_ret = NVM_IO_OK;
 	}
@@ -502,45 +500,6 @@ int pblk_rb_may_write_gc(struct pblk_rb *rb, unsigned int nr_entries,
 	spin_unlock(&rb->w_lock);
 
 	return 1;
-}
-
-/*
- * The caller of this function must ensure that the backpointer will not
- * overwrite the entries passed on the list.
- */
-unsigned int pblk_rb_read_to_bio_list(struct pblk_rb *rb, struct bio *bio,
-				      struct list_head *list,
-				      unsigned int max)
-{
-	struct pblk_rb_entry *entry, *tentry;
-	struct page *page;
-	unsigned int read = 0;
-	int ret;
-
-	list_for_each_entry_safe(entry, tentry, list, index) {
-		if (read > max) {
-			pr_err("pblk: too many entries on list\n");
-			goto out;
-		}
-
-		page = virt_to_page(entry->data);
-		if (!page) {
-			pr_err("pblk: could not allocate write bio page\n");
-			goto out;
-		}
-
-		ret = bio_add_page(bio, page, rb->seg_size, 0);
-		if (ret != rb->seg_size) {
-			pr_err("pblk: could not add page to write bio\n");
-			goto out;
-		}
-
-		list_del(&entry->index);
-		read++;
-	}
-
-out:
-	return read;
 }
 
 /*
@@ -620,11 +579,17 @@ try:
 			pr_err("pblk: could not pad page in write bio\n");
 			return NVM_IO_ERR;
 		}
+
+		if (pad < pblk->min_write_pgs)
+			atomic64_inc(&pblk->pad_dist[pad - 1]);
+		else
+			pr_warn("pblk: padding more than min. sectors\n");
+
+		atomic64_add(pad, &pblk->pad_wa);
 	}
 
 #ifdef CONFIG_NVM_DEBUG
-	atomic_long_add(pad, &((struct pblk *)
-			(container_of(rb, struct pblk, rwb)))->padded_writes);
+	atomic_long_add(pad, &pblk->padded_writes);
 #endif
 
 	return NVM_IO_OK;

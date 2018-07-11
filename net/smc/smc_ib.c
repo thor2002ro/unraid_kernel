@@ -23,6 +23,8 @@
 #include "smc_wr.h"
 #include "smc.h"
 
+#define SMC_MAX_CQE 32766	/* max. # of completion queue elements */
+
 #define SMC_QP_MIN_RNR_TIMER		5
 #define SMC_QP_TIMEOUT			15 /* 4096 * 2 ** timeout usec */
 #define SMC_QP_RETRY_CNT			7 /* 7: infinite */
@@ -141,17 +143,6 @@ out:
 	return rc;
 }
 
-static void smc_ib_port_terminate(struct smc_ib_device *smcibdev, u8 ibport)
-{
-	struct smc_link_group *lgr, *l;
-
-	list_for_each_entry_safe(lgr, l, &smc_lgr_list.list, list) {
-		if (lgr->lnk[SMC_SINGLE_LINK].smcibdev == smcibdev &&
-		    lgr->lnk[SMC_SINGLE_LINK].ibport == ibport)
-			smc_lgr_terminate(lgr);
-	}
-}
-
 /* process context wrapper for might_sleep smc_ib_remember_port_attr */
 static void smc_ib_port_event_work(struct work_struct *work)
 {
@@ -163,7 +154,7 @@ static void smc_ib_port_event_work(struct work_struct *work)
 		smc_ib_remember_port_attr(smcibdev, port_idx + 1);
 		clear_bit(port_idx, &smcibdev->port_event_mask);
 		if (!smc_ib_port_active(smcibdev, port_idx + 1))
-			smc_ib_port_terminate(smcibdev, port_idx + 1);
+			smc_port_terminate(smcibdev, port_idx + 1);
 	}
 }
 
@@ -438,9 +429,15 @@ out:
 long smc_ib_setup_per_ibdev(struct smc_ib_device *smcibdev)
 {
 	struct ib_cq_init_attr cqattr =	{
-		.cqe = SMC_WR_MAX_CQE, .comp_vector = 0 };
+		.cqe = SMC_MAX_CQE, .comp_vector = 0 };
+	int cqe_size_order, smc_order;
 	long rc;
 
+	/* the calculated number of cq entries fits to mlx5 cq allocation */
+	cqe_size_order = cache_line_size() == 128 ? 7 : 6;
+	smc_order = MAX_ORDER - cqe_size_order - 1;
+	if (SMC_MAX_CQE + 2 > (0x00000001 << smc_order) * PAGE_SIZE)
+		cqattr.cqe = (0x00000001 << smc_order) * PAGE_SIZE - 2;
 	smcibdev->roce_cq_send = ib_create_cq(smcibdev->ibdev,
 					      smc_wr_tx_cq_handler, NULL,
 					      smcibdev, &cqattr);

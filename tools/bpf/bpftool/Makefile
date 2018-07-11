@@ -38,8 +38,13 @@ bash_compdir ?= /usr/share/bash-completion/completions
 CC = gcc
 
 CFLAGS += -O2
-CFLAGS += -W -Wall -Wextra -Wno-unused-parameter -Wshadow
-CFLAGS += -DPACKAGE='"bpftool"' -D__EXPORTED_HEADERS__ -I$(srctree)/tools/include/uapi -I$(srctree)/tools/include -I$(srctree)/tools/lib/bpf -I$(srctree)/kernel/bpf/
+CFLAGS += -W -Wall -Wextra -Wno-unused-parameter -Wshadow -Wno-missing-field-initializers
+CFLAGS += -DPACKAGE='"bpftool"' -D__EXPORTED_HEADERS__ \
+	-I$(srctree)/kernel/bpf/ \
+	-I$(srctree)/tools/include \
+	-I$(srctree)/tools/include/uapi \
+	-I$(srctree)/tools/lib/bpf \
+	-I$(srctree)/tools/perf
 CFLAGS += -DBPFTOOL_VERSION='"$(BPFTOOL_VERSION)"'
 LIBS = -lelf -lbfd -lopcodes $(LIBBPF)
 
@@ -70,7 +75,7 @@ ifeq ($(feature-disassembler-four-args), 1)
 CFLAGS += -DDISASM_FOUR_ARGS_SIGNATURE
 endif
 
-include $(wildcard *.d)
+include $(wildcard $(OUTPUT)*.d)
 
 all: $(OUTPUT)bpftool
 
@@ -89,6 +94,8 @@ $(OUTPUT)%.o: %.c
 clean: $(LIBBPF)-clean
 	$(call QUIET_CLEAN, bpftool)
 	$(Q)$(RM) $(OUTPUT)bpftool $(OUTPUT)*.o $(OUTPUT)*.d
+	$(call QUIET_CLEAN, core-gen)
+	$(Q)$(RM) $(OUTPUT)FEATURE-DUMP.bpftool
 
 install: $(OUTPUT)bpftool
 	$(call QUIET_INSTALL, bpftool)

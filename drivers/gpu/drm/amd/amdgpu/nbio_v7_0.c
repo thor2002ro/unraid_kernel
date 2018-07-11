@@ -34,9 +34,18 @@
 #define smnCPM_CONTROL                                                                                  0x11180460
 #define smnPCIE_CNTL2                                                                                   0x11180070
 
+/* vega20 */
+#define mmRCC_DEV0_EPF0_STRAP0_VG20                                                                         0x0011
+#define mmRCC_DEV0_EPF0_STRAP0_VG20_BASE_IDX                                                                2
+
 static u32 nbio_v7_0_get_rev_id(struct amdgpu_device *adev)
 {
         u32 tmp = RREG32_SOC15(NBIO, 0, mmRCC_DEV0_EPF0_STRAP0);
+
+	if (adev->asic_type == CHIP_VEGA20)
+		tmp = RREG32_SOC15(NBIO, 0, mmRCC_DEV0_EPF0_STRAP0_VG20);
+	else
+		tmp = RREG32_SOC15(NBIO, 0, mmRCC_DEV0_EPF0_STRAP0);
 
 	tmp &= RCC_DEV0_EPF0_STRAP0__STRAP_ATI_REV_ID_DEV0_F0_MASK;
 	tmp >>= RCC_DEV0_EPF0_STRAP0__STRAP_ATI_REV_ID_DEV0_F0__SHIFT;
@@ -53,9 +62,14 @@ static void nbio_v7_0_mc_access_enable(struct amdgpu_device *adev, bool enable)
 		WREG32_SOC15(NBIO, 0, mmBIF_FB_EN, 0);
 }
 
-static void nbio_v7_0_hdp_flush(struct amdgpu_device *adev)
+static void nbio_v7_0_hdp_flush(struct amdgpu_device *adev,
+				struct amdgpu_ring *ring)
 {
-	WREG32_SOC15_NO_KIQ(NBIO, 0, mmHDP_MEM_COHERENCY_FLUSH_CNTL, 0);
+	if (!ring || !ring->funcs->emit_wreg)
+		WREG32_SOC15_NO_KIQ(NBIO, 0, mmHDP_MEM_COHERENCY_FLUSH_CNTL, 0);
+	else
+		amdgpu_ring_emit_wreg(ring, SOC15_REG_OFFSET(
+			NBIO, 0, mmHDP_MEM_COHERENCY_FLUSH_CNTL), 0);
 }
 
 static u32 nbio_v7_0_get_memsize(struct amdgpu_device *adev)
@@ -70,10 +84,14 @@ static void nbio_v7_0_sdma_doorbell_range(struct amdgpu_device *adev, int instan
 			SOC15_REG_OFFSET(NBIO, 0, mmBIF_SDMA1_DOORBELL_RANGE);
 
 	u32 doorbell_range = RREG32(reg);
+	u32 range = 2;
+
+	if (adev->asic_type == CHIP_VEGA20)
+		range = 8;
 
 	if (use_doorbell) {
 		doorbell_range = REG_SET_FIELD(doorbell_range, BIF_SDMA0_DOORBELL_RANGE, OFFSET, doorbell_index);
-		doorbell_range = REG_SET_FIELD(doorbell_range, BIF_SDMA0_DOORBELL_RANGE, SIZE, 2);
+		doorbell_range = REG_SET_FIELD(doorbell_range, BIF_SDMA0_DOORBELL_RANGE, SIZE, range);
 	} else
 		doorbell_range = REG_SET_FIELD(doorbell_range, BIF_SDMA0_DOORBELL_RANGE, SIZE, 0);
 
@@ -127,6 +145,9 @@ static void nbio_v7_0_update_medium_grain_clock_gating(struct amdgpu_device *ade
 						       bool enable)
 {
 	uint32_t def, data;
+
+	if (adev->asic_type == CHIP_VEGA20)
+		return;
 
 	/* NBIF_MGCG_CTRL_LCLK */
 	def = data = RREG32_PCIE(smnNBIF_MGCG_CTRL_LCLK);
@@ -203,7 +224,7 @@ static void nbio_v7_0_ih_control(struct amdgpu_device *adev)
 	u32 interrupt_cntl;
 
 	/* setup interrupt control */
-	WREG32_SOC15(NBIO, 0, mmINTERRUPT_CNTL2, adev->dummy_page.addr >> 8);
+	WREG32_SOC15(NBIO, 0, mmINTERRUPT_CNTL2, adev->dummy_page_addr >> 8);
 	interrupt_cntl = RREG32_SOC15(NBIO, 0, mmINTERRUPT_CNTL);
 	/* INTERRUPT_CNTL__IH_DUMMY_RD_OVERRIDE_MASK=0 - dummy read disabled with msi, enabled without msi
 	 * INTERRUPT_CNTL__IH_DUMMY_RD_OVERRIDE_MASK=1 - dummy read controlled by IH_DUMMY_RD_EN

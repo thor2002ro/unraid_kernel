@@ -42,6 +42,11 @@
 		};
 	};
 
+	memory@40000000 {
+		device_type = "memory";
+		reg = <0x40000000 0>;
+	};
+
 	ahb {
 		compatible = "simple-bus";
 		#address-cells = <1>;
@@ -103,6 +108,23 @@
 			status = "disabled";
 		};
 
+		ehci0: usb@1e6a1000 {
+			compatible = "aspeed,ast2400-ehci", "generic-ehci";
+			reg = <0x1e6a1000 0x100>;
+			interrupts = <5>;
+			clocks = <&syscon ASPEED_CLK_GATE_USBPORT1CLK>;
+			status = "disabled";
+		};
+
+		uhci: usb@1e6b0000 {
+			compatible = "aspeed,ast2400-uhci", "generic-uhci";
+			reg = <0x1e6b0000 0x100>;
+			interrupts = <14>;
+			#ports = <3>;
+			clocks = <&syscon ASPEED_CLK_GATE_USBUHCICLK>;
+			status = "disabled";
+		};
+
 		apb {
 			compatible = "simple-bus";
 			#address-cells = <1>;
@@ -120,6 +142,14 @@
 				pinctrl: pinctrl {
 					compatible = "aspeed,g4-pinctrl";
 				};
+
+			};
+
+			rng: hwrng@1e6e2078 {
+				compatible = "timeriomem_rng";
+				reg = <0x1e6e2078 0x4>;
+				period = <1>;
+				quality = <100>;
 			};
 
 			adc: adc@1e6e9000 {
@@ -162,6 +192,7 @@
 				reg-shift = <2>;
 				interrupts = <9>;
 				clocks = <&syscon ASPEED_CLK_GATE_UART1CLK>;
+				resets = <&lpc_reset 4>;
 				no-loopback-test;
 				status = "disabled";
 			};
@@ -233,6 +264,7 @@
 					lpc_ctrl: lpc-ctrl@0 {
 						compatible = "aspeed,ast2400-lpc-ctrl";
 						reg = <0x0 0x80>;
+						clocks = <&syscon ASPEED_CLK_GATE_LCLK>;
 						status = "disabled";
 					};
 
@@ -247,6 +279,19 @@
 						compatible = "aspeed,ast2400-lhc";
 						reg = <0x20 0x24 0x48 0x8>;
 					};
+
+					lpc_reset: reset-controller@18 {
+						compatible = "aspeed,ast2400-lpc-reset";
+						reg = <0x18 0x4>;
+						#reset-cells = <1>;
+					};
+
+					ibt: ibt@c0  {
+						compatible = "aspeed,ast2400-ibt-bmc";
+						reg = <0xc0 0x18>;
+						interrupts = <8>;
+						status = "disabled";
+					};
 				};
 			};
 
@@ -256,6 +301,7 @@
 				reg-shift = <2>;
 				interrupts = <32>;
 				clocks = <&syscon ASPEED_CLK_GATE_UART2CLK>;
+				resets = <&lpc_reset 5>;
 				no-loopback-test;
 				status = "disabled";
 			};
@@ -266,6 +312,7 @@
 				reg-shift = <2>;
 				interrupts = <33>;
 				clocks = <&syscon ASPEED_CLK_GATE_UART3CLK>;
+				resets = <&lpc_reset 6>;
 				no-loopback-test;
 				status = "disabled";
 			};
@@ -276,6 +323,7 @@
 				reg-shift = <2>;
 				interrupts = <34>;
 				clocks = <&syscon ASPEED_CLK_GATE_UART4CLK>;
+				resets = <&lpc_reset 7>;
 				no-loopback-test;
 				status = "disabled";
 			};
@@ -1225,6 +1273,16 @@
 	pinctrl_usbcki_default: usbcki_default {
 		function = "USBCKI";
 		groups = "USBCKI";
+	};
+
+	pinctrl_usb2h_default: usb2h_default {
+		function = "USB2H1";
+		groups = "USB2H1";
+	};
+
+	pinctrl_usb2d_default: usb2d_default {
+		function = "USB2D1";
+		groups = "USB2D1";
 	};
 
 	pinctrl_vgabios_rom_default: vgabios_rom_default {

@@ -1078,7 +1078,7 @@ int o2net_send_message_vec(u32 msg_type, u32 key, struct kvec *caller_vec,
 	o2net_set_nst_sock_container(&nst, sc);
 
 	veclen = caller_veclen + 1;
-	vec = kmalloc(sizeof(struct kvec) * veclen, GFP_ATOMIC);
+	vec = kmalloc_array(veclen, sizeof(struct kvec), GFP_ATOMIC);
 	if (vec == NULL) {
 		mlog(0, "failed to %zu element kvec!\n", veclen);
 		ret = -ENOMEM;
@@ -1819,7 +1819,7 @@ int o2net_register_hb_callbacks(void)
 
 static int o2net_accept_one(struct socket *sock, int *more)
 {
-	int ret, slen;
+	int ret;
 	struct sockaddr_in sin;
 	struct socket *new_sock = NULL;
 	struct o2nm_node *node = NULL;
@@ -1864,9 +1864,7 @@ static int o2net_accept_one(struct socket *sock, int *more)
 		goto out;
 	}
 
-	slen = sizeof(sin);
-	ret = new_sock->ops->getname(new_sock, (struct sockaddr *) &sin,
-				       &slen, 1);
+	ret = new_sock->ops->getname(new_sock, (struct sockaddr *) &sin, 1);
 	if (ret < 0)
 		goto out;
 

@@ -8,6 +8,7 @@
  * Copyright(c) 2008 - 2014 Intel Corporation. All rights reserved.
  * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
  * Copyright(c) 2016 - 2017 Intel Deutschland GmbH
+ * Copyright(c) 2018 Intel Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -35,6 +36,7 @@
  * Copyright(c) 2005 - 2014 Intel Corporation. All rights reserved.
  * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
  * Copyright(c) 2016 - 2017 Intel Deutschland GmbH
+ * Copyright(c) 2018 Intel Corporation
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -143,6 +145,7 @@ enum iwl_ucode_tlv_type {
 	IWL_UCODE_TLV_FW_DBG_TRIGGER	= 40,
 	IWL_UCODE_TLV_FW_GSCAN_CAPA	= 50,
 	IWL_UCODE_TLV_FW_MEM_SEG	= 51,
+	IWL_UCODE_TLV_IML		= 52,
 };
 
 struct iwl_ucode_tlv {
@@ -250,6 +253,8 @@ typedef unsigned int __bitwise iwl_ucode_tlv_api_t;
  *	indicating low latency direction.
  * @IWL_UCODE_TLV_API_DEPRECATE_TTAK: RX status flag TTAK ok (bit 7) is
  *	deprecated.
+ * @IWL_UCODE_TLV_API_ADAPTIVE_DWELL_V2: This ucode supports version 8
+ *	of scan request: SCAN_REQUEST_CMD_UMAC_API_S_VER_8
  *
  * @NUM_IWL_UCODE_TLV_API: number of bits used
  */
@@ -265,10 +270,12 @@ enum iwl_ucode_tlv_api {
 	IWL_UCODE_TLV_API_NAN2_VER2		= (__force iwl_ucode_tlv_api_t)31,
 	/* API Set 1 */
 	IWL_UCODE_TLV_API_ADAPTIVE_DWELL	= (__force iwl_ucode_tlv_api_t)32,
+	IWL_UCODE_TLV_API_OCE			= (__force iwl_ucode_tlv_api_t)33,
 	IWL_UCODE_TLV_API_NEW_BEACON_TEMPLATE	= (__force iwl_ucode_tlv_api_t)34,
 	IWL_UCODE_TLV_API_NEW_RX_STATS		= (__force iwl_ucode_tlv_api_t)35,
 	IWL_UCODE_TLV_API_QUOTA_LOW_LATENCY	= (__force iwl_ucode_tlv_api_t)38,
 	IWL_UCODE_TLV_API_DEPRECATE_TTAK	= (__force iwl_ucode_tlv_api_t)41,
+	IWL_UCODE_TLV_API_ADAPTIVE_DWELL_V2	= (__force iwl_ucode_tlv_api_t)42,
 
 	NUM_IWL_UCODE_TLV_API
 #ifdef __CHECKER__
@@ -441,6 +448,7 @@ enum iwl_fw_phy_cfg {
 	FW_PHY_CFG_TX_CHAIN = 0xf << FW_PHY_CFG_TX_CHAIN_POS,
 	FW_PHY_CFG_RX_CHAIN_POS = 20,
 	FW_PHY_CFG_RX_CHAIN = 0xf << FW_PHY_CFG_RX_CHAIN_POS,
+	FW_PHY_CFG_SHARED_CLK = BIT(31),
 };
 
 #define IWL_UCODE_MAX_CS		1
@@ -616,6 +624,14 @@ enum iwl_fw_dbg_trigger_mode {
 };
 
 /**
+ * enum iwl_fw_dbg_trigger_flags - the flags supported by wrt triggers
+ * @IWL_FW_DBG_FORCE_RESTART: force a firmware restart
+ */
+enum iwl_fw_dbg_trigger_flags {
+	IWL_FW_DBG_FORCE_RESTART = BIT(0),
+};
+
+/**
  * enum iwl_fw_dbg_trigger_vif_type - define the VIF type for a trigger
  * @IWL_FW_DBG_CONF_VIF_ANY: any vif type
  * @IWL_FW_DBG_CONF_VIF_IBSS: IBSS mode
@@ -651,6 +667,7 @@ enum iwl_fw_dbg_trigger_vif_type {
  * @occurrences: number of occurrences. 0 means the trigger will never fire.
  * @trig_dis_ms: the time, in milliseconds, after an occurrence of this
  *	trigger in which another occurrence should be ignored.
+ * @flags: &enum iwl_fw_dbg_trigger_flags
  */
 struct iwl_fw_dbg_trigger_tlv {
 	__le32 id;
@@ -661,7 +678,8 @@ struct iwl_fw_dbg_trigger_tlv {
 	u8 start_conf_id;
 	__le16 occurrences;
 	__le16 trig_dis_ms;
-	__le16 reserved[3];
+	u8 flags;
+	u8 reserved[5];
 
 	u8 data[0];
 } __packed;

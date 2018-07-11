@@ -89,7 +89,7 @@ static int ppc4xx_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
 	if (type == PCI_CAP_ID_MSIX)
 		pr_debug("ppc4xx msi: MSI-X untested, trying anyway.\n");
 
-	msi_data->msi_virqs = kmalloc((msi_irqs) * sizeof(int), GFP_KERNEL);
+	msi_data->msi_virqs = kmalloc_array(msi_irqs, sizeof(int), GFP_KERNEL);
 	if (!msi_data->msi_virqs)
 		return -ENOMEM;
 
@@ -223,7 +223,7 @@ static int ppc4xx_msi_probe(struct platform_device *dev)
 
 	dev_dbg(&dev->dev, "PCIE-MSI: Setting up MSI support...\n");
 
-	msi = kzalloc(sizeof(struct ppc4xx_msi), GFP_KERNEL);
+	msi = kzalloc(sizeof(*msi), GFP_KERNEL);
 	if (!msi) {
 		dev_err(&dev->dev, "No memory for MSI structure\n");
 		return -ENOMEM;
@@ -241,7 +241,8 @@ static int ppc4xx_msi_probe(struct platform_device *dev)
 	if (!msi_irqs)
 		return -ENODEV;
 
-	if (ppc4xx_setup_pcieh_hw(dev, res, msi))
+	err = ppc4xx_setup_pcieh_hw(dev, res, msi);
+	if (err)
 		goto error_out;
 
 	err = ppc4xx_msi_init_allocator(dev, msi);

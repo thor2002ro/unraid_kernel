@@ -317,9 +317,9 @@ struct omap_hwmod_ocp_if {
  * then this field has to be populated with the correct offset structure.
  */
 struct omap_hwmod_class_sysconfig {
-	u32 rev_offs;
-	u32 sysc_offs;
-	u32 syss_offs;
+	s32 rev_offs;
+	s32 sysc_offs;
+	s32 syss_offs;
 	u16 sysc_flags;
 	struct sysc_regbits *sysc_fields;
 	u8 srst_udelay;
@@ -619,6 +619,13 @@ int __init omap_hwmod_setup_one(const char *name);
 int omap_hwmod_parse_module_range(struct omap_hwmod *oh,
 				  struct device_node *np,
 				  struct resource *res);
+
+struct ti_sysc_module_data;
+struct ti_sysc_cookie;
+
+int omap_hwmod_init_module(struct device *dev,
+			   const struct ti_sysc_module_data *data,
+			   struct ti_sysc_cookie *cookie);
 
 int omap_hwmod_enable(struct omap_hwmod *oh);
 int omap_hwmod_idle(struct omap_hwmod *oh);

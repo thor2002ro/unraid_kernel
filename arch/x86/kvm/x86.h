@@ -2,11 +2,47 @@
 #ifndef ARCH_X86_KVM_X86_H
 #define ARCH_X86_KVM_X86_H
 
-#include <asm/processor.h>
-#include <asm/mwait.h>
 #include <linux/kvm_host.h>
 #include <asm/pvclock.h>
 #include "kvm_cache_regs.h"
+
+#define KVM_DEFAULT_PLE_GAP		128
+#define KVM_VMX_DEFAULT_PLE_WINDOW	4096
+#define KVM_DEFAULT_PLE_WINDOW_GROW	2
+#define KVM_DEFAULT_PLE_WINDOW_SHRINK	0
+#define KVM_VMX_DEFAULT_PLE_WINDOW_MAX	UINT_MAX
+#define KVM_SVM_DEFAULT_PLE_WINDOW_MAX	USHRT_MAX
+#define KVM_SVM_DEFAULT_PLE_WINDOW	3000
+
+static inline unsigned int __grow_ple_window(unsigned int val,
+		unsigned int base, unsigned int modifier, unsigned int max)
+{
+	u64 ret = val;
+
+	if (modifier < 1)
+		return base;
+
+	if (modifier < base)
+		ret *= modifier;
+	else
+		ret += modifier;
+
+	return min(ret, (u64)max);
+}
+
+static inline unsigned int __shrink_ple_window(unsigned int val,
+		unsigned int base, unsigned int modifier, unsigned int min)
+{
+	if (modifier < 1)
+		return base;
+
+	if (modifier < base)
+		val /= modifier;
+	else
+		val -= modifier;
+
+	return max(val, min);
+}
 
 #define MSR_IA32_CR_PAT_DEFAULT  0x0007040600070406ULL
 
@@ -19,19 +55,19 @@ static inline void kvm_clear_exception_queue(struct kvm_vcpu *vcpu)
 static inline void kvm_queue_interrupt(struct kvm_vcpu *vcpu, u8 vector,
 	bool soft)
 {
-	vcpu->arch.interrupt.pending = true;
+	vcpu->arch.interrupt.injected = true;
 	vcpu->arch.interrupt.soft = soft;
 	vcpu->arch.interrupt.nr = vector;
 }
 
 static inline void kvm_clear_interrupt_queue(struct kvm_vcpu *vcpu)
 {
-	vcpu->arch.interrupt.pending = false;
+	vcpu->arch.interrupt.injected = false;
 }
 
 static inline bool kvm_event_needs_reinjection(struct kvm_vcpu *vcpu)
 {
-	return vcpu->arch.exception.injected || vcpu->arch.interrupt.pending ||
+	return vcpu->arch.exception.injected || vcpu->arch.interrupt.injected ||
 		vcpu->arch.nmi_injected;
 }
 
@@ -72,6 +108,15 @@ static inline bool is_la57_mode(struct kvm_vcpu *vcpu)
 #else
 	return 0;
 #endif
+}
+
+static inline bool x86_exception_has_error_code(unsigned int vector)
+{
+	static u32 exception_has_error_code = BIT(DF_VECTOR) | BIT(TS_VECTOR) |
+			BIT(NP_VECTOR) | BIT(SS_VECTOR) | BIT(GP_VECTOR) |
+			BIT(PF_VECTOR) | BIT(AC_VECTOR);
+
+	return (1U << vector) & exception_has_error_code;
 }
 
 static inline bool mmu_is_nested(struct kvm_vcpu *vcpu)
@@ -205,21 +250,21 @@ static inline bool kvm_check_has_quirk(struct kvm *kvm, u64 quirk)
 	return !(kvm->arch.disabled_quirks & quirk);
 }
 
-void kvm_before_handle_nmi(struct kvm_vcpu *vcpu);
-void kvm_after_handle_nmi(struct kvm_vcpu *vcpu);
 void kvm_set_pending_timer(struct kvm_vcpu *vcpu);
 int kvm_inject_realmode_interrupt(struct kvm_vcpu *vcpu, int irq, int inc_eip);
 
 void kvm_write_tsc(struct kvm_vcpu *vcpu, struct msr_data *msr);
 u64 get_kvmclock_ns(struct kvm *kvm);
 
-int kvm_read_guest_virt(struct x86_emulate_ctxt *ctxt,
+int kvm_read_guest_virt(struct kvm_vcpu *vcpu,
 	gva_t addr, void *val, unsigned int bytes,
 	struct x86_exception *exception);
 
-int kvm_write_guest_virt_system(struct x86_emulate_ctxt *ctxt,
+int kvm_write_guest_virt_system(struct kvm_vcpu *vcpu,
 	gva_t addr, void *val, unsigned int bytes,
 	struct x86_exception *exception);
+
+int handle_ud(struct kvm_vcpu *vcpu);
 
 void kvm_vcpu_mtrr_init(struct kvm_vcpu *vcpu);
 u8 kvm_mtrr_get_guest_memory_type(struct kvm_vcpu *vcpu, gfn_t gfn);
@@ -241,6 +286,8 @@ extern u64 kvm_supported_xcr0(void);
 extern unsigned int min_timer_period_us;
 
 extern unsigned int lapic_timer_advance_ns;
+
+extern bool enable_vmware_backdoor;
 
 extern struct static_key kvm_no_apic_vcpu;
 
@@ -264,10 +311,31 @@ static inline u64 nsec_to_cycles(struct kvm_vcpu *vcpu, u64 nsec)
 	    __rem;						\
 	 })
 
-static inline bool kvm_mwait_in_guest(void)
+static inline bool kvm_mwait_in_guest(struct kvm *kvm)
 {
-	return boot_cpu_has(X86_FEATURE_MWAIT) &&
-		!boot_cpu_has_bug(X86_BUG_MONITOR);
+	return kvm->arch.mwait_in_guest;
+}
+
+static inline bool kvm_hlt_in_guest(struct kvm *kvm)
+{
+	return kvm->arch.hlt_in_guest;
+}
+
+static inline bool kvm_pause_in_guest(struct kvm *kvm)
+{
+	return kvm->arch.pause_in_guest;
+}
+
+DECLARE_PER_CPU(struct kvm_vcpu *, current_vcpu);
+
+static inline void kvm_before_interrupt(struct kvm_vcpu *vcpu)
+{
+	__this_cpu_write(current_vcpu, vcpu);
+}
+
+static inline void kvm_after_interrupt(struct kvm_vcpu *vcpu)
+{
+	__this_cpu_write(current_vcpu, NULL);
 }
 
 #endif

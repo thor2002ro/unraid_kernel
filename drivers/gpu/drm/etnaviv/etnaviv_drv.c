@@ -1,17 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2015 Etnaviv Project
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2015-2018 Etnaviv Project
  */
 
 #include <linux/component.h>
@@ -24,57 +13,6 @@
 #include "etnaviv_gem.h"
 #include "etnaviv_mmu.h"
 #include "etnaviv_perfmon.h"
-
-#ifdef CONFIG_DRM_ETNAVIV_REGISTER_LOGGING
-static bool reglog;
-MODULE_PARM_DESC(reglog, "Enable register read/write logging");
-module_param(reglog, bool, 0600);
-#else
-#define reglog 0
-#endif
-
-void __iomem *etnaviv_ioremap(struct platform_device *pdev, const char *name,
-		const char *dbgname)
-{
-	struct resource *res;
-	void __iomem *ptr;
-
-	if (name)
-		res = platform_get_resource_byname(pdev, IORESOURCE_MEM, name);
-	else
-		res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-
-	ptr = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(ptr)) {
-		dev_err(&pdev->dev, "failed to ioremap %s: %ld\n", name,
-			PTR_ERR(ptr));
-		return ptr;
-	}
-
-	if (reglog)
-		dev_printk(KERN_DEBUG, &pdev->dev, "IO:region %s 0x%p %08zx\n",
-			   dbgname, ptr, (size_t)resource_size(res));
-
-	return ptr;
-}
-
-void etnaviv_writel(u32 data, void __iomem *addr)
-{
-	if (reglog)
-		printk(KERN_DEBUG "IO:W %p %08x\n", addr, data);
-
-	writel(data, addr);
-}
-
-u32 etnaviv_readl(const void __iomem *addr)
-{
-	u32 val = readl(addr);
-
-	if (reglog)
-		printk(KERN_DEBUG "IO:R %p %08x\n", addr, val);
-
-	return val;
-}
 
 /*
  * DRM operations:
@@ -101,11 +39,24 @@ static void load_gpu(struct drm_device *dev)
 
 static int etnaviv_open(struct drm_device *dev, struct drm_file *file)
 {
+	struct etnaviv_drm_private *priv = dev->dev_private;
 	struct etnaviv_file_private *ctx;
+	int i;
 
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
+
+	for (i = 0; i < ETNA_MAX_PIPES; i++) {
+		struct etnaviv_gpu *gpu = priv->gpu[i];
+
+		if (gpu) {
+			drm_sched_entity_init(&gpu->sched,
+				&ctx->sched_entity[i],
+				&gpu->sched.sched_rq[DRM_SCHED_PRIORITY_NORMAL],
+				NULL);
+			}
+	}
 
 	file->driver_priv = ctx;
 
@@ -126,6 +77,9 @@ static void etnaviv_postclose(struct drm_device *dev, struct drm_file *file)
 			if (gpu->lastctx == ctx)
 				gpu->lastctx = NULL;
 			mutex_unlock(&gpu->lock);
+
+			drm_sched_entity_fini(&gpu->sched,
+					      &ctx->sched_entity[i]);
 		}
 	}
 
@@ -637,25 +591,21 @@ static int compare_str(struct device *dev, void *data)
 static int etnaviv_pdev_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct device_node *node = dev->of_node;
 	struct component_match *match = NULL;
 
 	dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32));
 
-	if (node) {
+	if (!dev->platform_data) {
 		struct device_node *core_node;
-		int i;
 
-		for (i = 0; ; i++) {
-			core_node = of_parse_phandle(node, "cores", i);
-			if (!core_node)
-				break;
+		for_each_compatible_node(core_node, NULL, "vivante,gc") {
+			if (!of_device_is_available(core_node))
+				continue;
 
 			drm_of_component_match_add(&pdev->dev, &match,
 						   compare_of, core_node);
-			of_node_put(core_node);
 		}
-	} else if (dev->platform_data) {
+	} else {
 		char **names = dev->platform_data;
 		unsigned i;
 
@@ -673,25 +623,18 @@ static int etnaviv_pdev_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static const struct of_device_id dt_match[] = {
-	{ .compatible = "fsl,imx-gpu-subsystem" },
-	{ .compatible = "marvell,dove-gpu-subsystem" },
-	{}
-};
-MODULE_DEVICE_TABLE(of, dt_match);
-
 static struct platform_driver etnaviv_platform_driver = {
 	.probe      = etnaviv_pdev_probe,
 	.remove     = etnaviv_pdev_remove,
 	.driver     = {
 		.name   = "etnaviv",
-		.of_match_table = dt_match,
 	},
 };
 
 static int __init etnaviv_init(void)
 {
 	int ret;
+	struct device_node *np;
 
 	etnaviv_validate_init();
 
@@ -702,6 +645,19 @@ static int __init etnaviv_init(void)
 	ret = platform_driver_register(&etnaviv_platform_driver);
 	if (ret != 0)
 		platform_driver_unregister(&etnaviv_gpu_driver);
+
+	/*
+	 * If the DT contains at least one available GPU device, instantiate
+	 * the DRM platform device.
+	 */
+	for_each_compatible_node(np, NULL, "vivante,gc") {
+		if (!of_device_is_available(np))
+			continue;
+
+		platform_device_register_simple("etnaviv", -1, NULL, 0);
+		of_node_put(np);
+		break;
+	}
 
 	return ret;
 }

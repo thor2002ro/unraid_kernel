@@ -31,6 +31,7 @@
 #include <linux/iopoll.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
+#include <linux/of_clk.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/pm_domain.h>
@@ -127,8 +128,7 @@ struct tegra_powergate {
 	unsigned int id;
 	struct clk **clks;
 	unsigned int num_clks;
-	struct reset_control **resets;
-	unsigned int num_resets;
+	struct reset_control *reset;
 };
 
 struct tegra_io_pad_soc {
@@ -153,6 +153,7 @@ struct tegra_pmc_soc {
 
 	bool has_tsense_reset;
 	bool has_gpu_clamps;
+	bool needs_mbist_war;
 
 	const struct tegra_io_pad_soc *io_pads;
 	unsigned int num_io_pads;
@@ -368,31 +369,8 @@ out:
 	return err;
 }
 
-static int tegra_powergate_reset_assert(struct tegra_powergate *pg)
+int __weak tegra210_clk_handle_mbist_war(unsigned int id)
 {
-	unsigned int i;
-	int err;
-
-	for (i = 0; i < pg->num_resets; i++) {
-		err = reset_control_assert(pg->resets[i]);
-		if (err)
-			return err;
-	}
-
-	return 0;
-}
-
-static int tegra_powergate_reset_deassert(struct tegra_powergate *pg)
-{
-	unsigned int i;
-	int err;
-
-	for (i = 0; i < pg->num_resets; i++) {
-		err = reset_control_deassert(pg->resets[i]);
-		if (err)
-			return err;
-	}
-
 	return 0;
 }
 
@@ -401,7 +379,7 @@ static int tegra_powergate_power_up(struct tegra_powergate *pg,
 {
 	int err;
 
-	err = tegra_powergate_reset_assert(pg);
+	err = reset_control_assert(pg->reset);
 	if (err)
 		return err;
 
@@ -425,11 +403,16 @@ static int tegra_powergate_power_up(struct tegra_powergate *pg,
 
 	usleep_range(10, 20);
 
-	err = tegra_powergate_reset_deassert(pg);
+	err = reset_control_deassert(pg->reset);
 	if (err)
 		goto powergate_off;
 
 	usleep_range(10, 20);
+
+	if (pg->pmc->soc->needs_mbist_war)
+		err = tegra210_clk_handle_mbist_war(pg->id);
+	if (err)
+		goto disable_clks;
 
 	if (disable_clocks)
 		tegra_powergate_disable_clocks(pg);
@@ -456,7 +439,7 @@ static int tegra_powergate_power_down(struct tegra_powergate *pg)
 
 	usleep_range(10, 20);
 
-	err = tegra_powergate_reset_assert(pg);
+	err = reset_control_assert(pg->reset);
 	if (err)
 		goto disable_clks;
 
@@ -475,7 +458,7 @@ static int tegra_powergate_power_down(struct tegra_powergate *pg)
 assert_resets:
 	tegra_powergate_enable_clocks(pg);
 	usleep_range(10, 20);
-	tegra_powergate_reset_deassert(pg);
+	reset_control_deassert(pg->reset);
 	usleep_range(10, 20);
 
 disable_clks:
@@ -577,21 +560,27 @@ EXPORT_SYMBOL(tegra_powergate_remove_clamping);
 int tegra_powergate_sequence_power_up(unsigned int id, struct clk *clk,
 				      struct reset_control *rst)
 {
-	struct tegra_powergate pg;
+	struct tegra_powergate *pg;
 	int err;
 
 	if (!tegra_powergate_is_available(id))
 		return -EINVAL;
 
-	pg.id = id;
-	pg.clks = &clk;
-	pg.num_clks = 1;
-	pg.resets = &rst;
-	pg.num_resets = 1;
+	pg = kzalloc(sizeof(*pg), GFP_KERNEL);
+	if (!pg)
+		return -ENOMEM;
 
-	err = tegra_powergate_power_up(&pg, false);
+	pg->id = id;
+	pg->clks = &clk;
+	pg->num_clks = 1;
+	pg->reset = rst;
+	pg->pmc = pmc;
+
+	err = tegra_powergate_power_up(pg, false);
 	if (err)
 		pr_err("failed to turn on partition %d: %d\n", id, err);
+
+	kfree(pg);
 
 	return err;
 }
@@ -743,7 +732,7 @@ static int tegra_powergate_of_get_clks(struct tegra_powergate *pg,
 	unsigned int i, count;
 	int err;
 
-	count = of_count_phandle_with_args(np, "clocks", "#clock-cells");
+	count = of_clk_get_parent_count(np);
 	if (count == 0)
 		return -ENODEV;
 
@@ -775,45 +764,22 @@ err:
 static int tegra_powergate_of_get_resets(struct tegra_powergate *pg,
 					 struct device_node *np, bool off)
 {
-	struct reset_control *rst;
-	unsigned int i, count;
 	int err;
 
-	count = of_count_phandle_with_args(np, "resets", "#reset-cells");
-	if (count == 0)
-		return -ENODEV;
-
-	pg->resets = kcalloc(count, sizeof(rst), GFP_KERNEL);
-	if (!pg->resets)
-		return -ENOMEM;
-
-	for (i = 0; i < count; i++) {
-		pg->resets[i] = of_reset_control_get_by_index(np, i);
-		if (IS_ERR(pg->resets[i])) {
-			err = PTR_ERR(pg->resets[i]);
-			goto error;
-		}
-
-		if (off)
-			err = reset_control_assert(pg->resets[i]);
-		else
-			err = reset_control_deassert(pg->resets[i]);
-
-		if (err) {
-			reset_control_put(pg->resets[i]);
-			goto error;
-		}
+	pg->reset = of_reset_control_array_get_exclusive(np);
+	if (IS_ERR(pg->reset)) {
+		err = PTR_ERR(pg->reset);
+		pr_err("failed to get device resets: %d\n", err);
+		return err;
 	}
 
-	pg->num_resets = count;
+	if (off)
+		err = reset_control_assert(pg->reset);
+	else
+		err = reset_control_deassert(pg->reset);
 
-	return 0;
-
-error:
-	while (i--)
-		reset_control_put(pg->resets[i]);
-
-	kfree(pg->resets);
+	if (err)
+		reset_control_put(pg->reset);
 
 	return err;
 }
@@ -905,10 +871,7 @@ remove_genpd:
 	pm_genpd_remove(&pg->genpd);
 
 remove_resets:
-	while (pg->num_resets--)
-		reset_control_put(pg->resets[pg->num_resets]);
-
-	kfree(pg->resets);
+	reset_control_put(pg->reset);
 
 remove_clks:
 	while (pg->num_clks--)
@@ -1815,6 +1778,7 @@ static const struct tegra_pmc_soc tegra210_pmc_soc = {
 	.cpu_powergates = tegra210_cpu_powergates,
 	.has_tsense_reset = true,
 	.has_gpu_clamps = true,
+	.needs_mbist_war = true,
 	.num_io_pads = ARRAY_SIZE(tegra210_io_pads),
 	.io_pads = tegra210_io_pads,
 	.regs = &tegra20_pmc_regs,
@@ -1920,6 +1884,7 @@ static const struct tegra_pmc_soc tegra186_pmc_soc = {
 };
 
 static const struct of_device_id tegra_pmc_match[] = {
+	{ .compatible = "nvidia,tegra194-pmc", .data = &tegra186_pmc_soc },
 	{ .compatible = "nvidia,tegra186-pmc", .data = &tegra186_pmc_soc },
 	{ .compatible = "nvidia,tegra210-pmc", .data = &tegra210_pmc_soc },
 	{ .compatible = "nvidia,tegra132-pmc", .data = &tegra124_pmc_soc },

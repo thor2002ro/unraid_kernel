@@ -7,8 +7,7 @@
 #include "xyarray.h"
 #include "rblist.h"
 
-struct stats
-{
+struct stats {
 	double n, mean, M2;
 	u64 max, min;
 };
@@ -90,6 +89,8 @@ struct perf_stat_config {
 	bool		scale;
 	FILE		*output;
 	unsigned int	interval;
+	unsigned int	timeout;
+	int		times;
 	struct runtime_stat *stats;
 	int		stats_num;
 };
@@ -125,8 +126,6 @@ bool __perf_evsel_stat__is(struct perf_evsel *evsel,
 
 #define perf_stat_evsel__is(evsel, id) \
 	__perf_evsel_stat__is(evsel, PERF_STAT_EVSEL_ID__ ## id)
-
-void perf_stat_evsel_id_init(struct perf_evsel *evsel);
 
 extern struct runtime_stat rt_stat;
 extern struct stats walltime_nsecs_stats;

@@ -1,22 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (C) 2008 Oracle.  All rights reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public
- * License v2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public
- * License along with this program; if not, write to the
- * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 021110-1307, USA.
  */
-#ifndef __DELAYED_REF__
-#define __DELAYED_REF__
+
+#ifndef BTRFS_DELAYED_REF_H
+#define BTRFS_DELAYED_REF_H
 
 #include <linux/refcount.h>
 
@@ -139,6 +127,7 @@ struct btrfs_delayed_ref_head {
 	 */
 	unsigned int must_insert_reserved:1;
 	unsigned int is_data:1;
+	unsigned int is_system:1;
 	unsigned int processing:1;
 };
 
@@ -204,7 +193,7 @@ extern struct kmem_cache *btrfs_delayed_data_ref_cachep;
 extern struct kmem_cache *btrfs_delayed_extent_op_cachep;
 
 int __init btrfs_delayed_ref_init(void);
-void btrfs_delayed_ref_exit(void);
+void __cold btrfs_delayed_ref_exit(void);
 
 static inline struct btrfs_delayed_extent_op *
 btrfs_alloc_delayed_extent_op(void)
@@ -262,7 +251,6 @@ int btrfs_add_delayed_extent_op(struct btrfs_fs_info *fs_info,
 				u64 bytenr, u64 num_bytes,
 				struct btrfs_delayed_extent_op *extent_op);
 void btrfs_merge_delayed_refs(struct btrfs_trans_handle *trans,
-			      struct btrfs_fs_info *fs_info,
 			      struct btrfs_delayed_ref_root *delayed_refs,
 			      struct btrfs_delayed_ref_head *head);
 
@@ -280,9 +268,7 @@ static inline void btrfs_delayed_ref_unlock(struct btrfs_delayed_ref_head *head)
 struct btrfs_delayed_ref_head *
 btrfs_select_ref_head(struct btrfs_trans_handle *trans);
 
-int btrfs_check_delayed_seq(struct btrfs_fs_info *fs_info,
-			    struct btrfs_delayed_ref_root *delayed_refs,
-			    u64 seq);
+int btrfs_check_delayed_seq(struct btrfs_fs_info *fs_info, u64 seq);
 
 /*
  * helper functions to cast a node into its container
@@ -298,4 +284,5 @@ btrfs_delayed_node_to_data_ref(struct btrfs_delayed_ref_node *node)
 {
 	return container_of(node, struct btrfs_delayed_data_ref, node);
 }
+
 #endif

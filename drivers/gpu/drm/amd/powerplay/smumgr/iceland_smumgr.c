@@ -60,10 +60,7 @@
 
 #define ICELAND_SMC_SIZE               0x20000
 
-#define VOLTAGE_SCALE 4
 #define POWERTUNE_DEFAULT_SET_MAX    1
-#define VOLTAGE_VID_OFFSET_SCALE1   625
-#define VOLTAGE_VID_OFFSET_SCALE2   100
 #define MC_CG_ARB_FREQ_F1           0x0b
 #define VDDC_VDDCI_DELTA            200
 
@@ -262,7 +259,6 @@ static int iceland_start_smu(struct pp_hwmgr *hwmgr)
 
 static int iceland_smu_init(struct pp_hwmgr *hwmgr)
 {
-	int i;
 	struct iceland_smumgr *iceland_priv = NULL;
 
 	iceland_priv = kzalloc(sizeof(struct iceland_smumgr), GFP_KERNEL);
@@ -272,11 +268,10 @@ static int iceland_smu_init(struct pp_hwmgr *hwmgr)
 
 	hwmgr->smu_backend = iceland_priv;
 
-	if (smu7_init(hwmgr))
+	if (smu7_init(hwmgr)) {
+		kfree(iceland_priv);
 		return -EINVAL;
-
-	for (i = 0; i < SMU71_MAX_LEVELS_GRAPHICS; i++)
-		iceland_priv->activity_target[i] = 30;
+	}
 
 	return 0;
 }
@@ -285,13 +280,10 @@ static int iceland_smu_init(struct pp_hwmgr *hwmgr)
 static void iceland_initialize_power_tune_defaults(struct pp_hwmgr *hwmgr)
 {
 	struct iceland_smumgr *smu_data = (struct iceland_smumgr *)(hwmgr->smu_backend);
-	struct cgs_system_info sys_info = {0};
+	struct amdgpu_device *adev = hwmgr->adev;
 	uint32_t dev_id;
 
-	sys_info.size = sizeof(struct cgs_system_info);
-	sys_info.info_id = CGS_SYSTEM_INFO_PCIE_DEV;
-	cgs_query_system_info(hwmgr->device, &sys_info);
-	dev_id = (uint32_t)sys_info.value;
+	dev_id = adev->pdev->device;
 
 	switch (dev_id) {
 	case DEVICE_ID_VI_ICELAND_M_6900:
@@ -546,7 +538,7 @@ static int iceland_get_std_voltage_value_sidd(struct pp_hwmgr *hwmgr,
 
 	/* SCLK/VDDC Dependency Table has to exist. */
 	PP_ASSERT_WITH_CODE(NULL != hwmgr->dyn_state.vddc_dependency_on_sclk,
-			"The SCLK/VDDC Dependency Table does not exist.\n",
+			"The SCLK/VDDC Dependency Table does not exist.",
 			return -EINVAL);
 
 	if (NULL == hwmgr->dyn_state.cac_leakage_table) {
@@ -898,7 +890,6 @@ static int iceland_populate_phase_value_based_on_sclk(struct pp_hwmgr *hwmgr,
 
 static int iceland_populate_single_graphic_level(struct pp_hwmgr *hwmgr,
 						uint32_t engine_clock,
-				uint16_t sclk_activity_level_threshold,
 				SMU71_Discrete_GraphicsLevel *graphic_level)
 {
 	int result;
@@ -924,7 +915,7 @@ static int iceland_populate_single_graphic_level(struct pp_hwmgr *hwmgr,
 				&graphic_level->MinVddcPhases);
 
 	/* Indicates maximum activity level for this performance level. 50% for now*/
-	graphic_level->ActivityLevel = sclk_activity_level_threshold;
+	graphic_level->ActivityLevel = data->current_profile_setting.sclk_activity;
 
 	graphic_level->CcPwrDynRm = 0;
 	graphic_level->CcPwrDynRm1 = 0;
@@ -932,13 +923,13 @@ static int iceland_populate_single_graphic_level(struct pp_hwmgr *hwmgr,
 	graphic_level->EnabledForActivity = 0;
 	/* this level can be used for throttling.*/
 	graphic_level->EnabledForThrottle = 1;
-	graphic_level->UpHyst = 0;
-	graphic_level->DownHyst = 100;
+	graphic_level->UpHyst = data->current_profile_setting.sclk_up_hyst;
+	graphic_level->DownHyst = data->current_profile_setting.sclk_down_hyst;
 	graphic_level->VoltageDownHyst = 0;
 	graphic_level->PowerThrottle = 0;
 
 	data->display_timing.min_clock_in_sr =
-			hwmgr->display_config.min_core_set_clock_in_sr;
+			hwmgr->display_config->min_core_set_clock_in_sr;
 
 	if (phm_cap_enabled(hwmgr->platform_descriptor.platformCaps,
 			PHM_PlatformCaps_SclkDeepSleep))
@@ -989,7 +980,6 @@ static int iceland_populate_all_graphic_levels(struct pp_hwmgr *hwmgr)
 	for (i = 0; i < dpm_table->sclk_table.count; i++) {
 		result = iceland_populate_single_graphic_level(hwmgr,
 					dpm_table->sclk_table.dpm_levels[i].value,
-					(uint16_t)smu_data->activity_target[i],
 					&(smu_data->smc_state_table.GraphicsLevel[i]));
 		if (result != 0)
 			return result;
@@ -1243,7 +1233,6 @@ static int iceland_populate_single_memory_level(
 	struct smu7_hwmgr *data = (struct smu7_hwmgr *)(hwmgr->backend);
 	int result = 0;
 	bool dll_state_on;
-	struct cgs_display_info info = {0};
 	uint32_t mclk_edc_wr_enable_threshold = 40000;
 	uint32_t mclk_edc_enable_threshold = 40000;
 	uint32_t mclk_strobe_mode_threshold = 40000;
@@ -1275,12 +1264,12 @@ static int iceland_populate_single_memory_level(
 
 	memory_level->EnabledForThrottle = 1;
 	memory_level->EnabledForActivity = 0;
-	memory_level->UpHyst = 0;
-	memory_level->DownHyst = 100;
+	memory_level->UpHyst = data->current_profile_setting.mclk_up_hyst;
+	memory_level->DownHyst = data->current_profile_setting.mclk_down_hyst;
 	memory_level->VoltageDownHyst = 0;
 
 	/* Indicates maximum activity level for this performance level.*/
-	memory_level->ActivityLevel = (uint16_t)data->mclk_activity_target;
+	memory_level->ActivityLevel = data->current_profile_setting.mclk_activity;
 	memory_level->StutterEnable = 0;
 	memory_level->StrobeEnable = 0;
 	memory_level->EdcReadEnable = 0;
@@ -1290,8 +1279,7 @@ static int iceland_populate_single_memory_level(
 	/* default set to low watermark. Highest level will be set to high later.*/
 	memory_level->DisplayWatermark = PPSMC_DISPLAY_WATERMARK_LOW;
 
-	cgs_get_active_displays_info(hwmgr->device, &info);
-	data->display_timing.num_existing_displays = info.display_count;
+	data->display_timing.num_existing_displays = hwmgr->display_config->num_display;
 
 	/* stutter mode not support on iceland */
 
@@ -1561,7 +1549,7 @@ static int iceland_populate_smc_acpi_level(struct pp_hwmgr *hwmgr,
 	table->MemoryACPILevel.DownHyst = 100;
 	table->MemoryACPILevel.VoltageDownHyst = 0;
 	/* Indicates maximum activity level for this performance level.*/
-	table->MemoryACPILevel.ActivityLevel = PP_HOST_TO_SMC_US((uint16_t)data->mclk_activity_target);
+	table->MemoryACPILevel.ActivityLevel = PP_HOST_TO_SMC_US(data->current_profile_setting.mclk_activity);
 
 	table->MemoryACPILevel.StutterEnable = 0;
 	table->MemoryACPILevel.StrobeEnable = 0;
@@ -2165,7 +2153,7 @@ int iceland_thermal_setup_fan_table(struct pp_hwmgr *hwmgr)
 
 	fan_table.TempRespLim = cpu_to_be16(5);
 
-	reference_clock = smu7_get_xclk(hwmgr);
+	reference_clock = amdgpu_asic_get_xclk((struct amdgpu_device *)hwmgr->adev);
 
 	fan_table.RefreshPeriod = cpu_to_be32((hwmgr->thermal_controller.advanceFanControlParameters.ulCycleDelay * reference_clock) / 1600);
 

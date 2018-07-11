@@ -265,6 +265,17 @@ struct nicvf_drv_stats {
 
 struct cavium_ptp;
 
+struct xcast_addr_list {
+	int              count;
+	u64              mc[];
+};
+
+struct nicvf_work {
+	struct delayed_work    work;
+	u8                     mode;
+	struct xcast_addr_list *mc;
+};
+
 struct nicvf {
 	struct nicvf		*pnicvf;
 	struct net_device	*netdev;
@@ -313,6 +324,9 @@ struct nicvf {
 	struct nicvf_pfc	pfc;
 	struct tasklet_struct	qs_err_task;
 	struct work_struct	reset_task;
+	struct nicvf_work       rx_mode_work;
+	/* spinlock to protect workqueue arguments from concurrent access */
+	spinlock_t              rx_mode_wq_lock;
 
 	/* PTP timestamp */
 	struct cavium_ptp	*ptp_clock;
@@ -403,6 +417,9 @@ struct nicvf {
 #define	NIC_MBOX_MSG_PTP_CFG		0x19	/* HW packet timestamp */
 #define	NIC_MBOX_MSG_CFG_DONE		0xF0	/* VF configuration done */
 #define	NIC_MBOX_MSG_SHUTDOWN		0xF1	/* VF is being shutdown */
+#define	NIC_MBOX_MSG_RESET_XCAST	0xF2    /* Reset DCAM filtering mode */
+#define	NIC_MBOX_MSG_ADD_MCAST		0xF3    /* Add MAC to DCAM filters */
+#define	NIC_MBOX_MSG_SET_XCAST		0xF4    /* Set MCAST/BCAST RX mode */
 
 struct nic_cfg_msg {
 	u8    msg;
@@ -556,6 +573,14 @@ struct set_ptp {
 	bool  enable;
 };
 
+struct xcast {
+	u8    msg;
+	union {
+		u8    mode;
+		u64   mac;
+	} data;
+};
+
 /* 128 bit shared memory between PF and each VF */
 union nic_mbx {
 	struct { u8 msg; }	msg;
@@ -576,6 +601,7 @@ union nic_mbx {
 	struct reset_stat_cfg	reset_stat;
 	struct pfc		pfc;
 	struct set_ptp		ptp;
+	struct xcast            xcast;
 };
 
 #define NIC_NODE_ID_MASK	0x03

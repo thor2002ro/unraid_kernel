@@ -46,6 +46,7 @@
 #include <linux/etherdevice.h>
 #include <net/devlink.h>
 
+#include <uapi/rdma/mlx4-abi.h>
 #include <linux/mlx4/device.h>
 #include <linux/mlx4/doorbell.h>
 
@@ -72,7 +73,7 @@ MODULE_PARM_DESC(debug_level, "Enable debug tracing if > 0");
 
 static int msi_x = 1;
 module_param(msi_x, int, 0444);
-MODULE_PARM_DESC(msi_x, "attempt to use MSI-X if nonzero");
+MODULE_PARM_DESC(msi_x, "0 - don't use MSI-X, 1 - use MSI-X, >1 - limit number of MSI-X irqs to msi_x");
 
 #else /* CONFIG_PCI_MSI */
 
@@ -621,85 +622,6 @@ static int mlx4_dev_cap(struct mlx4_dev *dev, struct mlx4_dev_cap *dev_cap)
 	mlx4_enable_ignore_fcs(dev);
 
 	return 0;
-}
-
-static int mlx4_get_pcie_dev_link_caps(struct mlx4_dev *dev,
-				       enum pci_bus_speed *speed,
-				       enum pcie_link_width *width)
-{
-	u32 lnkcap1, lnkcap2;
-	int err1, err2;
-
-#define  PCIE_MLW_CAP_SHIFT 4	/* start of MLW mask in link capabilities */
-
-	*speed = PCI_SPEED_UNKNOWN;
-	*width = PCIE_LNK_WIDTH_UNKNOWN;
-
-	err1 = pcie_capability_read_dword(dev->persist->pdev, PCI_EXP_LNKCAP,
-					  &lnkcap1);
-	err2 = pcie_capability_read_dword(dev->persist->pdev, PCI_EXP_LNKCAP2,
-					  &lnkcap2);
-	if (!err2 && lnkcap2) { /* PCIe r3.0-compliant */
-		if (lnkcap2 & PCI_EXP_LNKCAP2_SLS_8_0GB)
-			*speed = PCIE_SPEED_8_0GT;
-		else if (lnkcap2 & PCI_EXP_LNKCAP2_SLS_5_0GB)
-			*speed = PCIE_SPEED_5_0GT;
-		else if (lnkcap2 & PCI_EXP_LNKCAP2_SLS_2_5GB)
-			*speed = PCIE_SPEED_2_5GT;
-	}
-	if (!err1) {
-		*width = (lnkcap1 & PCI_EXP_LNKCAP_MLW) >> PCIE_MLW_CAP_SHIFT;
-		if (!lnkcap2) { /* pre-r3.0 */
-			if (lnkcap1 & PCI_EXP_LNKCAP_SLS_5_0GB)
-				*speed = PCIE_SPEED_5_0GT;
-			else if (lnkcap1 & PCI_EXP_LNKCAP_SLS_2_5GB)
-				*speed = PCIE_SPEED_2_5GT;
-		}
-	}
-
-	if (*speed == PCI_SPEED_UNKNOWN || *width == PCIE_LNK_WIDTH_UNKNOWN) {
-		return err1 ? err1 :
-			err2 ? err2 : -EINVAL;
-	}
-	return 0;
-}
-
-static void mlx4_check_pcie_caps(struct mlx4_dev *dev)
-{
-	enum pcie_link_width width, width_cap;
-	enum pci_bus_speed speed, speed_cap;
-	int err;
-
-#define PCIE_SPEED_STR(speed) \
-	(speed == PCIE_SPEED_8_0GT ? "8.0GT/s" : \
-	 speed == PCIE_SPEED_5_0GT ? "5.0GT/s" : \
-	 speed == PCIE_SPEED_2_5GT ? "2.5GT/s" : \
-	 "Unknown")
-
-	err = mlx4_get_pcie_dev_link_caps(dev, &speed_cap, &width_cap);
-	if (err) {
-		mlx4_warn(dev,
-			  "Unable to determine PCIe device BW capabilities\n");
-		return;
-	}
-
-	err = pcie_get_minimum_link(dev->persist->pdev, &speed, &width);
-	if (err || speed == PCI_SPEED_UNKNOWN ||
-	    width == PCIE_LNK_WIDTH_UNKNOWN) {
-		mlx4_warn(dev,
-			  "Unable to determine PCI device chain minimum BW\n");
-		return;
-	}
-
-	if (width != width_cap || speed != speed_cap)
-		mlx4_warn(dev,
-			  "PCIe BW is different than device's capability\n");
-
-	mlx4_info(dev, "PCIe link speed is %s, device supports %s\n",
-		  PCIE_SPEED_STR(speed), PCIE_SPEED_STR(speed_cap));
-	mlx4_info(dev, "PCIe link width is x%d, device supports x%d\n",
-		  width, width_cap);
-	return;
 }
 
 /*The function checks if there are live vf, return the num of them*/
@@ -1395,7 +1317,7 @@ static int mlx4_mf_unbond(struct mlx4_dev *dev)
 
 	ret = mlx4_unbond_fs_rules(dev);
 	if (ret)
-		mlx4_warn(dev, "multifunction unbond for flow rules failedi (%d)\n", ret);
+		mlx4_warn(dev, "multifunction unbond for flow rules failed (%d)\n", ret);
 	ret1 = mlx4_unbond_mac_table(dev);
 	if (ret1) {
 		mlx4_warn(dev, "multifunction unbond for MAC table failed (%d)\n", ret1);
@@ -2893,6 +2815,9 @@ static void mlx4_enable_msi_x(struct mlx4_dev *dev)
 				dev->caps.num_eqs - dev->caps.reserved_eqs,
 				MAX_MSIX);
 
+		if (msi_x > 1)
+			nreq = min_t(int, nreq, msi_x);
+
 		entries = kcalloc(nreq, sizeof(*entries), GFP_KERNEL);
 		if (!entries)
 			goto no_msi;
@@ -2993,10 +2918,10 @@ static int mlx4_init_port_info(struct mlx4_dev *dev, int port)
 
 	sprintf(info->dev_name, "mlx4_port%d", port);
 	info->port_attr.attr.name = info->dev_name;
-	if (mlx4_is_mfunc(dev))
-		info->port_attr.attr.mode = S_IRUGO;
-	else {
-		info->port_attr.attr.mode = S_IRUGO | S_IWUSR;
+	if (mlx4_is_mfunc(dev)) {
+		info->port_attr.attr.mode = 0444;
+	} else {
+		info->port_attr.attr.mode = 0644;
 		info->port_attr.store     = set_port_type;
 	}
 	info->port_attr.show      = show_port_type;
@@ -3007,14 +2932,15 @@ static int mlx4_init_port_info(struct mlx4_dev *dev, int port)
 		mlx4_err(dev, "Failed to create file for port %d\n", port);
 		devlink_port_unregister(&info->devlink_port);
 		info->port = -1;
+		return err;
 	}
 
 	sprintf(info->dev_mtu_name, "mlx4_port%d_mtu", port);
 	info->port_mtu_attr.attr.name = info->dev_mtu_name;
-	if (mlx4_is_mfunc(dev))
-		info->port_mtu_attr.attr.mode = S_IRUGO;
-	else {
-		info->port_mtu_attr.attr.mode = S_IRUGO | S_IWUSR;
+	if (mlx4_is_mfunc(dev)) {
+		info->port_mtu_attr.attr.mode = 0444;
+	} else {
+		info->port_mtu_attr.attr.mode = 0644;
 		info->port_mtu_attr.store     = set_port_ib_mtu;
 	}
 	info->port_mtu_attr.show      = show_port_ib_mtu;
@@ -3028,9 +2954,10 @@ static int mlx4_init_port_info(struct mlx4_dev *dev, int port)
 				   &info->port_attr);
 		devlink_port_unregister(&info->devlink_port);
 		info->port = -1;
+		return err;
 	}
 
-	return err;
+	return 0;
 }
 
 static void mlx4_cleanup_port_info(struct mlx4_port_info *info)
@@ -3055,7 +2982,8 @@ static int mlx4_init_steering(struct mlx4_dev *dev)
 	int num_entries = dev->caps.num_ports;
 	int i, j;
 
-	priv->steer = kzalloc(sizeof(struct mlx4_steer) * num_entries, GFP_KERNEL);
+	priv->steer = kcalloc(num_entries, sizeof(struct mlx4_steer),
+			      GFP_KERNEL);
 	if (!priv->steer)
 		return -ENOMEM;
 
@@ -3176,7 +3104,7 @@ static u64 mlx4_enable_sriov(struct mlx4_dev *dev, struct pci_dev *pdev,
 		}
 	}
 
-	dev->dev_vfs = kzalloc(total_vfs * sizeof(*dev->dev_vfs), GFP_KERNEL);
+	dev->dev_vfs = kcalloc(total_vfs, sizeof(*dev->dev_vfs), GFP_KERNEL);
 	if (NULL == dev->dev_vfs) {
 		mlx4_err(dev, "Failed to allocate memory for VFs\n");
 		goto disable_sriov;
@@ -3475,7 +3403,7 @@ slave_start:
 	 * express device capabilities are under-satisfied by the bus.
 	 */
 	if (!mlx4_is_slave(dev))
-		mlx4_check_pcie_caps(dev);
+		pcie_print_link_status(dev->persist->pdev);
 
 	/* In master functions, the communication channel must be initialized
 	 * after obtaining its address from fw */
@@ -4203,17 +4131,68 @@ static const struct pci_error_handlers mlx4_err_handler = {
 	.resume		= mlx4_pci_resume,
 };
 
+static int mlx4_suspend(struct pci_dev *pdev, pm_message_t state)
+{
+	struct mlx4_dev_persistent *persist = pci_get_drvdata(pdev);
+	struct mlx4_dev	*dev = persist->dev;
+
+	mlx4_err(dev, "suspend was called\n");
+	mutex_lock(&persist->interface_state_mutex);
+	if (persist->interface_state & MLX4_INTERFACE_STATE_UP)
+		mlx4_unload_one(pdev);
+	mutex_unlock(&persist->interface_state_mutex);
+
+	return 0;
+}
+
+static int mlx4_resume(struct pci_dev *pdev)
+{
+	struct mlx4_dev_persistent *persist = pci_get_drvdata(pdev);
+	struct mlx4_dev	*dev = persist->dev;
+	struct mlx4_priv *priv = mlx4_priv(dev);
+	int nvfs[MLX4_MAX_PORTS + 1] = {0, 0, 0};
+	int total_vfs;
+	int ret = 0;
+
+	mlx4_err(dev, "resume was called\n");
+	total_vfs = dev->persist->num_vfs;
+	memcpy(nvfs, dev->persist->nvfs, sizeof(dev->persist->nvfs));
+
+	mutex_lock(&persist->interface_state_mutex);
+	if (!(persist->interface_state & MLX4_INTERFACE_STATE_UP)) {
+		ret = mlx4_load_one(pdev, priv->pci_dev_data, total_vfs,
+				    nvfs, priv, 1);
+		if (!ret) {
+			ret = restore_current_port_types(dev,
+					dev->persist->curr_port_type,
+					dev->persist->curr_port_poss_type);
+			if (ret)
+				mlx4_err(dev, "resume: could not restore original port types (%d)\n", ret);
+		}
+	}
+	mutex_unlock(&persist->interface_state_mutex);
+
+	return ret;
+}
+
 static struct pci_driver mlx4_driver = {
 	.name		= DRV_NAME,
 	.id_table	= mlx4_pci_table,
 	.probe		= mlx4_init_one,
 	.shutdown	= mlx4_shutdown,
 	.remove		= mlx4_remove_one,
+	.suspend	= mlx4_suspend,
+	.resume		= mlx4_resume,
 	.err_handler    = &mlx4_err_handler,
 };
 
 static int __init mlx4_verify_params(void)
 {
+	if (msi_x < 0) {
+		pr_warn("mlx4_core: bad msi_x: %d\n", msi_x);
+		return -1;
+	}
+
 	if ((log_num_mac < 0) || (log_num_mac > 7)) {
 		pr_warn("mlx4_core: bad num_mac: %d\n", log_num_mac);
 		return -1;

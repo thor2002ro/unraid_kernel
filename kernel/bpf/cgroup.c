@@ -428,6 +428,60 @@ int __cgroup_bpf_query(struct cgroup *cgrp, const union bpf_attr *attr,
 	return ret;
 }
 
+int cgroup_bpf_prog_attach(const union bpf_attr *attr,
+			   enum bpf_prog_type ptype, struct bpf_prog *prog)
+{
+	struct cgroup *cgrp;
+	int ret;
+
+	cgrp = cgroup_get_from_fd(attr->target_fd);
+	if (IS_ERR(cgrp))
+		return PTR_ERR(cgrp);
+
+	ret = cgroup_bpf_attach(cgrp, prog, attr->attach_type,
+				attr->attach_flags);
+	cgroup_put(cgrp);
+	return ret;
+}
+
+int cgroup_bpf_prog_detach(const union bpf_attr *attr, enum bpf_prog_type ptype)
+{
+	struct bpf_prog *prog;
+	struct cgroup *cgrp;
+	int ret;
+
+	cgrp = cgroup_get_from_fd(attr->target_fd);
+	if (IS_ERR(cgrp))
+		return PTR_ERR(cgrp);
+
+	prog = bpf_prog_get_type(attr->attach_bpf_fd, ptype);
+	if (IS_ERR(prog))
+		prog = NULL;
+
+	ret = cgroup_bpf_detach(cgrp, prog, attr->attach_type, 0);
+	if (prog)
+		bpf_prog_put(prog);
+
+	cgroup_put(cgrp);
+	return ret;
+}
+
+int cgroup_bpf_prog_query(const union bpf_attr *attr,
+			  union bpf_attr __user *uattr)
+{
+	struct cgroup *cgrp;
+	int ret;
+
+	cgrp = cgroup_get_from_fd(attr->query.target_fd);
+	if (IS_ERR(cgrp))
+		return PTR_ERR(cgrp);
+
+	ret = cgroup_bpf_query(cgrp, attr, uattr);
+
+	cgroup_put(cgrp);
+	return ret;
+}
+
 /**
  * __cgroup_bpf_run_filter_skb() - Run a program for packet filtering
  * @sk: The socket sending or receiving traffic
@@ -495,6 +549,51 @@ int __cgroup_bpf_run_filter_sk(struct sock *sk,
 EXPORT_SYMBOL(__cgroup_bpf_run_filter_sk);
 
 /**
+ * __cgroup_bpf_run_filter_sock_addr() - Run a program on a sock and
+ *                                       provided by user sockaddr
+ * @sk: sock struct that will use sockaddr
+ * @uaddr: sockaddr struct provided by user
+ * @type: The type of program to be exectuted
+ * @t_ctx: Pointer to attach type specific context
+ *
+ * socket is expected to be of type INET or INET6.
+ *
+ * This function will return %-EPERM if an attached program is found and
+ * returned value != 1 during execution. In all other cases, 0 is returned.
+ */
+int __cgroup_bpf_run_filter_sock_addr(struct sock *sk,
+				      struct sockaddr *uaddr,
+				      enum bpf_attach_type type,
+				      void *t_ctx)
+{
+	struct bpf_sock_addr_kern ctx = {
+		.sk = sk,
+		.uaddr = uaddr,
+		.t_ctx = t_ctx,
+	};
+	struct sockaddr_storage unspec;
+	struct cgroup *cgrp;
+	int ret;
+
+	/* Check socket family since not all sockets represent network
+	 * endpoint (e.g. AF_UNIX).
+	 */
+	if (sk->sk_family != AF_INET && sk->sk_family != AF_INET6)
+		return 0;
+
+	if (!ctx.uaddr) {
+		memset(&unspec, 0, sizeof(unspec));
+		ctx.uaddr = (struct sockaddr *)&unspec;
+	}
+
+	cgrp = sock_cgroup_ptr(&sk->sk_cgrp_data);
+	ret = BPF_PROG_RUN_ARRAY(cgrp->bpf.effective[type], &ctx, BPF_PROG_RUN);
+
+	return ret == 1 ? 0 : -EPERM;
+}
+EXPORT_SYMBOL(__cgroup_bpf_run_filter_sock_addr);
+
+/**
  * __cgroup_bpf_run_filter_sock_ops() - Run a program on a sock
  * @sk: socket to get cgroup from
  * @sock_ops: bpf_sock_ops_kern struct to pass to program. Contains
@@ -545,7 +644,7 @@ int __cgroup_bpf_check_dev_permission(short dev_type, u32 major, u32 minor,
 EXPORT_SYMBOL(__cgroup_bpf_check_dev_permission);
 
 static const struct bpf_func_proto *
-cgroup_dev_func_proto(enum bpf_func_id func_id)
+cgroup_dev_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
 	switch (func_id) {
 	case BPF_FUNC_map_lookup_elem:
@@ -566,6 +665,7 @@ cgroup_dev_func_proto(enum bpf_func_id func_id)
 
 static bool cgroup_dev_is_valid_access(int off, int size,
 				       enum bpf_access_type type,
+				       const struct bpf_prog *prog,
 				       struct bpf_insn_access_aux *info)
 {
 	const int size_default = sizeof(__u32);

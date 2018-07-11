@@ -891,7 +891,7 @@ bfad_iocmd_fabric_get_lports(struct bfad_s *bfad, void *cmd,
 
 	if (bfad_chk_iocmd_sz(payload_len,
 		sizeof(struct bfa_bsg_fabric_get_lports_s),
-		sizeof(wwn_t[iocmd->nports])) != BFA_STATUS_OK) {
+		sizeof(wwn_t) * iocmd->nports) != BFA_STATUS_OK) {
 		iocmd->status = BFA_STATUS_VERSION_FAIL;
 		goto out;
 	}
@@ -3252,8 +3252,9 @@ bfad_fcxp_map_sg(struct bfad_s *bfad, void *payload_kbuf,
 	struct bfa_sge_s	*sg_table;
 	int sge_num = 1;
 
-	buf_base = kzalloc((sizeof(struct bfad_buf_info) +
-			   sizeof(struct bfa_sge_s)) * sge_num, GFP_KERNEL);
+	buf_base = kcalloc(sizeof(struct bfad_buf_info) +
+				sizeof(struct bfa_sge_s),
+			   sge_num, GFP_KERNEL);
 	if (!buf_base)
 		return NULL;
 

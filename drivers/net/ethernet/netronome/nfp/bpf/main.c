@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 Netronome Systems, Inc.
+ * Copyright (C) 2017-2018 Netronome Systems, Inc.
  *
  * This software is dual licensed under the GNU General License Version 2,
  * June 1991 as shown in the file COPYING in the top-level directory of this
@@ -43,6 +43,14 @@
 #include "fw.h"
 #include "main.h"
 
+const struct rhashtable_params nfp_bpf_maps_neutral_params = {
+	.nelem_hint		= 4,
+	.key_len		= FIELD_SIZEOF(struct nfp_bpf_neutral_map, ptr),
+	.key_offset		= offsetof(struct nfp_bpf_neutral_map, ptr),
+	.head_offset		= offsetof(struct nfp_bpf_neutral_map, l),
+	.automatic_shrinking	= true,
+};
+
 static bool nfp_net_ebpf_capable(struct nfp_net *nn)
 {
 #ifdef __LITTLE_ENDIAN
@@ -73,10 +81,10 @@ nfp_bpf_xdp_offload(struct nfp_app *app, struct nfp_net *nn,
 
 	ret = nfp_net_bpf_offload(nn, prog, running, extack);
 	/* Stop offload if replace not possible */
-	if (ret && prog)
-		nfp_bpf_xdp_offload(app, nn, NULL, extack);
+	if (ret)
+		return ret;
 
-	nn->dp.bpf_offload_xdp = prog && !ret;
+	nn->dp.bpf_offload_xdp = !!prog;
 	return ret;
 }
 
@@ -194,6 +202,9 @@ static int nfp_bpf_setup_tc_block(struct net_device *netdev,
 	if (f->binder_type != TCF_BLOCK_BINDER_TYPE_CLSACT_INGRESS)
 		return -EOPNOTSUPP;
 
+	if (tcf_block_shared(f->block))
+		return -EOPNOTSUPP;
+
 	switch (f->command) {
 	case TC_BLOCK_BIND:
 		return tcf_block_cb_register(f->block,
@@ -221,7 +232,7 @@ static int nfp_bpf_setup_tc(struct nfp_app *app, struct net_device *netdev,
 }
 
 static int
-nfp_bpf_change_mtu(struct nfp_app *app, struct net_device *netdev, int new_mtu)
+nfp_bpf_check_mtu(struct nfp_app *app, struct net_device *netdev, int new_mtu)
 {
 	struct nfp_net *nn = netdev_priv(netdev);
 	unsigned int max_mtu;
@@ -284,6 +295,15 @@ nfp_bpf_parse_cap_func(struct nfp_app_bpf *bpf, void __iomem *value, u32 length)
 	case BPF_FUNC_map_lookup_elem:
 		bpf->helpers.map_lookup = readl(&cap->func_addr);
 		break;
+	case BPF_FUNC_map_update_elem:
+		bpf->helpers.map_update = readl(&cap->func_addr);
+		break;
+	case BPF_FUNC_map_delete_elem:
+		bpf->helpers.map_delete = readl(&cap->func_addr);
+		break;
+	case BPF_FUNC_perf_event_output:
+		bpf->helpers.perf_event_output = readl(&cap->func_addr);
+		break;
 	}
 
 	return 0;
@@ -309,6 +329,21 @@ nfp_bpf_parse_cap_maps(struct nfp_app_bpf *bpf, void __iomem *value, u32 length)
 	return 0;
 }
 
+static int
+nfp_bpf_parse_cap_random(struct nfp_app_bpf *bpf, void __iomem *value,
+			 u32 length)
+{
+	bpf->pseudo_random = true;
+	return 0;
+}
+
+static int
+nfp_bpf_parse_cap_qsel(struct nfp_app_bpf *bpf, void __iomem *value, u32 length)
+{
+	bpf->queue_select = true;
+	return 0;
+}
+
 static int nfp_bpf_parse_capabilities(struct nfp_app *app)
 {
 	struct nfp_cpp *cpp = app->pf->cpp;
@@ -321,7 +356,7 @@ static int nfp_bpf_parse_capabilities(struct nfp_app *app)
 		return PTR_ERR(mem) == -ENOENT ? 0 : PTR_ERR(mem);
 
 	start = mem;
-	while (mem - start + 8 < nfp_cpp_area_size(area)) {
+	while (mem - start + 8 <= nfp_cpp_area_size(area)) {
 		u8 __iomem *value;
 		u32 type, length;
 
@@ -345,6 +380,14 @@ static int nfp_bpf_parse_capabilities(struct nfp_app *app)
 			break;
 		case NFP_BPF_CAP_TYPE_MAPS:
 			if (nfp_bpf_parse_cap_maps(app->priv, value, length))
+				goto err_release_free;
+			break;
+		case NFP_BPF_CAP_TYPE_RANDOM:
+			if (nfp_bpf_parse_cap_random(app->priv, value, length))
+				goto err_release_free;
+			break;
+		case NFP_BPF_CAP_TYPE_QUEUE_SELECT:
+			if (nfp_bpf_parse_cap_qsel(app->priv, value, length))
 				goto err_release_free;
 			break;
 		default:
@@ -383,15 +426,26 @@ static int nfp_bpf_init(struct nfp_app *app)
 	init_waitqueue_head(&bpf->cmsg_wq);
 	INIT_LIST_HEAD(&bpf->map_list);
 
-	err = nfp_bpf_parse_capabilities(app);
+	err = rhashtable_init(&bpf->maps_neutral, &nfp_bpf_maps_neutral_params);
 	if (err)
 		goto err_free_bpf;
 
+	err = nfp_bpf_parse_capabilities(app);
+	if (err)
+		goto err_free_neutral_maps;
+
 	return 0;
 
+err_free_neutral_maps:
+	rhashtable_destroy(&bpf->maps_neutral);
 err_free_bpf:
 	kfree(bpf);
 	return err;
+}
+
+static void nfp_check_rhashtable_empty(void *ptr, void *arg)
+{
+	WARN_ON_ONCE(1);
 }
 
 static void nfp_bpf_clean(struct nfp_app *app)
@@ -401,6 +455,8 @@ static void nfp_bpf_clean(struct nfp_app *app)
 	WARN_ON(!skb_queue_empty(&bpf->cmsg_replies));
 	WARN_ON(!list_empty(&bpf->map_list));
 	WARN_ON(bpf->maps_in_use || bpf->map_elems_in_use);
+	rhashtable_free_and_destroy(&bpf->maps_neutral,
+				    nfp_check_rhashtable_empty, NULL);
 	kfree(bpf);
 }
 
@@ -413,7 +469,7 @@ const struct nfp_app_type app_bpf = {
 	.init		= nfp_bpf_init,
 	.clean		= nfp_bpf_clean,
 
-	.change_mtu	= nfp_bpf_change_mtu,
+	.check_mtu	= nfp_bpf_check_mtu,
 
 	.extra_cap	= nfp_bpf_extra_cap,
 

@@ -33,11 +33,6 @@
 static struct ion_device *internal_dev;
 static int heap_id;
 
-bool ion_buffer_cached(struct ion_buffer *buffer)
-{
-	return !!(buffer->flags & ION_FLAG_CACHED);
-}
-
 /* this function should only be called while dev->lock is held */
 static void ion_buffer_add(struct ion_device *dev,
 			   struct ion_buffer *buffer)
@@ -79,6 +74,8 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 
 	buffer->heap = heap;
 	buffer->flags = flags;
+	buffer->dev = dev;
+	buffer->size = len;
 
 	ret = heap->ops->allocate(heap, buffer, len, flags);
 
@@ -98,11 +95,6 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 		goto err1;
 	}
 
-	buffer->dev = dev;
-	buffer->size = len;
-
-	buffer->dev = dev;
-	buffer->size = len;
 	INIT_LIST_HEAD(&buffer->attachments);
 	mutex_init(&buffer->lock);
 	mutex_lock(&dev->buffer_lock);
@@ -119,8 +111,11 @@ err2:
 
 void ion_buffer_destroy(struct ion_buffer *buffer)
 {
-	if (WARN_ON(buffer->kmap_cnt > 0))
+	if (buffer->kmap_cnt > 0) {
+		pr_warn_once("%s: buffer still mapped in the kernel\n",
+			     __func__);
 		buffer->heap->ops->unmap_kernel(buffer->heap, buffer);
+	}
 	buffer->heap->ops->free(buffer);
 	kfree(buffer);
 }
@@ -187,7 +182,7 @@ static struct sg_table *dup_sg_table(struct sg_table *table)
 	new_sg = new_table->sgl;
 	for_each_sg(table->sgl, sg, table->nents, i) {
 		memcpy(new_sg, sg, sizeof(*sg));
-		sg->dma_address = 0;
+		new_sg->dma_address = 0;
 		new_sg = sg_next(new_sg);
 	}
 
@@ -323,6 +318,7 @@ static int ion_dma_buf_begin_cpu_access(struct dma_buf *dmabuf,
 	struct ion_buffer *buffer = dmabuf->priv;
 	void *vaddr;
 	struct ion_dma_buf_attachment *a;
+	int ret = 0;
 
 	/*
 	 * TODO: Move this elsewhere because we don't always need a vaddr
@@ -330,6 +326,10 @@ static int ion_dma_buf_begin_cpu_access(struct dma_buf *dmabuf,
 	if (buffer->heap->ops->map_kernel) {
 		mutex_lock(&buffer->lock);
 		vaddr = ion_buffer_kmap_get(buffer);
+		if (IS_ERR(vaddr)) {
+			ret = PTR_ERR(vaddr);
+			goto unlock;
+		}
 		mutex_unlock(&buffer->lock);
 	}
 
@@ -338,9 +338,10 @@ static int ion_dma_buf_begin_cpu_access(struct dma_buf *dmabuf,
 		dma_sync_sg_for_cpu(a->dev, a->table->sgl, a->table->nents,
 				    direction);
 	}
-	mutex_unlock(&buffer->lock);
 
-	return 0;
+unlock:
+	mutex_unlock(&buffer->lock);
+	return ret;
 }
 
 static int ion_dma_buf_end_cpu_access(struct dma_buf *dmabuf,
@@ -527,7 +528,6 @@ DEFINE_SIMPLE_ATTRIBUTE(debug_shrink_fops, debug_shrink_get,
 
 void ion_device_add_heap(struct ion_heap *heap)
 {
-	struct dentry *debug_file;
 	struct ion_device *dev = internal_dev;
 	int ret;
 
@@ -561,16 +561,8 @@ void ion_device_add_heap(struct ion_heap *heap)
 		char debug_name[64];
 
 		snprintf(debug_name, 64, "%s_shrink", heap->name);
-		debug_file = debugfs_create_file(debug_name,
-						 0644, dev->debug_root, heap,
-						 &debug_shrink_fops);
-		if (!debug_file) {
-			char buf[256], *path;
-
-			path = dentry_path(dev->debug_root, buf, 256);
-			pr_err("Failed to create heap shrinker debugfs at %s/%s\n",
-			       path, debug_name);
-		}
+		debugfs_create_file(debug_name, 0644, dev->debug_root,
+				    heap, &debug_shrink_fops);
 	}
 
 	dev->heap_cnt++;
@@ -599,12 +591,6 @@ static int ion_device_create(void)
 	}
 
 	idev->debug_root = debugfs_create_dir("ion", NULL);
-	if (!idev->debug_root) {
-		pr_err("ion: failed to create debugfs root directory.\n");
-		goto debugfs_done;
-	}
-
-debugfs_done:
 	idev->buffers = RB_ROOT;
 	mutex_init(&idev->buffer_lock);
 	init_rwsem(&idev->lock);

@@ -98,7 +98,7 @@ drm_gem_init(struct drm_device *dev)
 	struct drm_vma_offset_manager *vma_offset_manager;
 
 	mutex_init(&dev->object_name_lock);
-	idr_init(&dev->object_name_idr);
+	idr_init_base(&dev->object_name_idr, 1);
 
 	vma_offset_manager = kzalloc(sizeof(*vma_offset_manager), GFP_KERNEL);
 	if (!vma_offset_manager) {
@@ -436,9 +436,12 @@ err_unref:
  * @obj: object to register
  * @handlep: pionter to return the created handle to the caller
  *
- * Create a handle for this object. This adds a handle reference
- * to the object, which includes a regular reference count. Callers
- * will likely want to dereference the object afterwards.
+ * Create a handle for this object. This adds a handle reference to the object,
+ * which includes a regular reference count. Callers will likely want to
+ * dereference the object afterwards.
+ *
+ * Since this publishes @obj to userspace it must be fully set up by this point,
+ * drivers must call this last in their buffer object creation callbacks.
  */
 int drm_gem_handle_create(struct drm_file *file_priv,
 			  struct drm_gem_object *obj,
@@ -776,7 +779,7 @@ drm_gem_open_ioctl(struct drm_device *dev, void *data,
 void
 drm_gem_open(struct drm_device *dev, struct drm_file *file_private)
 {
-	idr_init(&file_private->object_idr);
+	idr_init_base(&file_private->object_idr, 1);
 	spin_lock_init(&file_private->table_lock);
 }
 

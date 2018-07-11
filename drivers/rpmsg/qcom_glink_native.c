@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2016-2017, Linaro Ltd
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/idr.h>
@@ -113,7 +105,7 @@ struct qcom_glink {
 	spinlock_t rx_lock;
 	struct list_head rx_queue;
 
-	struct mutex tx_lock;
+	spinlock_t tx_lock;
 
 	spinlock_t idr_lock;
 	struct idr lcids;
@@ -288,15 +280,14 @@ static int qcom_glink_tx(struct qcom_glink *glink,
 			 const void *data, size_t dlen, bool wait)
 {
 	unsigned int tlen = hlen + dlen;
-	int ret;
+	unsigned long flags;
+	int ret = 0;
 
 	/* Reject packets that are too big */
 	if (tlen >= glink->tx_pipe->length)
 		return -EINVAL;
 
-	ret = mutex_lock_interruptible(&glink->tx_lock);
-	if (ret)
-		return ret;
+	spin_lock_irqsave(&glink->tx_lock, flags);
 
 	while (qcom_glink_tx_avail(glink) < tlen) {
 		if (!wait) {
@@ -304,7 +295,12 @@ static int qcom_glink_tx(struct qcom_glink *glink,
 			goto out;
 		}
 
+		/* Wait without holding the tx_lock */
+		spin_unlock_irqrestore(&glink->tx_lock, flags);
+
 		usleep_range(10000, 15000);
+
+		spin_lock_irqsave(&glink->tx_lock, flags);
 	}
 
 	qcom_glink_tx_write(glink, hdr, hlen, data, dlen);
@@ -313,7 +309,7 @@ static int qcom_glink_tx(struct qcom_glink *glink,
 	mbox_client_txdone(glink->mbox_chan, 0);
 
 out:
-	mutex_unlock(&glink->tx_lock);
+	spin_unlock_irqrestore(&glink->tx_lock, flags);
 
 	return ret;
 }
@@ -1567,7 +1563,7 @@ struct qcom_glink *qcom_glink_native_probe(struct device *dev,
 	glink->features = features;
 	glink->intentless = intentless;
 
-	mutex_init(&glink->tx_lock);
+	spin_lock_init(&glink->tx_lock);
 	spin_lock_init(&glink->rx_lock);
 	INIT_LIST_HEAD(&glink->rx_queue);
 	INIT_WORK(&glink->rx_work, qcom_glink_work);

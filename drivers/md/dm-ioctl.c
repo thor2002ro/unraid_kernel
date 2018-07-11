@@ -1344,7 +1344,8 @@ static int table_load(struct file *filp, struct dm_ioctl *param, size_t param_si
 			goto err_unlock_md_type;
 		}
 	} else if (!is_valid_type(dm_get_md_type(md), dm_table_get_type(t))) {
-		DMWARN("can't change device type after initial table load.");
+		DMWARN("can't change device type (old=%u vs new=%u) after initial table load.",
+		       dm_get_md_type(md), dm_table_get_type(t));
 		r = -EINVAL;
 		goto err_unlock_md_type;
 	}
@@ -1595,7 +1596,7 @@ static int target_message(struct file *filp, struct dm_ioctl *param, size_t para
 		DMWARN("Target message sector outside device.");
 		r = -EINVAL;
 	} else if (ti->type->message)
-		r = ti->type->message(ti, argc, argv);
+		r = ti->type->message(ti, argc, argv, result, maxlen);
 	else {
 		DMWARN("Target type does not support messages");
 		r = -EINVAL;

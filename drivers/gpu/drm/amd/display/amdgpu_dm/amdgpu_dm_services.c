@@ -37,8 +37,17 @@
 
 unsigned long long dm_get_timestamp(struct dc_context *ctx)
 {
-	/* TODO: return actual timestamp */
-	return 0;
+	struct timespec64 time;
+
+	getrawmonotonic64(&time);
+	return timespec64_to_ns(&time);
+}
+
+unsigned long long dm_get_elapse_time_in_ns(struct dc_context *ctx,
+		unsigned long long current_time_stamp,
+		unsigned long long last_time_stamp)
+{
+	return current_time_stamp - last_time_stamp;
 }
 
 void dm_perf_trace_timestamp(const char *func_name, unsigned int line)
@@ -70,15 +79,6 @@ bool dm_read_persistent_data(struct dc_context *ctx,
 }
 
 /**** power component interfaces ****/
-
-bool dm_pp_pre_dce_clock_change(
-		struct dc_context *ctx,
-		struct dm_pp_gpu_clock_range *requested_state,
-		struct dm_pp_gpu_clock_range *actual_state)
-{
-	/*TODO*/
-	return false;
-}
 
 bool dm_pp_apply_display_requirements(
 		const struct dc_context *ctx,
@@ -146,30 +146,6 @@ bool dm_pp_apply_display_requirements(
 
 		/* TODO: replace by a separate call to 'apply display cfg'? */
 		amdgpu_pm_compute_clocks(adev);
-	}
-
-	return true;
-}
-
-bool dc_service_get_system_clocks_range(
-		const struct dc_context *ctx,
-		struct dm_pp_gpu_clock_range *sys_clks)
-{
-	struct amdgpu_device *adev = ctx->driver_context;
-
-	/* Default values, in case PPLib is not compiled-in. */
-	sys_clks->mclk.max_khz = 800000;
-	sys_clks->mclk.min_khz = 800000;
-
-	sys_clks->sclk.max_khz = 600000;
-	sys_clks->sclk.min_khz = 300000;
-
-	if (adev->pm.dpm_enabled) {
-		sys_clks->mclk.max_khz = amdgpu_dpm_get_mclk(adev, false);
-		sys_clks->mclk.min_khz = amdgpu_dpm_get_mclk(adev, true);
-
-		sys_clks->sclk.max_khz = amdgpu_dpm_get_sclk(adev, false);
-		sys_clks->sclk.min_khz = amdgpu_dpm_get_sclk(adev, true);
 	}
 
 	return true;
@@ -258,6 +234,33 @@ static void pp_to_dc_clock_levels(
 	}
 }
 
+static void pp_to_dc_clock_levels_with_latency(
+		const struct pp_clock_levels_with_latency *pp_clks,
+		struct dm_pp_clock_levels_with_latency *clk_level_info,
+		enum dm_pp_clock_type dc_clk_type)
+{
+	uint32_t i;
+
+	if (pp_clks->num_levels > DM_PP_MAX_CLOCK_LEVELS) {
+		DRM_INFO("DM_PPLIB: Warning: %s clock: number of levels %d exceeds maximum of %d!\n",
+				DC_DECODE_PP_CLOCK_TYPE(dc_clk_type),
+				pp_clks->num_levels,
+				DM_PP_MAX_CLOCK_LEVELS);
+
+		clk_level_info->num_levels = DM_PP_MAX_CLOCK_LEVELS;
+	} else
+		clk_level_info->num_levels = pp_clks->num_levels;
+
+	DRM_DEBUG("DM_PPLIB: values for %s clock\n",
+			DC_DECODE_PP_CLOCK_TYPE(dc_clk_type));
+
+	for (i = 0; i < clk_level_info->num_levels; i++) {
+		DRM_DEBUG("DM_PPLIB:\t %d\n", pp_clks->data[i].clocks_in_khz);
+		clk_level_info->data[i].clocks_in_khz = pp_clks->data[i].clocks_in_khz;
+		clk_level_info->data[i].latency_in_us = pp_clks->data[i].latency_in_us;
+	}
+}
+
 bool dm_pp_get_clock_levels_by_type(
 		const struct dc_context *ctx,
 		enum dm_pp_clock_type clk_type,
@@ -335,8 +338,22 @@ bool dm_pp_get_clock_levels_by_type_with_latency(
 	enum dm_pp_clock_type clk_type,
 	struct dm_pp_clock_levels_with_latency *clk_level_info)
 {
-	/* TODO: to be implemented */
-	return false;
+	struct amdgpu_device *adev = ctx->driver_context;
+	void *pp_handle = adev->powerplay.pp_handle;
+	struct pp_clock_levels_with_latency pp_clks = { 0 };
+	const struct amd_pm_funcs *pp_funcs = adev->powerplay.pp_funcs;
+
+	if (!pp_funcs || !pp_funcs->get_clock_by_type_with_latency)
+		return false;
+
+	if (pp_funcs->get_clock_by_type_with_latency(pp_handle,
+						     dc_to_pp_clock_type(clk_type),
+						     &pp_clks))
+		return false;
+
+	pp_to_dc_clock_levels_with_latency(&pp_clks, clk_level_info, clk_type);
+
+	return true;
 }
 
 bool dm_pp_get_clock_levels_by_type_with_voltage(

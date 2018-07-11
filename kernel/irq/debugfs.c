@@ -1,8 +1,6 @@
-/*
- * Copyright 2017 Thomas Gleixner <tglx@linutronix.de>
- *
- * This file is licensed under the GPL V2.
- */
+// SPDX-License-Identifier: GPL-2.0
+// Copyright 2017 Thomas Gleixner <tglx@linutronix.de>
+
 #include <linux/irqdomain.h>
 #include <linux/irq.h>
 #include <linux/uaccess.h>
@@ -57,6 +55,7 @@ static const struct irq_bit_descr irqchip_flags[] = {
 	BIT_MASK_DESCR(IRQCHIP_SKIP_SET_WAKE),
 	BIT_MASK_DESCR(IRQCHIP_ONESHOT_SAFE),
 	BIT_MASK_DESCR(IRQCHIP_EOI_THREADED),
+	BIT_MASK_DESCR(IRQCHIP_SUPPORTS_LEVEL_MSI),
 };
 
 static void

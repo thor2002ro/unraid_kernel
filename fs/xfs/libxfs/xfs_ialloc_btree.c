@@ -1,19 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2000-2001,2005 Silicon Graphics, Inc.
  * All Rights Reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it would be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write the Free Software Foundation,
- * Inc.,  51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
 #include "xfs.h"
 #include "xfs_fs.h"
@@ -93,8 +81,6 @@ __xfs_inobt_alloc_block(
 	int			error;		/* error return value */
 	xfs_agblock_t		sbno = be32_to_cpu(start->s);
 
-	XFS_BTREE_TRACE_CURSOR(cur, XBT_ENTRY);
-
 	memset(&args, 0, sizeof(args));
 	args.tp = cur->bc_tp;
 	args.mp = cur->bc_mp;
@@ -107,17 +93,14 @@ __xfs_inobt_alloc_block(
 	args.resv = resv;
 
 	error = xfs_alloc_vextent(&args);
-	if (error) {
-		XFS_BTREE_TRACE_CURSOR(cur, XBT_ERROR);
+	if (error)
 		return error;
-	}
+
 	if (args.fsbno == NULLFSBLOCK) {
-		XFS_BTREE_TRACE_CURSOR(cur, XBT_EXIT);
 		*stat = 0;
 		return 0;
 	}
 	ASSERT(args.len == 1);
-	XFS_BTREE_TRACE_CURSOR(cur, XBT_EXIT);
 
 	new->s = cpu_to_be32(XFS_FSB_TO_AGBNO(args.mp, args.fsbno));
 	*stat = 1;
@@ -301,7 +284,7 @@ xfs_inobt_verify(
 	case cpu_to_be32(XFS_FIBT_MAGIC):
 		break;
 	default:
-		return NULL;
+		return __this_address;
 	}
 
 	/* level verification */
@@ -561,7 +544,7 @@ xfs_inobt_max_size(
 	if (mp->m_inobt_mxr[0] == 0)
 		return 0;
 
-	return xfs_btree_calc_size(mp, mp->m_inobt_mnr,
+	return xfs_btree_calc_size(mp->m_inobt_mnr,
 		(uint64_t)mp->m_sb.sb_agblocks * mp->m_sb.sb_inopblock /
 				XFS_INODES_PER_CHUNK);
 }
@@ -612,4 +595,13 @@ xfs_finobt_calc_reserves(
 	*ask += xfs_inobt_max_size(mp);
 	*used += tree_len;
 	return 0;
+}
+
+/* Calculate the inobt btree size for some records. */
+xfs_extlen_t
+xfs_iallocbt_calc_size(
+	struct xfs_mount	*mp,
+	unsigned long long	len)
+{
+	return xfs_btree_calc_size(mp->m_inobt_mnr, len);
 }

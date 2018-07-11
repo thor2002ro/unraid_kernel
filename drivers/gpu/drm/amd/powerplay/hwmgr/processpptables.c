@@ -837,7 +837,7 @@ static const ATOM_PPLIB_POWERPLAYTABLE *get_powerplay_table(
 			hwmgr->soft_pp_table = &soft_dummy_pp_table[0];
 			hwmgr->soft_pp_table_size = sizeof(soft_dummy_pp_table);
 		} else {
-			table_addr = cgs_atom_get_data_table(hwmgr->device,
+			table_addr = smu_atom_get_data_table(hwmgr->adev,
 					GetIndexIntoMasterTable(DATA, PowerPlayInfo),
 					&size, &frev, &crev);
 			hwmgr->soft_pp_table = table_addr;
@@ -1058,7 +1058,7 @@ static int init_overdrive_limits(struct pp_hwmgr *hwmgr,
 		return 0;
 
 	/* We assume here that fw_info is unchanged if this call fails.*/
-	fw_info = cgs_atom_get_data_table(hwmgr->device,
+	fw_info = smu_atom_get_data_table(hwmgr->adev,
 			 GetIndexIntoMasterTable(DATA, FirmwareInfo),
 			 &size, &frev, &crev);
 
@@ -1073,13 +1073,6 @@ static int init_overdrive_limits(struct pp_hwmgr *hwmgr,
 		result = init_overdrive_limits_V2_1(hwmgr,
 				powerplay_table,
 				(const ATOM_FIRMWARE_INFO_V2_1 *)fw_info);
-
-	if (hwmgr->platform_descriptor.overdriveLimit.engineClock > 0
-		&& hwmgr->platform_descriptor.overdriveLimit.memoryClock > 0
-		&& !phm_cap_enabled(hwmgr->platform_descriptor.platformCaps,
-			PHM_PlatformCaps_OverdriveDisabledByPowerBudget))
-		phm_cap_set(hwmgr->platform_descriptor.platformCaps,
-				PHM_PlatformCaps_ACOverdriveSupport);
 
 	return result;
 }
@@ -1696,9 +1689,6 @@ static int pp_tables_uninitialize(struct pp_hwmgr *hwmgr)
 
 	kfree(hwmgr->dyn_state.vdd_gfx_dependency_on_sclk);
 	hwmgr->dyn_state.vdd_gfx_dependency_on_sclk = NULL;
-
-	kfree(hwmgr->dyn_state.vq_budgeting_table);
-	hwmgr->dyn_state.vq_budgeting_table = NULL;
 
 	return 0;
 }

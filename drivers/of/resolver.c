@@ -19,9 +19,6 @@
 
 #include "of_private.h"
 
-/* illegal phandle value (set when unresolved) */
-#define OF_PHANDLE_ILLEGAL	0xdeadbeef
-
 static phandle live_tree_max_phandle(void)
 {
 	struct device_node *node;
@@ -122,6 +119,11 @@ static int update_usages_of_a_phandle_reference(struct device_node *overlay,
 
 		if (!prop) {
 			err = -ENOENT;
+			goto err_fail;
+		}
+
+		if (offset < 0 || offset + sizeof(__be32) > prop->length) {
+			err = -EINVAL;
 			goto err_fail;
 		}
 
@@ -269,17 +271,11 @@ int of_resolve_phandles(struct device_node *overlay)
 		goto out;
 	}
 
-#if 0
-	Temporarily disable check so that old style overlay unittests
-	do not fail when of_resolve_phandles() is moved into
-	of_overlay_apply().
-
 	if (!of_node_check_flag(overlay, OF_DETACHED)) {
 		pr_err("overlay not detached\n");
 		err = -EINVAL;
 		goto out;
 	}
-#endif
 
 	phandle_delta = live_tree_max_phandle() + 1;
 	adjust_overlay_phandles(overlay, phandle_delta);

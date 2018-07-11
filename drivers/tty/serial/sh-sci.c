@@ -33,6 +33,7 @@
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/ioport.h>
+#include <linux/ktime.h>
 #include <linux/major.h>
 #include <linux/module.h>
 #include <linux/mm.h>
@@ -143,8 +144,8 @@ struct sci_port {
 	void				*rx_buf[2];
 	size_t				buf_len_rx;
 	struct work_struct		work_tx;
-	struct timer_list		rx_timer;
-	unsigned int			rx_timeout;
+	struct hrtimer			rx_timer;
+	unsigned int			rx_timeout;	/* microseconds */
 #endif
 	unsigned int			rx_frame;
 	int				rx_trigger;
@@ -159,6 +160,7 @@ struct sci_port {
 #define SCI_NPORTS CONFIG_SERIAL_SH_SCI_NR_UARTS
 
 static struct sci_port sci_ports[SCI_NPORTS];
+static unsigned long sci_ports_in_use;
 static struct uart_driver sci_uart_driver;
 
 static inline struct sci_port *
@@ -885,6 +887,8 @@ static void sci_receive_chars(struct uart_port *port)
 		/* Tell the rest of the system the news. New characters! */
 		tty_flip_buffer_push(tport);
 	} else {
+		/* TTY buffers full; read from RX reg to prevent lockup */
+		serial_port_in(port, SCxRDR);
 		serial_port_in(port, SCxSR); /* dummy read */
 		sci_clear_SCxSR(port, SCxSR_RDxF_CLEAR(port));
 	}
@@ -1229,6 +1233,15 @@ static void sci_rx_dma_release(struct sci_port *s, bool enable_pio)
 	}
 }
 
+static void start_hrtimer_us(struct hrtimer *hrt, unsigned long usec)
+{
+	long sec = usec / 1000000;
+	long nsec = (usec % 1000000) * 1000;
+	ktime_t t = ktime_set(sec, nsec);
+
+	hrtimer_start(hrt, t, HRTIMER_MODE_REL);
+}
+
 static void sci_dma_rx_complete(void *arg)
 {
 	struct sci_port *s = arg;
@@ -1247,7 +1260,7 @@ static void sci_dma_rx_complete(void *arg)
 	if (active >= 0)
 		count = sci_dma_rx_push(s, s->rx_buf[active], s->buf_len_rx);
 
-	mod_timer(&s->rx_timer, jiffies + s->rx_timeout);
+	start_hrtimer_us(&s->rx_timer, s->rx_timeout);
 
 	if (count)
 		tty_flip_buffer_push(&port->state->port);
@@ -1391,9 +1404,9 @@ static void work_fn_tx(struct work_struct *work)
 	dma_async_issue_pending(chan);
 }
 
-static void rx_timer_fn(struct timer_list *t)
+static enum hrtimer_restart rx_timer_fn(struct hrtimer *t)
 {
-	struct sci_port *s = from_timer(s, t, rx_timer);
+	struct sci_port *s = container_of(t, struct sci_port, rx_timer);
 	struct dma_chan *chan = s->chan_rx;
 	struct uart_port *port = &s->port;
 	struct dma_tx_state state;
@@ -1410,7 +1423,7 @@ static void rx_timer_fn(struct timer_list *t)
 	active = sci_dma_rx_find_active(s);
 	if (active < 0) {
 		spin_unlock_irqrestore(&port->lock, flags);
-		return;
+		return HRTIMER_NORESTART;
 	}
 
 	status = dmaengine_tx_status(s->chan_rx, s->active_rx, &state);
@@ -1420,7 +1433,7 @@ static void rx_timer_fn(struct timer_list *t)
 			s->active_rx, active);
 
 		/* Let packet complete handler take care of the packet */
-		return;
+		return HRTIMER_NORESTART;
 	}
 
 	dmaengine_pause(chan);
@@ -1435,7 +1448,7 @@ static void rx_timer_fn(struct timer_list *t)
 	if (status == DMA_COMPLETE) {
 		spin_unlock_irqrestore(&port->lock, flags);
 		dev_dbg(port->dev, "Transaction complete after DMA engine was stopped");
-		return;
+		return HRTIMER_NORESTART;
 	}
 
 	/* Handle incomplete DMA receive */
@@ -1460,6 +1473,8 @@ static void rx_timer_fn(struct timer_list *t)
 	serial_port_out(port, SCSCR, scr | SCSCR_RIE);
 
 	spin_unlock_irqrestore(&port->lock, flags);
+
+	return HRTIMER_NORESTART;
 }
 
 static struct dma_chan *sci_request_dma_chan(struct uart_port *port,
@@ -1571,7 +1586,8 @@ static void sci_request_dma(struct uart_port *port)
 			dma += s->buf_len_rx;
 		}
 
-		timer_setup(&s->rx_timer, rx_timer_fn, 0);
+		hrtimer_init(&s->rx_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+		s->rx_timer.function = rx_timer_fn;
 
 		if (port->type == PORT_SCIFA || port->type == PORT_SCIFB)
 			sci_submit_rx(s);
@@ -1630,9 +1646,9 @@ static irqreturn_t sci_rx_interrupt(int irq, void *ptr)
 		/* Clear current interrupt */
 		serial_port_out(port, SCxSR,
 				ssr & ~(SCIF_DR | SCxSR_RDxF(port)));
-		dev_dbg(port->dev, "Rx IRQ %lu: setup t-out in %u jiffies\n",
+		dev_dbg(port->dev, "Rx IRQ %lu: setup t-out in %u us\n",
 			jiffies, s->rx_timeout);
-		mod_timer(&s->rx_timer, jiffies + s->rx_timeout);
+		start_hrtimer_us(&s->rx_timer, s->rx_timeout);
 
 		return IRQ_HANDLED;
 	}
@@ -1643,7 +1659,7 @@ static irqreturn_t sci_rx_interrupt(int irq, void *ptr)
 			scif_set_rtrg(port, s->rx_trigger);
 
 		mod_timer(&s->rx_fifo_timer, jiffies + DIV_ROUND_UP(
-			  s->rx_frame * s->rx_fifo_timeout, 1000));
+			  s->rx_frame * HZ * s->rx_fifo_timeout, 1000000));
 	}
 
 	/* I think sci_receive_chars has to be called irrespective
@@ -2079,7 +2095,7 @@ static void sci_shutdown(struct uart_port *port)
 	if (s->chan_rx) {
 		dev_dbg(port->dev, "%s(%d) deleting rx_timer\n", __func__,
 			port->line);
-		del_timer_sync(&s->rx_timer);
+		hrtimer_cancel(&s->rx_timer);
 	}
 #endif
 
@@ -2375,6 +2391,27 @@ done:
 
 	uart_update_timeout(port, termios->c_cflag, baud);
 
+	/* byte size and parity */
+	switch (termios->c_cflag & CSIZE) {
+	case CS5:
+		bits = 7;
+		break;
+	case CS6:
+		bits = 8;
+		break;
+	case CS7:
+		bits = 9;
+		break;
+	default:
+		bits = 10;
+		break;
+	}
+
+	if (termios->c_cflag & CSTOPB)
+		bits++;
+	if (termios->c_cflag & PARENB)
+		bits++;
+
 	if (best_clk >= 0) {
 		if (port->type == PORT_SCIFA || port->type == PORT_SCIFB)
 			switch (srr + 1) {
@@ -2391,8 +2428,27 @@ done:
 		serial_port_out(port, SCSCR, scr_val | s->hscif_tot);
 		serial_port_out(port, SCSMR, smr_val);
 		serial_port_out(port, SCBRR, brr);
-		if (sci_getreg(port, HSSRR)->size)
-			serial_port_out(port, HSSRR, srr | HSCIF_SRE);
+		if (sci_getreg(port, HSSRR)->size) {
+			unsigned int hssrr = srr | HSCIF_SRE;
+			/* Calculate deviation from intended rate at the
+			 * center of the last stop bit in sampling clocks.
+			 */
+			int last_stop = bits * 2 - 1;
+			int deviation = min_err * srr * last_stop / 2 / baud;
+
+			if (abs(deviation) >= 2) {
+				/* At least two sampling clocks off at the
+				 * last stop bit; we can increase the error
+				 * margin by shifting the sampling point.
+				 */
+				int shift = min(-8, max(7, deviation / 2));
+
+				hssrr |= (shift << HSCIF_SRHP_SHIFT) &
+					 HSCIF_SRHP_MASK;
+				hssrr |= HSCIF_SRDE;
+			}
+			serial_port_out(port, HSSRR, hssrr);
+		}
 
 		/* Wait one bit interval */
 		udelay((1000000 + (baud - 1)) / baud);
@@ -2459,32 +2515,11 @@ done:
 	 * value obtained by this formula is too small. Therefore, if the value
 	 * is smaller than 20ms, use 20ms as the timeout value for DMA.
 	 */
-	/* byte size and parity */
-	switch (termios->c_cflag & CSIZE) {
-	case CS5:
-		bits = 7;
-		break;
-	case CS6:
-		bits = 8;
-		break;
-	case CS7:
-		bits = 9;
-		break;
-	default:
-		bits = 10;
-		break;
-	}
-
-	if (termios->c_cflag & CSTOPB)
-		bits++;
-	if (termios->c_cflag & PARENB)
-		bits++;
-
-	s->rx_frame = (100 * bits * HZ) / (baud / 10);
+	s->rx_frame = (10000 * bits) / (baud / 100);
 #ifdef CONFIG_SERIAL_SH_SCI_DMA
-	s->rx_timeout = DIV_ROUND_UP(s->buf_len_rx * 2 * s->rx_frame, 1000);
-	if (s->rx_timeout < msecs_to_jiffies(20))
-		s->rx_timeout = msecs_to_jiffies(20);
+	s->rx_timeout = s->buf_len_rx * 2 * s->rx_frame;
+	if (s->rx_timeout < 20)
+		s->rx_timeout = 20;
 #endif
 
 	if ((termios->c_cflag & CREAD) != 0)
@@ -2689,8 +2724,8 @@ found:
 			dev_dbg(dev, "failed to get %s (%ld)\n", clk_names[i],
 				PTR_ERR(clk));
 		else
-			dev_dbg(dev, "clk %s is %pC rate %pCr\n", clk_names[i],
-				clk, clk);
+			dev_dbg(dev, "clk %s is %pC rate %lu\n", clk_names[i],
+				clk, clk_get_rate(clk));
 		sci_port->clks[i] = IS_ERR(clk) ? NULL : clk;
 	}
 	return 0;
@@ -2875,16 +2910,15 @@ static void serial_console_write(struct console *co, const char *s,
 	unsigned long flags;
 	int locked = 1;
 
-	local_irq_save(flags);
 #if defined(SUPPORT_SYSRQ)
 	if (port->sysrq)
 		locked = 0;
 	else
 #endif
 	if (oops_in_progress)
-		locked = spin_trylock(&port->lock);
+		locked = spin_trylock_irqsave(&port->lock, flags);
 	else
-		spin_lock(&port->lock);
+		spin_lock_irqsave(&port->lock, flags);
 
 	/* first save SCSCR then disable interrupts, keep clock source */
 	ctrl = serial_port_in(port, SCSCR);
@@ -2904,8 +2938,7 @@ static void serial_console_write(struct console *co, const char *s,
 	serial_port_out(port, SCSCR, ctrl);
 
 	if (locked)
-		spin_unlock(&port->lock);
-	local_irq_restore(flags);
+		spin_unlock_irqrestore(&port->lock, flags);
 }
 
 static int serial_console_setup(struct console *co, char *options)
@@ -3011,6 +3044,7 @@ static int sci_remove(struct platform_device *dev)
 {
 	struct sci_port *port = platform_get_drvdata(dev);
 
+	sci_ports_in_use &= ~BIT(port->port.line);
 	uart_remove_one_port(&sci_uart_driver, &port->port);
 
 	sci_cleanup_single(port);
@@ -3092,8 +3126,14 @@ static struct plat_sci_port *sci_parse_dt(struct platform_device *pdev,
 
 	/* Get the line number from the aliases node. */
 	id = of_alias_get_id(np, "serial");
+	if (id < 0 && ~sci_ports_in_use)
+		id = ffz(sci_ports_in_use);
 	if (id < 0) {
 		dev_err(&pdev->dev, "failed to get alias id (%d)\n", id);
+		return NULL;
+	}
+	if (id >= ARRAY_SIZE(sci_ports)) {
+		dev_err(&pdev->dev, "serial%d out of range\n", id);
 		return NULL;
 	}
 
@@ -3122,6 +3162,9 @@ static int sci_probe_single(struct platform_device *dev,
 		dev_notice(&dev->dev, "Consider bumping CONFIG_SERIAL_SH_SCI_NR_UARTS!\n");
 		return -EINVAL;
 	}
+	BUILD_BUG_ON(SCI_NPORTS > sizeof(sci_ports_in_use) * 8);
+	if (sci_ports_in_use & BIT(index))
+		return -EBUSY;
 
 	mutex_lock(&sci_uart_registration_lock);
 	if (!sci_uart_driver.state) {
@@ -3220,6 +3263,7 @@ static int sci_probe(struct platform_device *dev)
 	sh_bios_gdb_detach();
 #endif
 
+	sci_ports_in_use |= BIT(dev_id);
 	return 0;
 }
 

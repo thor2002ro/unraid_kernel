@@ -1,22 +1,5 @@
-/* Intel(R) Ethernet Switch Host Interface Driver
- * Copyright(c) 2013 - 2017 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
- * Contact Information:
- * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- */
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright(c) 2013 - 2018 Intel Corporation. */
 
 #include <linux/types.h>
 #include <linux/module.h>
@@ -28,13 +11,13 @@
 
 #include "fm10k.h"
 
-#define DRV_VERSION	"0.22.1-k"
+#define DRV_VERSION	"0.23.4-k"
 #define DRV_SUMMARY	"Intel(R) Ethernet Switch Host Interface Driver"
 const char fm10k_driver_version[] = DRV_VERSION;
 char fm10k_driver_name[] = "fm10k";
 static const char fm10k_driver_string[] = DRV_SUMMARY;
 static const char fm10k_copyright[] =
-	"Copyright(c) 2013 - 2017 Intel Corporation.";
+	"Copyright(c) 2013 - 2018 Intel Corporation.";
 
 MODULE_AUTHOR("Intel Corporation, <linux.nics@intel.com>");
 MODULE_DESCRIPTION(DRV_SUMMARY);
@@ -444,15 +427,14 @@ static void fm10k_type_trans(struct fm10k_ring *rx_ring,
 			l2_accel = NULL;
 	}
 
-	skb->protocol = eth_type_trans(skb, dev);
-
 	/* Record Rx queue, or update macvlan statistics */
 	if (!l2_accel)
 		skb_record_rx_queue(skb, rx_ring->queue_index);
 	else
 		macvlan_count_rx(netdev_priv(dev), skb->len + ETH_HLEN, true,
-				 (skb->pkt_type == PACKET_BROADCAST) ||
-				 (skb->pkt_type == PACKET_MULTICAST));
+				 false);
+
+	skb->protocol = eth_type_trans(skb, dev);
 }
 
 /**

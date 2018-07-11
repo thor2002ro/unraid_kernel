@@ -114,6 +114,7 @@ static size_t get_elements_above_id(const void **iters,
 	short min = SHRT_MAX;
 	const void *elem;
 	int i, j, last_stored = -1;
+	unsigned int equal_min = 0;
 
 	for_each_element(elem, i, j, elements, num_elements, num_offset,
 			 data_offset) {
@@ -136,6 +137,10 @@ static size_t get_elements_above_id(const void **iters,
 		 */
 		iters[last_stored == i ? num_iters - 1 : num_iters++] = elem;
 		last_stored = i;
+		if (min == GET_ID(id))
+			equal_min++;
+		else
+			equal_min = 1;
 		min = GET_ID(id);
 	}
 
@@ -146,15 +151,10 @@ static size_t get_elements_above_id(const void **iters,
 	 * Therefore, we need to clean the beginning of the array to make sure
 	 * all ids of final elements are equal to min.
 	 */
-	for (i = num_iters - 1; i >= 0 &&
-	     GET_ID(*(u16 *)(iters[i] + id_offset)) == min; i--)
-		;
-
-	num_iters -= i + 1;
-	memmove(iters, iters + i + 1, sizeof(*iters) * num_iters);
+	memmove(iters, iters + num_iters - equal_min, sizeof(*iters) * equal_min);
 
 	*min_id = min;
-	return num_iters;
+	return equal_min;
 }
 
 #define find_max_element_entry_id(num_elements, elements, num_objects_fld, \
@@ -297,8 +297,7 @@ static struct uverbs_method_spec *build_method_with_attrs(const struct uverbs_me
 	if (max_attr_buckets >= 0)
 		num_attr_buckets = max_attr_buckets + 1;
 
-	method = kzalloc(sizeof(*method) +
-			 num_attr_buckets * sizeof(*method->attr_buckets),
+	method = kzalloc(struct_size(method, attr_buckets, num_attr_buckets),
 			 GFP_KERNEL);
 	if (!method)
 		return ERR_PTR(-ENOMEM);
@@ -322,7 +321,7 @@ static struct uverbs_method_spec *build_method_with_attrs(const struct uverbs_me
 		hash = kzalloc(sizeof(*hash) +
 			       ALIGN(sizeof(*hash->attrs) * (attr_max_bucket + 1),
 				     sizeof(long)) +
-			       BITS_TO_LONGS(attr_max_bucket) * sizeof(long),
+			       BITS_TO_LONGS(attr_max_bucket + 1) * sizeof(long),
 			       GFP_KERNEL);
 		if (!hash) {
 			res = -ENOMEM;
@@ -379,7 +378,7 @@ static struct uverbs_method_spec *build_method_with_attrs(const struct uverbs_me
 				 "ib_uverbs: Tried to merge attr (%d) but it's an object with new/destroy access but isn't mandatory\n",
 				 min_id) ||
 			    WARN(IS_ATTR_OBJECT(attr) &&
-				 attr->flags & UVERBS_ATTR_SPEC_F_MIN_SZ,
+				 attr->flags & UVERBS_ATTR_SPEC_F_MIN_SZ_OR_ZERO,
 				 "ib_uverbs: Tried to merge attr (%d) but it's an object with min_sz flag\n",
 				 min_id)) {
 				res = -EINVAL;
@@ -446,9 +445,9 @@ static struct uverbs_object_spec *build_object_with_methods(const struct uverbs_
 	if (max_method_buckets >= 0)
 		num_method_buckets = max_method_buckets + 1;
 
-	object = kzalloc(sizeof(*object) +
-			 num_method_buckets *
-			 sizeof(*object->method_buckets), GFP_KERNEL);
+	object = kzalloc(struct_size(object, method_buckets,
+				     num_method_buckets),
+			 GFP_KERNEL);
 	if (!object)
 		return ERR_PTR(-ENOMEM);
 
@@ -469,8 +468,8 @@ static struct uverbs_object_spec *build_object_with_methods(const struct uverbs_
 		if (methods_max_bucket < 0)
 			continue;
 
-		hash = kzalloc(sizeof(*hash) +
-			       sizeof(*hash->methods) * (methods_max_bucket + 1),
+		hash = kzalloc(struct_size(hash, methods,
+					   methods_max_bucket + 1),
 			       GFP_KERNEL);
 		if (!hash) {
 			res = -ENOMEM;
@@ -509,7 +508,7 @@ static struct uverbs_object_spec *build_object_with_methods(const struct uverbs_
 			 * first handler which != NULL. This also defines the
 			 * set of flags used for this handler.
 			 */
-			for (i = num_object_defs - 1;
+			for (i = num_method_defs - 1;
 			     i >= 0 && !method_defs[i]->handler; i--)
 				;
 			hash->methods[min_id++] = method;
@@ -579,8 +578,8 @@ struct uverbs_root_spec *uverbs_alloc_spec_tree(unsigned int num_trees,
 	if (max_object_buckets >= 0)
 		num_objects_buckets = max_object_buckets + 1;
 
-	root_spec = kzalloc(sizeof(*root_spec) +
-			    num_objects_buckets * sizeof(*root_spec->object_buckets),
+	root_spec = kzalloc(struct_size(root_spec, object_buckets,
+					num_objects_buckets),
 			    GFP_KERNEL);
 	if (!root_spec)
 		return ERR_PTR(-ENOMEM);
@@ -603,8 +602,8 @@ struct uverbs_root_spec *uverbs_alloc_spec_tree(unsigned int num_trees,
 		if (objects_max_bucket < 0)
 			continue;
 
-		hash = kzalloc(sizeof(*hash) +
-			       sizeof(*hash->objects) * (objects_max_bucket + 1),
+		hash = kzalloc(struct_size(hash, objects,
+					   objects_max_bucket + 1),
 			       GFP_KERNEL);
 		if (!hash) {
 			res = -ENOMEM;

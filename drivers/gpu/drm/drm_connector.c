@@ -205,9 +205,14 @@ int drm_connector_init(struct drm_device *dev,
 	connector->dev = dev;
 	connector->funcs = funcs;
 
-	ret = ida_simple_get(&config->connector_ida, 0, 0, GFP_KERNEL);
-	if (ret < 0)
+	/* connector index is used with 32bit bitmasks */
+	ret = ida_simple_get(&config->connector_ida, 0, 32, GFP_KERNEL);
+	if (ret < 0) {
+		DRM_DEBUG_KMS("Failed to allocate %s connector index: %d\n",
+			      drm_connector_enum_list[connector_type].name,
+			      ret);
 		goto out_put;
+	}
 	connector->index = ret;
 	ret = 0;
 
@@ -756,6 +761,13 @@ static const struct drm_prop_enum_list drm_tv_subconnector_enum_list[] = {
 DRM_ENUM_NAME_FN(drm_get_tv_subconnector_name,
 		 drm_tv_subconnector_enum_list)
 
+static struct drm_prop_enum_list drm_cp_enum_list[] = {
+	{ DRM_MODE_CONTENT_PROTECTION_UNDESIRED, "Undesired" },
+	{ DRM_MODE_CONTENT_PROTECTION_DESIRED, "Desired" },
+	{ DRM_MODE_CONTENT_PROTECTION_ENABLED, "Enabled" },
+};
+DRM_ENUM_NAME_FN(drm_get_content_protection_name, drm_cp_enum_list)
+
 /**
  * DOC: standard connector properties
  *
@@ -817,14 +829,50 @@ DRM_ENUM_NAME_FN(drm_get_tv_subconnector_name,
  * 	should update this value using drm_mode_connector_set_tile_property().
  * 	Userspace cannot change this property.
  * link-status:
- *      Connector link-status property to indicate the status of link. The default
- *      value of link-status is "GOOD". If something fails during or after modeset,
- *      the kernel driver may set this to "BAD" and issue a hotplug uevent. Drivers
- *      should update this value using drm_mode_connector_set_link_status_property().
+ *      Connector link-status property to indicate the status of link. The
+ *      default value of link-status is "GOOD". If something fails during or
+ *      after modeset, the kernel driver may set this to "BAD" and issue a
+ *      hotplug uevent. Drivers should update this value using
+ *      drm_mode_connector_set_link_status_property().
  * non_desktop:
  * 	Indicates the output should be ignored for purposes of displaying a
  * 	standard desktop environment or console. This is most likely because
  * 	the output device is not rectilinear.
+ * Content Protection:
+ *	This property is used by userspace to request the kernel protect future
+ *	content communicated over the link. When requested, kernel will apply
+ *	the appropriate means of protection (most often HDCP), and use the
+ *	property to tell userspace the protection is active.
+ *
+ *	Drivers can set this up by calling
+ *	drm_connector_attach_content_protection_property() on initialization.
+ *
+ *	The value of this property can be one of the following:
+ *
+ *	DRM_MODE_CONTENT_PROTECTION_UNDESIRED = 0
+ *		The link is not protected, content is transmitted in the clear.
+ *	DRM_MODE_CONTENT_PROTECTION_DESIRED = 1
+ *		Userspace has requested content protection, but the link is not
+ *		currently protected. When in this state, kernel should enable
+ *		Content Protection as soon as possible.
+ *	DRM_MODE_CONTENT_PROTECTION_ENABLED = 2
+ *		Userspace has requested content protection, and the link is
+ *		protected. Only the driver can set the property to this value.
+ *		If userspace attempts to set to ENABLED, kernel will return
+ *		-EINVAL.
+ *
+ *	A few guidelines:
+ *
+ *	- DESIRED state should be preserved until userspace de-asserts it by
+ *	  setting the property to UNDESIRED. This means ENABLED should only
+ *	  transition to UNDESIRED when the user explicitly requests it.
+ *	- If the state is DESIRED, kernel should attempt to re-authenticate the
+ *	  link whenever possible. This includes across disable/enable, dpms,
+ *	  hotplug, downstream device changes, link status failures, etc..
+ *	- Userspace is responsible for polling the property to determine when
+ *	  the value transitions from ENABLED to DESIRED. This signifies the link
+ *	  is no longer protected and userspace should take appropriate action
+ *	  (whatever that might be).
  *
  * Connectors also have one standardized atomic property:
  *
@@ -841,7 +889,31 @@ DRM_ENUM_NAME_FN(drm_get_tv_subconnector_name,
  *	INPUT_PROP_DIRECT) will still map 1:1 to the actual LCD panel
  *	coordinates, so if userspace rotates the picture to adjust for
  *	the orientation it must also apply the same transformation to the
- *	touchscreen input coordinates.
+ *	touchscreen input coordinates. This property is initialized by calling
+ *	drm_connector_init_panel_orientation_property().
+ *
+ * scaling mode:
+ *	This property defines how a non-native mode is upscaled to the native
+ *	mode of an LCD panel:
+ *
+ *	None:
+ *		No upscaling happens, scaling is left to the panel. Not all
+ *		drivers expose this mode.
+ *	Full:
+ *		The output is upscaled to the full resolution of the panel,
+ *		ignoring the aspect ratio.
+ *	Center:
+ *		No upscaling happens, the output is centered within the native
+ *		resolution the panel.
+ *	Full aspect:
+ *		The output is upscaled to maximize either the width or height
+ *		while retaining the aspect ratio.
+ *
+ *	This property should be set up by calling
+ *	drm_connector_attach_scaling_mode_property(). Note that drivers
+ *	can also expose this property to external outputs, in which case they
+ *	must support "None", which should be the default (since external screens
+ *	have a built-in scaler).
  */
 
 int drm_connector_create_standard_properties(struct drm_device *dev)
@@ -997,7 +1069,7 @@ int drm_mode_create_tv_properties(struct drm_device *dev,
 		goto nomem;
 
 	for (i = 0; i < num_modes; i++)
-		drm_property_add_enum(dev->mode_config.tv_mode_property, i,
+		drm_property_add_enum(dev->mode_config.tv_mode_property,
 				      i, modes[i]);
 
 	dev->mode_config.tv_brightness_property =
@@ -1084,7 +1156,7 @@ int drm_connector_attach_scaling_mode_property(struct drm_connector *connector,
 {
 	struct drm_device *dev = connector->dev;
 	struct drm_property *scaling_mode_property;
-	int i, j = 0;
+	int i;
 	const unsigned valid_scaling_mode_mask =
 		(1U << ARRAY_SIZE(drm_scaling_mode_enum_list)) - 1;
 
@@ -1105,7 +1177,7 @@ int drm_connector_attach_scaling_mode_property(struct drm_connector *connector,
 		if (!(BIT(i) & scaling_mode_mask))
 			continue;
 
-		ret = drm_property_add_enum(scaling_mode_property, j++,
+		ret = drm_property_add_enum(scaling_mode_property,
 					    drm_scaling_mode_enum_list[i].type,
 					    drm_scaling_mode_enum_list[i].name);
 
@@ -1124,6 +1196,42 @@ int drm_connector_attach_scaling_mode_property(struct drm_connector *connector,
 	return 0;
 }
 EXPORT_SYMBOL(drm_connector_attach_scaling_mode_property);
+
+/**
+ * drm_connector_attach_content_protection_property - attach content protection
+ * property
+ *
+ * @connector: connector to attach CP property on.
+ *
+ * This is used to add support for content protection on select connectors.
+ * Content Protection is intentionally vague to allow for different underlying
+ * technologies, however it is most implemented by HDCP.
+ *
+ * The content protection will be set to &drm_connector_state.content_protection
+ *
+ * Returns:
+ * Zero on success, negative errno on failure.
+ */
+int drm_connector_attach_content_protection_property(
+		struct drm_connector *connector)
+{
+	struct drm_device *dev = connector->dev;
+	struct drm_property *prop;
+
+	prop = drm_property_create_enum(dev, 0, "Content Protection",
+					drm_cp_enum_list,
+					ARRAY_SIZE(drm_cp_enum_list));
+	if (!prop)
+		return -ENOMEM;
+
+	drm_object_attach_property(&connector->base, prop,
+				   DRM_MODE_CONTENT_PROTECTION_UNDESIRED);
+
+	connector->content_protection_property = prop;
+
+	return 0;
+}
+EXPORT_SYMBOL(drm_connector_attach_content_protection_property);
 
 /**
  * drm_mode_create_aspect_ratio_property - create aspect ratio property
@@ -1423,8 +1531,10 @@ static struct drm_encoder *drm_connector_get_encoder(struct drm_connector *conne
 	return connector->encoder;
 }
 
-static bool drm_mode_expose_to_userspace(const struct drm_display_mode *mode,
-					 const struct drm_file *file_priv)
+static bool
+drm_mode_expose_to_userspace(const struct drm_display_mode *mode,
+			     const struct list_head *export_list,
+			     const struct drm_file *file_priv)
 {
 	/*
 	 * If user-space hasn't configured the driver to expose the stereo 3D
@@ -1432,6 +1542,23 @@ static bool drm_mode_expose_to_userspace(const struct drm_display_mode *mode,
 	 */
 	if (!file_priv->stereo_allowed && drm_mode_is_stereo(mode))
 		return false;
+	/*
+	 * If user-space hasn't configured the driver to expose the modes
+	 * with aspect-ratio, don't expose them. However if such a mode
+	 * is unique, let it be exposed, but reset the aspect-ratio flags
+	 * while preparing the list of user-modes.
+	 */
+	if (!file_priv->aspect_ratio_allowed) {
+		struct drm_display_mode *mode_itr;
+
+		list_for_each_entry(mode_itr, export_list, export_head)
+			if (drm_mode_match(mode_itr, mode,
+					   DRM_MODE_MATCH_TIMINGS |
+					   DRM_MODE_MATCH_CLOCK |
+					   DRM_MODE_MATCH_FLAGS |
+					   DRM_MODE_MATCH_3D_FLAGS))
+				return false;
+	}
 
 	return true;
 }
@@ -1451,6 +1578,7 @@ int drm_mode_getconnector(struct drm_device *dev, void *data,
 	struct drm_mode_modeinfo u_mode;
 	struct drm_mode_modeinfo __user *mode_ptr;
 	uint32_t __user *encoder_ptr;
+	LIST_HEAD(export_list);
 
 	if (!drm_core_check_feature(dev, DRIVER_MODESET))
 		return -EINVAL;
@@ -1499,21 +1627,31 @@ int drm_mode_getconnector(struct drm_device *dev, void *data,
 
 	/* delayed so we get modes regardless of pre-fill_modes state */
 	list_for_each_entry(mode, &connector->modes, head)
-		if (drm_mode_expose_to_userspace(mode, file_priv))
+		if (drm_mode_expose_to_userspace(mode, &export_list,
+						 file_priv)) {
+			list_add_tail(&mode->export_head, &export_list);
 			mode_count++;
+		}
 
 	/*
 	 * This ioctl is called twice, once to determine how much space is
 	 * needed, and the 2nd time to fill it.
+	 * The modes that need to be exposed to the user are maintained in the
+	 * 'export_list'. When the ioctl is called first time to determine the,
+	 * space, the export_list gets filled, to find the no.of modes. In the
+	 * 2nd time, the user modes are filled, one by one from the export_list.
 	 */
 	if ((out_resp->count_modes >= mode_count) && mode_count) {
 		copied = 0;
 		mode_ptr = (struct drm_mode_modeinfo __user *)(unsigned long)out_resp->modes_ptr;
-		list_for_each_entry(mode, &connector->modes, head) {
-			if (!drm_mode_expose_to_userspace(mode, file_priv))
-				continue;
-
+		list_for_each_entry(mode, &export_list, export_head) {
 			drm_mode_convert_to_umode(&u_mode, mode);
+			/*
+			 * Reset aspect ratio flags of user-mode, if modes with
+			 * aspect-ratio are not supported.
+			 */
+			if (!file_priv->aspect_ratio_allowed)
+				u_mode.flags &= ~DRM_MODE_FLAG_PIC_AR_MASK;
 			if (copy_to_user(mode_ptr + copied,
 					 &u_mode, sizeof(u_mode))) {
 				ret = -EFAULT;

@@ -34,11 +34,11 @@
 #define GMAC_PCS_BASE			0x000000e0
 #define GMAC_PHYIF_CONTROL_STATUS	0x000000f8
 #define GMAC_PMT			0x000000c0
-#define GMAC_VERSION			0x00000110
 #define GMAC_DEBUG			0x00000114
 #define GMAC_HW_FEATURE0		0x0000011c
 #define GMAC_HW_FEATURE1		0x00000120
 #define GMAC_HW_FEATURE2		0x00000124
+#define GMAC_HW_FEATURE3		0x00000128
 #define GMAC_MDIO_ADDR			0x00000200
 #define GMAC_MDIO_DATA			0x00000204
 #define GMAC_ADDR_HIGH(reg)		(0x300 + reg * 8)
@@ -187,10 +187,17 @@ enum power_event {
 #define GMAC_HW_RXFIFOSIZE		GENMASK(4, 0)
 
 /* MAC HW features2 bitmap */
+#define GMAC_HW_FEAT_PPSOUTNUM		GENMASK(26, 24)
 #define GMAC_HW_FEAT_TXCHCNT		GENMASK(21, 18)
 #define GMAC_HW_FEAT_RXCHCNT		GENMASK(15, 12)
 #define GMAC_HW_FEAT_TXQCNT		GENMASK(9, 6)
 #define GMAC_HW_FEAT_RXQCNT		GENMASK(3, 0)
+
+/* MAC HW features3 bitmap */
+#define GMAC_HW_FEAT_ASP		GENMASK(29, 28)
+#define GMAC_HW_FEAT_FRPES		GENMASK(14, 13)
+#define GMAC_HW_FEAT_FRPBS		GENMASK(12, 11)
+#define GMAC_HW_FEAT_FRPSEL		BIT(10)
 
 /* MAC HW ADDR regs */
 #define GMAC_HI_DCS			GENMASK(18, 16)
@@ -199,6 +206,7 @@ enum power_event {
 
 /*  MTL registers */
 #define MTL_OPERATION_MODE		0x00000c00
+#define MTL_FRPE			BIT(15)
 #define MTL_OPERATION_SCHALG_MASK	GENMASK(6, 5)
 #define MTL_OPERATION_SCHALG_WRR	(0x0 << 5)
 #define MTL_OPERATION_SCHALG_WFQ	(0x1 << 5)
@@ -343,7 +351,7 @@ enum power_event {
 #define MTL_RX_OVERFLOW_INT		BIT(16)
 
 /* Default operating mode of the MAC */
-#define GMAC_CORE_INIT (GMAC_CONFIG_JD | GMAC_CONFIG_PS | GMAC_CONFIG_ACS | \
+#define GMAC_CORE_INIT (GMAC_CONFIG_JD | GMAC_CONFIG_PS | \
 			GMAC_CONFIG_BE | GMAC_CONFIG_DCRS)
 
 /* To dump the core regs excluding  the Address Registers */

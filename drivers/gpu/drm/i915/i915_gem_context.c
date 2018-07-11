@@ -90,6 +90,7 @@
 #include <drm/i915_drm.h>
 #include "i915_drv.h"
 #include "i915_trace.h"
+#include "intel_workarounds.h"
 
 #define ALL_L3_SLICES(dev) (1 << NUM_L3_SLICES(dev)) - 1
 
@@ -116,15 +117,15 @@ static void lut_close(struct i915_gem_context *ctx)
 
 static void i915_gem_context_free(struct i915_gem_context *ctx)
 {
-	int i;
+	unsigned int n;
 
 	lockdep_assert_held(&ctx->i915->drm.struct_mutex);
 	GEM_BUG_ON(!i915_gem_context_is_closed(ctx));
 
 	i915_ppgtt_put(ctx->ppgtt);
 
-	for (i = 0; i < I915_NUM_ENGINES; i++) {
-		struct intel_context *ce = &ctx->engine[i];
+	for (n = 0; n < ARRAY_SIZE(ctx->__engine); n++) {
+		struct intel_context *ce = &ctx->__engine[n];
 
 		if (!ce->state)
 			continue;
@@ -211,17 +212,23 @@ static void context_close(struct i915_gem_context *ctx)
 static int assign_hw_id(struct drm_i915_private *dev_priv, unsigned *out)
 {
 	int ret;
+	unsigned int max;
+
+	if (INTEL_GEN(dev_priv) >= 11)
+		max = GEN11_MAX_CONTEXT_HW_ID;
+	else
+		max = MAX_CONTEXT_HW_ID;
 
 	ret = ida_simple_get(&dev_priv->contexts.hw_ida,
-			     0, MAX_CONTEXT_HW_ID, GFP_KERNEL);
+			     0, max, GFP_KERNEL);
 	if (ret < 0) {
 		/* Contexts are only released when no longer active.
 		 * Flush any pending retires to hopefully release some
 		 * stale contexts and try again.
 		 */
-		i915_gem_retire_requests(dev_priv);
+		i915_retire_requests(dev_priv);
 		ret = ida_simple_get(&dev_priv->contexts.hw_ida,
-				     0, MAX_CONTEXT_HW_ID, GFP_KERNEL);
+				     0, max, GFP_KERNEL);
 		if (ret < 0)
 			return ret;
 	}
@@ -274,7 +281,7 @@ __create_hw_context(struct drm_i915_private *dev_priv,
 	kref_init(&ctx->ref);
 	list_add_tail(&ctx->link, &dev_priv->contexts.list);
 	ctx->i915 = dev_priv;
-	ctx->priority = I915_PRIORITY_NORMAL;
+	ctx->sched.priority = I915_PRIORITY_NORMAL;
 
 	INIT_RADIX_TREE(&ctx->handles_vma, GFP_KERNEL);
 	INIT_LIST_HEAD(&ctx->handles_list);
@@ -312,12 +319,13 @@ __create_hw_context(struct drm_i915_private *dev_priv,
 	ctx->desc_template =
 		default_desc_template(dev_priv, dev_priv->mm.aliasing_ppgtt);
 
-	/* GuC requires the ring to be placed above GUC_WOPCM_TOP. If GuC is not
+	/*
+	 * GuC requires the ring to be placed in Non-WOPCM memory. If GuC is not
 	 * present or not in use we still need a small bias as ring wraparound
 	 * at offset 0 sometimes hangs. No idea why.
 	 */
 	if (USES_GUC(dev_priv))
-		ctx->ggtt_offset_bias = GUC_WOPCM_TOP;
+		ctx->ggtt_offset_bias = dev_priv->guc.ggtt_pin_bias;
 	else
 		ctx->ggtt_offset_bias = I915_GTT_PAGE_SIZE;
 
@@ -338,11 +346,6 @@ static void __destroy_hw_context(struct i915_gem_context *ctx,
 	context_close(ctx);
 }
 
-/**
- * The default context needs to exist per ring that uses contexts. It stores the
- * context state of the GPU for applications that don't utilize HW contexts, as
- * well as an idle case.
- */
 static struct i915_gem_context *
 i915_gem_create_context(struct drm_i915_private *dev_priv,
 			struct drm_i915_file_private *file_priv)
@@ -428,7 +431,7 @@ i915_gem_context_create_kernel(struct drm_i915_private *i915, int prio)
 		return ctx;
 
 	i915_gem_context_clear_bannable(ctx);
-	ctx->priority = prio;
+	ctx->sched.priority = prio;
 	ctx->ring_size = PAGE_SIZE;
 
 	GEM_BUG_ON(!i915_gem_context_is_kernel(ctx));
@@ -449,12 +452,23 @@ destroy_kernel_context(struct i915_gem_context **ctxp)
 	i915_gem_context_free(ctx);
 }
 
+static bool needs_preempt_context(struct drm_i915_private *i915)
+{
+	return HAS_LOGICAL_RING_PREEMPTION(i915);
+}
+
 int i915_gem_contexts_init(struct drm_i915_private *dev_priv)
 {
 	struct i915_gem_context *ctx;
-	int err;
+	int ret;
 
+	/* Reassure ourselves we are only called once */
 	GEM_BUG_ON(dev_priv->kernel_context);
+	GEM_BUG_ON(dev_priv->preempt_context);
+
+	ret = intel_ctx_workarounds_init(dev_priv);
+	if (ret)
+		return ret;
 
 	INIT_LIST_HEAD(&dev_priv->contexts.list);
 	INIT_WORK(&dev_priv->contexts.free_work, contexts_free_worker);
@@ -462,14 +476,14 @@ int i915_gem_contexts_init(struct drm_i915_private *dev_priv)
 
 	/* Using the simple ida interface, the max is limited by sizeof(int) */
 	BUILD_BUG_ON(MAX_CONTEXT_HW_ID > INT_MAX);
+	BUILD_BUG_ON(GEN11_MAX_CONTEXT_HW_ID > INT_MAX);
 	ida_init(&dev_priv->contexts.hw_ida);
 
 	/* lowest priority; idle task */
 	ctx = i915_gem_context_create_kernel(dev_priv, I915_PRIORITY_MIN);
 	if (IS_ERR(ctx)) {
 		DRM_ERROR("Failed to create default global context\n");
-		err = PTR_ERR(ctx);
-		goto err;
+		return PTR_ERR(ctx);
 	}
 	/*
 	 * For easy recognisablity, we want the kernel context to be 0 and then
@@ -479,23 +493,18 @@ int i915_gem_contexts_init(struct drm_i915_private *dev_priv)
 	dev_priv->kernel_context = ctx;
 
 	/* highest priority; preempting task */
-	ctx = i915_gem_context_create_kernel(dev_priv, INT_MAX);
-	if (IS_ERR(ctx)) {
-		DRM_ERROR("Failed to create default preempt context\n");
-		err = PTR_ERR(ctx);
-		goto err_kernel_context;
+	if (needs_preempt_context(dev_priv)) {
+		ctx = i915_gem_context_create_kernel(dev_priv, INT_MAX);
+		if (!IS_ERR(ctx))
+			dev_priv->preempt_context = ctx;
+		else
+			DRM_ERROR("Failed to create preempt context; disabling preemption\n");
 	}
-	dev_priv->preempt_context = ctx;
 
 	DRM_DEBUG_DRIVER("%s context support initialized\n",
 			 dev_priv->engine[RCS]->context_size ? "logical" :
 			 "fake");
 	return 0;
-
-err_kernel_context:
-	destroy_kernel_context(&dev_priv->kernel_context);
-err:
-	return err;
 }
 
 void i915_gem_contexts_lost(struct drm_i915_private *dev_priv)
@@ -512,7 +521,7 @@ void i915_gem_contexts_lost(struct drm_i915_private *dev_priv)
 		if (!engine->last_retired_context)
 			continue;
 
-		engine->context_unpin(engine, engine->last_retired_context);
+		intel_context_unpin(engine->last_retired_context, engine);
 		engine->last_retired_context = NULL;
 	}
 }
@@ -521,7 +530,8 @@ void i915_gem_contexts_fini(struct drm_i915_private *i915)
 {
 	lockdep_assert_held(&i915->drm.struct_mutex);
 
-	destroy_kernel_context(&i915->preempt_context);
+	if (i915->preempt_context)
+		destroy_kernel_context(&i915->preempt_context);
 	destroy_kernel_context(&i915->kernel_context);
 
 	/* Must free all deferred contexts (via flush_workqueue) first */
@@ -567,19 +577,29 @@ void i915_gem_context_close(struct drm_file *file)
 	idr_destroy(&file_priv->context_idr);
 }
 
+static struct i915_request *
+last_request_on_engine(struct i915_timeline *timeline,
+		       struct intel_engine_cs *engine)
+{
+	struct i915_request *rq;
+
+	if (timeline == &engine->timeline)
+		return NULL;
+
+	rq = i915_gem_active_raw(&timeline->last_request,
+				 &engine->i915->drm.struct_mutex);
+	if (rq && rq->engine == engine)
+		return rq;
+
+	return NULL;
+}
+
 static bool engine_has_idle_kernel_context(struct intel_engine_cs *engine)
 {
-	struct i915_gem_timeline *timeline;
+	struct i915_timeline *timeline;
 
 	list_for_each_entry(timeline, &engine->i915->gt.timelines, link) {
-		struct intel_timeline *tl;
-
-		if (timeline == &engine->i915->gt.global_timeline)
-			continue;
-
-		tl = &timeline->engine[engine->id];
-		if (i915_gem_active_peek(&tl->last_request,
-					 &engine->i915->drm.struct_mutex))
+		if (last_request_on_engine(timeline, engine))
 			return false;
 	}
 
@@ -589,33 +609,30 @@ static bool engine_has_idle_kernel_context(struct intel_engine_cs *engine)
 int i915_gem_switch_to_kernel_context(struct drm_i915_private *dev_priv)
 {
 	struct intel_engine_cs *engine;
-	struct i915_gem_timeline *timeline;
+	struct i915_timeline *timeline;
 	enum intel_engine_id id;
 
 	lockdep_assert_held(&dev_priv->drm.struct_mutex);
 
-	i915_gem_retire_requests(dev_priv);
+	i915_retire_requests(dev_priv);
 
 	for_each_engine(engine, dev_priv, id) {
-		struct drm_i915_gem_request *req;
+		struct i915_request *rq;
 
 		if (engine_has_idle_kernel_context(engine))
 			continue;
 
-		req = i915_gem_request_alloc(engine, dev_priv->kernel_context);
-		if (IS_ERR(req))
-			return PTR_ERR(req);
+		rq = i915_request_alloc(engine, dev_priv->kernel_context);
+		if (IS_ERR(rq))
+			return PTR_ERR(rq);
 
 		/* Queue this switch after all other activity */
 		list_for_each_entry(timeline, &dev_priv->gt.timelines, link) {
-			struct drm_i915_gem_request *prev;
-			struct intel_timeline *tl;
+			struct i915_request *prev;
 
-			tl = &timeline->engine[engine->id];
-			prev = i915_gem_active_raw(&tl->last_request,
-						   &dev_priv->drm.struct_mutex);
+			prev = last_request_on_engine(timeline, engine);
 			if (prev)
-				i915_sw_fence_await_sw_fence_gfp(&req->submit,
+				i915_sw_fence_await_sw_fence_gfp(&rq->submit,
 								 &prev->submit,
 								 I915_FENCE_GFP);
 		}
@@ -627,7 +644,7 @@ int i915_gem_switch_to_kernel_context(struct drm_i915_private *dev_priv)
 		 * but an extra layer of paranoia before we declare the system
 		 * idle (on suspend etc) is advisable!
 		 */
-		__i915_add_request(req, true);
+		__i915_request_add(rq, true);
 	}
 
 	return 0;
@@ -635,7 +652,7 @@ int i915_gem_switch_to_kernel_context(struct drm_i915_private *dev_priv)
 
 static bool client_is_banned(struct drm_i915_file_private *file_priv)
 {
-	return atomic_read(&file_priv->context_bans) > I915_MAX_CLIENT_CONTEXT_BANS;
+	return atomic_read(&file_priv->ban_score) >= I915_CLIENT_SCORE_BANNED;
 }
 
 int i915_gem_context_create_ioctl(struct drm_device *dev, void *data,
@@ -743,7 +760,7 @@ int i915_gem_context_getparam_ioctl(struct drm_device *dev, void *data,
 		args->value = i915_gem_context_is_bannable(ctx);
 		break;
 	case I915_CONTEXT_PARAM_PRIORITY:
-		args->value = ctx->priority;
+		args->value = ctx->sched.priority;
 		break;
 	default:
 		ret = -EINVAL;
@@ -803,11 +820,11 @@ int i915_gem_context_setparam_ioctl(struct drm_device *dev, void *data,
 
 	case I915_CONTEXT_PARAM_PRIORITY:
 		{
-			int priority = args->value;
+			s64 priority = args->value;
 
 			if (args->size)
 				ret = -EINVAL;
-			else if (!to_i915(dev)->engine[RCS]->schedule)
+			else if (!(to_i915(dev)->caps.scheduler & I915_SCHEDULER_CAP_PRIORITY))
 				ret = -ENODEV;
 			else if (priority > I915_CONTEXT_MAX_USER_PRIORITY ||
 				 priority < I915_CONTEXT_MIN_USER_PRIORITY)
@@ -816,7 +833,7 @@ int i915_gem_context_setparam_ioctl(struct drm_device *dev, void *data,
 				 !capable(CAP_SYS_NICE))
 				ret = -EPERM;
 			else
-				ctx->priority = priority;
+				ctx->sched.priority = priority;
 		}
 		break;
 

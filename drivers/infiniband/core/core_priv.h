@@ -88,9 +88,6 @@ int  ib_device_register_sysfs(struct ib_device *device,
 						   u8, struct kobject *));
 void ib_device_unregister_sysfs(struct ib_device *device);
 
-void ib_cache_setup(void);
-void ib_cache_cleanup(void);
-
 typedef void (*roce_netdev_callback)(struct ib_device *device, u8 port,
 	      struct net_device *idev, void *cookie);
 
@@ -305,9 +302,13 @@ void nldev_exit(void);
 static inline struct ib_qp *_ib_create_qp(struct ib_device *dev,
 					  struct ib_pd *pd,
 					  struct ib_qp_init_attr *attr,
-					  struct ib_udata *udata)
+					  struct ib_udata *udata,
+					  struct ib_uobject *uobj)
 {
 	struct ib_qp *qp;
+
+	if (!dev->create_qp)
+		return ERR_PTR(-EOPNOTSUPP);
 
 	qp = dev->create_qp(pd, attr, udata);
 	if (IS_ERR(qp))
@@ -315,6 +316,7 @@ static inline struct ib_qp *_ib_create_qp(struct ib_device *dev,
 
 	qp->device = dev;
 	qp->pd = pd;
+	qp->uobject = uobj;
 	/*
 	 * We don't track XRC QPs for now, because they don't have PD
 	 * and more importantly they are created internaly by driver,
@@ -328,4 +330,15 @@ static inline struct ib_qp *_ib_create_qp(struct ib_device *dev,
 
 	return qp;
 }
+
+struct rdma_dev_addr;
+int rdma_resolve_ip_route(struct sockaddr *src_addr,
+			  const struct sockaddr *dst_addr,
+			  struct rdma_dev_addr *addr);
+
+int rdma_addr_find_l2_eth_by_grh(const union ib_gid *sgid,
+				 const union ib_gid *dgid,
+				 u8 *dmac, const struct net_device *ndev,
+				 int *hoplimit);
+
 #endif /* _CORE_PRIV_H */

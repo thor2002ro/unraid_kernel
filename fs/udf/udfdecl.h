@@ -48,6 +48,8 @@ extern __printf(3, 4) void _udf_warn(struct super_block *sb,
 #define UDF_EXTENT_LENGTH_MASK	0x3FFFFFFF
 #define UDF_EXTENT_FLAG_MASK	0xC0000000
 
+#define UDF_INVALID_ID ((uint32_t)-1)
+
 #define UDF_NAME_PAD		4
 #define UDF_NAME_LEN		254
 #define UDF_NAME_LEN_CS0	255
@@ -130,6 +132,12 @@ struct inode *udf_find_metadata_inode_efe(struct super_block *sb,
 extern int udf_write_fi(struct inode *inode, struct fileIdentDesc *,
 			struct fileIdentDesc *, struct udf_fileident_bh *,
 			uint8_t *, uint8_t *);
+static inline unsigned int udf_dir_entry_len(struct fileIdentDesc *cfi)
+{
+	return ALIGN(sizeof(struct fileIdentDesc) +
+		le16_to_cpu(cfi->lengthOfImpUse) + cfi->lengthFileIdent,
+		UDF_NAME_PAD);
+}
 
 /* file.c */
 extern long udf_ioctl(struct file *, unsigned int, unsigned long);
@@ -165,8 +173,7 @@ extern int udf_add_aext(struct inode *, struct extent_position *,
 			struct kernel_lb_addr *, uint32_t, int);
 extern void udf_write_aext(struct inode *, struct extent_position *,
 			   struct kernel_lb_addr *, uint32_t, int);
-extern int8_t udf_delete_aext(struct inode *, struct extent_position,
-			      struct kernel_lb_addr, uint32_t);
+extern int8_t udf_delete_aext(struct inode *, struct extent_position);
 extern int8_t udf_next_aext(struct inode *, struct extent_position *,
 			    struct kernel_lb_addr *, uint32_t *, int);
 extern int8_t udf_current_aext(struct inode *, struct extent_position *,
@@ -218,7 +225,8 @@ extern int udf_get_filename(struct super_block *, const uint8_t *, int,
 			    uint8_t *, int);
 extern int udf_put_filename(struct super_block *, const uint8_t *, int,
 			    uint8_t *, int);
-extern int udf_dstrCS0toUTF8(uint8_t *, int, const uint8_t *, int);
+extern int udf_dstrCS0toChar(struct super_block *, uint8_t *, int,
+			     const uint8_t *, int);
 
 /* ialloc.c */
 extern void udf_free_inode(struct inode *);
@@ -250,8 +258,8 @@ extern struct long_ad *udf_get_filelongad(uint8_t *, int, uint32_t *, int);
 extern struct short_ad *udf_get_fileshortad(uint8_t *, int, uint32_t *, int);
 
 /* udftime.c */
-extern struct timespec *udf_disk_stamp_to_time(struct timespec *dest,
+extern void udf_disk_stamp_to_time(struct timespec *dest,
 						struct timestamp src);
-extern struct timestamp *udf_time_to_disk_stamp(struct timestamp *dest, struct timespec src);
+extern void udf_time_to_disk_stamp(struct timestamp *dest, struct timespec src);
 
 #endif				/* __UDF_DECL_H */

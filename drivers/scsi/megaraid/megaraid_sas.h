@@ -35,8 +35,8 @@
 /*
  * MegaRAID SAS Driver meta data
  */
-#define MEGASAS_VERSION				"07.704.04.00-rc1"
-#define MEGASAS_RELDATE				"December 7, 2017"
+#define MEGASAS_VERSION				"07.705.02.00-rc1"
+#define MEGASAS_RELDATE				"April 4, 2018"
 
 /*
  * Device IDs
@@ -2128,6 +2128,7 @@ enum MR_PD_TYPE {
 
 struct megasas_instance {
 
+	unsigned int *reply_map;
 	__le32 *producer;
 	dma_addr_t producer_h;
 	__le32 *consumer;

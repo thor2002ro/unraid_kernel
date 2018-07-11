@@ -120,7 +120,8 @@ static int tve200_display_check(struct drm_simple_display_pipe *pipe,
 }
 
 static void tve200_display_enable(struct drm_simple_display_pipe *pipe,
-				 struct drm_crtc_state *cstate)
+				 struct drm_crtc_state *cstate,
+				 struct drm_plane_state *plane_state)
 {
 	struct drm_crtc *crtc = &pipe->crtc;
 	struct drm_plane *plane = &pipe->plane;
@@ -273,25 +274,23 @@ static void tve200_display_update(struct drm_simple_display_pipe *pipe,
 	}
 }
 
-int tve200_enable_vblank(struct drm_device *drm, unsigned int crtc)
+static int tve200_display_enable_vblank(struct drm_simple_display_pipe *pipe)
 {
+	struct drm_crtc *crtc = &pipe->crtc;
+	struct drm_device *drm = crtc->dev;
 	struct tve200_drm_dev_private *priv = drm->dev_private;
 
 	writel(TVE200_INT_V_STATUS, priv->regs + TVE200_INT_EN);
 	return 0;
 }
 
-void tve200_disable_vblank(struct drm_device *drm, unsigned int crtc)
+static void tve200_display_disable_vblank(struct drm_simple_display_pipe *pipe)
 {
+	struct drm_crtc *crtc = &pipe->crtc;
+	struct drm_device *drm = crtc->dev;
 	struct tve200_drm_dev_private *priv = drm->dev_private;
 
 	writel(0, priv->regs + TVE200_INT_EN);
-}
-
-static int tve200_display_prepare_fb(struct drm_simple_display_pipe *pipe,
-				    struct drm_plane_state *plane_state)
-{
-	return drm_gem_fb_prepare_fb(&pipe->plane, plane_state);
 }
 
 static const struct drm_simple_display_pipe_funcs tve200_display_funcs = {
@@ -299,7 +298,9 @@ static const struct drm_simple_display_pipe_funcs tve200_display_funcs = {
 	.enable = tve200_display_enable,
 	.disable = tve200_display_disable,
 	.update = tve200_display_update,
-	.prepare_fb = tve200_display_prepare_fb,
+	.prepare_fb = drm_gem_fb_simple_display_pipe_prepare_fb,
+	.enable_vblank = tve200_display_enable_vblank,
+	.disable_vblank = tve200_display_disable_vblank,
 };
 
 int tve200_display_init(struct drm_device *drm)

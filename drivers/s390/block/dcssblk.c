@@ -51,9 +51,16 @@ static size_t dcssblk_dax_copy_from_iter(struct dax_device *dax_dev,
 	return copy_from_iter(addr, bytes, i);
 }
 
+static size_t dcssblk_dax_copy_to_iter(struct dax_device *dax_dev,
+		pgoff_t pgoff, void *addr, size_t bytes, struct iov_iter *i)
+{
+	return copy_to_iter(addr, bytes, i);
+}
+
 static const struct dax_operations dcssblk_dax_ops = {
 	.direct_access = dcssblk_dax_direct_access,
 	.copy_from_iter = dcssblk_dax_copy_from_iter,
+	.copy_to_iter = dcssblk_dax_copy_to_iter,
 };
 
 struct dcssblk_dev_info {
@@ -231,9 +238,9 @@ dcssblk_is_continuous(struct dcssblk_dev_info *dev_info)
 	if (dev_info->num_of_segments <= 1)
 		return 0;
 
-	sort_list = kzalloc(
-			sizeof(struct segment_info) * dev_info->num_of_segments,
-			GFP_KERNEL);
+	sort_list = kcalloc(dev_info->num_of_segments,
+			    sizeof(struct segment_info),
+			    GFP_KERNEL);
 	if (sort_list == NULL)
 		return -ENOMEM;
 	i = 0;
@@ -633,7 +640,7 @@ dcssblk_add_store(struct device *dev, struct device_attribute *attr, const char 
 	dev_info->gd->private_data = dev_info;
 	blk_queue_make_request(dev_info->dcssblk_queue, dcssblk_make_request);
 	blk_queue_logical_block_size(dev_info->dcssblk_queue, 4096);
-	queue_flag_set_unlocked(QUEUE_FLAG_DAX, dev_info->dcssblk_queue);
+	blk_queue_flag_set(QUEUE_FLAG_DAX, dev_info->dcssblk_queue);
 
 	seg_byte_size = (dev_info->end - dev_info->start + 1);
 	set_capacity(dev_info->gd, seg_byte_size >> 9); // size in sectors

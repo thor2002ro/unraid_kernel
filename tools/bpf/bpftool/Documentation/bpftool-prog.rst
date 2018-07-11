@@ -21,7 +21,7 @@ MAP COMMANDS
 =============
 
 |	**bpftool** **prog { show | list }** [*PROG*]
-|	**bpftool** **prog dump xlated** *PROG* [{**file** *FILE* | **opcodes**}]
+|	**bpftool** **prog dump xlated** *PROG* [{**file** *FILE* | **opcodes** | **visual**}]
 |	**bpftool** **prog dump jited**  *PROG* [{**file** *FILE* | **opcodes**}]
 |	**bpftool** **prog pin** *PROG* *FILE*
 |	**bpftool** **prog load** *OBJ* *FILE*
@@ -39,12 +39,18 @@ DESCRIPTION
 		  Output will start with program ID followed by program type and
 		  zero or more named attributes (depending on kernel version).
 
-	**bpftool prog dump xlated** *PROG* [{ **file** *FILE* | **opcodes** }]
-		  Dump eBPF instructions of the program from the kernel.
-		  If *FILE* is specified image will be written to a file,
-		  otherwise it will be disassembled and printed to stdout.
+	**bpftool prog dump xlated** *PROG* [{ **file** *FILE* | **opcodes** | **visual** }]
+		  Dump eBPF instructions of the program from the kernel. By
+		  default, eBPF will be disassembled and printed to standard
+		  output in human-readable format. In this case, **opcodes**
+		  controls if raw opcodes should be printed as well.
 
-		  **opcodes** controls if raw opcodes will be printed.
+		  If **file** is specified, the binary image will instead be
+		  written to *FILE*.
+
+		  If **visual** is specified, control flow graph (CFG) will be
+		  built instead, and eBPF instructions will be presented with
+		  CFG in DOT format, on standard output.
 
 	**bpftool prog dump jited**  *PROG* [{ **file** *FILE* | **opcodes** }]
 		  Dump jited image (host machine code) of the program.
@@ -89,7 +95,7 @@ EXAMPLES
 **# bpftool prog show**
 ::
 
-  10: xdp  name some_prog  tag 005a3d2123620c8b
+  10: xdp  name some_prog  tag 005a3d2123620c8b  gpl
 	loaded_at Sep 29/20:11  uid 0
 	xlated 528B  jited 370B  memlock 4096B  map_ids 10
 
@@ -102,6 +108,7 @@ EXAMPLES
                 "id": 10,
                 "type": "xdp",
                 "tag": "005a3d2123620c8b",
+                "gpl_compatible": true,
                 "loaded_at": "Sep 29/20:11",
                 "uid": 0,
                 "bytes_xlated": 528,

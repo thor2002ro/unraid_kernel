@@ -24,6 +24,10 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/thp.h>
 
+#if H_PGTABLE_RANGE > (USER_VSID_RANGE * (TASK_SIZE_USER64 / TASK_CONTEXT_SIZE))
+#warning Limited user VSID range means pagetable space is wasted
+#endif
+
 #ifdef CONFIG_SPARSEMEM_VMEMMAP
 /*
  * vmemmap is the starting address of the virtual address space where
@@ -189,7 +193,7 @@ unsigned long hash__pmd_hugepage_update(struct mm_struct *mm, unsigned long addr
 
 #ifdef CONFIG_DEBUG_VM
 	WARN_ON(!hash__pmd_trans_huge(*pmdp) && !pmd_devmap(*pmdp));
-	assert_spin_locked(&mm->page_table_lock);
+	assert_spin_locked(pmd_lockptr(mm, pmdp));
 #endif
 
 	__asm__ __volatile__(
@@ -261,7 +265,8 @@ void hash__pgtable_trans_huge_deposit(struct mm_struct *mm, pmd_t *pmdp,
 				  pgtable_t pgtable)
 {
 	pgtable_t *pgtable_slot;
-	assert_spin_locked(&mm->page_table_lock);
+
+	assert_spin_locked(pmd_lockptr(mm, pmdp));
 	/*
 	 * we store the pgtable in the second half of PMD
 	 */
@@ -281,7 +286,8 @@ pgtable_t hash__pgtable_trans_huge_withdraw(struct mm_struct *mm, pmd_t *pmdp)
 	pgtable_t pgtable;
 	pgtable_t *pgtable_slot;
 
-	assert_spin_locked(&mm->page_table_lock);
+	assert_spin_locked(pmd_lockptr(mm, pmdp));
+
 	pgtable_slot = (pgtable_t *)pmdp + PTRS_PER_PMD;
 	pgtable = *pgtable_slot;
 	/*
@@ -320,7 +326,7 @@ void hpte_do_hugepage_flush(struct mm_struct *mm, unsigned long addr,
 
 	if (!is_kernel_addr(addr)) {
 		ssize = user_segment_size(addr);
-		vsid = get_vsid(mm->context.id, addr, ssize);
+		vsid = get_user_vsid(&mm->context, addr, ssize);
 		WARN_ON(vsid == 0);
 	} else {
 		vsid = get_kernel_vsid(addr, mmu_kernel_ssize);

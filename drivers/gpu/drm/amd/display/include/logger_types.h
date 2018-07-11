@@ -30,6 +30,39 @@
 
 #define MAX_NAME_LEN 32
 
+#define DC_LOG_ERROR(...) DRM_ERROR(__VA_ARGS__)
+#define DC_LOG_WARNING(...) DRM_WARN(__VA_ARGS__)
+#define DC_LOG_DEBUG(...) DRM_DEBUG_KMS(__VA_ARGS__)
+#define DC_LOG_DC(...) DRM_DEBUG_KMS(__VA_ARGS__)
+#define DC_LOG_DTN(...) DRM_DEBUG_KMS(__VA_ARGS__)
+#define DC_LOG_SURFACE(...) pr_debug("[SURFACE]:"__VA_ARGS__)
+#define DC_LOG_HW_HOTPLUG(...) DRM_DEBUG_KMS(__VA_ARGS__)
+#define DC_LOG_HW_LINK_TRAINING(...) pr_debug("[HW_LINK_TRAINING]:"__VA_ARGS__)
+#define DC_LOG_HW_SET_MODE(...) DRM_DEBUG_KMS(__VA_ARGS__)
+#define DC_LOG_HW_RESUME_S3(...) DRM_DEBUG_KMS(__VA_ARGS__)
+#define DC_LOG_HW_AUDIO(...) pr_debug("[HW_AUDIO]:"__VA_ARGS__)
+#define DC_LOG_HW_HPD_IRQ(...) DRM_DEBUG_KMS(__VA_ARGS__)
+#define DC_LOG_MST(...) DRM_DEBUG_KMS(__VA_ARGS__)
+#define DC_LOG_SCALER(...) pr_debug("[SCALER]:"__VA_ARGS__)
+#define DC_LOG_BIOS(...) pr_debug("[BIOS]:"__VA_ARGS__)
+#define DC_LOG_BANDWIDTH_CALCS(...) pr_debug("[BANDWIDTH_CALCS]:"__VA_ARGS__)
+#define DC_LOG_BANDWIDTH_VALIDATION(...) DRM_DEBUG_KMS(__VA_ARGS__)
+#define DC_LOG_I2C_AUX(...) DRM_DEBUG_KMS(__VA_ARGS__)
+#define DC_LOG_SYNC(...) DRM_DEBUG_KMS(__VA_ARGS__)
+#define DC_LOG_BACKLIGHT(...) DRM_DEBUG_KMS(__VA_ARGS__)
+#define DC_LOG_FEATURE_OVERRIDE(...) DRM_DEBUG_KMS(__VA_ARGS__)
+#define DC_LOG_DETECTION_EDID_PARSER(...) DRM_DEBUG_KMS(__VA_ARGS__)
+#define DC_LOG_DETECTION_DP_CAPS(...) DRM_DEBUG_KMS(__VA_ARGS__)
+#define DC_LOG_RESOURCE(...) DRM_DEBUG_KMS(__VA_ARGS__)
+#define DC_LOG_DML(...) pr_debug("[DML]:"__VA_ARGS__)
+#define DC_LOG_EVENT_MODE_SET(...) DRM_DEBUG_KMS(__VA_ARGS__)
+#define DC_LOG_EVENT_DETECTION(...) DRM_DEBUG_KMS(__VA_ARGS__)
+#define DC_LOG_EVENT_LINK_TRAINING(...) DRM_DEBUG_KMS(__VA_ARGS__)
+#define DC_LOG_EVENT_LINK_LOSS(...) DRM_DEBUG_KMS(__VA_ARGS__)
+#define DC_LOG_EVENT_UNDERFLOW(...) DRM_DEBUG_KMS(__VA_ARGS__)
+#define DC_LOG_IF_TRACE(...) pr_debug("[IF_TRACE]:"__VA_ARGS__)
+#define DC_LOG_PERF_TRACE(...) DRM_DEBUG_KMS(__VA_ARGS__)
+
 struct dal_logger;
 
 enum dc_log_type {
@@ -65,6 +98,7 @@ enum dc_log_type {
 	LOG_EVENT_UNDERFLOW,
 	LOG_IF_TRACE,
 	LOG_PERF_TRACE,
+	LOG_DISPLAYSTATS,
 
 	LOG_SECTION_TOTAL_COUNT
 };

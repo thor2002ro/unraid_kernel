@@ -38,7 +38,7 @@
 #include "inc/compressor.h"
 #include "dml/display_mode_lib.h"
 
-#define DC_VER "3.1.27"
+#define DC_VER "3.1.44"
 
 #define MAX_SURFACES 3
 #define MAX_STREAMS 6
@@ -48,6 +48,18 @@
 /*******************************************************************************
  * Display Core Interfaces
  ******************************************************************************/
+struct dmcu_version {
+	unsigned int date;
+	unsigned int month;
+	unsigned int year;
+	unsigned int interface_version;
+};
+
+struct dc_versions {
+	const char *dc_ver;
+	struct dmcu_version dmcu_version;
+};
+
 struct dc_caps {
 	uint32_t max_streams;
 	uint32_t max_links;
@@ -62,6 +74,8 @@ struct dc_caps {
 	bool dcc_const_color;
 	bool dynamic_audio;
 	bool is_apu;
+	bool dual_link_dvi;
+	bool post_blend_color_processing;
 };
 
 struct dc_dcc_surface_param {
@@ -94,6 +108,7 @@ struct dc_surface_dcc_cap {
 };
 
 struct dc_static_screen_events {
+	bool force_trigger;
 	bool cursor_update;
 	bool surface_update;
 	bool overlay_update;
@@ -170,6 +185,16 @@ enum wm_report_mode {
 	WM_REPORT_OVERRIDE = 1,
 };
 
+struct dc_clocks {
+	int dispclk_khz;
+	int max_supported_dppclk_khz;
+	int dppclk_khz;
+	int dcfclk_khz;
+	int socclk_khz;
+	int dcfclk_deep_sleep_khz;
+	int fclk_khz;
+};
+
 struct dc_debug {
 	bool surface_visual_confirm;
 	bool sanity_checks;
@@ -178,6 +203,8 @@ struct dc_debug {
 	bool timing_trace;
 	bool clock_trace;
 	bool validation_trace;
+	bool bandwidth_calcs_trace;
+	int max_downscale_src_width;
 
 	/* stutter efficiency related */
 	bool disable_stutter;
@@ -211,11 +238,17 @@ struct dc_debug {
 	bool disable_stereo_support;
 	bool vsr_support;
 	bool performance_trace;
+	bool az_endpoint_mute_only;
+	bool always_use_regamma;
+	bool p010_mpo_support;
+	bool recovery_enabled;
+
 };
 struct dc_state;
 struct resource_pool;
 struct dce_hwseq;
 struct dc {
+	struct dc_versions versions;
 	struct dc_caps caps;
 	struct dc_cap_funcs cap_funcs;
 	struct dc_config config;
@@ -251,6 +284,8 @@ struct dc {
 	struct dm_pp_display_configuration prev_display_config;
 
 	bool optimized_required;
+
+	bool apply_edp_fast_boot_optimization;
 
 	/* FBC compressor */
 #if defined(CONFIG_DRM_AMD_DC_FBC)
@@ -288,9 +323,6 @@ struct dc_init_data {
 
 	struct dc_config flags;
 	uint32_t log_mask;
-#if defined(CONFIG_DRM_AMD_DC_FBC)
-	uint64_t fbc_gpu_addr;
-#endif
 };
 
 struct dc *dc_create(const struct dc_init_data *init_params);
@@ -303,20 +335,6 @@ void dc_destroy(struct dc **dc);
 
 enum {
 	TRANSFER_FUNC_POINTS = 1025
-};
-
-// Moved here from color module for linux
-enum color_transfer_func {
-	transfer_func_unknown,
-	transfer_func_srgb,
-	transfer_func_bt709,
-	transfer_func_pq2084,
-	transfer_func_pq2084_interim,
-	transfer_func_linear_0_1,
-	transfer_func_linear_0_125,
-	transfer_func_dolbyvision,
-	transfer_func_gamma_22,
-	transfer_func_gamma_26
 };
 
 struct dc_hdr_static_metadata {
@@ -334,9 +352,6 @@ struct dc_hdr_static_metadata {
 	uint32_t max_luminance;
 	uint32_t maximum_content_light_level;
 	uint32_t maximum_frame_average_light_level;
-
-	bool hdr_supported;
-	bool is_hdr;
 };
 
 enum dc_transfer_func_type {
@@ -369,6 +384,8 @@ struct dc_transfer_func {
 	struct dc_transfer_func_distributed_points tf_pts;
 	enum dc_transfer_func_type type;
 	enum dc_transfer_func_predefined tf;
+	/* FP16 1.0 reference level in nits, default is 80 nits, only for PQ*/
+	uint32_t sdr_ref_white_level;
 	struct dc_context *ctx;
 };
 
@@ -390,19 +407,22 @@ union surface_update_flags {
 		/* Medium updates */
 		uint32_t dcc_change:1;
 		uint32_t color_space_change:1;
-		uint32_t input_tf_change:1;
 		uint32_t horizontal_mirror_change:1;
 		uint32_t per_pixel_alpha_change:1;
 		uint32_t rotation_change:1;
 		uint32_t swizzle_change:1;
 		uint32_t scaling_change:1;
 		uint32_t position_change:1;
-		uint32_t in_transfer_func:1;
+		uint32_t in_transfer_func_change:1;
 		uint32_t input_csc_change:1;
+		uint32_t coeff_reduction_change:1;
+		uint32_t output_tf_change:1;
+		uint32_t pixel_format_change:1;
 
 		/* Full updates */
 		uint32_t new_plane:1;
 		uint32_t bpp_change:1;
+		uint32_t gamma_change:1;
 		uint32_t bandwidth_change:1;
 		uint32_t clock_change:1;
 		uint32_t stereo_format_change:1;
@@ -414,6 +434,7 @@ union surface_update_flags {
 
 struct dc_plane_state {
 	struct dc_plane_address address;
+	struct dc_plane_flip_time time;
 	struct scaling_taps scaling_quality;
 	struct rect src_rect;
 	struct rect dst_rect;
@@ -427,14 +448,14 @@ struct dc_plane_state {
 	struct dc_gamma *gamma_correction;
 	struct dc_transfer_func *in_transfer_func;
 	struct dc_bias_and_scale *bias_and_scale;
-	struct csc_transform input_csc_color_matrix;
+	struct dc_csc_transform input_csc_color_matrix;
 	struct fixed31_32 coeff_reduction_factor;
+	uint32_t sdr_white_level;
 
 	// TODO: No longer used, remove
 	struct dc_hdr_static_metadata hdr_static_ctx;
 
 	enum dc_color_space color_space;
-	enum color_transfer_func input_tf;
 
 	enum surface_pixel_format format;
 	enum dc_rotation_angle rotation;
@@ -464,7 +485,7 @@ struct dc_plane_info {
 	enum dc_rotation_angle rotation;
 	enum plane_stereo_format stereo_format;
 	enum dc_color_space color_space;
-	enum color_transfer_func input_tf;
+	unsigned int sdr_white_level;
 	bool horizontal_mirror;
 	bool visible;
 	bool per_pixel_alpha;
@@ -482,21 +503,18 @@ struct dc_surface_update {
 	struct dc_plane_state *surface;
 
 	/* isr safe update parameters.  null means no updates */
-	struct dc_flip_addrs *flip_addr;
-	struct dc_plane_info *plane_info;
-	struct dc_scaling_info *scaling_info;
+	const struct dc_flip_addrs *flip_addr;
+	const struct dc_plane_info *plane_info;
+	const struct dc_scaling_info *scaling_info;
 
 	/* following updates require alloc/sleep/spin that is not isr safe,
 	 * null means no updates
 	 */
-	/* gamma TO BE REMOVED */
-	struct dc_gamma *gamma;
-	enum color_transfer_func color_input_tf;
-	enum color_transfer_func color_output_tf;
-	struct dc_transfer_func *in_transfer_func;
+	const struct dc_gamma *gamma;
+	const struct dc_transfer_func *in_transfer_func;
 
-	struct csc_transform *input_csc_color_matrix;
-	struct fixed31_32 *coeff_reduction_factor;
+	const struct dc_csc_transform *input_csc_color_matrix;
+	const struct fixed31_32 *coeff_reduction_factor;
 };
 
 /*
@@ -524,6 +542,7 @@ struct dc_transfer_func *dc_create_transfer_func(void);
  */
 struct dc_flip_addrs {
 	struct dc_plane_address address;
+	unsigned int flip_timestamp_in_us;
 	bool flip_immediate;
 	/* TODO: add flip duration for FreeSync */
 };
@@ -665,6 +684,7 @@ struct dc_cursor {
 	struct dc_cursor_attributes attributes;
 };
 
+
 /*******************************************************************************
  * Interrupt interfaces
  ******************************************************************************/
@@ -672,7 +692,7 @@ enum dc_irq_source dc_interrupt_to_irq_source(
 		struct dc *dc,
 		uint32_t src_id,
 		uint32_t ext_id);
-void dc_interrupt_set(struct dc *dc, enum dc_irq_source src, bool enable);
+bool dc_interrupt_set(struct dc *dc, enum dc_irq_source src, bool enable);
 void dc_interrupt_ack(struct dc *dc, enum dc_irq_source src);
 enum dc_irq_source dc_get_hpd_irq_source_at_index(
 		struct dc *dc, uint32_t link_index);

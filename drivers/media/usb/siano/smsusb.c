@@ -179,8 +179,7 @@ static int smsusb_submit_urb(struct smsusb_device_t *dev,
 		smsusb_onresponse,
 		surb
 	);
-	surb->urb.transfer_dma = surb->cb->phys;
-	surb->urb.transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
+	surb->urb.transfer_flags |= URB_FREE_BUFFER;
 
 	return usb_submit_urb(&surb->urb, GFP_ATOMIC);
 }
@@ -446,6 +445,7 @@ static int smsusb_init_device(struct usb_interface *intf, int board_id)
 		dev->in_ep, dev->out_ep);
 
 	params.device = &dev->udev->dev;
+	params.usb_device = dev->udev;
 	params.buffer_size = dev->buffer_size;
 	params.num_buffers = MAX_BUFFERS;
 	params.sendrequest_handler = smsusb_sendrequest;
@@ -455,7 +455,7 @@ static int smsusb_init_device(struct usb_interface *intf, int board_id)
 	mdev = siano_media_device_register(dev, board_id);
 
 	/* register in smscore */
-	rc = smscore_register_device(&params, &dev->coredev, mdev);
+	rc = smscore_register_device(&params, &dev->coredev, 0, mdev);
 	if (rc < 0) {
 		pr_err("smscore_register_device(...) failed, rc %d\n", rc);
 		smsusb_term_device(intf);

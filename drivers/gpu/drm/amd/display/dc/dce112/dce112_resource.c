@@ -56,6 +56,8 @@
 #include "dce/dce_11_2_sh_mask.h"
 
 #include "dce100/dce100_resource.h"
+#define DC_LOGGER \
+		dc->ctx->logger
 
 #ifndef mmDP_DPHY_INTERNAL_CTRL
 	#define mmDP_DPHY_INTERNAL_CTRL 0x4aa7
@@ -428,7 +430,7 @@ static struct stream_encoder *dce112_stream_encoder_create(
 
 	if (!enc110)
 		return NULL;
-	
+
 	dce110_stream_encoder_construct(enc110, ctx, ctx->dc_bios, eng_id,
 					&stream_enc_regs[eng_id],
 					&se_shift, &se_mask);
@@ -722,8 +724,7 @@ bool dce112_validate_bandwidth(
 {
 	bool result = false;
 
-	dm_logger_write(
-		dc->ctx->logger, LOG_BANDWIDTH_CALCS,
+	DC_LOG_BANDWIDTH_CALCS(
 		"%s: start",
 		__func__);
 
@@ -737,7 +738,7 @@ bool dce112_validate_bandwidth(
 		result = true;
 
 	if (!result)
-		dm_logger_write(dc->ctx->logger, LOG_BANDWIDTH_VALIDATION,
+		DC_LOG_BANDWIDTH_VALIDATION(
 			"%s: Bandwidth validation failed!",
 			__func__);
 
@@ -866,38 +867,6 @@ enum dc_status dce112_add_stream_to_ctx(
 	return result;
 }
 
-enum dc_status dce112_validate_guaranteed(
-		struct dc *dc,
-		struct dc_stream_state *stream,
-		struct dc_state *context)
-{
-	enum dc_status result = DC_ERROR_UNEXPECTED;
-
-	context->streams[0] = stream;
-	dc_stream_retain(context->streams[0]);
-	context->stream_count++;
-
-	result = resource_map_pool_resources(dc, context, stream);
-
-	if (result == DC_OK)
-		result = resource_map_phy_clock_resources(dc, context, stream);
-
-	if (result == DC_OK)
-		result = build_mapped_resource(dc, context, stream);
-
-	if (result == DC_OK) {
-		validate_guaranteed_copy_streams(
-				context, dc->caps.max_streams);
-		result = resource_build_scaling_params_for_context(dc, context);
-	}
-
-	if (result == DC_OK)
-		if (!dce112_validate_bandwidth(dc, context))
-			result = DC_FAIL_BANDWIDTH_VALIDATE;
-
-	return result;
-}
-
 enum dc_status dce112_validate_global(
 		struct dc *dc,
 		struct dc_state *context)
@@ -920,7 +889,6 @@ static void dce112_destroy_resource_pool(struct resource_pool **pool)
 static const struct resource_funcs dce112_res_pool_funcs = {
 	.destroy = dce112_destroy_resource_pool,
 	.link_enc_create = dce112_link_encoder_create,
-	.validate_guaranteed = dce112_validate_guaranteed,
 	.validate_bandwidth = dce112_validate_bandwidth,
 	.validate_plane = dce100_validate_plane,
 	.add_stream_to_ctx = dce112_add_stream_to_ctx,
@@ -1100,9 +1068,12 @@ static bool construct(
 	 *************************************************/
 	pool->base.underlay_pipe_index = NO_UNDERLAY_PIPE;
 	pool->base.pipe_count = pool->base.res_cap->num_timing_generator;
+	pool->base.timing_generator_count = pool->base.res_cap->num_timing_generator;
 	dc->caps.max_downscale_ratio = 200;
 	dc->caps.i2c_speed_in_khz = 100;
 	dc->caps.max_cursor_size = 128;
+	dc->caps.dual_link_dvi = true;
+
 
 	/*************************************************
 	 *  Create resources                             *

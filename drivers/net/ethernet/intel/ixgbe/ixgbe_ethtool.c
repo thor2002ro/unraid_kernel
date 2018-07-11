@@ -1,30 +1,5 @@
-/*******************************************************************************
-
-  Intel 10 Gigabit PCI Express Linux driver
-  Copyright(c) 1999 - 2016 Intel Corporation.
-
-  This program is free software; you can redistribute it and/or modify it
-  under the terms and conditions of the GNU General Public License,
-  version 2, as published by the Free Software Foundation.
-
-  This program is distributed in the hope it will be useful, but WITHOUT
-  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
-  more details.
-
-  You should have received a copy of the GNU General Public License along with
-  this program; if not, write to the Free Software Foundation, Inc.,
-  51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
-
-  The full GNU General Public License is included in this distribution in
-  the file called "COPYING".
-
-  Contact Information:
-  Linux NICS <linux.nics@intel.com>
-  e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
-  Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
-
-*******************************************************************************/
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright(c) 1999 - 2018 Intel Corporation. */
 
 /* ethtool support for ixgbe */
 
@@ -97,6 +72,7 @@ static const struct ixgbe_stats ixgbe_gstrings_stats[] = {
 	{"tx_heartbeat_errors", IXGBE_NETDEV_STAT(tx_heartbeat_errors)},
 	{"tx_timeout_count", IXGBE_STAT(tx_timeout_count)},
 	{"tx_restart_queue", IXGBE_STAT(restart_queue)},
+	{"rx_length_errors", IXGBE_STAT(stats.rlec)},
 	{"rx_long_length_errors", IXGBE_STAT(stats.roc)},
 	{"rx_short_length_errors", IXGBE_STAT(stats.ruc)},
 	{"tx_flow_control_xon", IXGBE_STAT(stats.lxontxc)},
@@ -925,7 +901,7 @@ static int ixgbe_get_eeprom(struct net_device *netdev,
 	last_word = (eeprom->offset + eeprom->len - 1) >> 1;
 	eeprom_len = last_word - first_word + 1;
 
-	eeprom_buff = kmalloc(sizeof(u16) * eeprom_len, GFP_KERNEL);
+	eeprom_buff = kmalloc_array(eeprom_len, sizeof(u16), GFP_KERNEL);
 	if (!eeprom_buff)
 		return -ENOMEM;
 
@@ -1087,7 +1063,7 @@ static int ixgbe_set_ringparam(struct net_device *netdev,
 	/* allocate temporary buffer to store rings in */
 	i = max_t(int, adapter->num_tx_queues + adapter->num_xdp_queues,
 		  adapter->num_rx_queues);
-	temp_ring = vmalloc(i * sizeof(struct ixgbe_ring));
+	temp_ring = vmalloc(array_size(i, sizeof(struct ixgbe_ring)));
 
 	if (!temp_ring) {
 		err = -ENOMEM;
@@ -3059,6 +3035,8 @@ static int ixgbe_set_rxfh(struct net_device *netdev, const u32 *indir,
 
 		for (i = 0; i < reta_entries; i++)
 			adapter->rss_indir_tbl[i] = indir[i];
+
+		ixgbe_store_reta(adapter);
 	}
 
 	/* Fill out the rss hash key */
@@ -3066,8 +3044,6 @@ static int ixgbe_set_rxfh(struct net_device *netdev, const u32 *indir,
 		memcpy(adapter->rss_key, key, ixgbe_get_rxfh_key_size(netdev));
 		ixgbe_store_key(adapter);
 	}
-
-	ixgbe_store_reta(adapter);
 
 	return 0;
 }

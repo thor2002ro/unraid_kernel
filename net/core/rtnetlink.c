@@ -59,6 +59,9 @@
 #include <net/rtnetlink.h>
 #include <net/net_namespace.h>
 
+#define RTNL_MAX_TYPE		48
+#define RTNL_SLAVE_MAX_TYPE	36
+
 struct rtnl_link {
 	rtnl_doit_func		doit;
 	rtnl_dumpit_func	dumpit;
@@ -74,6 +77,12 @@ void rtnl_lock(void)
 	mutex_lock(&rtnl_mutex);
 }
 EXPORT_SYMBOL(rtnl_lock);
+
+int rtnl_lock_killable(void)
+{
+	return mutex_lock_killable(&rtnl_mutex);
+}
+EXPORT_SYMBOL(rtnl_lock_killable);
 
 static struct sk_buff *defer_kfree_skb_list;
 void rtnl_kfree_skbs(struct sk_buff *head, struct sk_buff *tail)
@@ -383,6 +392,11 @@ int rtnl_link_register(struct rtnl_link_ops *ops)
 {
 	int err;
 
+	/* Sanity-check max sizes to avoid stack buffer overflow. */
+	if (WARN_ON(ops->maxtype > RTNL_MAX_TYPE ||
+		    ops->slave_maxtype > RTNL_SLAVE_MAX_TYPE))
+		return -EINVAL;
+
 	rtnl_lock();
 	err = __rtnl_link_register(ops);
 	rtnl_unlock();
@@ -406,7 +420,9 @@ static void __rtnl_kill_links(struct net *net, struct rtnl_link_ops *ops)
  * __rtnl_link_unregister - Unregister rtnl_link_ops from rtnetlink.
  * @ops: struct rtnl_link_ops * to unregister
  *
- * The caller must hold the rtnl_mutex.
+ * The caller must hold the rtnl_mutex and guarantee net_namespace_list
+ * integrity (hold pernet_ops_rwsem for writing to close the race
+ * with setup_net() and cleanup_net()).
  */
 void __rtnl_link_unregister(struct rtnl_link_ops *ops)
 {
@@ -432,6 +448,9 @@ static void rtnl_lock_unregistering_all(void)
 	for (;;) {
 		unregistering = false;
 		rtnl_lock();
+		/* We held write locked pernet_ops_rwsem, and parallel
+		 * setup_net() and cleanup_net() are not possible.
+		 */
 		for_each_net(net) {
 			if (net->dev_unreg_count > 0) {
 				unregistering = true;
@@ -453,12 +472,12 @@ static void rtnl_lock_unregistering_all(void)
  */
 void rtnl_link_unregister(struct rtnl_link_ops *ops)
 {
-	/* Close the race with cleanup_net() */
-	mutex_lock(&net_mutex);
+	/* Close the race with setup_net() and cleanup_net() */
+	down_write(&pernet_ops_rwsem);
 	rtnl_lock_unregistering_all();
 	__rtnl_link_unregister(ops);
 	rtnl_unlock();
-	mutex_unlock(&net_mutex);
+	up_write(&pernet_ops_rwsem);
 }
 EXPORT_SYMBOL_GPL(rtnl_link_unregister);
 
@@ -774,13 +793,15 @@ int rtnl_put_cacheinfo(struct sk_buff *skb, struct dst_entry *dst, u32 id,
 		       long expires, u32 error)
 {
 	struct rta_cacheinfo ci = {
-		.rta_lastuse = jiffies_delta_to_clock_t(jiffies - dst->lastuse),
-		.rta_used = dst->__use,
-		.rta_clntref = atomic_read(&(dst->__refcnt)),
 		.rta_error = error,
 		.rta_id =  id,
 	};
 
+	if (dst) {
+		ci.rta_lastuse = jiffies_delta_to_clock_t(jiffies - dst->lastuse);
+		ci.rta_used = dst->__use;
+		ci.rta_clntref = atomic_read(&dst->__refcnt);
+	}
 	if (expires) {
 		unsigned long clock;
 
@@ -2245,6 +2266,10 @@ static int do_setlink(const struct sk_buff *skb,
 	const struct net_device_ops *ops = dev->netdev_ops;
 	int err;
 
+	err = validate_linkmsg(dev, tb);
+	if (err < 0)
+		return err;
+
 	if (tb[IFLA_NET_NS_PID] || tb[IFLA_NET_NS_FD] || tb[IFLA_IF_NETNSID]) {
 		struct net *net = rtnl_link_get_net_capable(skb, dev_net(dev),
 							    tb, CAP_NET_ADMIN);
@@ -2608,10 +2633,6 @@ static int rtnl_setlink(struct sk_buff *skb, struct nlmsghdr *nlh,
 		goto errout;
 	}
 
-	err = validate_linkmsg(dev, tb);
-	if (err < 0)
-		goto errout;
-
 	err = do_setlink(skb, dev, ifm, extack, tb, ifname, 0);
 errout:
 	return err;
@@ -2889,13 +2910,16 @@ replay:
 	}
 
 	if (1) {
-		struct nlattr *attr[ops ? ops->maxtype + 1 : 1];
-		struct nlattr *slave_attr[m_ops ? m_ops->slave_maxtype + 1 : 1];
+		struct nlattr *attr[RTNL_MAX_TYPE + 1];
+		struct nlattr *slave_attr[RTNL_SLAVE_MAX_TYPE + 1];
 		struct nlattr **data = NULL;
 		struct nlattr **slave_data = NULL;
 		struct net *dest_net, *link_net = NULL;
 
 		if (ops) {
+			if (ops->maxtype > RTNL_MAX_TYPE)
+				return -EINVAL;
+
 			if (ops->maxtype && linkinfo[IFLA_INFO_DATA]) {
 				err = nla_parse_nested(attr, ops->maxtype,
 						       linkinfo[IFLA_INFO_DATA],
@@ -2912,6 +2936,9 @@ replay:
 		}
 
 		if (m_ops) {
+			if (m_ops->slave_maxtype > RTNL_SLAVE_MAX_TYPE)
+				return -EINVAL;
+
 			if (m_ops->slave_maxtype &&
 			    linkinfo[IFLA_INFO_SLAVE_DATA]) {
 				err = nla_parse_nested(slave_attr,

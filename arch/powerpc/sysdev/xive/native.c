@@ -341,7 +341,7 @@ static void xive_native_update_pending(struct xive_cpu *xc)
 	 * of the hypervisor interrupt (if any)
 	 */
 	cppr = ack & 0xff;
-	he = GETFIELD(TM_QW3_NSR_HE, (ack >> 8));
+	he = (ack >> 8) >> 6;
 	switch(he) {
 	case TM_QW3_NSR_HE_NONE: /* Nothing to see here */
 		break;
@@ -388,6 +388,10 @@ static void xive_native_setup_cpu(unsigned int cpu, struct xive_cpu *xc)
 
 	if (xive_pool_vps == XIVE_INVALID_VP)
 		return;
+
+	/* Check if pool VP already active, if it is, pull it */
+	if (in_be32(xive_tima + TM_QW2_HV_POOL + TM_WORD2) & TM_QW2W2_VP)
+		in_be64(xive_tima + TM_SPC_PULL_POOL_CTX);
 
 	/* Enable the pool VP */
 	vp = xive_pool_vps + cpu;
@@ -485,7 +489,7 @@ static bool xive_parse_provisioning(struct device_node *np)
 	if (rc == 0)
 		return true;
 
-	xive_provision_chips = kzalloc(4 * xive_provision_chip_count,
+	xive_provision_chips = kcalloc(4, xive_provision_chip_count,
 				       GFP_KERNEL);
 	if (WARN_ON(!xive_provision_chips))
 		return false;

@@ -32,6 +32,10 @@ void perf_env__exit(struct perf_env *env)
 	for (i = 0; i < env->caches_cnt; i++)
 		cpu_cache_level__free(&env->caches[i]);
 	zfree(&env->caches);
+
+	for (i = 0; i < env->nr_memory_nodes; i++)
+		free(env->memory_nodes[i].set);
+	zfree(&env->memory_nodes);
 }
 
 int perf_env__set_cmdline(struct perf_env *env, int argc, const char *argv[])
@@ -87,6 +91,37 @@ int perf_env__read_cpu_topology_map(struct perf_env *env)
 
 	env->nr_cpus_avail = nr_cpus;
 	return 0;
+}
+
+static int perf_env__read_arch(struct perf_env *env)
+{
+	struct utsname uts;
+
+	if (env->arch)
+		return 0;
+
+	if (!uname(&uts))
+		env->arch = strdup(uts.machine);
+
+	return env->arch ? 0 : -ENOMEM;
+}
+
+static int perf_env__read_nr_cpus_avail(struct perf_env *env)
+{
+	if (env->nr_cpus_avail == 0)
+		env->nr_cpus_avail = cpu__max_present_cpu();
+
+	return env->nr_cpus_avail ? 0 : -ENOENT;
+}
+
+const char *perf_env__raw_arch(struct perf_env *env)
+{
+	return env && !perf_env__read_arch(env) ? env->arch : "unknown";
+}
+
+int perf_env__nr_cpus_avail(struct perf_env *env)
+{
+	return env && !perf_env__read_nr_cpus_avail(env) ? env->nr_cpus_avail : 0;
 }
 
 void cpu_cache_level__free(struct cpu_cache_level *cache)

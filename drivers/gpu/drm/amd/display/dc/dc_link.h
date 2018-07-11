@@ -51,6 +51,14 @@ struct link_mst_stream_allocation_table {
 	struct link_mst_stream_allocation stream_allocations[MAX_CONTROLLER_NUM];
 };
 
+struct time_stamp {
+	uint64_t edp_poweroff;
+	uint64_t edp_poweron;
+};
+
+struct link_trace {
+	struct time_stamp time_stamp;
+};
 /*
  * A link contains one or more sinks and their connected status.
  * The currently active signal type (HDMI, DP-SST, DP-MST) is also reported.
@@ -64,6 +72,8 @@ struct dc_link {
 	enum signal_type connector_signal;
 	enum dc_irq_source irq_source_hpd;
 	enum dc_irq_source irq_source_hpd_rx;/* aka DP Short Pulse  */
+	bool is_hpd_filter_disabled;
+
 	/* caps is the same as reported_link_cap. link_traing use
 	 * reported_link_cap. Will clean up.  TODO
 	 */
@@ -112,6 +122,7 @@ struct dc_link {
 
 	struct dc_link_status link_status;
 
+	struct link_trace link_trace;
 };
 
 const struct dc_link_status *dc_link_get_status(const struct dc_link *dc_link);
@@ -129,6 +140,8 @@ static inline struct dc_link *dc_get_link_at_index(struct dc *dc, uint32_t link_
 /* Set backlight level of an embedded panel (eDP, LVDS). */
 bool dc_link_set_backlight_level(const struct dc_link *dc_link, uint32_t level,
 		uint32_t frame_ramp, const struct dc_stream_state *stream);
+
+bool dc_link_set_abm_disable(const struct dc_link *dc_link);
 
 bool dc_link_set_psr_enable(const struct dc_link *dc_link, bool enable, bool wait);
 
@@ -194,6 +207,8 @@ bool dc_link_dp_set_test_pattern(
 	const struct link_training_settings *p_link_settings,
 	const unsigned char *p_custom_pattern,
 	unsigned int cust_pattern_size);
+
+void dc_link_enable_hpd_filter(struct dc_link *link, bool enable);
 
 /*
  * DPCD access interfaces

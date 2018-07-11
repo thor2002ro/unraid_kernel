@@ -38,8 +38,8 @@
 #include "dcn10/dcn10_hw_sequencer.h"
 #include "dce110/dce110_hw_sequencer.h"
 #include "dcn10/dcn10_opp.h"
-#include "dce/dce_link_encoder.h"
-#include "dce/dce_stream_encoder.h"
+#include "dcn10/dcn10_link_encoder.h"
+#include "dcn10/dcn10_stream_encoder.h"
 #include "dce/dce_clocks.h"
 #include "dce/dce_clock_source.h"
 #include "dce/dce_audio.h"
@@ -50,7 +50,8 @@
 #include "dcn10_hubp.h"
 #include "dcn10_hubbub.h"
 
-#include "soc15ip.h"
+#include "soc15_hw_ip.h"
+#include "vega10_ip_offset.h"
 
 #include "dcn/dcn_1_0_offset.h"
 #include "dcn/dcn_1_0_sh_mask.h"
@@ -165,36 +166,22 @@ static const struct dce_abm_mask abm_mask = {
 
 #define stream_enc_regs(id)\
 [id] = {\
-	SE_DCN_REG_LIST(id),\
-	.TMDS_CNTL = 0,\
-	.AFMT_AVI_INFO0 = 0,\
-	.AFMT_AVI_INFO1 = 0,\
-	.AFMT_AVI_INFO2 = 0,\
-	.AFMT_AVI_INFO3 = 0,\
+	SE_DCN_REG_LIST(id)\
 }
 
-static const struct dce110_stream_enc_registers stream_enc_regs[] = {
+static const struct dcn10_stream_enc_registers stream_enc_regs[] = {
 	stream_enc_regs(0),
 	stream_enc_regs(1),
 	stream_enc_regs(2),
 	stream_enc_regs(3),
 };
 
-static const struct dce_stream_encoder_shift se_shift = {
+static const struct dcn10_stream_encoder_shift se_shift = {
 		SE_COMMON_MASK_SH_LIST_DCN10(__SHIFT)
 };
 
-static const struct dce_stream_encoder_mask se_mask = {
-		SE_COMMON_MASK_SH_LIST_DCN10(_MASK),
-		.AFMT_GENERIC0_UPDATE = 0,
-		.AFMT_GENERIC2_UPDATE = 0,
-		.DP_DYN_RANGE = 0,
-		.DP_YCBCR_RANGE = 0,
-		.HDMI_AVI_INFO_SEND = 0,
-		.HDMI_AVI_INFO_CONT = 0,
-		.HDMI_AVI_INFO_LINE = 0,
-		.DP_SEC_AVI_ENABLE = 0,
-		.AFMT_AVI_INFO_VERSION = 0
+static const struct dcn10_stream_encoder_mask se_mask = {
+		SE_COMMON_MASK_SH_LIST_DCN10(_MASK)
 };
 
 #define audio_regs(id)\
@@ -227,13 +214,11 @@ static const struct dce_aduio_mask audio_mask = {
 	AUX_REG_LIST(id)\
 }
 
-static const struct dce110_link_enc_aux_registers link_enc_aux_regs[] = {
+static const struct dcn10_link_enc_aux_registers link_enc_aux_regs[] = {
 		aux_regs(0),
 		aux_regs(1),
 		aux_regs(2),
-		aux_regs(3),
-		aux_regs(4),
-		aux_regs(5)
+		aux_regs(3)
 };
 
 #define hpd_regs(id)\
@@ -241,13 +226,11 @@ static const struct dce110_link_enc_aux_registers link_enc_aux_regs[] = {
 	HPD_REG_LIST(id)\
 }
 
-static const struct dce110_link_enc_hpd_registers link_enc_hpd_regs[] = {
+static const struct dcn10_link_enc_hpd_registers link_enc_hpd_regs[] = {
 		hpd_regs(0),
 		hpd_regs(1),
 		hpd_regs(2),
-		hpd_regs(3),
-		hpd_regs(4),
-		hpd_regs(5)
+		hpd_regs(3)
 };
 
 #define link_regs(id)\
@@ -256,14 +239,19 @@ static const struct dce110_link_enc_hpd_registers link_enc_hpd_regs[] = {
 	SRI(DP_DPHY_INTERNAL_CTRL, DP, id) \
 }
 
-static const struct dce110_link_enc_registers link_enc_regs[] = {
+static const struct dcn10_link_enc_registers link_enc_regs[] = {
 	link_regs(0),
 	link_regs(1),
 	link_regs(2),
-	link_regs(3),
-	link_regs(4),
-	link_regs(5),
-	link_regs(6),
+	link_regs(3)
+};
+
+static const struct dcn10_link_enc_shift le_shift = {
+		LINK_ENCODER_MASK_SH_LIST_DCN10(__SHIFT)
+};
+
+static const struct dcn10_link_enc_mask le_mask = {
+		LINK_ENCODER_MASK_SH_LIST_DCN10(_MASK)
 };
 
 #define ipp_regs(id)\
@@ -319,11 +307,14 @@ static const struct dcn_dpp_registers tf_regs[] = {
 };
 
 static const struct dcn_dpp_shift tf_shift = {
-	TF_REG_LIST_SH_MASK_DCN10(__SHIFT)
+	TF_REG_LIST_SH_MASK_DCN10(__SHIFT),
+	TF_DEBUG_REG_LIST_SH_DCN10
+
 };
 
 static const struct dcn_dpp_mask tf_mask = {
 	TF_REG_LIST_SH_MASK_DCN10(_MASK),
+	TF_DEBUG_REG_LIST_MASK_DCN10
 };
 
 static const struct dcn_mpc_registers mpc_regs = {
@@ -365,6 +356,7 @@ static const struct dcn_optc_mask tg_mask = {
 
 
 static const struct bios_registers bios_regs = {
+		NBIO_SR(BIOS_SCRATCH_3),
 		NBIO_SR(BIOS_SCRATCH_6)
 };
 
@@ -438,7 +430,11 @@ static const struct dc_debug debug_defaults_drv = {
 		.timing_trace = false,
 		.clock_trace = true,
 
-		.min_disp_clk_khz = 300000,
+		/* raven smu dones't allow 0 disp clk,
+		 * smu min disp clk limit is 50Mhz
+		 * keep min disp clk 100Mhz avoid smu hang
+		 */
+		.min_disp_clk_khz = 100000,
 
 		.disable_pplib_clock_request = true,
 		.disable_pplib_wm_range = false,
@@ -450,6 +446,9 @@ static const struct dc_debug debug_defaults_drv = {
 		.disable_stereo_support = true,
 		.vsr_support = true,
 		.performance_trace = false,
+		.az_endpoint_mute_only = true,
+		.recovery_enabled = false, /*enable this by default after testing.*/
+		.max_downscale_src_width = 3840,
 };
 
 static const struct dc_debug debug_defaults_diags = {
@@ -585,20 +584,22 @@ static const struct encoder_feature_support link_enc_feature = {
 struct link_encoder *dcn10_link_encoder_create(
 	const struct encoder_init_data *enc_init_data)
 {
-	struct dce110_link_encoder *enc110 =
-		kzalloc(sizeof(struct dce110_link_encoder), GFP_KERNEL);
+	struct dcn10_link_encoder *enc10 =
+		kzalloc(sizeof(struct dcn10_link_encoder), GFP_KERNEL);
 
-	if (!enc110)
+	if (!enc10)
 		return NULL;
 
-	dce110_link_encoder_construct(enc110,
+	dcn10_link_encoder_construct(enc10,
 				      enc_init_data,
 				      &link_enc_feature,
 				      &link_enc_regs[enc_init_data->transmitter],
 				      &link_enc_aux_regs[enc_init_data->channel - 1],
-				      &link_enc_hpd_regs[enc_init_data->hpd_source]);
+				      &link_enc_hpd_regs[enc_init_data->hpd_source],
+				      &le_shift,
+				      &le_mask);
 
-	return &enc110->base;
+	return &enc10->base;
 }
 
 struct clock_source *dcn10_clock_source_create(
@@ -643,16 +644,16 @@ static struct stream_encoder *dcn10_stream_encoder_create(
 	enum engine_id eng_id,
 	struct dc_context *ctx)
 {
-	struct dce110_stream_encoder *enc110 =
-		kzalloc(sizeof(struct dce110_stream_encoder), GFP_KERNEL);
+	struct dcn10_stream_encoder *enc1 =
+		kzalloc(sizeof(struct dcn10_stream_encoder), GFP_KERNEL);
 
-	if (!enc110)
+	if (!enc1)
 		return NULL;
 
-	dce110_stream_encoder_construct(enc110, ctx, ctx->dc_bios, eng_id,
+	dcn10_stream_encoder_construct(enc1, ctx, ctx->dc_bios, eng_id,
 					&stream_enc_regs[eng_id],
 					&se_shift, &se_mask);
-	return &enc110->base;
+	return &enc1->base;
 }
 
 static const struct dce_hwseq_registers hwseq_reg = {
@@ -818,7 +819,7 @@ static void get_pixel_clock_parameters(
 	pixel_clk_params->requested_pix_clk = stream->timing.pix_clk_khz;
 	pixel_clk_params->encoder_object_id = stream->sink->link->link_enc->id;
 	pixel_clk_params->signal_type = pipe_ctx->stream->signal;
-	pixel_clk_params->controller_id = pipe_ctx->pipe_idx + 1;
+	pixel_clk_params->controller_id = pipe_ctx->stream_res.tg->inst + 1;
 	/* TODO: un-hardcode*/
 	pixel_clk_params->requested_sym_clk = LINK_RATE_LOW *
 		LINK_RATE_REF_FREQ_IN_KHZ;
@@ -911,36 +912,6 @@ enum dc_status dcn10_add_stream_to_ctx(
 	return result;
 }
 
-enum dc_status dcn10_validate_guaranteed(
-		struct dc *dc,
-		struct dc_stream_state *dc_stream,
-		struct dc_state *context)
-{
-	enum dc_status result = DC_ERROR_UNEXPECTED;
-
-	context->streams[0] = dc_stream;
-	dc_stream_retain(context->streams[0]);
-	context->stream_count++;
-
-	result = resource_map_pool_resources(dc, context, dc_stream);
-
-	if (result == DC_OK)
-		result = resource_map_phy_clock_resources(dc, context, dc_stream);
-
-	if (result == DC_OK)
-		result = build_mapped_resource(dc, context, dc_stream);
-
-	if (result == DC_OK) {
-		validate_guaranteed_copy_streams(
-				context, dc->caps.max_streams);
-		result = resource_build_scaling_params_for_context(dc, context);
-	}
-	if (result == DC_OK && !dcn_validate_bandwidth(dc, context))
-		return DC_FAIL_BANDWIDTH_VALIDATE;
-
-	return result;
-}
-
 static struct pipe_ctx *dcn10_acquire_idle_pipe_for_layer(
 		struct dc_state *context,
 		const struct resource_pool *pool,
@@ -960,243 +931,26 @@ static struct pipe_ctx *dcn10_acquire_idle_pipe_for_layer(
 
 	idle_pipe->stream = head_pipe->stream;
 	idle_pipe->stream_res.tg = head_pipe->stream_res.tg;
+	idle_pipe->stream_res.abm = head_pipe->stream_res.abm;
 	idle_pipe->stream_res.opp = head_pipe->stream_res.opp;
 
 	idle_pipe->plane_res.hubp = pool->hubps[idle_pipe->pipe_idx];
 	idle_pipe->plane_res.ipp = pool->ipps[idle_pipe->pipe_idx];
 	idle_pipe->plane_res.dpp = pool->dpps[idle_pipe->pipe_idx];
+	idle_pipe->plane_res.mpcc_inst = pool->dpps[idle_pipe->pipe_idx]->inst;
 
 	return idle_pipe;
 }
 
-enum dcc_control {
-	dcc_control__256_256_xxx,
-	dcc_control__128_128_xxx,
-	dcc_control__256_64_64,
-};
-
-enum segment_order {
-	segment_order__na,
-	segment_order__contiguous,
-	segment_order__non_contiguous,
-};
-
-static bool dcc_support_pixel_format(
-		enum surface_pixel_format format,
-		unsigned int *bytes_per_element)
-{
-	/* DML: get_bytes_per_element */
-	switch (format) {
-	case SURFACE_PIXEL_FORMAT_GRPH_ARGB1555:
-	case SURFACE_PIXEL_FORMAT_GRPH_RGB565:
-		*bytes_per_element = 2;
-		return true;
-	case SURFACE_PIXEL_FORMAT_GRPH_ARGB8888:
-	case SURFACE_PIXEL_FORMAT_GRPH_ABGR8888:
-	case SURFACE_PIXEL_FORMAT_GRPH_ARGB2101010:
-	case SURFACE_PIXEL_FORMAT_GRPH_ABGR2101010:
-		*bytes_per_element = 4;
-		return true;
-	case SURFACE_PIXEL_FORMAT_GRPH_ARGB16161616:
-	case SURFACE_PIXEL_FORMAT_GRPH_ARGB16161616F:
-	case SURFACE_PIXEL_FORMAT_GRPH_ABGR16161616F:
-		*bytes_per_element = 8;
-		return true;
-	default:
-		return false;
-	}
-}
-
-static bool dcc_support_swizzle(
-		enum swizzle_mode_values swizzle,
-		unsigned int bytes_per_element,
-		enum segment_order *segment_order_horz,
-		enum segment_order *segment_order_vert)
-{
-	bool standard_swizzle = false;
-	bool display_swizzle = false;
-
-	switch (swizzle) {
-	case DC_SW_4KB_S:
-	case DC_SW_64KB_S:
-	case DC_SW_VAR_S:
-	case DC_SW_4KB_S_X:
-	case DC_SW_64KB_S_X:
-	case DC_SW_VAR_S_X:
-		standard_swizzle = true;
-		break;
-	case DC_SW_4KB_D:
-	case DC_SW_64KB_D:
-	case DC_SW_VAR_D:
-	case DC_SW_4KB_D_X:
-	case DC_SW_64KB_D_X:
-	case DC_SW_VAR_D_X:
-		display_swizzle = true;
-		break;
-	default:
-		break;
-	}
-
-	if (bytes_per_element == 1 && standard_swizzle) {
-		*segment_order_horz = segment_order__contiguous;
-		*segment_order_vert = segment_order__na;
-		return true;
-	}
-	if (bytes_per_element == 2 && standard_swizzle) {
-		*segment_order_horz = segment_order__non_contiguous;
-		*segment_order_vert = segment_order__contiguous;
-		return true;
-	}
-	if (bytes_per_element == 4 && standard_swizzle) {
-		*segment_order_horz = segment_order__non_contiguous;
-		*segment_order_vert = segment_order__contiguous;
-		return true;
-	}
-	if (bytes_per_element == 8 && standard_swizzle) {
-		*segment_order_horz = segment_order__na;
-		*segment_order_vert = segment_order__contiguous;
-		return true;
-	}
-	if (bytes_per_element == 8 && display_swizzle) {
-		*segment_order_horz = segment_order__contiguous;
-		*segment_order_vert = segment_order__non_contiguous;
-		return true;
-	}
-
-	return false;
-}
-
-static void get_blk256_size(unsigned int *blk256_width, unsigned int *blk256_height,
-		unsigned int bytes_per_element)
-{
-	/* copied from DML.  might want to refactor DML to leverage from DML */
-	/* DML : get_blk256_size */
-	if (bytes_per_element == 1) {
-		*blk256_width = 16;
-		*blk256_height = 16;
-	} else if (bytes_per_element == 2) {
-		*blk256_width = 16;
-		*blk256_height = 8;
-	} else if (bytes_per_element == 4) {
-		*blk256_width = 8;
-		*blk256_height = 8;
-	} else if (bytes_per_element == 8) {
-		*blk256_width = 8;
-		*blk256_height = 4;
-	}
-}
-
-static void det_request_size(
-		unsigned int height,
-		unsigned int width,
-		unsigned int bpe,
-		bool *req128_horz_wc,
-		bool *req128_vert_wc)
-{
-	unsigned int detile_buf_size = 164 * 1024;  /* 164KB for DCN1.0 */
-
-	unsigned int blk256_height = 0;
-	unsigned int blk256_width = 0;
-	unsigned int swath_bytes_horz_wc, swath_bytes_vert_wc;
-
-	get_blk256_size(&blk256_width, &blk256_height, bpe);
-
-	swath_bytes_horz_wc = height * blk256_height * bpe;
-	swath_bytes_vert_wc = width * blk256_width * bpe;
-
-	*req128_horz_wc = (2 * swath_bytes_horz_wc <= detile_buf_size) ?
-			false : /* full 256B request */
-			true; /* half 128b request */
-
-	*req128_vert_wc = (2 * swath_bytes_vert_wc <= detile_buf_size) ?
-			false : /* full 256B request */
-			true; /* half 128b request */
-}
-
-static bool get_dcc_compression_cap(const struct dc *dc,
+static bool dcn10_get_dcc_compression_cap(const struct dc *dc,
 		const struct dc_dcc_surface_param *input,
 		struct dc_surface_dcc_cap *output)
 {
-	/* implement section 1.6.2.1 of DCN1_Programming_Guide.docx */
-	enum dcc_control dcc_control;
-	unsigned int bpe;
-	enum segment_order segment_order_horz, segment_order_vert;
-	bool req128_horz_wc, req128_vert_wc;
-
-	memset(output, 0, sizeof(*output));
-
-	if (dc->debug.disable_dcc == DCC_DISABLE)
-		return false;
-
-	if (!dcc_support_pixel_format(input->format,
-			&bpe))
-		return false;
-
-	if (!dcc_support_swizzle(input->swizzle_mode, bpe,
-			&segment_order_horz, &segment_order_vert))
-		return false;
-
-	det_request_size(input->surface_size.height,  input->surface_size.width,
-			bpe, &req128_horz_wc, &req128_vert_wc);
-
-	if (!req128_horz_wc && !req128_vert_wc) {
-		dcc_control = dcc_control__256_256_xxx;
-	} else if (input->scan == SCAN_DIRECTION_HORIZONTAL) {
-		if (!req128_horz_wc)
-			dcc_control = dcc_control__256_256_xxx;
-		else if (segment_order_horz == segment_order__contiguous)
-			dcc_control = dcc_control__128_128_xxx;
-		else
-			dcc_control = dcc_control__256_64_64;
-	} else if (input->scan == SCAN_DIRECTION_VERTICAL) {
-		if (!req128_vert_wc)
-			dcc_control = dcc_control__256_256_xxx;
-		else if (segment_order_vert == segment_order__contiguous)
-			dcc_control = dcc_control__128_128_xxx;
-		else
-			dcc_control = dcc_control__256_64_64;
-	} else {
-		if ((req128_horz_wc &&
-			segment_order_horz == segment_order__non_contiguous) ||
-			(req128_vert_wc &&
-			segment_order_vert == segment_order__non_contiguous))
-			/* access_dir not known, must use most constraining */
-			dcc_control = dcc_control__256_64_64;
-		else
-			/* reg128 is true for either horz and vert
-			 * but segment_order is contiguous
-			 */
-			dcc_control = dcc_control__128_128_xxx;
-	}
-
-	if (dc->debug.disable_dcc == DCC_HALF_REQ_DISALBE &&
-		dcc_control != dcc_control__256_256_xxx)
-		return false;
-
-	switch (dcc_control) {
-	case dcc_control__256_256_xxx:
-		output->grph.rgb.max_uncompressed_blk_size = 256;
-		output->grph.rgb.max_compressed_blk_size = 256;
-		output->grph.rgb.independent_64b_blks = false;
-		break;
-	case dcc_control__128_128_xxx:
-		output->grph.rgb.max_uncompressed_blk_size = 128;
-		output->grph.rgb.max_compressed_blk_size = 128;
-		output->grph.rgb.independent_64b_blks = false;
-		break;
-	case dcc_control__256_64_64:
-		output->grph.rgb.max_uncompressed_blk_size = 256;
-		output->grph.rgb.max_compressed_blk_size = 64;
-		output->grph.rgb.independent_64b_blks = true;
-		break;
-	}
-
-	output->capable = true;
-	output->const_color_support = false;
-
-	return true;
+	return dc->res_pool->hubbub->funcs->get_dcc_compression_cap(
+			dc->res_pool->hubbub,
+			input,
+			output);
 }
-
 
 static void dcn10_destroy_resource_pool(struct resource_pool **pool)
 {
@@ -1218,13 +972,12 @@ static enum dc_status dcn10_validate_plane(const struct dc_plane_state *plane_st
 }
 
 static struct dc_cap_funcs cap_funcs = {
-	.get_dcc_compression_cap = get_dcc_compression_cap
+	.get_dcc_compression_cap = dcn10_get_dcc_compression_cap
 };
 
 static struct resource_funcs dcn10_res_pool_funcs = {
 	.destroy = dcn10_destroy_resource_pool,
 	.link_enc_create = dcn10_link_encoder_create,
-	.validate_guaranteed = dcn10_validate_guaranteed,
 	.validate_bandwidth = dcn_validate_bandwidth,
 	.acquire_idle_pipe_for_layer = dcn10_acquire_idle_pipe_for_layer,
 	.validate_plane = dcn10_validate_plane,
@@ -1273,6 +1026,7 @@ static bool construct(
 	dc->caps.max_cursor_size = 256;
 	dc->caps.max_slave_planes = 1;
 	dc->caps.is_apu = true;
+	dc->caps.post_blend_color_processing = false;
 
 	if (dc->ctx->dce_environment == DCE_ENV_PRODUCTION_DRV)
 		dc->debug = debug_defaults_drv;
@@ -1316,13 +1070,11 @@ static bool construct(
 		}
 	}
 
-	if (!IS_FPGA_MAXIMUS_DC(dc->ctx->dce_environment)) {
-		pool->base.display_clock = dce120_disp_clk_create(ctx);
-		if (pool->base.display_clock == NULL) {
-			dm_error("DC: failed to create display clock!\n");
-			BREAK_TO_DEBUGGER();
-			goto fail;
-		}
+	pool->base.display_clock = dce120_disp_clk_create(ctx);
+	if (pool->base.display_clock == NULL) {
+		dm_error("DC: failed to create display clock!\n");
+		BREAK_TO_DEBUGGER();
+		goto fail;
 	}
 
 	pool->base.dmcu = dcn10_dmcu_create(ctx,
@@ -1445,6 +1197,7 @@ static bool construct(
 
 	/* valid pipe num */
 	pool->base.pipe_count = j;
+	pool->base.timing_generator_count = j;
 
 	/* within dml lib, it is hard code to 4. If ASIC pipe is fused,
 	 * the value may be changed

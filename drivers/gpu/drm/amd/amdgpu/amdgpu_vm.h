@@ -28,6 +28,7 @@
 #include <linux/kfifo.h>
 #include <linux/rbtree.h>
 #include <drm/gpu_scheduler.h>
+#include <drm/drm_file.h>
 
 #include "amdgpu_sync.h"
 #include "amdgpu_ring.h"
@@ -74,11 +75,12 @@ struct amdgpu_bo_list_entry;
 /* PDE Block Fragment Size for VEGA10 */
 #define AMDGPU_PDE_BFS(a)	((uint64_t)a << 59)
 
-/* VEGA10 only */
+
+/* For GFX9 */
 #define AMDGPU_PTE_MTYPE(a)    ((uint64_t)a << 57)
 #define AMDGPU_PTE_MTYPE_MASK	AMDGPU_PTE_MTYPE(3ULL)
 
-/* For Raven */
+#define AMDGPU_MTYPE_NC 0
 #define AMDGPU_MTYPE_CC 2
 
 #define AMDGPU_PTE_DEFAULT_ATC  (AMDGPU_PTE_SYSTEM      \
@@ -99,7 +101,7 @@ struct amdgpu_bo_list_entry;
 #define AMDGPU_MMHUB				1
 
 /* hardcode that limit for now */
-#define AMDGPU_VA_RESERVED_SIZE			(8ULL << 20)
+#define AMDGPU_VA_RESERVED_SIZE			(1ULL << 20)
 
 /* VA hole for 48bit addresses on Vega10 */
 #define AMDGPU_VA_HOLE_START			0x0000800000000000ULL
@@ -166,9 +168,6 @@ struct amdgpu_vm {
 	/* tree of virtual addresses mapped */
 	struct rb_root_cached	va;
 
-	/* protecting invalidated */
-	spinlock_t		status_lock;
-
 	/* BOs who needs a validation */
 	struct list_head	evicted;
 
@@ -177,6 +176,10 @@ struct amdgpu_vm {
 
 	/* BOs moved, but not yet updated in the PT */
 	struct list_head	moved;
+	spinlock_t		moved_lock;
+
+	/* All BOs of this VM not currently in the state machine */
+	struct list_head	idle;
 
 	/* BO mappings freed, but not yet updated in the PT */
 	struct list_head	freed;
@@ -184,9 +187,6 @@ struct amdgpu_vm {
 	/* contains the page directory */
 	struct amdgpu_vm_pt     root;
 	struct dma_fence	*last_update;
-
-	/* protecting freed */
-	spinlock_t		freed_lock;
 
 	/* Scheduler entity for page table updates */
 	struct drm_sched_entity	entity;
@@ -206,6 +206,15 @@ struct amdgpu_vm {
 
 	/* Limit non-retry fault storms */
 	unsigned int		fault_credit;
+
+	/* Points to the KFD process VM info */
+	struct amdkfd_process_info *process_info;
+
+	/* List node in amdkfd_process_info.vm_list_head */
+	struct list_head	vm_list_node;
+
+	/* Valid while the PD is reserved or fenced */
+	uint64_t		pd_phys_addr;
 };
 
 struct amdgpu_vm_manager {
@@ -250,6 +259,7 @@ void amdgpu_vm_manager_init(struct amdgpu_device *adev);
 void amdgpu_vm_manager_fini(struct amdgpu_device *adev);
 int amdgpu_vm_init(struct amdgpu_device *adev, struct amdgpu_vm *vm,
 		   int vm_context, unsigned int pasid);
+int amdgpu_vm_make_compute(struct amdgpu_device *adev, struct amdgpu_vm *vm);
 void amdgpu_vm_fini(struct amdgpu_device *adev, struct amdgpu_vm *vm);
 bool amdgpu_vm_pasid_fault_credit(struct amdgpu_device *adev,
 				  unsigned int pasid);

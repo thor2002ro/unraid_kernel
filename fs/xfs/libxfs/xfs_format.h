@@ -1,19 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2000-2005 Silicon Graphics, Inc.
  * All Rights Reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it would be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write the Free Software Foundation,
- * Inc.,  51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
 #ifndef __XFS_FORMAT_H__
 #define __XFS_FORMAT_H__
@@ -98,6 +86,9 @@ struct xfs_ifork;
 	 XFS_SB_VERSION2_PROJID32BIT	| \
 	 XFS_SB_VERSION2_FTYPE)
 
+/* Maximum size of the xfs filesystem label, no terminating NULL */
+#define XFSLABEL_MAX			12
+
 /*
  * Superblock - in core version.  Must match the ondisk version below.
  * Must be padded to 64 bit alignment.
@@ -122,7 +113,7 @@ typedef struct xfs_sb {
 	uint16_t	sb_sectsize;	/* volume sector size, bytes */
 	uint16_t	sb_inodesize;	/* inode size, bytes */
 	uint16_t	sb_inopblock;	/* inodes per block */
-	char		sb_fname[12];	/* file system name */
+	char		sb_fname[XFSLABEL_MAX]; /* file system name */
 	uint8_t		sb_blocklog;	/* log2 of sb_blocksize */
 	uint8_t		sb_sectlog;	/* log2 of sb_sectsize */
 	uint8_t		sb_inodelog;	/* log2 of sb_inodesize */
@@ -213,7 +204,7 @@ typedef struct xfs_dsb {
 	__be16		sb_sectsize;	/* volume sector size, bytes */
 	__be16		sb_inodesize;	/* inode size, bytes */
 	__be16		sb_inopblock;	/* inodes per block */
-	char		sb_fname[12];	/* file system name */
+	char		sb_fname[XFSLABEL_MAX]; /* file system name */
 	__u8		sb_blocklog;	/* log2 of sb_blocksize */
 	__u8		sb_sectlog;	/* log2 of sb_sectsize */
 	__u8		sb_inodelog;	/* log2 of sb_inodesize */
@@ -803,24 +794,13 @@ typedef struct xfs_agi {
 		&(XFS_BUF_TO_AGFL(bp)->agfl_bno[0]) : \
 		(__be32 *)(bp)->b_addr)
 
-/*
- * Size of the AGFL.  For CRC-enabled filesystes we steal a couple of
- * slots in the beginning of the block for a proper header with the
- * location information and CRC.
- */
-#define XFS_AGFL_SIZE(mp) \
-	(((mp)->m_sb.sb_sectsize - \
-	 (xfs_sb_version_hascrc(&((mp)->m_sb)) ? \
-		sizeof(struct xfs_agfl) : 0)) / \
-	  sizeof(xfs_agblock_t))
-
 typedef struct xfs_agfl {
 	__be32		agfl_magicnum;
 	__be32		agfl_seqno;
 	uuid_t		agfl_uuid;
 	__be64		agfl_lsn;
 	__be32		agfl_crc;
-	__be32		agfl_bno[];	/* actually XFS_AGFL_SIZE(mp) */
+	__be32		agfl_bno[];	/* actually xfs_agfl_size(mp) */
 } __attribute__((packed)) xfs_agfl_t;
 
 #define XFS_AGFL_CRC_OFF	offsetof(struct xfs_agfl, agfl_crc)
@@ -981,6 +961,9 @@ typedef enum xfs_dinode_fmt {
 	((w) == XFS_DATA_FORK ? \
 		XFS_DFORK_DSIZE(dip, mp) : \
 		XFS_DFORK_ASIZE(dip, mp))
+
+#define XFS_DFORK_MAXEXT(dip, mp, w) \
+	(XFS_DFORK_SIZE(dip, mp, w) / sizeof(struct xfs_bmbt_rec))
 
 /*
  * Return pointers to the data or attribute forks.
@@ -1545,6 +1528,8 @@ typedef struct xfs_bmdr_block {
 #define BMBT_STARTOFF_BITLEN	54
 #define BMBT_STARTBLOCK_BITLEN	52
 #define BMBT_BLOCKCOUNT_BITLEN	21
+
+#define BMBT_STARTOFF_MASK	((1ULL << BMBT_STARTOFF_BITLEN) - 1)
 
 typedef struct xfs_bmbt_rec {
 	__be64			l0, l1;

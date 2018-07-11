@@ -1,20 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2000-2005 Silicon Graphics, Inc.
  * Copyright (c) 2013 Red Hat, Inc.
  * All Rights Reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it would be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write the Free Software Foundation,
- * Inc.,  51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
 #include "xfs.h"
 #include "xfs_fs.h"
@@ -84,7 +72,8 @@ xfs_dir3_leaf_check(
 	if (!fa)
 		return;
 	xfs_corruption_error(__func__, XFS_ERRLEVEL_LOW, dp->i_mount,
-			bp->b_addr, __FILE__, __LINE__, fa);
+			bp->b_addr, BBTOB(bp->b_length), __FILE__, __LINE__,
+			fa);
 	ASSERT(0);
 }
 #else
@@ -387,8 +376,9 @@ xfs_dir2_leaf_to_node(
 	dp->d_ops->free_hdr_from_disk(&freehdr, free);
 	leaf = lbp->b_addr;
 	ltp = xfs_dir2_leaf_tail_p(args->geo, leaf);
-	ASSERT(be32_to_cpu(ltp->bestcount) <=
-				(uint)dp->i_d.di_size / args->geo->blksize);
+	if (be32_to_cpu(ltp->bestcount) >
+				(uint)dp->i_d.di_size / args->geo->blksize)
+		return -EFSCORRUPTED;
 
 	/*
 	 * Copy freespace entries from the leaf block to the new block.
@@ -1728,6 +1718,7 @@ xfs_dir2_node_addname_int(
 	__be16			*bests;
 	struct xfs_dir3_icfree_hdr freehdr;
 	struct xfs_dir2_data_free *bf;
+	xfs_dir2_data_aoff_t	aoff;
 
 	dp = args->dp;
 	mp = dp->i_mount;
@@ -2022,9 +2013,13 @@ xfs_dir2_node_addname_int(
 	/*
 	 * Mark the first part of the unused space, inuse for us.
 	 */
-	xfs_dir2_data_use_free(args, dbp, dup,
-		(xfs_dir2_data_aoff_t)((char *)dup - (char *)hdr), length,
-		&needlog, &needscan);
+	aoff = (xfs_dir2_data_aoff_t)((char *)dup - (char *)hdr);
+	error = xfs_dir2_data_use_free(args, dbp, dup, aoff, length,
+			&needlog, &needscan);
+	if (error) {
+		xfs_trans_brelse(tp, dbp);
+		return error;
+	}
 	/*
 	 * Fill in the new entry and log it.
 	 */

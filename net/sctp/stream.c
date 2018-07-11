@@ -6,7 +6,7 @@
  *
  * This file is part of the SCTP kernel implementation
  *
- * These functions manipulate sctp tsn mapping array.
+ * This file contains sctp stream maniuplation primitives and helpers.
  *
  * This SCTP implementation is free software;
  * you can redistribute it and/or modify it under the terms of
@@ -240,6 +240,8 @@ void sctp_stream_update(struct sctp_stream *stream, struct sctp_stream *new)
 
 	new->out = NULL;
 	new->in  = NULL;
+	new->outcnt = 0;
+	new->incnt  = 0;
 }
 
 static int sctp_send_reconf(struct sctp_association *asoc,

@@ -258,15 +258,9 @@ static int cpufreq_init(struct cpufreq_policy *policy)
 	priv->cpu_dev = cpu_dev;
 	policy->driver_data = priv;
 	policy->clk = cpu_clk;
+	policy->freq_table = freq_table;
 
 	policy->suspend_freq = dev_pm_opp_get_suspend_opp_freq(cpu_dev) / 1000;
-
-	ret = cpufreq_table_validate_and_show(policy, freq_table);
-	if (ret) {
-		dev_err(cpu_dev, "%s: invalid frequency table: %d\n", __func__,
-			ret);
-		goto out_free_cpufreq_table;
-	}
 
 	/* Support turbo/boost mode */
 	if (policy_has_boost_freq(policy)) {
@@ -352,8 +346,14 @@ static int dt_cpufreq_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	if (data && data->have_governor_per_policy)
-		dt_cpufreq_driver.flags |= CPUFREQ_HAVE_GOVERNOR_PER_POLICY;
+	if (data) {
+		if (data->have_governor_per_policy)
+			dt_cpufreq_driver.flags |= CPUFREQ_HAVE_GOVERNOR_PER_POLICY;
+
+		dt_cpufreq_driver.resume = data->resume;
+		if (data->suspend)
+			dt_cpufreq_driver.suspend = data->suspend;
+	}
 
 	ret = cpufreq_register_driver(&dt_cpufreq_driver);
 	if (ret)

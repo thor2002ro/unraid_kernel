@@ -83,6 +83,7 @@ struct i2caux *dal_i2caux_create(
 	case DCE_VERSION_8_3:
 		return dal_i2caux_dce80_create(ctx);
 	case DCE_VERSION_11_2:
+	case DCE_VERSION_11_22:
 		return dal_i2caux_dce112_create(ctx);
 	case DCE_VERSION_11_0:
 		return dal_i2caux_dce110_create(ctx);
@@ -253,6 +254,7 @@ bool dal_i2caux_submit_aux_command(
 			break;
 		}
 
+		cmd->payloads->length = request.payload.length;
 		++index_of_payload;
 	}
 

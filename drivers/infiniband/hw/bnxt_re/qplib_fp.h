@@ -389,6 +389,18 @@ struct bnxt_qplib_cq {
 	struct list_head		sqf_head, rqf_head;
 	atomic_t			arm_state;
 	spinlock_t			compl_lock; /* synch CQ handlers */
+/* Locking Notes:
+ * QP can move to error state from modify_qp, async error event or error
+ * CQE as part of poll_cq. When QP is moved to error state, it gets added
+ * to two flush lists, one each for SQ and RQ.
+ * Each flush list is protected by qplib_cq->flush_lock. Both scq and rcq
+ * flush_locks should be acquired when QP is moved to error. The control path
+ * operations(modify_qp and async error events) are synchronized with poll_cq
+ * using upper level CQ locks (bnxt_re_cq->cq_lock) of both SCQ and RCQ.
+ * The qplib_cq->flush_lock is required to synchronize two instances of poll_cq
+ * of the same QP while manipulating the flush list.
+ */
+	spinlock_t			flush_lock; /* QP flush management */
 };
 
 #define BNXT_QPLIB_MAX_IRRQE_ENTRY_SIZE	sizeof(struct xrrq_irrq)
@@ -455,7 +467,10 @@ struct bnxt_qplib_nq_work {
 	struct bnxt_qplib_cq    *cq;
 };
 
+void bnxt_qplib_nq_stop_irq(struct bnxt_qplib_nq *nq, bool kill);
 void bnxt_qplib_disable_nq(struct bnxt_qplib_nq *nq);
+int bnxt_qplib_nq_start_irq(struct bnxt_qplib_nq *nq, int nq_indx,
+			    int msix_vector, bool need_init);
 int bnxt_qplib_enable_nq(struct pci_dev *pdev, struct bnxt_qplib_nq *nq,
 			 int nq_idx, int msix_vector, int bar_reg_offset,
 			 int (*cqn_handler)(struct bnxt_qplib_nq *nq,
@@ -478,6 +493,9 @@ int bnxt_qplib_create_qp(struct bnxt_qplib_res *res, struct bnxt_qplib_qp *qp);
 int bnxt_qplib_modify_qp(struct bnxt_qplib_res *res, struct bnxt_qplib_qp *qp);
 int bnxt_qplib_query_qp(struct bnxt_qplib_res *res, struct bnxt_qplib_qp *qp);
 int bnxt_qplib_destroy_qp(struct bnxt_qplib_res *res, struct bnxt_qplib_qp *qp);
+void bnxt_qplib_clean_qp(struct bnxt_qplib_qp *qp);
+void bnxt_qplib_free_qp_res(struct bnxt_qplib_res *res,
+			    struct bnxt_qplib_qp *qp);
 void *bnxt_qplib_get_qp1_sq_buf(struct bnxt_qplib_qp *qp,
 				struct bnxt_qplib_sge *sge);
 void *bnxt_qplib_get_qp1_rq_buf(struct bnxt_qplib_qp *qp,
@@ -500,7 +518,6 @@ void bnxt_qplib_req_notify_cq(struct bnxt_qplib_cq *cq, u32 arm_type);
 void bnxt_qplib_free_nq(struct bnxt_qplib_nq *nq);
 int bnxt_qplib_alloc_nq(struct pci_dev *pdev, struct bnxt_qplib_nq *nq);
 void bnxt_qplib_add_flush_qp(struct bnxt_qplib_qp *qp);
-void bnxt_qplib_del_flush_qp(struct bnxt_qplib_qp *qp);
 void bnxt_qplib_acquire_cq_locks(struct bnxt_qplib_qp *qp,
 				 unsigned long *flags);
 void bnxt_qplib_release_cq_locks(struct bnxt_qplib_qp *qp,

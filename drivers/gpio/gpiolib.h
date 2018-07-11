@@ -13,13 +13,13 @@
 #define GPIOLIB_H
 
 #include <linux/gpio/driver.h>
+#include <linux/gpio/consumer.h> /* for enum gpiod_flags */
 #include <linux/err.h>
 #include <linux/device.h>
 #include <linux/module.h>
 #include <linux/cdev.h>
 
 enum of_gpio_flags;
-enum gpiod_flags;
 enum gpio_lookup_flags;
 struct acpi_device;
 
@@ -188,7 +188,7 @@ int gpiod_get_array_value_complex(bool raw, bool can_sleep,
 				  unsigned int array_size,
 				  struct gpio_desc **desc_array,
 				  int *value_array);
-void gpiod_set_array_value_complex(bool raw, bool can_sleep,
+int gpiod_set_array_value_complex(bool raw, bool can_sleep,
 				   unsigned int array_size,
 				   struct gpio_desc **desc_array,
 				   int *value_array);

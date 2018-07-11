@@ -968,7 +968,7 @@ sdev_show_wwid(struct device *dev, struct device_attribute *attr,
 static DEVICE_ATTR(wwid, S_IRUGO, sdev_show_wwid, NULL);
 
 #define BLIST_FLAG_NAME(name)					\
-	[ilog2((__force unsigned int)BLIST_##name)] = #name
+	[const_ilog2((__force __u64)BLIST_##name)] = #name
 static const char *const sdev_bflags_name[] = {
 #include "scsi_devinfo_tbl.c"
 };
@@ -1292,8 +1292,7 @@ int scsi_sysfs_add_sdev(struct scsi_device *sdev)
 	transport_add_device(&sdev->sdev_gendev);
 	sdev->is_visible = 1;
 
-	error = bsg_register_queue(rq, &sdev->sdev_gendev, NULL, NULL);
-
+	error = bsg_scsi_register_queue(rq, &sdev->sdev_gendev);
 	if (error)
 		/* we're treating error on bsg register as non-fatal,
 		 * so pretend nothing went wrong */
@@ -1308,6 +1307,13 @@ int scsi_sysfs_add_sdev(struct scsi_device *sdev)
 			if (error)
 				return error;
 		}
+	}
+
+	if (sdev->host->hostt->sdev_groups) {
+		error = sysfs_create_groups(&sdev->sdev_gendev.kobj,
+				sdev->host->hostt->sdev_groups);
+		if (error)
+			return error;
 	}
 
 	scsi_autopm_put_device(sdev);
@@ -1348,6 +1354,10 @@ void __scsi_remove_device(struct scsi_device *sdev)
 
 		if (res != 0)
 			return;
+
+		if (sdev->host->hostt->sdev_groups)
+			sysfs_remove_groups(&sdev->sdev_gendev.kobj,
+					sdev->host->hostt->sdev_groups);
 
 		bsg_unregister_queue(sdev->request_queue);
 		device_unregister(&sdev->sdev_dev);

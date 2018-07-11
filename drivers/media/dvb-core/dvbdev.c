@@ -24,6 +24,7 @@
 #include <linux/string.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/i2c.h>
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/device.h>
@@ -858,6 +859,10 @@ int dvb_register_adapter(struct dvb_adapter *adap, const char *name,
 	adap->mfe_dvbdev = NULL;
 	mutex_init (&adap->mfe_lock);
 
+#ifdef CONFIG_MEDIA_CONTROLLER_DVB
+	mutex_init(&adap->mdev_lock);
+#endif
+
 	list_add_tail (&adap->list_head, &dvb_adapter_list);
 
 	mutex_unlock(&dvbdev_register_lock);
@@ -940,6 +945,55 @@ out:
 	kfree(mbuf);
 	return err;
 }
+
+#if IS_ENABLED(CONFIG_I2C)
+struct i2c_client *dvb_module_probe(const char *module_name,
+				    const char *name,
+				    struct i2c_adapter *adap,
+				    unsigned char addr,
+				    void *platform_data)
+{
+	struct i2c_client *client;
+	struct i2c_board_info *board_info;
+
+	board_info = kzalloc(sizeof(*board_info), GFP_KERNEL);
+	if (!board_info)
+		return NULL;
+
+	if (name)
+		strlcpy(board_info->type, name, I2C_NAME_SIZE);
+	else
+		strlcpy(board_info->type, module_name, I2C_NAME_SIZE);
+
+	board_info->addr = addr;
+	board_info->platform_data = platform_data;
+	request_module(module_name);
+	client = i2c_new_device(adap, board_info);
+	if (client == NULL || client->dev.driver == NULL) {
+		kfree(board_info);
+		return NULL;
+	}
+
+	if (!try_module_get(client->dev.driver->owner)) {
+		i2c_unregister_device(client);
+		client = NULL;
+	}
+
+	kfree(board_info);
+	return client;
+}
+EXPORT_SYMBOL_GPL(dvb_module_probe);
+
+void dvb_module_release(struct i2c_client *client)
+{
+	if (!client)
+		return;
+
+	module_put(client->dev.driver->owner);
+	i2c_unregister_device(client);
+}
+EXPORT_SYMBOL_GPL(dvb_module_release);
+#endif
 
 static int dvb_uevent(struct device *dev, struct kobj_uevent_env *env)
 {

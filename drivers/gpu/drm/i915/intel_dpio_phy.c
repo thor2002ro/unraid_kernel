@@ -147,7 +147,7 @@ struct bxt_ddi_phy_info {
 	 */
 	struct {
 		/**
-		 * @port: which port maps to this channel.
+		 * @channel.port: which port maps to this channel.
 		 */
 		enum port port;
 	} channel[2];
@@ -380,13 +380,14 @@ static void _bxt_ddi_phy_init(struct drm_i915_private *dev_priv,
 	 * all 1s.  Eventually they become accessible as they power up, then
 	 * the reserved bit will give the default 0.  Poll on the reserved bit
 	 * becoming 0 to find when the PHY is accessible.
-	 * HW team confirmed that the time to reach phypowergood status is
-	 * anywhere between 50 us and 100us.
+	 * The flag should get set in 100us according to the HW team, but
+	 * use 1ms due to occasional timeouts observed with that.
 	 */
-	if (wait_for_us(((I915_READ(BXT_PORT_CL1CM_DW0(phy)) &
-		(PHY_RESERVED | PHY_POWER_GOOD)) == PHY_POWER_GOOD), 100)) {
+	if (intel_wait_for_register_fw(dev_priv, BXT_PORT_CL1CM_DW0(phy),
+				       PHY_RESERVED | PHY_POWER_GOOD,
+				       PHY_POWER_GOOD,
+				       1))
 		DRM_ERROR("timeout during PHY%d power on\n", phy);
-	}
 
 	/* Program PLL Rcomp code offset */
 	val = I915_READ(BXT_PORT_CL1CM_DW9(phy));

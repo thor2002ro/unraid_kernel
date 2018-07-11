@@ -1034,6 +1034,12 @@ void acpi_ec_unblock_transactions(void)
 		acpi_ec_start(first_ec, true);
 }
 
+void acpi_ec_dispatch_gpe(void)
+{
+	if (first_ec)
+		acpi_dispatch_gpe(NULL, first_ec->gpe);
+}
+
 /* --------------------------------------------------------------------------
                                 Event Management
    -------------------------------------------------------------------------- */
@@ -1927,12 +1933,18 @@ static int acpi_ec_suspend_noirq(struct device *dev)
 	    ec->reference_count >= 1)
 		acpi_set_gpe(NULL, ec->gpe, ACPI_GPE_DISABLE);
 
+	if (acpi_sleep_no_ec_events())
+		acpi_ec_enter_noirq(ec);
+
 	return 0;
 }
 
 static int acpi_ec_resume_noirq(struct device *dev)
 {
 	struct acpi_ec *ec = acpi_driver_data(to_acpi_device(dev));
+
+	if (acpi_sleep_no_ec_events())
+		acpi_ec_leave_noirq(ec);
 
 	if (ec_no_wakeup && test_bit(EC_FLAGS_STARTED, &ec->flags) &&
 	    ec->reference_count >= 1)
@@ -2025,6 +2037,17 @@ static inline void acpi_ec_query_exit(void)
 	}
 }
 
+static const struct dmi_system_id acpi_ec_no_wakeup[] = {
+	{
+		.ident = "Thinkpad X1 Carbon 6th",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "20KGS3JF01"),
+		},
+	},
+	{ },
+};
+
 int __init acpi_ec_init(void)
 {
 	int result;
@@ -2034,6 +2057,15 @@ int __init acpi_ec_init(void)
 	result = acpi_ec_query_init();
 	if (result)
 		return result;
+
+	/*
+	 * Disable EC wakeup on following systems to prevent periodic
+	 * wakeup from EC GPE.
+	 */
+	if (dmi_check_system(acpi_ec_no_wakeup)) {
+		ec_no_wakeup = true;
+		pr_debug("Disabling EC wakeup on suspend-to-idle\n");
+	}
 
 	/* Drivers must be started after acpi_ec_query_init() */
 	dsdt_fail = acpi_bus_register_driver(&acpi_ec_driver);

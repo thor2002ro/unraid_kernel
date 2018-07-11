@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -70,7 +70,7 @@ __rmnet_map_ingress_handler(struct sk_buff *skb,
 	u8 mux_id;
 
 	if (RMNET_MAP_GET_CD_BIT(skb)) {
-		if (port->data_format & RMNET_INGRESS_FORMAT_MAP_COMMANDS)
+		if (port->data_format & RMNET_FLAGS_INGRESS_MAP_COMMANDS)
 			return rmnet_map_command(skb, port);
 
 		goto free_skb;
@@ -93,7 +93,7 @@ __rmnet_map_ingress_handler(struct sk_buff *skb,
 	skb_pull(skb, sizeof(struct rmnet_map_header));
 	rmnet_set_skb_proto(skb);
 
-	if (port->data_format & RMNET_INGRESS_FORMAT_MAP_CKSUMV4) {
+	if (port->data_format & RMNET_FLAGS_INGRESS_MAP_CKSUMV4) {
 		if (!rmnet_map_checksum_downlink_packet(skb, len + pad))
 			skb->ip_summed = CHECKSUM_UNNECESSARY;
 	}
@@ -121,7 +121,7 @@ rmnet_map_ingress_handler(struct sk_buff *skb,
 		skb_push(skb, ETH_HLEN);
 	}
 
-	if (port->data_format & RMNET_INGRESS_FORMAT_DEAGGREGATION) {
+	if (port->data_format & RMNET_FLAGS_INGRESS_DEAGGREGATION) {
 		while ((skbn = rmnet_map_deaggregate(skb, port)) != NULL)
 			__rmnet_map_ingress_handler(skbn, port);
 
@@ -141,32 +141,28 @@ static int rmnet_map_egress_handler(struct sk_buff *skb,
 	additional_header_len = 0;
 	required_headroom = sizeof(struct rmnet_map_header);
 
-	if (port->data_format & RMNET_EGRESS_FORMAT_MAP_CKSUMV4) {
+	if (port->data_format & RMNET_FLAGS_EGRESS_MAP_CKSUMV4) {
 		additional_header_len = sizeof(struct rmnet_map_ul_csum_header);
 		required_headroom += additional_header_len;
 	}
 
 	if (skb_headroom(skb) < required_headroom) {
 		if (pskb_expand_head(skb, required_headroom, 0, GFP_KERNEL))
-			goto fail;
+			return -ENOMEM;
 	}
 
-	if (port->data_format & RMNET_EGRESS_FORMAT_MAP_CKSUMV4)
+	if (port->data_format & RMNET_FLAGS_EGRESS_MAP_CKSUMV4)
 		rmnet_map_checksum_uplink_packet(skb, orig_dev);
 
 	map_header = rmnet_map_add_map_header(skb, additional_header_len, 0);
 	if (!map_header)
-		goto fail;
+		return -ENOMEM;
 
 	map_header->mux_id = mux_id;
 
 	skb->protocol = htons(ETH_P_MAP);
 
 	return 0;
-
-fail:
-	kfree_skb(skb);
-	return -ENOMEM;
 }
 
 static void
@@ -228,15 +224,18 @@ void rmnet_egress_handler(struct sk_buff *skb)
 	mux_id = priv->mux_id;
 
 	port = rmnet_get_port(skb->dev);
-	if (!port) {
-		kfree_skb(skb);
-		return;
-	}
+	if (!port)
+		goto drop;
 
 	if (rmnet_map_egress_handler(skb, port, mux_id, orig_dev))
-		return;
+		goto drop;
 
 	rmnet_vnd_tx_fixup(skb, orig_dev);
 
 	dev_queue_xmit(skb);
+	return;
+
+drop:
+	this_cpu_inc(priv->pcpu_stats->stats.tx_drops);
+	kfree_skb(skb);
 }

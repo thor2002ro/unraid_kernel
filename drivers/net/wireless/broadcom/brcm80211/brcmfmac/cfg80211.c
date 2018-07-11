@@ -753,7 +753,7 @@ s32 brcmf_notify_escan_complete(struct brcmf_cfg80211_info *cfg,
 static int brcmf_cfg80211_del_ap_iface(struct wiphy *wiphy,
 				       struct wireless_dev *wdev)
 {
-	struct brcmf_cfg80211_info *cfg = wiphy_priv(wiphy);
+	struct brcmf_cfg80211_info *cfg = wiphy_to_cfg(wiphy);
 	struct net_device *ndev = wdev->netdev;
 	struct brcmf_if *ifp = netdev_priv(ndev);
 	int ret;
@@ -786,7 +786,7 @@ err_unarm:
 static
 int brcmf_cfg80211_del_iface(struct wiphy *wiphy, struct wireless_dev *wdev)
 {
-	struct brcmf_cfg80211_info *cfg = wiphy_priv(wiphy);
+	struct brcmf_cfg80211_info *cfg = wiphy_to_cfg(wiphy);
 	struct net_device *ndev = wdev->netdev;
 
 	if (ndev && ndev == cfg_to_ndev(cfg))
@@ -831,7 +831,7 @@ brcmf_cfg80211_change_iface(struct wiphy *wiphy, struct net_device *ndev,
 			 enum nl80211_iftype type,
 			 struct vif_params *params)
 {
-	struct brcmf_cfg80211_info *cfg = wiphy_priv(wiphy);
+	struct brcmf_cfg80211_info *cfg = wiphy_to_cfg(wiphy);
 	struct brcmf_if *ifp = netdev_priv(ndev);
 	struct brcmf_cfg80211_vif *vif = ifp->vif;
 	s32 infra = 0;
@@ -1264,7 +1264,7 @@ static void brcmf_link_down(struct brcmf_cfg80211_vif *vif, u16 reason)
 	brcmf_dbg(TRACE, "Enter\n");
 
 	if (test_and_clear_bit(BRCMF_VIF_STATUS_CONNECTED, &vif->sme_state)) {
-		brcmf_dbg(INFO, "Call WLC_DISASSOC to stop excess roaming\n ");
+		brcmf_dbg(INFO, "Call WLC_DISASSOC to stop excess roaming\n");
 		err = brcmf_fil_cmd_data_set(vif->ifp,
 					     BRCMF_C_DISASSOC, NULL, 0);
 		if (err) {
@@ -2127,17 +2127,15 @@ static s32
 brcmf_cfg80211_get_tx_power(struct wiphy *wiphy, struct wireless_dev *wdev,
 			    s32 *dbm)
 {
-	struct brcmf_cfg80211_info *cfg = wiphy_to_cfg(wiphy);
-	struct net_device *ndev = cfg_to_ndev(cfg);
-	struct brcmf_if *ifp = netdev_priv(ndev);
+	struct brcmf_cfg80211_vif *vif = wdev_to_vif(wdev);
 	s32 qdbm = 0;
 	s32 err;
 
 	brcmf_dbg(TRACE, "Enter\n");
-	if (!check_vif_up(ifp->vif))
+	if (!check_vif_up(vif))
 		return -EIO;
 
-	err = brcmf_fil_iovar_int_get(ifp, "qtxpower", &qdbm);
+	err = brcmf_fil_iovar_int_get(vif->ifp, "qtxpower", &qdbm);
 	if (err) {
 		brcmf_err("error (%d)\n", err);
 		goto done;
@@ -2730,9 +2728,8 @@ static s32 brcmf_inform_single_bss(struct brcmf_cfg80211_info *cfg,
 				   struct brcmf_bss_info_le *bi)
 {
 	struct wiphy *wiphy = cfg_to_wiphy(cfg);
-	struct ieee80211_channel *notify_channel;
 	struct cfg80211_bss *bss;
-	struct ieee80211_supported_band *band;
+	enum nl80211_band band;
 	struct brcmu_chan ch;
 	u16 channel;
 	u32 freq;
@@ -2740,7 +2737,7 @@ static s32 brcmf_inform_single_bss(struct brcmf_cfg80211_info *cfg,
 	u16 notify_interval;
 	u8 *notify_ie;
 	size_t notify_ielen;
-	s32 notify_signal;
+	struct cfg80211_inform_bss bss_data = {};
 
 	if (le32_to_cpu(bi->length) > WL_BSS_INFO_MAX) {
 		brcmf_err("Bss info is larger than buffer. Discarding\n");
@@ -2755,32 +2752,33 @@ static s32 brcmf_inform_single_bss(struct brcmf_cfg80211_info *cfg,
 	channel = bi->ctl_ch;
 
 	if (channel <= CH_MAX_2G_CHANNEL)
-		band = wiphy->bands[NL80211_BAND_2GHZ];
+		band = NL80211_BAND_2GHZ;
 	else
-		band = wiphy->bands[NL80211_BAND_5GHZ];
+		band = NL80211_BAND_5GHZ;
 
-	freq = ieee80211_channel_to_frequency(channel, band->band);
-	notify_channel = ieee80211_get_channel(wiphy, freq);
+	freq = ieee80211_channel_to_frequency(channel, band);
+	bss_data.chan = ieee80211_get_channel(wiphy, freq);
+	bss_data.scan_width = NL80211_BSS_CHAN_WIDTH_20;
+	bss_data.boottime_ns = ktime_to_ns(ktime_get_boottime());
 
 	notify_capability = le16_to_cpu(bi->capability);
 	notify_interval = le16_to_cpu(bi->beacon_period);
 	notify_ie = (u8 *)bi + le16_to_cpu(bi->ie_offset);
 	notify_ielen = le32_to_cpu(bi->ie_length);
-	notify_signal = (s16)le16_to_cpu(bi->RSSI) * 100;
+	bss_data.signal = (s16)le16_to_cpu(bi->RSSI) * 100;
 
 	brcmf_dbg(CONN, "bssid: %pM\n", bi->BSSID);
 	brcmf_dbg(CONN, "Channel: %d(%d)\n", channel, freq);
 	brcmf_dbg(CONN, "Capability: %X\n", notify_capability);
 	brcmf_dbg(CONN, "Beacon interval: %d\n", notify_interval);
-	brcmf_dbg(CONN, "Signal: %d\n", notify_signal);
+	brcmf_dbg(CONN, "Signal: %d\n", bss_data.signal);
 
-	bss = cfg80211_inform_bss(wiphy, notify_channel,
-				  CFG80211_BSS_FTYPE_UNKNOWN,
-				  (const u8 *)bi->BSSID,
-				  0, notify_capability,
-				  notify_interval, notify_ie,
-				  notify_ielen, notify_signal,
-				  GFP_KERNEL);
+	bss = cfg80211_inform_bss_data(wiphy, &bss_data,
+				       CFG80211_BSS_FTYPE_UNKNOWN,
+				       (const u8 *)bi->BSSID,
+				       0, notify_capability,
+				       notify_interval, notify_ie,
+				       notify_ielen, GFP_KERNEL);
 
 	if (!bss)
 		return -ENOMEM;
@@ -3358,7 +3356,7 @@ brcmf_cfg80211_sched_scan_start(struct wiphy *wiphy,
 				struct cfg80211_sched_scan_request *req)
 {
 	struct brcmf_if *ifp = netdev_priv(ndev);
-	struct brcmf_cfg80211_info *cfg = wiphy_priv(wiphy);
+	struct brcmf_cfg80211_info *cfg = wiphy_to_cfg(wiphy);
 
 	brcmf_dbg(SCAN, "Enter: n_match_sets=%d n_ssids=%d\n",
 		  req->n_match_sets, req->n_ssids);
@@ -5124,6 +5122,9 @@ static int brcmf_cfg80211_set_pmk(struct wiphy *wiphy, struct net_device *dev,
 	if (WARN_ON(ifp->vif->profile.use_fwsup != BRCMF_PROFILE_FWSUP_1X))
 		return -EINVAL;
 
+	if (conf->pmk_len > BRCMF_WSEC_MAX_PSK_LEN)
+		return -ERANGE;
+
 	return brcmf_set_pmk(ifp, conf->pmk, conf->pmk_len);
 }
 
@@ -5186,6 +5187,12 @@ static struct cfg80211_ops brcmf_cfg80211_ops = {
 	.set_pmk = brcmf_cfg80211_set_pmk,
 	.del_pmk = brcmf_cfg80211_del_pmk,
 };
+
+struct cfg80211_ops *brcmf_cfg80211_get_ops(void)
+{
+	return kmemdup(&brcmf_cfg80211_ops, sizeof(brcmf_cfg80211_ops),
+		       GFP_KERNEL);
+}
 
 struct brcmf_cfg80211_vif *brcmf_alloc_vif(struct brcmf_cfg80211_info *cfg,
 					   enum nl80211_iftype type)
@@ -5491,7 +5498,7 @@ brcmf_notify_connect_status_ap(struct brcmf_cfg80211_info *cfg,
 	static int generation;
 	u32 event = e->event_code;
 	u32 reason = e->reason;
-	struct station_info sinfo;
+	struct station_info *sinfo;
 
 	brcmf_dbg(CONN, "event %s (%u), reason %d\n",
 		  brcmf_fweh_event_name(event), event, reason);
@@ -5504,16 +5511,22 @@ brcmf_notify_connect_status_ap(struct brcmf_cfg80211_info *cfg,
 
 	if (((event == BRCMF_E_ASSOC_IND) || (event == BRCMF_E_REASSOC_IND)) &&
 	    (reason == BRCMF_E_STATUS_SUCCESS)) {
-		memset(&sinfo, 0, sizeof(sinfo));
 		if (!data) {
 			brcmf_err("No IEs present in ASSOC/REASSOC_IND");
 			return -EINVAL;
 		}
-		sinfo.assoc_req_ies = data;
-		sinfo.assoc_req_ies_len = e->datalen;
+
+		sinfo = kzalloc(sizeof(*sinfo), GFP_KERNEL);
+		if (!sinfo)
+			return -ENOMEM;
+
+		sinfo->assoc_req_ies = data;
+		sinfo->assoc_req_ies_len = e->datalen;
 		generation++;
-		sinfo.generation = generation;
-		cfg80211_new_sta(ndev, e->addr, &sinfo, GFP_KERNEL);
+		sinfo->generation = generation;
+		cfg80211_new_sta(ndev, e->addr, sinfo, GFP_KERNEL);
+
+		kfree(sinfo);
 	} else if ((event == BRCMF_E_DISASSOC_IND) ||
 		   (event == BRCMF_E_DEAUTH_IND) ||
 		   (event == BRCMF_E_DEAUTH)) {
@@ -5894,7 +5907,7 @@ static void brcmf_update_bw40_channel_flag(struct ieee80211_channel *channel,
 static int brcmf_construct_chaninfo(struct brcmf_cfg80211_info *cfg,
 				    u32 bw_cap[])
 {
-	struct brcmf_if *ifp = netdev_priv(cfg_to_ndev(cfg));
+	struct brcmf_if *ifp = brcmf_get_ifp(cfg->pub, 0);
 	struct ieee80211_supported_band *band;
 	struct ieee80211_channel *channel;
 	struct wiphy *wiphy;
@@ -6009,7 +6022,7 @@ fail_pbuf:
 
 static int brcmf_enable_bw40_2g(struct brcmf_cfg80211_info *cfg)
 {
-	struct brcmf_if *ifp = netdev_priv(cfg_to_ndev(cfg));
+	struct brcmf_if *ifp = brcmf_get_ifp(cfg->pub, 0);
 	struct ieee80211_supported_band *band;
 	struct brcmf_fil_bwcap_le band_bwcap;
 	struct brcmf_chanspec_list *list;
@@ -6194,10 +6207,10 @@ static void brcmf_update_vht_cap(struct ieee80211_supported_band *band,
 	}
 }
 
-static int brcmf_setup_wiphybands(struct wiphy *wiphy)
+static int brcmf_setup_wiphybands(struct brcmf_cfg80211_info *cfg)
 {
-	struct brcmf_cfg80211_info *cfg = wiphy_priv(wiphy);
-	struct brcmf_if *ifp = netdev_priv(cfg_to_ndev(cfg));
+	struct brcmf_if *ifp = brcmf_get_ifp(cfg->pub, 0);
+	struct wiphy *wiphy;
 	u32 nmode = 0;
 	u32 vhtmode = 0;
 	u32 bw_cap[2] = { WLC_BW_20MHZ_BIT, WLC_BW_20MHZ_BIT };
@@ -6505,6 +6518,7 @@ static int brcmf_setup_wiphy(struct wiphy *wiphy, struct brcmf_if *ifp)
 
 	wiphy->flags |= WIPHY_FLAG_NETNS_OK |
 			WIPHY_FLAG_PS_ON_BY_DEFAULT |
+			WIPHY_FLAG_HAVE_AP_SME |
 			WIPHY_FLAG_OFFCHAN_TX |
 			WIPHY_FLAG_HAS_REMAIN_ON_CHANNEL;
 	if (brcmf_feat_is_enabled(ifp, BRCMF_FEAT_TDLS))
@@ -6791,8 +6805,8 @@ static s32 brcmf_translate_country_code(struct brcmf_pub *drvr, char alpha2[2],
 static void brcmf_cfg80211_reg_notifier(struct wiphy *wiphy,
 					struct regulatory_request *req)
 {
-	struct brcmf_cfg80211_info *cfg = wiphy_priv(wiphy);
-	struct brcmf_if *ifp = netdev_priv(cfg_to_ndev(cfg));
+	struct brcmf_cfg80211_info *cfg = wiphy_to_cfg(wiphy);
+	struct brcmf_if *ifp = brcmf_get_ifp(cfg->pub, 0);
 	struct brcmf_fil_country_le ccreq;
 	s32 err;
 	int i;
@@ -6802,7 +6816,7 @@ static void brcmf_cfg80211_reg_notifier(struct wiphy *wiphy,
 		return;
 
 	/* ignore non-ISO3166 country codes */
-	for (i = 0; i < sizeof(req->alpha2); i++)
+	for (i = 0; i < 2; i++)
 		if (req->alpha2[i] < 'A' || req->alpha2[i] > 'Z') {
 			brcmf_err("not an ISO3166 code (0x%02x 0x%02x)\n",
 				  req->alpha2[0], req->alpha2[1]);
@@ -6827,7 +6841,7 @@ static void brcmf_cfg80211_reg_notifier(struct wiphy *wiphy,
 		brcmf_err("Firmware rejected country setting\n");
 		return;
 	}
-	brcmf_setup_wiphybands(wiphy);
+	brcmf_setup_wiphybands(cfg);
 }
 
 static void brcmf_free_wiphy(struct wiphy *wiphy)
@@ -6854,17 +6868,15 @@ static void brcmf_free_wiphy(struct wiphy *wiphy)
 	if (wiphy->wowlan != &brcmf_wowlan_support)
 		kfree(wiphy->wowlan);
 #endif
-	wiphy_free(wiphy);
 }
 
 struct brcmf_cfg80211_info *brcmf_cfg80211_attach(struct brcmf_pub *drvr,
-						  struct device *busdev,
+						  struct cfg80211_ops *ops,
 						  bool p2pdev_forced)
 {
+	struct wiphy *wiphy = drvr->wiphy;
 	struct net_device *ndev = brcmf_get_ifp(drvr, 0)->ndev;
 	struct brcmf_cfg80211_info *cfg;
-	struct wiphy *wiphy;
-	struct cfg80211_ops *ops;
 	struct brcmf_cfg80211_vif *vif;
 	struct brcmf_if *ifp;
 	s32 err = 0;
@@ -6876,26 +6888,13 @@ struct brcmf_cfg80211_info *brcmf_cfg80211_attach(struct brcmf_pub *drvr,
 		return NULL;
 	}
 
-	ops = kmemdup(&brcmf_cfg80211_ops, sizeof(*ops), GFP_KERNEL);
-	if (!ops)
-		return NULL;
-
-	ifp = netdev_priv(ndev);
-#ifdef CONFIG_PM
-	if (brcmf_feat_is_enabled(ifp, BRCMF_FEAT_WOWL_GTK))
-		ops->set_rekey_data = brcmf_cfg80211_set_rekey_data;
-#endif
-	wiphy = wiphy_new(ops, sizeof(struct brcmf_cfg80211_info));
-	if (!wiphy) {
+	cfg = kzalloc(sizeof(*cfg), GFP_KERNEL);
+	if (!cfg) {
 		brcmf_err("Could not allocate wiphy device\n");
-		goto ops_out;
+		return NULL;
 	}
-	memcpy(wiphy->perm_addr, drvr->mac, ETH_ALEN);
-	set_wiphy_dev(wiphy, busdev);
 
-	cfg = wiphy_priv(wiphy);
 	cfg->wiphy = wiphy;
-	cfg->ops = ops;
 	cfg->pub = drvr;
 	init_vif_event(&cfg->vif_event);
 	INIT_LIST_HEAD(&cfg->vif_list);
@@ -6904,6 +6903,7 @@ struct brcmf_cfg80211_info *brcmf_cfg80211_attach(struct brcmf_pub *drvr,
 	if (IS_ERR(vif))
 		goto wiphy_out;
 
+	ifp = netdev_priv(ndev);
 	vif->ifp = ifp;
 	vif->wdev.netdev = ndev;
 	ndev->ieee80211_ptr = &vif->wdev;
@@ -6930,6 +6930,11 @@ struct brcmf_cfg80211_info *brcmf_cfg80211_attach(struct brcmf_pub *drvr,
 	if (err < 0)
 		goto priv_out;
 
+	/* regulatory notifer below needs access to cfg so
+	 * assign it now.
+	 */
+	drvr->config = cfg;
+
 	brcmf_dbg(INFO, "Registering custom regulatory\n");
 	wiphy->reg_notifier = brcmf_cfg80211_reg_notifier;
 	wiphy->regulatory_flags |= REGULATORY_CUSTOM_REG;
@@ -6943,13 +6948,17 @@ struct brcmf_cfg80211_info *brcmf_cfg80211_attach(struct brcmf_pub *drvr,
 		cap = &wiphy->bands[NL80211_BAND_2GHZ]->ht_cap.cap;
 		*cap |= IEEE80211_HT_CAP_SUP_WIDTH_20_40;
 	}
+#ifdef CONFIG_PM
+	if (brcmf_feat_is_enabled(ifp, BRCMF_FEAT_WOWL_GTK))
+		ops->set_rekey_data = brcmf_cfg80211_set_rekey_data;
+#endif
 	err = wiphy_register(wiphy);
 	if (err < 0) {
 		brcmf_err("Could not register wiphy device (%d)\n", err);
 		goto priv_out;
 	}
 
-	err = brcmf_setup_wiphybands(wiphy);
+	err = brcmf_setup_wiphybands(cfg);
 	if (err) {
 		brcmf_err("Setting wiphy bands failed (%d)\n", err);
 		goto wiphy_unreg_out;
@@ -6966,12 +6975,7 @@ struct brcmf_cfg80211_info *brcmf_cfg80211_attach(struct brcmf_pub *drvr,
 		else
 			*cap &= ~IEEE80211_HT_CAP_SUP_WIDTH_20_40;
 	}
-	/* p2p might require that "if-events" get processed by fweh. So
-	 * activate the already registered event handlers now and activate
-	 * the rest when initialization has completed. drvr->config needs to
-	 * be assigned before activating events.
-	 */
-	drvr->config = cfg;
+
 	err = brcmf_fweh_activate_events(ifp);
 	if (err) {
 		brcmf_err("FWEH activation failed (%d)\n", err);
@@ -7039,8 +7043,7 @@ priv_out:
 	ifp->vif = NULL;
 wiphy_out:
 	brcmf_free_wiphy(wiphy);
-ops_out:
-	kfree(ops);
+	kfree(cfg);
 	return NULL;
 }
 
@@ -7055,4 +7058,5 @@ void brcmf_cfg80211_detach(struct brcmf_cfg80211_info *cfg)
 	kfree(cfg->ops);
 	wl_deinit_priv(cfg);
 	brcmf_free_wiphy(cfg->wiphy);
+	kfree(cfg);
 }

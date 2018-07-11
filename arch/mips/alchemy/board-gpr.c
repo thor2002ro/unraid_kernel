@@ -29,7 +29,7 @@
 #include <linux/leds.h>
 #include <linux/gpio.h>
 #include <linux/i2c.h>
-#include <linux/i2c-gpio.h>
+#include <linux/platform_data/i2c-gpio.h>
 #include <linux/gpio/machine.h>
 #include <asm/bootinfo.h>
 #include <asm/idle.h>
@@ -190,7 +190,7 @@ static struct platform_device gpr_mtd_device = {
 /*
  * LEDs
  */
-static struct gpio_led gpr_gpio_leds[] = {
+static const struct gpio_led gpr_gpio_leds[] = {
 	{	/* green */
 		.name			= "gpr:green",
 		.gpio			= 4,

@@ -39,6 +39,9 @@
 
 #define MT_CALIBRATE_INTERVAL	HZ
 
+#define MT_MAX_VIFS		8
+#define MT_VIF_WCID(_n)		(254 - ((_n) & 7))
+
 #include "mt76.h"
 #include "mt76x2_regs.h"
 #include "mt76x2_mac.h"
@@ -117,7 +120,6 @@ struct mt76x2_dev {
 	u8 beacon_mask;
 	u8 beacon_data_mask;
 
-	u32 rev;
 	u32 rxfilter;
 
 	u16 chainmask;
@@ -151,7 +153,7 @@ struct mt76x2_sta {
 
 static inline bool is_mt7612(struct mt76x2_dev *dev)
 {
-	return (dev->rev >> 16) == 0x7612;
+	return mt76_chip(&dev->mt76) == 0x7612;
 }
 
 void mt76x2_set_irq_mask(struct mt76x2_dev *dev, u32 clear, u32 set);
@@ -180,6 +182,7 @@ int mt76x2_eeprom_init(struct mt76x2_dev *dev);
 int mt76x2_apply_calibration_data(struct mt76x2_dev *dev, int channel);
 void mt76x2_set_tx_ackto(struct mt76x2_dev *dev);
 
+void mt76x2_phy_set_antenna(struct mt76x2_dev *dev);
 int mt76x2_phy_start(struct mt76x2_dev *dev);
 int mt76x2_phy_set_channel(struct mt76x2_dev *dev,
 			 struct cfg80211_chan_def *chandef);

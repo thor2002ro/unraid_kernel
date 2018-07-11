@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2017 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * Copyright (C) 2017 Intel Corporation
  *
  * Based partially on Intel IPU4 driver written by
  *  Sakari Ailus <sakari.ailus@linux.intel.com>
@@ -526,6 +518,8 @@ static void cio2_hw_exit(struct cio2_device *cio2, struct cio2_queue *q)
 	unsigned int i, maxloops = 1000;
 
 	/* Disable CSI receiver and MIPI backend devices */
+	writel(0, q->csi_rx_base + CIO2_REG_IRQCTRL_MASK);
+	writel(0, q->csi_rx_base + CIO2_REG_IRQCTRL_ENABLE);
 	writel(0, q->csi_rx_base + CIO2_REG_CSIRX_ENABLE);
 	writel(0, q->csi_rx_base + CIO2_REG_MIPIBE_ENABLE);
 
@@ -646,18 +640,10 @@ static const char *const cio2_port_errs[] = {
 	"PKT2LONG",
 };
 
-static irqreturn_t cio2_irq(int irq, void *cio2_ptr)
+static void cio2_irq_handle_once(struct cio2_device *cio2, u32 int_status)
 {
-	struct cio2_device *cio2 = cio2_ptr;
 	void __iomem *const base = cio2->base;
 	struct device *dev = &cio2->pci_dev->dev;
-	u32 int_status, int_clear;
-
-	int_status = readl(base + CIO2_REG_INT_STS);
-	int_clear = int_status;
-
-	if (!int_status)
-		return IRQ_NONE;
 
 	if (int_status & CIO2_INT_IOOE) {
 		/*
@@ -776,9 +762,29 @@ static irqreturn_t cio2_irq(int irq, void *cio2_ptr)
 		int_status &= ~(CIO2_INT_IOIE | CIO2_INT_IOIRQ);
 	}
 
-	writel(int_clear, base + CIO2_REG_INT_STS);
 	if (int_status)
 		dev_warn(dev, "unknown interrupt 0x%x on INT\n", int_status);
+}
+
+static irqreturn_t cio2_irq(int irq, void *cio2_ptr)
+{
+	struct cio2_device *cio2 = cio2_ptr;
+	void __iomem *const base = cio2->base;
+	struct device *dev = &cio2->pci_dev->dev;
+	u32 int_status;
+
+	int_status = readl(base + CIO2_REG_INT_STS);
+	dev_dbg(dev, "isr enter - interrupt status 0x%x\n", int_status);
+	if (!int_status)
+		return IRQ_NONE;
+
+	do {
+		writel(int_status, base + CIO2_REG_INT_STS);
+		cio2_irq_handle_once(cio2, int_status);
+		int_status = readl(base + CIO2_REG_INT_STS);
+		if (int_status)
+			dev_dbg(dev, "pending status 0x%x\n", int_status);
+	} while (int_status);
 
 	return IRQ_HANDLED;
 }
@@ -1035,6 +1041,7 @@ static void cio2_vb2_stop_streaming(struct vb2_queue *vq)
 			"failed to stop sensor streaming\n");
 
 	cio2_hw_exit(cio2, q);
+	synchronize_irq(cio2->pci_dev->irq);
 	cio2_vb2_return_all_buffers(q, VB2_BUF_STATE_ERROR);
 	media_pipeline_stop(&q->vdev.entity);
 	pm_runtime_put(&cio2->pci_dev->dev);
@@ -1976,6 +1983,7 @@ static int __maybe_unused cio2_suspend(struct device *dev)
 
 	/* Stop stream */
 	cio2_hw_exit(cio2, q);
+	synchronize_irq(pci_dev->irq);
 
 	pm_runtime_force_suspend(dev);
 

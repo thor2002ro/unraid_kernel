@@ -212,6 +212,34 @@ probably use drm_fb_helper_fbdev_teardown().
 
 Contact: Maintainer of the driver you plan to convert
 
+Clean up mmap forwarding
+------------------------
+
+A lot of drivers forward gem mmap calls to dma-buf mmap for imported buffers.
+And also a lot of them forward dma-buf mmap to the gem mmap implementations.
+Would be great to refactor this all into a set of small common helpers.
+
+Contact: Daniel Vetter
+
+Put a reservation_object into drm_gem_object
+--------------------------------------------
+
+This would remove the need for the ->gem_prime_res_obj callback. It would also
+allow us to implement generic helpers for waiting for a bo, allowing for quite a
+bit of refactoring in the various wait ioctl implementations.
+
+Contact: Daniel Vetter
+
+idr_init_base()
+---------------
+
+DRM core&drivers uses a lot of idr (integer lookup directories) for mapping
+userspace IDs to internal objects, and in most places ID=0 means NULL and hence
+is never used. Switching to idr_init_base() for these would make the idr more
+efficient.
+
+Contact: Daniel Vetter
+
 Core refactorings
 =================
 
@@ -439,6 +467,13 @@ a bunch of progress cleaning it up but there's still plenty of work to be done.
 See drivers/gpu/drm/amd/display/TODO for tasks.
 
 Contact: Harry Wentland, Alex Deucher
+
+i915
+----
+
+- Our early/late pm callbacks could be removed in favour of using
+  device_link_add to model the dependency between i915 and snd_had. See
+  https://dri.freedesktop.org/docs/drm/driver-api/device_link.html
 
 Outside DRM
 ===========

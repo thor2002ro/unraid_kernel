@@ -102,7 +102,7 @@ static u32 cxgb4_get_entity_length(struct adapter *adap, u32 entity)
 	case CUDBG_CIM_LA:
 		if (is_t6(adap->params.chip)) {
 			len = adap->params.cim_la_size / 10 + 1;
-			len *= 11 * sizeof(u32);
+			len *= 10 * sizeof(u32);
 		} else {
 			len = adap->params.cim_la_size / 8;
 			len *= 8 * sizeof(u32);
@@ -214,7 +214,8 @@ static u32 cxgb4_get_entity_length(struct adapter *adap, u32 entity)
 		len = sizeof(struct ireg_buf) * n;
 		break;
 	case CUDBG_SGE_INDIRECT:
-		len = sizeof(struct ireg_buf) * 2;
+		len = sizeof(struct ireg_buf) * 2 +
+		      sizeof(struct sge_qbase_reg_field);
 		break;
 	case CUDBG_ULPRX_LA:
 		len = sizeof(struct cudbg_ulprx_la);
@@ -487,4 +488,29 @@ void cxgb4_init_ethtool_dump(struct adapter *adapter)
 	adapter->eth_dump.flag = CXGB4_ETH_DUMP_NONE;
 	adapter->eth_dump.version = adapter->params.fw_vers;
 	adapter->eth_dump.len = 0;
+}
+
+static int cxgb4_cudbg_vmcoredd_collect(struct vmcoredd_data *data, void *buf)
+{
+	struct adapter *adap = container_of(data, struct adapter, vmcoredd);
+	u32 len = data->size;
+
+	return cxgb4_cudbg_collect(adap, buf, &len, CXGB4_ETH_DUMP_ALL);
+}
+
+int cxgb4_cudbg_vmcore_add_dump(struct adapter *adap)
+{
+	struct vmcoredd_data *data = &adap->vmcoredd;
+	u32 len;
+
+	len = sizeof(struct cudbg_hdr) +
+	      sizeof(struct cudbg_entity_hdr) * CUDBG_MAX_ENTITY;
+	len += CUDBG_DUMP_BUFF_SIZE;
+
+	data->size = len;
+	snprintf(data->dump_name, sizeof(data->dump_name), "%s_%s",
+		 cxgb4_driver_name, adap->name);
+	data->vmcoredd_callback = cxgb4_cudbg_vmcoredd_collect;
+
+	return vmcore_add_device_dump(data);
 }

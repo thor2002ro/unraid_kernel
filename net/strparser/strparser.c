@@ -35,7 +35,6 @@ struct _strp_msg {
 	 */
 	struct strp_msg strp;
 	int accum_len;
-	int early_eaten;
 };
 
 static inline struct _strp_msg *_strp_msg(struct sk_buff *skb)
@@ -60,14 +59,14 @@ static void strp_abort_strp(struct strparser *strp, int err)
 		struct sock *sk = strp->sk;
 
 		/* Report an error on the lower socket */
-		sk->sk_err = err;
+		sk->sk_err = -err;
 		sk->sk_error_report(sk);
 	}
 }
 
 static void strp_start_timer(struct strparser *strp, long timeo)
 {
-	if (timeo)
+	if (timeo && timeo != LONG_MAX)
 		mod_delayed_work(strp_wq, &strp->msg_timer_work, timeo);
 }
 
@@ -115,20 +114,6 @@ static int __strp_recv(read_descriptor_t *desc, struct sk_buff *orig_skb,
 	head = strp->skb_head;
 	if (head) {
 		/* Message already in progress */
-
-		stm = _strp_msg(head);
-		if (unlikely(stm->early_eaten)) {
-			/* Already some number of bytes on the receive sock
-			 * data saved in skb_head, just indicate they
-			 * are consumed.
-			 */
-			eaten = orig_len <= stm->early_eaten ?
-				orig_len : stm->early_eaten;
-			stm->early_eaten -= eaten;
-
-			return eaten;
-		}
-
 		if (unlikely(orig_offset)) {
 			/* Getting data with a non-zero offset when a message is
 			 * in progress is not expected. If it does happen, we
@@ -296,10 +281,10 @@ static int __strp_recv(read_descriptor_t *desc, struct sk_buff *orig_skb,
 					strp_start_timer(strp, timeo);
 				}
 
+				stm->accum_len += cand_len;
+				eaten += cand_len;
 				strp->need_bytes = stm->strp.full_len -
 						       stm->accum_len;
-				stm->accum_len += cand_len;
-				stm->early_eaten = cand_len;
 				STRP_STATS_ADD(strp->stats.bytes, cand_len);
 				desc->count = 0; /* Stop reading socket */
 				break;
@@ -321,6 +306,7 @@ static int __strp_recv(read_descriptor_t *desc, struct sk_buff *orig_skb,
 		/* Hurray, we have a new message! */
 		cancel_delayed_work(&strp->msg_timer_work);
 		strp->skb_head = NULL;
+		strp->need_bytes = 0;
 		STRP_STATS_INCR(strp->stats.msgs);
 
 		/* Give skb to upper layer */
@@ -391,7 +377,7 @@ static int strp_read_sock(struct strparser *strp)
 /* Lower sock lock held */
 void strp_data_ready(struct strparser *strp)
 {
-	if (unlikely(strp->stopped))
+	if (unlikely(strp->stopped) || strp->paused)
 		return;
 
 	/* This check is needed to synchronize with do_strp_work.
@@ -406,13 +392,8 @@ void strp_data_ready(struct strparser *strp)
 		return;
 	}
 
-	if (strp->paused)
-		return;
-
 	if (strp->need_bytes) {
-		if (strp_peek_len(strp) >= strp->need_bytes)
-			strp->need_bytes = 0;
-		else
+		if (strp_peek_len(strp) < strp->need_bytes)
 			return;
 	}
 
@@ -458,7 +439,7 @@ static void strp_msg_timeout(struct work_struct *w)
 	/* Message assembly timed out */
 	STRP_STATS_INCR(strp->stats.msg_timeouts);
 	strp->cb.lock(strp);
-	strp->cb.abort_parser(strp, ETIMEDOUT);
+	strp->cb.abort_parser(strp, -ETIMEDOUT);
 	strp->cb.unlock(strp);
 }
 
@@ -512,6 +493,19 @@ int strp_init(struct strparser *strp, struct sock *sk,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(strp_init);
+
+/* Sock process lock held (lock_sock) */
+void __strp_unpause(struct strparser *strp)
+{
+	strp->paused = 0;
+
+	if (strp->need_bytes) {
+		if (strp_peek_len(strp) < strp->need_bytes)
+			return;
+	}
+	strp_read_sock(strp);
+}
+EXPORT_SYMBOL_GPL(__strp_unpause);
 
 void strp_unpause(struct strparser *strp)
 {

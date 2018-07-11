@@ -18,8 +18,10 @@
 #include <linux/ethtool.h>
 #include <linux/io.h>
 #include <net/dsa.h>
+#include "stmmac.h"
 #include "stmmac_pcs.h"
 #include "dwmac4.h"
+#include "dwmac5.h"
 
 static void dwmac4_core_init(struct mac_device_info *hw,
 			     struct net_device *dev)
@@ -29,13 +31,6 @@ static void dwmac4_core_init(struct mac_device_info *hw,
 	int mtu = dev->mtu;
 
 	value |= GMAC_CORE_INIT;
-
-	/* Clear ACS bit because Ethernet switch tagging formats such as
-	 * Broadcom tags can look like invalid LLC/SNAP packets and cause the
-	 * hardware to truncate packets on reception.
-	 */
-	if (netdev_uses_dsa(dev))
-		value &= ~GMAC_CONFIG_ACS;
 
 	if (mtu > 1500)
 		value |= GMAC_CONFIG_2K;
@@ -120,7 +115,7 @@ static void dwmac4_tx_queue_priority(struct mac_device_info *hw,
 	writel(value, ioaddr + base_register);
 }
 
-static void dwmac4_tx_queue_routing(struct mac_device_info *hw,
+static void dwmac4_rx_queue_routing(struct mac_device_info *hw,
 				    u8 packet, u32 queue)
 {
 	void __iomem *ioaddr = hw->pcsr;
@@ -706,14 +701,14 @@ static void dwmac4_debug(void __iomem *ioaddr, struct stmmac_extra_stats *x,
 		x->mac_gmii_rx_proto_engine++;
 }
 
-static const struct stmmac_ops dwmac4_ops = {
+const struct stmmac_ops dwmac4_ops = {
 	.core_init = dwmac4_core_init,
 	.set_mac = stmmac_set_mac,
 	.rx_ipc = dwmac4_rx_ipc_enable,
 	.rx_queue_enable = dwmac4_rx_queue_enable,
 	.rx_queue_prio = dwmac4_rx_queue_priority,
 	.tx_queue_prio = dwmac4_tx_queue_priority,
-	.rx_queue_routing = dwmac4_tx_queue_routing,
+	.rx_queue_routing = dwmac4_rx_queue_routing,
 	.prog_mtl_rx_algorithms = dwmac4_prog_mtl_rx_algorithms,
 	.prog_mtl_tx_algorithms = dwmac4_prog_mtl_tx_algorithms,
 	.set_mtl_tx_queue_weight = dwmac4_set_mtl_tx_queue_weight,
@@ -737,14 +732,14 @@ static const struct stmmac_ops dwmac4_ops = {
 	.set_filter = dwmac4_set_filter,
 };
 
-static const struct stmmac_ops dwmac410_ops = {
+const struct stmmac_ops dwmac410_ops = {
 	.core_init = dwmac4_core_init,
 	.set_mac = stmmac_dwmac4_set_mac,
 	.rx_ipc = dwmac4_rx_ipc_enable,
 	.rx_queue_enable = dwmac4_rx_queue_enable,
 	.rx_queue_prio = dwmac4_rx_queue_priority,
 	.tx_queue_prio = dwmac4_tx_queue_priority,
-	.rx_queue_routing = dwmac4_tx_queue_routing,
+	.rx_queue_routing = dwmac4_rx_queue_routing,
 	.prog_mtl_rx_algorithms = dwmac4_prog_mtl_rx_algorithms,
 	.prog_mtl_tx_algorithms = dwmac4_prog_mtl_tx_algorithms,
 	.set_mtl_tx_queue_weight = dwmac4_set_mtl_tx_queue_weight,
@@ -768,19 +763,52 @@ static const struct stmmac_ops dwmac410_ops = {
 	.set_filter = dwmac4_set_filter,
 };
 
-struct mac_device_info *dwmac4_setup(void __iomem *ioaddr, int mcbins,
-				     int perfect_uc_entries, int *synopsys_id)
+const struct stmmac_ops dwmac510_ops = {
+	.core_init = dwmac4_core_init,
+	.set_mac = stmmac_dwmac4_set_mac,
+	.rx_ipc = dwmac4_rx_ipc_enable,
+	.rx_queue_enable = dwmac4_rx_queue_enable,
+	.rx_queue_prio = dwmac4_rx_queue_priority,
+	.tx_queue_prio = dwmac4_tx_queue_priority,
+	.rx_queue_routing = dwmac4_rx_queue_routing,
+	.prog_mtl_rx_algorithms = dwmac4_prog_mtl_rx_algorithms,
+	.prog_mtl_tx_algorithms = dwmac4_prog_mtl_tx_algorithms,
+	.set_mtl_tx_queue_weight = dwmac4_set_mtl_tx_queue_weight,
+	.map_mtl_to_dma = dwmac4_map_mtl_dma,
+	.config_cbs = dwmac4_config_cbs,
+	.dump_regs = dwmac4_dump_regs,
+	.host_irq_status = dwmac4_irq_status,
+	.host_mtl_irq_status = dwmac4_irq_mtl_status,
+	.flow_ctrl = dwmac4_flow_ctrl,
+	.pmt = dwmac4_pmt,
+	.set_umac_addr = dwmac4_set_umac_addr,
+	.get_umac_addr = dwmac4_get_umac_addr,
+	.set_eee_mode = dwmac4_set_eee_mode,
+	.reset_eee_mode = dwmac4_reset_eee_mode,
+	.set_eee_timer = dwmac4_set_eee_timer,
+	.set_eee_pls = dwmac4_set_eee_pls,
+	.pcs_ctrl_ane = dwmac4_ctrl_ane,
+	.pcs_rane = dwmac4_rane,
+	.pcs_get_adv_lp = dwmac4_get_adv_lp,
+	.debug = dwmac4_debug,
+	.set_filter = dwmac4_set_filter,
+	.safety_feat_config = dwmac5_safety_feat_config,
+	.safety_feat_irq_status = dwmac5_safety_feat_irq_status,
+	.safety_feat_dump = dwmac5_safety_feat_dump,
+	.rxp_config = dwmac5_rxp_config,
+	.flex_pps_config = dwmac5_flex_pps_config,
+};
+
+int dwmac4_setup(struct stmmac_priv *priv)
 {
-	struct mac_device_info *mac;
-	u32 hwid = readl(ioaddr + GMAC_VERSION);
+	struct mac_device_info *mac = priv->hw;
 
-	mac = kzalloc(sizeof(const struct mac_device_info), GFP_KERNEL);
-	if (!mac)
-		return NULL;
+	dev_info(priv->device, "\tDWMAC4/5\n");
 
-	mac->pcsr = ioaddr;
-	mac->multicast_filter_bins = mcbins;
-	mac->unicast_filter_entries = perfect_uc_entries;
+	priv->dev->priv_flags |= IFF_UNICAST_FLT;
+	mac->pcsr = priv->ioaddr;
+	mac->multicast_filter_bins = priv->plat->multicast_filter_bins;
+	mac->unicast_filter_entries = priv->plat->unicast_filter_entries;
 	mac->mcast_bits_log2 = 0;
 
 	if (mac->multicast_filter_bins)
@@ -800,18 +828,5 @@ struct mac_device_info *dwmac4_setup(void __iomem *ioaddr, int mcbins,
 	mac->mii.clk_csr_shift = 8;
 	mac->mii.clk_csr_mask = GENMASK(11, 8);
 
-	/* Get and dump the chip ID */
-	*synopsys_id = stmmac_get_synopsys_id(hwid);
-
-	if (*synopsys_id > DWMAC_CORE_4_00)
-		mac->dma = &dwmac410_dma_ops;
-	else
-		mac->dma = &dwmac4_dma_ops;
-
-	if (*synopsys_id >= DWMAC_CORE_4_00)
-		mac->mac = &dwmac410_ops;
-	else
-		mac->mac = &dwmac4_ops;
-
-	return mac;
+	return 0;
 }

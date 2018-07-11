@@ -203,6 +203,8 @@ free:
 static void tegra_bo_free(struct drm_device *drm, struct tegra_bo *bo)
 {
 	if (bo->pages) {
+		dma_unmap_sg(drm->dev, bo->sgt->sgl, bo->sgt->nents,
+			     DMA_BIDIRECTIONAL);
 		drm_gem_put_pages(&bo->gem, bo->pages, true, true);
 		sg_free_table(bo->sgt);
 		kfree(bo->sgt);
@@ -213,8 +215,7 @@ static void tegra_bo_free(struct drm_device *drm, struct tegra_bo *bo)
 
 static int tegra_bo_get_pages(struct drm_device *drm, struct tegra_bo *bo)
 {
-	struct scatterlist *s;
-	unsigned int i;
+	int err;
 
 	bo->pages = drm_gem_get_pages(&bo->gem);
 	if (IS_ERR(bo->pages))
@@ -223,27 +224,26 @@ static int tegra_bo_get_pages(struct drm_device *drm, struct tegra_bo *bo)
 	bo->num_pages = bo->gem.size >> PAGE_SHIFT;
 
 	bo->sgt = drm_prime_pages_to_sg(bo->pages, bo->num_pages);
-	if (IS_ERR(bo->sgt))
+	if (IS_ERR(bo->sgt)) {
+		err = PTR_ERR(bo->sgt);
 		goto put_pages;
+	}
 
-	/*
-	 * Fake up the SG table so that dma_sync_sg_for_device() can be used
-	 * to flush the pages associated with it.
-	 *
-	 * TODO: Replace this by drm_clflash_sg() once it can be implemented
-	 * without relying on symbols that are not exported.
-	 */
-	for_each_sg(bo->sgt->sgl, s, bo->sgt->nents, i)
-		sg_dma_address(s) = sg_phys(s);
-
-	dma_sync_sg_for_device(drm->dev, bo->sgt->sgl, bo->sgt->nents,
-			       DMA_TO_DEVICE);
+	err = dma_map_sg(drm->dev, bo->sgt->sgl, bo->sgt->nents,
+			 DMA_BIDIRECTIONAL);
+	if (err == 0) {
+		err = -EFAULT;
+		goto free_sgt;
+	}
 
 	return 0;
 
+free_sgt:
+	sg_free_table(bo->sgt);
+	kfree(bo->sgt);
 put_pages:
 	drm_gem_put_pages(&bo->gem, bo->pages, false, false);
-	return PTR_ERR(bo->sgt);
+	return err;
 }
 
 static int tegra_bo_alloc(struct drm_device *drm, struct tegra_bo *bo)
@@ -422,14 +422,13 @@ int tegra_bo_dumb_create(struct drm_file *file, struct drm_device *drm,
 	return 0;
 }
 
-static int tegra_bo_fault(struct vm_fault *vmf)
+static vm_fault_t tegra_bo_fault(struct vm_fault *vmf)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	struct drm_gem_object *gem = vma->vm_private_data;
 	struct tegra_bo *bo = to_tegra_bo(gem);
 	struct page *page;
 	pgoff_t offset;
-	int err;
 
 	if (!bo->pages)
 		return VM_FAULT_SIGBUS;
@@ -437,20 +436,7 @@ static int tegra_bo_fault(struct vm_fault *vmf)
 	offset = (vmf->address - vma->vm_start) >> PAGE_SHIFT;
 	page = bo->pages[offset];
 
-	err = vm_insert_page(vma, vmf->address, page);
-	switch (err) {
-	case -EAGAIN:
-	case 0:
-	case -ERESTARTSYS:
-	case -EINTR:
-	case -EBUSY:
-		return VM_FAULT_NOPAGE;
-
-	case -ENOMEM:
-		return VM_FAULT_OOM;
-	}
-
-	return VM_FAULT_SIGBUS;
+	return vmf_insert_page(vma, vmf->address, page);
 }
 
 const struct vm_operations_struct tegra_bo_vm_ops = {
@@ -459,8 +445,7 @@ const struct vm_operations_struct tegra_bo_vm_ops = {
 	.close = drm_gem_vm_close,
 };
 
-static int tegra_gem_mmap(struct drm_gem_object *gem,
-			  struct vm_area_struct *vma)
+int __tegra_gem_mmap(struct drm_gem_object *gem, struct vm_area_struct *vma)
 {
 	struct tegra_bo *bo = to_tegra_bo(gem);
 
@@ -507,7 +492,7 @@ int tegra_drm_mmap(struct file *file, struct vm_area_struct *vma)
 
 	gem = vma->vm_private_data;
 
-	return tegra_gem_mmap(gem, vma);
+	return __tegra_gem_mmap(gem, vma);
 }
 
 static struct sg_table *
@@ -569,6 +554,34 @@ static void tegra_gem_prime_release(struct dma_buf *buf)
 	drm_gem_dmabuf_release(buf);
 }
 
+static int tegra_gem_prime_begin_cpu_access(struct dma_buf *buf,
+					    enum dma_data_direction direction)
+{
+	struct drm_gem_object *gem = buf->priv;
+	struct tegra_bo *bo = to_tegra_bo(gem);
+	struct drm_device *drm = gem->dev;
+
+	if (bo->pages)
+		dma_sync_sg_for_cpu(drm->dev, bo->sgt->sgl, bo->sgt->nents,
+				    DMA_FROM_DEVICE);
+
+	return 0;
+}
+
+static int tegra_gem_prime_end_cpu_access(struct dma_buf *buf,
+					  enum dma_data_direction direction)
+{
+	struct drm_gem_object *gem = buf->priv;
+	struct tegra_bo *bo = to_tegra_bo(gem);
+	struct drm_device *drm = gem->dev;
+
+	if (bo->pages)
+		dma_sync_sg_for_device(drm->dev, bo->sgt->sgl, bo->sgt->nents,
+				       DMA_TO_DEVICE);
+
+	return 0;
+}
+
 static void *tegra_gem_prime_kmap_atomic(struct dma_buf *buf,
 					 unsigned long page)
 {
@@ -600,7 +613,7 @@ static int tegra_gem_prime_mmap(struct dma_buf *buf, struct vm_area_struct *vma)
 	if (err < 0)
 		return err;
 
-	return tegra_gem_mmap(gem, vma);
+	return __tegra_gem_mmap(gem, vma);
 }
 
 static void *tegra_gem_prime_vmap(struct dma_buf *buf)
@@ -619,6 +632,8 @@ static const struct dma_buf_ops tegra_gem_prime_dmabuf_ops = {
 	.map_dma_buf = tegra_gem_prime_map_dma_buf,
 	.unmap_dma_buf = tegra_gem_prime_unmap_dma_buf,
 	.release = tegra_gem_prime_release,
+	.begin_cpu_access = tegra_gem_prime_begin_cpu_access,
+	.end_cpu_access = tegra_gem_prime_end_cpu_access,
 	.map_atomic = tegra_gem_prime_kmap_atomic,
 	.unmap_atomic = tegra_gem_prime_kunmap_atomic,
 	.map = tegra_gem_prime_kmap,
@@ -634,6 +649,8 @@ struct dma_buf *tegra_gem_prime_export(struct drm_device *drm,
 {
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
 
+	exp_info.exp_name = KBUILD_MODNAME;
+	exp_info.owner = drm->driver->fops->owner;
 	exp_info.ops = &tegra_gem_prime_dmabuf_ops;
 	exp_info.size = gem->size;
 	exp_info.flags = flags;

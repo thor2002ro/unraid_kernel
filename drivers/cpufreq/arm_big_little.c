@@ -280,7 +280,7 @@ static int merge_cluster_tables(void)
 	for (i = 0; i < MAX_CLUSTERS; i++)
 		count += get_table_count(freq_table[i]);
 
-	table = kzalloc(sizeof(*table) * count, GFP_KERNEL);
+	table = kcalloc(count, sizeof(*table), GFP_KERNEL);
 	if (!table)
 		return -ENOMEM;
 
@@ -483,14 +483,7 @@ static int bL_cpufreq_init(struct cpufreq_policy *policy)
 	if (ret)
 		return ret;
 
-	ret = cpufreq_table_validate_and_show(policy, freq_table[cur_cluster]);
-	if (ret) {
-		dev_err(cpu_dev, "CPU %d, cluster: %d invalid freq table\n",
-			policy->cpu, cur_cluster);
-		put_cluster_clk_and_freq_table(cpu_dev, policy->cpus);
-		return ret;
-	}
-
+	policy->freq_table = freq_table[cur_cluster];
 	policy->cpuinfo.transition_latency =
 				arm_bL_ops->get_transition_latency(cpu_dev);
 

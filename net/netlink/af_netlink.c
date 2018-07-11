@@ -1085,6 +1085,9 @@ static int netlink_connect(struct socket *sock, struct sockaddr *addr,
 	if (addr->sa_family != AF_NETLINK)
 		return -EINVAL;
 
+	if (alen < sizeof(struct sockaddr_nl))
+		return -EINVAL;
+
 	if ((nladdr->nl_groups || nladdr->nl_pid) &&
 	    !netlink_allowed(sock, NL_CFG_F_NONROOT_SEND))
 		return -EPERM;
@@ -1105,7 +1108,7 @@ static int netlink_connect(struct socket *sock, struct sockaddr *addr,
 }
 
 static int netlink_getname(struct socket *sock, struct sockaddr *addr,
-			   int *addr_len, int peer)
+			   int peer)
 {
 	struct sock *sk = sock->sk;
 	struct netlink_sock *nlk = nlk_sk(sk);
@@ -1113,7 +1116,6 @@ static int netlink_getname(struct socket *sock, struct sockaddr *addr,
 
 	nladdr->nl_family = AF_NETLINK;
 	nladdr->nl_pad = 0;
-	*addr_len = sizeof(*nladdr);
 
 	if (peer) {
 		nladdr->nl_pid = nlk->dst_portid;
@@ -1124,7 +1126,7 @@ static int netlink_getname(struct socket *sock, struct sockaddr *addr,
 		nladdr->nl_groups = nlk->groups ? nlk->groups[0] : 0;
 		netlink_unlock_table();
 	}
-	return 0;
+	return sizeof(*nladdr);
 }
 
 static int netlink_ioctl(struct socket *sock, unsigned int cmd,
@@ -1842,6 +1844,8 @@ static int netlink_sendmsg(struct socket *sock, struct msghdr *msg, size_t len)
 
 	if (msg->msg_namelen) {
 		err = -EINVAL;
+		if (msg->msg_namelen < sizeof(struct sockaddr_nl))
+			goto out;
 		if (addr->nl_family != AF_NETLINK)
 			goto out;
 		dst_portid = addr->nl_pid;
@@ -2308,7 +2312,7 @@ int __netlink_dump_start(struct sock *ssk, struct sk_buff *skb,
 	if (cb->start) {
 		ret = cb->start(cb);
 		if (ret)
-			goto error_unlock;
+			goto error_put;
 	}
 
 	nlk->cb_running = true;
@@ -2328,6 +2332,8 @@ int __netlink_dump_start(struct sock *ssk, struct sk_buff *skb,
 	 */
 	return -EINTR;
 
+error_put:
+	module_put(control->module);
 error_unlock:
 	sock_put(sk);
 	mutex_unlock(nlk->cb_mutex);
@@ -2600,13 +2606,13 @@ static int netlink_seq_show(struct seq_file *seq, void *v)
 {
 	if (v == SEQ_START_TOKEN) {
 		seq_puts(seq,
-			 "sk       Eth Pid    Groups   "
-			 "Rmem     Wmem     Dump     Locks     Drops     Inode\n");
+			 "sk               Eth Pid        Groups   "
+			 "Rmem     Wmem     Dump  Locks    Drops    Inode\n");
 	} else {
 		struct sock *s = v;
 		struct netlink_sock *nlk = nlk_sk(s);
 
-		seq_printf(seq, "%pK %-3d %-6u %08x %-8d %-8d %d %-8d %-8d %-8lu\n",
+		seq_printf(seq, "%pK %-3d %-10u %08x %-8d %-8d %-5d %-8d %-8d %-8lu\n",
 			   s,
 			   s->sk_protocol,
 			   nlk->portid,
@@ -2629,21 +2635,6 @@ static const struct seq_operations netlink_seq_ops = {
 	.stop   = netlink_seq_stop,
 	.show   = netlink_seq_show,
 };
-
-
-static int netlink_seq_open(struct inode *inode, struct file *file)
-{
-	return seq_open_net(inode, file, &netlink_seq_ops,
-				sizeof(struct nl_seq_iter));
-}
-
-static const struct file_operations netlink_seq_fops = {
-	.open		= netlink_seq_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= seq_release_net,
-};
-
 #endif
 
 int netlink_register_notifier(struct notifier_block *nb)
@@ -2688,7 +2679,8 @@ static const struct net_proto_family netlink_family_ops = {
 static int __net_init netlink_net_init(struct net *net)
 {
 #ifdef CONFIG_PROC_FS
-	if (!proc_create("netlink", 0, net->proc_net, &netlink_seq_fops))
+	if (!proc_create_net("netlink", 0, net->proc_net, &netlink_seq_ops,
+			sizeof(struct nl_seq_iter)))
 		return -ENOMEM;
 #endif
 	return 0;

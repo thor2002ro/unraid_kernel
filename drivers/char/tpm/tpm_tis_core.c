@@ -31,12 +31,6 @@
 #include "tpm.h"
 #include "tpm_tis_core.h"
 
-/* This is a polling delay to check for status and burstcount.
- * As per ddwg input, expectation is that status check and burstcount
- * check should return within few usecs.
- */
-#define TPM_POLL_SLEEP	1  /* msec */
-
 static void tpm_tis_clkrun_enable(struct tpm_chip *chip, bool value);
 
 static bool wait_for_tpm_stat_cond(struct tpm_chip *chip, u8 mask,
@@ -90,7 +84,8 @@ again:
 		}
 	} else {
 		do {
-			tpm_msleep(TPM_POLL_SLEEP);
+			usleep_range(TPM_TIMEOUT_USECS_MIN,
+				     TPM_TIMEOUT_USECS_MAX);
 			status = chip->ops->status(chip);
 			if ((status & mask) == mask)
 				return 0;
@@ -143,11 +138,58 @@ static bool check_locality(struct tpm_chip *chip, int l)
 	return false;
 }
 
-static void release_locality(struct tpm_chip *chip, int l)
+static bool locality_inactive(struct tpm_chip *chip, int l)
 {
 	struct tpm_tis_data *priv = dev_get_drvdata(&chip->dev);
+	int rc;
+	u8 access;
+
+	rc = tpm_tis_read8(priv, TPM_ACCESS(l), &access);
+	if (rc < 0)
+		return false;
+
+	if ((access & (TPM_ACCESS_VALID | TPM_ACCESS_ACTIVE_LOCALITY))
+	    == TPM_ACCESS_VALID)
+		return true;
+
+	return false;
+}
+
+static int release_locality(struct tpm_chip *chip, int l)
+{
+	struct tpm_tis_data *priv = dev_get_drvdata(&chip->dev);
+	unsigned long stop, timeout;
+	long rc;
 
 	tpm_tis_write8(priv, TPM_ACCESS(l), TPM_ACCESS_ACTIVE_LOCALITY);
+
+	stop = jiffies + chip->timeout_a;
+
+	if (chip->flags & TPM_CHIP_FLAG_IRQ) {
+again:
+		timeout = stop - jiffies;
+		if ((long)timeout <= 0)
+			return -1;
+
+		rc = wait_event_interruptible_timeout(priv->int_queue,
+						      (locality_inactive(chip, l)),
+						      timeout);
+
+		if (rc > 0)
+			return 0;
+
+		if (rc == -ERESTARTSYS && freezing(current)) {
+			clear_thread_flag(TIF_SIGPENDING);
+			goto again;
+		}
+	} else {
+		do {
+			if (locality_inactive(chip, l))
+				return 0;
+			tpm_msleep(TPM_TIMEOUT);
+		} while (time_before(jiffies, stop));
+	}
+	return -1;
 }
 
 static int request_locality(struct tpm_chip *chip, int l)
@@ -232,7 +274,7 @@ static int get_burstcount(struct tpm_chip *chip)
 		burstcnt = (value >> 8) & 0xFFFF;
 		if (burstcnt)
 			return burstcnt;
-		tpm_msleep(TPM_POLL_SLEEP);
+		usleep_range(TPM_TIMEOUT_USECS_MIN, TPM_TIMEOUT_USECS_MAX);
 	} while (time_before(jiffies, stop));
 	return -EBUSY;
 }
@@ -270,7 +312,8 @@ static int tpm_tis_recv(struct tpm_chip *chip, u8 *buf, size_t count)
 {
 	struct tpm_tis_data *priv = dev_get_drvdata(&chip->dev);
 	int size = 0;
-	int expected, status;
+	int status;
+	u32 expected;
 
 	if (count < TPM_HEADER_SIZE) {
 		size = -EIO;
@@ -285,7 +328,7 @@ static int tpm_tis_recv(struct tpm_chip *chip, u8 *buf, size_t count)
 	}
 
 	expected = be32_to_cpu(*(__be32 *) (buf + 2));
-	if (expected > count) {
+	if (expected > count || expected < TPM_HEADER_SIZE) {
 		size = -EIO;
 		goto out;
 	}

@@ -1351,7 +1351,7 @@ static struct drm_property_blob *setcmap_new_gamma_lut(struct drm_crtc *crtc,
 	if (IS_ERR(gamma_lut))
 		return gamma_lut;
 
-	lut = (struct drm_color_lut *)gamma_lut->data;
+	lut = gamma_lut->data;
 	if (cmap->start || cmap->len != size) {
 		u16 *r = crtc->gamma_store;
 		u16 *g = r + crtc->gamma_size;
@@ -2183,7 +2183,11 @@ static bool drm_target_cloned(struct drm_fb_helper *fb_helper,
 		for (j = 0; j < i; j++) {
 			if (!enabled[j])
 				continue;
-			if (!drm_mode_equal(modes[j], modes[i]))
+			if (!drm_mode_match(modes[j], modes[i],
+					    DRM_MODE_MATCH_TIMINGS |
+					    DRM_MODE_MATCH_CLOCK |
+					    DRM_MODE_MATCH_FLAGS |
+					    DRM_MODE_MATCH_3D_FLAGS))
 				can_clone = false;
 		}
 	}
@@ -2203,7 +2207,11 @@ static bool drm_target_cloned(struct drm_fb_helper *fb_helper,
 
 		fb_helper_conn = fb_helper->connector_info[i];
 		list_for_each_entry(mode, &fb_helper_conn->connector->modes, head) {
-			if (drm_mode_equal(mode, dmt_mode))
+			if (drm_mode_match(mode, dmt_mode,
+					   DRM_MODE_MATCH_TIMINGS |
+					   DRM_MODE_MATCH_CLOCK |
+					   DRM_MODE_MATCH_FLAGS |
+					   DRM_MODE_MATCH_3D_FLAGS))
 				modes[i] = mode;
 		}
 		if (!modes[i])

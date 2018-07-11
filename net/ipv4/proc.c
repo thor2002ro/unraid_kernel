@@ -54,7 +54,6 @@
 static int sockstat_seq_show(struct seq_file *seq, void *v)
 {
 	struct net *net = seq->private;
-	unsigned int frag_mem;
 	int orphans, sockets;
 
 	orphans = percpu_counter_sum_positive(&tcp_orphan_count);
@@ -72,22 +71,11 @@ static int sockstat_seq_show(struct seq_file *seq, void *v)
 		   sock_prot_inuse_get(net, &udplite_prot));
 	seq_printf(seq, "RAW: inuse %d\n",
 		   sock_prot_inuse_get(net, &raw_prot));
-	frag_mem = ip_frag_mem(net);
-	seq_printf(seq,  "FRAG: inuse %u memory %u\n", !!frag_mem, frag_mem);
+	seq_printf(seq,  "FRAG: inuse %u memory %lu\n",
+		   atomic_read(&net->ipv4.frags.rhashtable.nelems),
+		   frag_mem_limit(&net->ipv4.frags));
 	return 0;
 }
-
-static int sockstat_seq_open(struct inode *inode, struct file *file)
-{
-	return single_open_net(inode, file, sockstat_seq_show);
-}
-
-static const struct file_operations sockstat_seq_fops = {
-	.open	 = sockstat_seq_open,
-	.read	 = seq_read,
-	.llseek	 = seq_lseek,
-	.release = single_release_net,
-};
 
 /* snmp items */
 static const struct snmp_mib snmp4_ipstats_list[] = {
@@ -296,6 +284,9 @@ static const struct snmp_mib snmp4_net_list[] = {
 	SNMP_MIB_ITEM("TCPKeepAlive", LINUX_MIB_TCPKEEPALIVE),
 	SNMP_MIB_ITEM("TCPMTUPFail", LINUX_MIB_TCPMTUPFAIL),
 	SNMP_MIB_ITEM("TCPMTUPSuccess", LINUX_MIB_TCPMTUPSUCCESS),
+	SNMP_MIB_ITEM("TCPDelivered", LINUX_MIB_TCPDELIVERED),
+	SNMP_MIB_ITEM("TCPDeliveredCE", LINUX_MIB_TCPDELIVEREDCE),
+	SNMP_MIB_ITEM("TCPAckCompressed", LINUX_MIB_TCPACKCOMPRESSED),
 	SNMP_MIB_SENTINEL
 };
 
@@ -460,20 +451,6 @@ static int snmp_seq_show(struct seq_file *seq, void *v)
 	return 0;
 }
 
-static int snmp_seq_open(struct inode *inode, struct file *file)
-{
-	return single_open_net(inode, file, snmp_seq_show);
-}
-
-static const struct file_operations snmp_seq_fops = {
-	.open	 = snmp_seq_open,
-	.read	 = seq_read,
-	.llseek	 = seq_lseek,
-	.release = single_release_net,
-};
-
-
-
 /*
  *	Output /proc/net/netstat
  */
@@ -507,26 +484,16 @@ static int netstat_seq_show(struct seq_file *seq, void *v)
 	return 0;
 }
 
-static int netstat_seq_open(struct inode *inode, struct file *file)
-{
-	return single_open_net(inode, file, netstat_seq_show);
-}
-
-static const struct file_operations netstat_seq_fops = {
-	.open	 = netstat_seq_open,
-	.read	 = seq_read,
-	.llseek	 = seq_lseek,
-	.release = single_release_net,
-};
-
 static __net_init int ip_proc_init_net(struct net *net)
 {
-	if (!proc_create("sockstat", S_IRUGO, net->proc_net,
-			 &sockstat_seq_fops))
+	if (!proc_create_net_single("sockstat", 0444, net->proc_net,
+			sockstat_seq_show, NULL))
 		goto out_sockstat;
-	if (!proc_create("netstat", S_IRUGO, net->proc_net, &netstat_seq_fops))
+	if (!proc_create_net_single("netstat", 0444, net->proc_net,
+			netstat_seq_show, NULL))
 		goto out_netstat;
-	if (!proc_create("snmp", S_IRUGO, net->proc_net, &snmp_seq_fops))
+	if (!proc_create_net_single("snmp", 0444, net->proc_net, snmp_seq_show,
+			NULL))
 		goto out_snmp;
 
 	return 0;
@@ -555,4 +522,3 @@ int __init ip_misc_proc_init(void)
 {
 	return register_pernet_subsys(&ip_proc_ops);
 }
-

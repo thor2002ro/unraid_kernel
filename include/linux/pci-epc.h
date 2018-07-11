@@ -39,10 +39,9 @@ struct pci_epc_ops {
 	int	(*write_header)(struct pci_epc *epc, u8 func_no,
 				struct pci_epf_header *hdr);
 	int	(*set_bar)(struct pci_epc *epc, u8 func_no,
-			   enum pci_barno bar,
-			   dma_addr_t bar_phys, size_t size, int flags);
+			   struct pci_epf_bar *epf_bar);
 	void	(*clear_bar)(struct pci_epc *epc, u8 func_no,
-			     enum pci_barno bar);
+			     struct pci_epf_bar *epf_bar);
 	int	(*map_addr)(struct pci_epc *epc, u8 func_no,
 			    phys_addr_t addr, u64 pci_addr, size_t size);
 	void	(*unmap_addr)(struct pci_epc *epc, u8 func_no,
@@ -91,7 +90,15 @@ struct pci_epc {
 	struct config_group		*group;
 	/* spinlock to protect against concurrent access of EP controller */
 	spinlock_t			lock;
+	unsigned int			features;
 };
+
+#define EPC_FEATURE_NO_LINKUP_NOTIFIER		BIT(0)
+#define EPC_FEATURE_BAR_MASK			(BIT(1) | BIT(2) | BIT(3))
+#define EPC_FEATURE_SET_BAR(features, bar)	\
+		(features |= (EPC_FEATURE_BAR_MASK & (bar << 1)))
+#define EPC_FEATURE_GET_BAR(features)		\
+		((features & EPC_FEATURE_BAR_MASK) >> 1)
 
 #define to_pci_epc(device) container_of((device), struct pci_epc, dev)
 
@@ -127,9 +134,9 @@ void pci_epc_remove_epf(struct pci_epc *epc, struct pci_epf *epf);
 int pci_epc_write_header(struct pci_epc *epc, u8 func_no,
 			 struct pci_epf_header *hdr);
 int pci_epc_set_bar(struct pci_epc *epc, u8 func_no,
-		    enum pci_barno bar,
-		    dma_addr_t bar_phys, size_t size, int flags);
-void pci_epc_clear_bar(struct pci_epc *epc, u8 func_no, int bar);
+		    struct pci_epf_bar *epf_bar);
+void pci_epc_clear_bar(struct pci_epc *epc, u8 func_no,
+		       struct pci_epf_bar *epf_bar);
 int pci_epc_map_addr(struct pci_epc *epc, u8 func_no,
 		     phys_addr_t phys_addr,
 		     u64 pci_addr, size_t size);

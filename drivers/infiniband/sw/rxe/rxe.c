@@ -78,7 +78,7 @@ void rxe_release(struct kref *kref)
 }
 
 /* initialize rxe device parameters */
-static int rxe_init_device_param(struct rxe_dev *rxe)
+static void rxe_init_device_param(struct rxe_dev *rxe)
 {
 	rxe->max_inline_data			= RXE_MAX_INLINE_DATA;
 
@@ -122,8 +122,6 @@ static int rxe_init_device_param(struct rxe_dev *rxe)
 	rxe->attr.local_ca_ack_delay		= RXE_LOCAL_CA_ACK_DELAY;
 
 	rxe->max_ucontext			= RXE_MAX_UCONTEXT;
-
-	return 0;
 }
 
 /* initialize port attributes */
@@ -293,7 +291,7 @@ err1:
 	return err;
 }
 
-int rxe_set_mtu(struct rxe_dev *rxe, unsigned int ndev_mtu)
+void rxe_set_mtu(struct rxe_dev *rxe, unsigned int ndev_mtu)
 {
 	struct rxe_port *port = &rxe->port;
 	enum ib_mtu mtu;
@@ -305,10 +303,7 @@ int rxe_set_mtu(struct rxe_dev *rxe, unsigned int ndev_mtu)
 
 	port->attr.active_mtu = mtu;
 	port->mtu_cap = ib_mtu_enum_to_int(mtu);
-
-	return 0;
 }
-EXPORT_SYMBOL(rxe_set_mtu);
 
 /* called by ifc layer to create new rxe device.
  * The caller should allocate memory for rxe by calling ib_alloc_device.
@@ -323,9 +318,7 @@ int rxe_add(struct rxe_dev *rxe, unsigned int mtu)
 	if (err)
 		goto err1;
 
-	err = rxe_set_mtu(rxe, mtu);
-	if (err)
-		goto err1;
+	rxe_set_mtu(rxe, mtu);
 
 	err = rxe_register_device(rxe);
 	if (err)
@@ -337,7 +330,6 @@ err1:
 	rxe_dev_put(rxe);
 	return err;
 }
-EXPORT_SYMBOL(rxe_add);
 
 /* called by the ifc layer to remove a device */
 void rxe_remove(struct rxe_dev *rxe)
@@ -346,7 +338,6 @@ void rxe_remove(struct rxe_dev *rxe)
 
 	rxe_dev_put(rxe);
 }
-EXPORT_SYMBOL(rxe_remove);
 
 static int __init rxe_module_init(void)
 {

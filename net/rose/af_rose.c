@@ -938,7 +938,7 @@ out_release:
 }
 
 static int rose_getname(struct socket *sock, struct sockaddr *uaddr,
-	int *uaddr_len, int peer)
+	int peer)
 {
 	struct full_sockaddr_rose *srose = (struct full_sockaddr_rose *)uaddr;
 	struct sock *sk = sock->sk;
@@ -964,8 +964,7 @@ static int rose_getname(struct socket *sock, struct sockaddr *uaddr,
 			srose->srose_digis[n] = rose->source_digis[n];
 	}
 
-	*uaddr_len = sizeof(struct full_sockaddr_rose);
-	return 0;
+	return sizeof(struct full_sockaddr_rose);
 }
 
 int rose_rx_call_request(struct sk_buff *skb, struct net_device *dev, struct rose_neigh *neigh, unsigned int lci)
@@ -1454,18 +1453,6 @@ static const struct seq_operations rose_info_seqops = {
 	.stop = rose_info_stop,
 	.show = rose_info_show,
 };
-
-static int rose_info_open(struct inode *inode, struct file *file)
-{
-	return seq_open(file, &rose_info_seqops);
-}
-
-static const struct file_operations rose_info_fops = {
-	.open = rose_info_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = seq_release,
-};
 #endif	/* CONFIG_PROC_FS */
 
 static const struct net_proto_family rose_family_ops = {
@@ -1527,7 +1514,8 @@ static int __init rose_proto_init(void)
 
 	rose_callsign = null_ax25_address;
 
-	dev_rose = kzalloc(rose_ndevs * sizeof(struct net_device *), GFP_KERNEL);
+	dev_rose = kcalloc(rose_ndevs, sizeof(struct net_device *),
+			   GFP_KERNEL);
 	if (dev_rose == NULL) {
 		printk(KERN_ERR "ROSE: rose_proto_init - unable to allocate device structure\n");
 		rc = -ENOMEM;
@@ -1568,13 +1556,13 @@ static int __init rose_proto_init(void)
 
 	rose_add_loopback_neigh();
 
-	proc_create("rose", S_IRUGO, init_net.proc_net, &rose_info_fops);
-	proc_create("rose_neigh", S_IRUGO, init_net.proc_net,
-		    &rose_neigh_fops);
-	proc_create("rose_nodes", S_IRUGO, init_net.proc_net,
-		    &rose_nodes_fops);
-	proc_create("rose_routes", S_IRUGO, init_net.proc_net,
-		    &rose_routes_fops);
+	proc_create_seq("rose", 0444, init_net.proc_net, &rose_info_seqops);
+	proc_create_seq("rose_neigh", 0444, init_net.proc_net,
+		    &rose_neigh_seqops);
+	proc_create_seq("rose_nodes", 0444, init_net.proc_net,
+		    &rose_node_seqops);
+	proc_create_seq("rose_routes", 0444, init_net.proc_net,
+		    &rose_route_seqops);
 out:
 	return rc;
 fail:

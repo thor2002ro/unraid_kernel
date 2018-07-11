@@ -24,7 +24,6 @@
 #include <linux/regmap.h>
 #include <linux/jiffies.h>
 #include <linux/interrupt.h>
-#include <linux/workqueue.h>
 #include <linux/mfd/axp20x.h>
 #include <linux/platform_device.h>
 #include <linux/power_supply.h>
@@ -88,7 +87,6 @@
 #define FG_LOW_CAP_CRIT_THR			4   /* 4 perc */
 #define FG_LOW_CAP_SHDN_THR			0   /* 0 perc */
 
-#define STATUS_MON_DELAY_JIFFIES    (HZ * 60)   /*60 sec */
 #define NR_RETRY_CNT    3
 #define DEV_NAME	"axp288_fuel_gauge"
 
@@ -128,7 +126,6 @@ struct axp288_fg_info {
 	struct mutex lock;
 	int status;
 	int max_volt;
-	struct delayed_work status_monitor;
 	struct dentry *debug_file;
 };
 
@@ -343,7 +340,7 @@ static inline void fuel_gauge_remove_debugfs(struct axp288_fg_info *info)
 
 static void fuel_gauge_get_status(struct axp288_fg_info *info)
 {
-	int pwr_stat, fg_res;
+	int pwr_stat, fg_res, curr, ret;
 
 	pwr_stat = fuel_gauge_reg_readb(info, AXP20X_PWR_INPUT_STATUS);
 	if (pwr_stat < 0) {
@@ -353,19 +350,42 @@ static void fuel_gauge_get_status(struct axp288_fg_info *info)
 	}
 
 	/* Report full if Vbus is valid and the reported capacity is 100% */
-	if (pwr_stat & PS_STAT_VBUS_VALID) {
-		fg_res = fuel_gauge_reg_readb(info, AXP20X_FG_RES);
-		if (fg_res < 0) {
-			dev_err(&info->pdev->dev,
-				"FG RES read failed: %d\n", fg_res);
-			return;
-		}
-		if (fg_res == (FG_REP_CAP_VALID | 100)) {
-			info->status = POWER_SUPPLY_STATUS_FULL;
-			return;
-		}
+	if (!(pwr_stat & PS_STAT_VBUS_VALID))
+		goto not_full;
+
+	fg_res = fuel_gauge_reg_readb(info, AXP20X_FG_RES);
+	if (fg_res < 0) {
+		dev_err(&info->pdev->dev, "FG RES read failed: %d\n", fg_res);
+		return;
+	}
+	if (!(fg_res & FG_REP_CAP_VALID))
+		goto not_full;
+
+	fg_res &= ~FG_REP_CAP_VALID;
+	if (fg_res == 100) {
+		info->status = POWER_SUPPLY_STATUS_FULL;
+		return;
 	}
 
+	/*
+	 * Sometimes the charger turns itself off before fg-res reaches 100%.
+	 * When this happens the AXP288 reports a not-charging status and
+	 * 0 mA discharge current.
+	 */
+	if (fg_res < 90 || (pwr_stat & PS_STAT_BAT_CHRG_DIR))
+		goto not_full;
+
+	ret = iio_read_channel_raw(info->iio_channel[BAT_D_CURR], &curr);
+	if (ret < 0) {
+		dev_err(&info->pdev->dev, "FG get current failed: %d\n", ret);
+		return;
+	}
+	if (curr == 0) {
+		info->status = POWER_SUPPLY_STATUS_FULL;
+		return;
+	}
+
+not_full:
 	if (pwr_stat & PS_STAT_BAT_CHRG_DIR)
 		info->status = POWER_SUPPLY_STATUS_CHARGING;
 	else
@@ -569,16 +589,6 @@ static int fuel_gauge_property_is_writeable(struct power_supply *psy,
 	return ret;
 }
 
-static void fuel_gauge_status_monitor(struct work_struct *work)
-{
-	struct axp288_fg_info *info = container_of(work,
-		struct axp288_fg_info, status_monitor.work);
-
-	fuel_gauge_get_status(info);
-	power_supply_changed(info->bat);
-	schedule_delayed_work(&info->status_monitor, STATUS_MON_DELAY_JIFFIES);
-}
-
 static irqreturn_t fuel_gauge_thread_handler(int irq, void *dev)
 {
 	struct axp288_fg_info *info = dev;
@@ -708,6 +718,12 @@ static const struct dmi_system_id axp288_fuel_gauge_blacklist[] = {
 			DMI_MATCH(DMI_BOARD_VERSION, "V1.1"),
 		},
 	},
+	{
+		/* ECS EF20EA */
+		.matches = {
+			DMI_MATCH(DMI_PRODUCT_NAME, "EF20EA"),
+		},
+	},
 	{}
 };
 
@@ -725,8 +741,19 @@ static int axp288_fuel_gauge_probe(struct platform_device *pdev)
 		[BAT_D_CURR] = "axp288-chrg-d-curr",
 		[BAT_VOLT] = "axp288-batt-volt",
 	};
+	unsigned int val;
 
 	if (dmi_check_system(axp288_fuel_gauge_blacklist))
+		return -ENODEV;
+
+	/*
+	 * On some devices the fuelgauge and charger parts of the axp288 are
+	 * not used, check that the fuelgauge is enabled (CC_CTRL != 0).
+	 */
+	ret = regmap_read(axp20x->regmap, AXP20X_CC_CTRL, &val);
+	if (ret < 0)
+		return ret;
+	if (val == 0)
 		return -ENODEV;
 
 	info = devm_kzalloc(&pdev->dev, sizeof(*info), GFP_KERNEL);
@@ -741,7 +768,6 @@ static int axp288_fuel_gauge_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, info);
 
 	mutex_init(&info->lock);
-	INIT_DELAYED_WORK(&info->status_monitor, fuel_gauge_status_monitor);
 
 	for (i = 0; i < IIO_CHANNEL_NUM; i++) {
 		/*
@@ -801,7 +827,6 @@ static int axp288_fuel_gauge_probe(struct platform_device *pdev)
 
 	fuel_gauge_create_debugfs(info);
 	fuel_gauge_init_irq(info);
-	schedule_delayed_work(&info->status_monitor, STATUS_MON_DELAY_JIFFIES);
 
 	return 0;
 
@@ -824,7 +849,6 @@ static int axp288_fuel_gauge_remove(struct platform_device *pdev)
 	struct axp288_fg_info *info = platform_get_drvdata(pdev);
 	int i;
 
-	cancel_delayed_work_sync(&info->status_monitor);
 	power_supply_unregister(info->bat);
 	fuel_gauge_remove_debugfs(info);
 

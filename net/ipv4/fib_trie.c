@@ -50,6 +50,7 @@
 
 #define VERSION "0.409"
 
+#include <linux/cache.h>
 #include <linux/uaccess.h>
 #include <linux/bitops.h>
 #include <linux/types.h>
@@ -191,8 +192,8 @@ static size_t tnode_free_size;
  */
 static const int sync_pages = 128;
 
-static struct kmem_cache *fn_alias_kmem __read_mostly;
-static struct kmem_cache *trie_leaf_kmem __read_mostly;
+static struct kmem_cache *fn_alias_kmem __ro_after_init;
+static struct kmem_cache *trie_leaf_kmem __ro_after_init;
 
 static inline struct tnode *tn_info(struct key_vector *kv)
 {
@@ -1064,6 +1065,9 @@ noleaf:
 	return -ENOMEM;
 }
 
+/* fib notifier for ADD is sent before calling fib_insert_alias with
+ * the expectation that the only possible failure ENOMEM
+ */
 static int fib_insert_alias(struct trie *t, struct key_vector *tp,
 			    struct key_vector *l, struct fib_alias *new,
 			    struct fib_alias *fa, t_key key)
@@ -1215,8 +1219,13 @@ int fib_table_insert(struct net *net, struct fib_table *tb,
 			new_fa->tb_id = tb->tb_id;
 			new_fa->fa_default = -1;
 
-			call_fib_entry_notifiers(net, FIB_EVENT_ENTRY_REPLACE,
-						 key, plen, new_fa, extack);
+			err = call_fib_entry_notifiers(net,
+						       FIB_EVENT_ENTRY_REPLACE,
+						       key, plen, new_fa,
+						       extack);
+			if (err)
+				goto out_free_new_fa;
+
 			rtmsg_fib(RTM_NEWROUTE, htonl(key), new_fa, plen,
 				  tb->tb_id, &cfg->fc_nlinfo, nlflags);
 
@@ -1262,21 +1271,32 @@ int fib_table_insert(struct net *net, struct fib_table *tb,
 	new_fa->tb_id = tb->tb_id;
 	new_fa->fa_default = -1;
 
+	err = call_fib_entry_notifiers(net, event, key, plen, new_fa, extack);
+	if (err)
+		goto out_free_new_fa;
+
 	/* Insert new entry to the list. */
 	err = fib_insert_alias(t, tp, l, new_fa, fa, key);
 	if (err)
-		goto out_free_new_fa;
+		goto out_fib_notif;
 
 	if (!plen)
 		tb->tb_num_default++;
 
 	rt_cache_flush(cfg->fc_nlinfo.nl_net);
-	call_fib_entry_notifiers(net, event, key, plen, new_fa, extack);
 	rtmsg_fib(RTM_NEWROUTE, htonl(key), new_fa, plen, new_fa->tb_id,
 		  &cfg->fc_nlinfo, nlflags);
 succeeded:
 	return 0;
 
+out_fib_notif:
+	/* notifier was sent that entry would be added to trie, but
+	 * the add failed and need to recover. Only failure for
+	 * fib_insert_alias is ENOMEM.
+	 */
+	NL_SET_ERR_MSG(extack, "Failed to insert route into trie");
+	call_fib_entry_notifiers(net, FIB_EVENT_ENTRY_DEL, key,
+				 plen, new_fa, NULL);
 out_free_new_fa:
 	kmem_cache_free(fn_alias_kmem, new_fa);
 out:
@@ -1306,14 +1326,14 @@ int fib_table_lookup(struct fib_table *tb, const struct flowi4 *flp,
 	unsigned long index;
 	t_key cindex;
 
-	trace_fib_table_lookup(tb->tb_id, flp);
-
 	pn = t->kv;
 	cindex = 0;
 
 	n = get_child_rcu(pn, cindex);
-	if (!n)
+	if (!n) {
+		trace_fib_table_lookup(tb->tb_id, flp, NULL, -EAGAIN);
 		return -EAGAIN;
+	}
 
 #ifdef CONFIG_IP_FIB_TRIE_STATS
 	this_cpu_inc(stats->gets);
@@ -1396,8 +1416,11 @@ backtrace:
 				 * nothing for us to do as we do not have any
 				 * further nodes to parse.
 				 */
-				if (IS_TRIE(pn))
+				if (IS_TRIE(pn)) {
+					trace_fib_table_lookup(tb->tb_id, flp,
+							       NULL, -EAGAIN);
 					return -EAGAIN;
+				}
 #ifdef CONFIG_IP_FIB_TRIE_STATS
 				this_cpu_inc(stats->backtrack);
 #endif
@@ -1439,6 +1462,7 @@ found:
 #ifdef CONFIG_IP_FIB_TRIE_STATS
 			this_cpu_inc(stats->semantic_match_passed);
 #endif
+			trace_fib_table_lookup(tb->tb_id, flp, NULL, err);
 			return err;
 		}
 		if (fi->fib_flags & RTNH_F_DEAD)
@@ -1474,7 +1498,7 @@ found:
 #ifdef CONFIG_IP_FIB_TRIE_STATS
 			this_cpu_inc(stats->semantic_match_passed);
 #endif
-			trace_fib_table_lookup_nh(nh);
+			trace_fib_table_lookup(tb->tb_id, flp, nh, err);
 
 			return err;
 		}
@@ -2328,18 +2352,6 @@ static int fib_triestat_seq_show(struct seq_file *seq, void *v)
 	return 0;
 }
 
-static int fib_triestat_seq_open(struct inode *inode, struct file *file)
-{
-	return single_open_net(inode, file, fib_triestat_seq_show);
-}
-
-static const struct file_operations fib_triestat_fops = {
-	.open	= fib_triestat_seq_open,
-	.read	= seq_read,
-	.llseek	= seq_lseek,
-	.release = single_release_net,
-};
-
 static struct key_vector *fib_trie_get_idx(struct seq_file *seq, loff_t pos)
 {
 	struct fib_trie_iter *iter = seq->private;
@@ -2511,19 +2523,6 @@ static const struct seq_operations fib_trie_seq_ops = {
 	.next   = fib_trie_seq_next,
 	.stop   = fib_trie_seq_stop,
 	.show   = fib_trie_seq_show,
-};
-
-static int fib_trie_seq_open(struct inode *inode, struct file *file)
-{
-	return seq_open_net(inode, file, &fib_trie_seq_ops,
-			    sizeof(struct fib_trie_iter));
-}
-
-static const struct file_operations fib_trie_fops = {
-	.open   = fib_trie_seq_open,
-	.read   = seq_read,
-	.llseek = seq_lseek,
-	.release = seq_release_net,
 };
 
 struct fib_route_iter {
@@ -2706,29 +2705,18 @@ static const struct seq_operations fib_route_seq_ops = {
 	.show   = fib_route_seq_show,
 };
 
-static int fib_route_seq_open(struct inode *inode, struct file *file)
-{
-	return seq_open_net(inode, file, &fib_route_seq_ops,
-			    sizeof(struct fib_route_iter));
-}
-
-static const struct file_operations fib_route_fops = {
-	.open   = fib_route_seq_open,
-	.read   = seq_read,
-	.llseek = seq_lseek,
-	.release = seq_release_net,
-};
-
 int __net_init fib_proc_init(struct net *net)
 {
-	if (!proc_create("fib_trie", S_IRUGO, net->proc_net, &fib_trie_fops))
+	if (!proc_create_net("fib_trie", 0444, net->proc_net, &fib_trie_seq_ops,
+			sizeof(struct fib_trie_iter)))
 		goto out1;
 
-	if (!proc_create("fib_triestat", S_IRUGO, net->proc_net,
-			 &fib_triestat_fops))
+	if (!proc_create_net_single("fib_triestat", 0444, net->proc_net,
+			fib_triestat_seq_show, NULL))
 		goto out2;
 
-	if (!proc_create("route", S_IRUGO, net->proc_net, &fib_route_fops))
+	if (!proc_create_net("route", 0444, net->proc_net, &fib_route_seq_ops,
+			sizeof(struct fib_route_iter)))
 		goto out3;
 
 	return 0;

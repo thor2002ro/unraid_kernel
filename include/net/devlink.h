@@ -35,6 +35,14 @@ struct devlink {
 	char priv[0] __aligned(NETDEV_ALIGN);
 };
 
+struct devlink_port_attrs {
+	bool set;
+	enum devlink_port_flavour flavour;
+	u32 port_number; /* same value as "split group" */
+	bool split;
+	u32 split_subport_number;
+};
+
 struct devlink_port {
 	struct list_head list;
 	struct devlink *devlink;
@@ -43,8 +51,7 @@ struct devlink_port {
 	enum devlink_port_type type;
 	enum devlink_port_type desired_type;
 	void *type_dev;
-	bool split;
-	u32 split_group;
+	struct devlink_port_attrs attrs;
 };
 
 struct devlink_sb_pool_info {
@@ -232,18 +239,6 @@ struct devlink_dpipe_headers {
 };
 
 /**
- * struct devlink_resource_ops - resource ops
- * @occ_get: get the occupied size
- * @size_validate: validate the size of the resource before update, reload
- *                 is needed for changes to take place
- */
-struct devlink_resource_ops {
-	u64 (*occ_get)(struct devlink *devlink);
-	int (*size_validate)(struct devlink *devlink, u64 size,
-			     struct netlink_ext_ack *extack);
-};
-
-/**
  * struct devlink_resource_size_params - resource's size parameters
  * @size_min: minimum size which can be set
  * @size_max: maximum size which can be set
@@ -257,6 +252,20 @@ struct devlink_resource_size_params {
 	enum devlink_resource_unit unit;
 };
 
+static inline void
+devlink_resource_size_params_init(struct devlink_resource_size_params *size_params,
+				  u64 size_min, u64 size_max,
+				  u64 size_granularity,
+				  enum devlink_resource_unit unit)
+{
+	size_params->size_min = size_min;
+	size_params->size_max = size_max;
+	size_params->size_granularity = size_granularity;
+	size_params->unit = unit;
+}
+
+typedef u64 devlink_resource_occ_get_t(void *priv);
+
 /**
  * struct devlink_resource - devlink resource
  * @name: name of the resource
@@ -269,7 +278,6 @@ struct devlink_resource_size_params {
  * @size_params: size parameters
  * @list: parent list
  * @resource_list: list of child resources
- * @resource_ops: resource ops
  */
 struct devlink_resource {
 	const char *name;
@@ -278,21 +286,23 @@ struct devlink_resource {
 	u64 size_new;
 	bool size_valid;
 	struct devlink_resource *parent;
-	struct devlink_resource_size_params *size_params;
+	struct devlink_resource_size_params size_params;
 	struct list_head list;
 	struct list_head resource_list;
-	const struct devlink_resource_ops *resource_ops;
+	devlink_resource_occ_get_t *occ_get;
+	void *occ_get_priv;
 };
 
 #define DEVLINK_RESOURCE_ID_PARENT_TOP 0
 
 struct devlink_ops {
-	int (*reload)(struct devlink *devlink);
+	int (*reload)(struct devlink *devlink, struct netlink_ext_ack *extack);
 	int (*port_type_set)(struct devlink_port *devlink_port,
 			     enum devlink_port_type port_type);
 	int (*port_split)(struct devlink *devlink, unsigned int port_index,
-			  unsigned int count);
-	int (*port_unsplit)(struct devlink *devlink, unsigned int port_index);
+			  unsigned int count, struct netlink_ext_ack *extack);
+	int (*port_unsplit)(struct devlink *devlink, unsigned int port_index,
+			    struct netlink_ext_ack *extack);
 	int (*sb_pool_get)(struct devlink *devlink, unsigned int sb_index,
 			   u16 pool_index,
 			   struct devlink_sb_pool_info *pool_info);
@@ -365,8 +375,12 @@ void devlink_port_type_eth_set(struct devlink_port *devlink_port,
 void devlink_port_type_ib_set(struct devlink_port *devlink_port,
 			      struct ib_device *ibdev);
 void devlink_port_type_clear(struct devlink_port *devlink_port);
-void devlink_port_split_set(struct devlink_port *devlink_port,
-			    u32 split_group);
+void devlink_port_attrs_set(struct devlink_port *devlink_port,
+			    enum devlink_port_flavour flavour,
+			    u32 port_number, bool split,
+			    u32 split_subport_number);
+int devlink_port_get_phys_port_name(struct devlink_port *devlink_port,
+				    char *name, size_t len);
 int devlink_sb_register(struct devlink *devlink, unsigned int sb_index,
 			u32 size, u16 ingress_pools_count,
 			u16 egress_pools_count, u16 ingress_tc_count,
@@ -398,12 +412,10 @@ extern struct devlink_dpipe_header devlink_dpipe_header_ipv6;
 
 int devlink_resource_register(struct devlink *devlink,
 			      const char *resource_name,
-			      bool top_hierarchy,
 			      u64 resource_size,
 			      u64 resource_id,
 			      u64 parent_resource_id,
-			      struct devlink_resource_size_params *size_params,
-			      const struct devlink_resource_ops *resource_ops);
+			      const struct devlink_resource_size_params *size_params);
 void devlink_resources_unregister(struct devlink *devlink,
 				  struct devlink_resource *resource);
 int devlink_resource_size_get(struct devlink *devlink,
@@ -412,6 +424,12 @@ int devlink_resource_size_get(struct devlink *devlink,
 int devlink_dpipe_table_resource_set(struct devlink *devlink,
 				     const char *table_name, u64 resource_id,
 				     u64 resource_units);
+void devlink_resource_occ_get_register(struct devlink *devlink,
+				       u64 resource_id,
+				       devlink_resource_occ_get_t *occ_get,
+				       void *occ_get_priv);
+void devlink_resource_occ_get_unregister(struct devlink *devlink,
+					 u64 resource_id);
 
 #else
 
@@ -460,9 +478,18 @@ static inline void devlink_port_type_clear(struct devlink_port *devlink_port)
 {
 }
 
-static inline void devlink_port_split_set(struct devlink_port *devlink_port,
-					  u32 split_group)
+static inline void devlink_port_attrs_set(struct devlink_port *devlink_port,
+					  enum devlink_port_flavour flavour,
+					  u32 port_number, bool split,
+					  u32 split_subport_number)
 {
+}
+
+static inline int
+devlink_port_get_phys_port_name(struct devlink_port *devlink_port,
+				char *name, size_t len)
+{
+	return -EOPNOTSUPP;
 }
 
 static inline int devlink_sb_register(struct devlink *devlink,
@@ -552,12 +579,10 @@ devlink_dpipe_match_put(struct sk_buff *skb,
 static inline int
 devlink_resource_register(struct devlink *devlink,
 			  const char *resource_name,
-			  bool top_hierarchy,
 			  u64 resource_size,
 			  u64 resource_id,
 			  u64 parent_resource_id,
-			  struct devlink_resource_size_params *size_params,
-			  const struct devlink_resource_ops *resource_ops)
+			  const struct devlink_resource_size_params *size_params)
 {
 	return 0;
 }
@@ -581,6 +606,20 @@ devlink_dpipe_table_resource_set(struct devlink *devlink,
 				 u64 resource_units)
 {
 	return -EOPNOTSUPP;
+}
+
+static inline void
+devlink_resource_occ_get_register(struct devlink *devlink,
+				  u64 resource_id,
+				  devlink_resource_occ_get_t *occ_get,
+				  void *occ_get_priv)
+{
+}
+
+static inline void
+devlink_resource_occ_get_unregister(struct devlink *devlink,
+				    u64 resource_id)
+{
 }
 
 #endif

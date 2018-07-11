@@ -347,6 +347,7 @@ config HW_RANDOM_STM32
 	tristate "STMicroelectronics STM32 random number generator"
 	depends on HW_RANDOM && (ARCH_STM32 || COMPILE_TEST)
 	depends on HAS_IOMEM
+	default HW_RANDOM
 	help
 	  This driver provides kernel-side support for the Random Number
 	  Generator hardware found on STM32 microcontrollers.
@@ -452,3 +453,10 @@ config UML_RANDOM
 	  (check your distro, or download from
 	  http://sourceforge.net/projects/gkernel/).  rngd periodically reads
 	  /dev/hwrng and injects the entropy into /dev/random.
+
+config HW_RANDOM_KEYSTONE
+	depends on ARCH_KEYSTONE
+	default HW_RANDOM
+	tristate "TI Keystone NETCP SA Hardware random number generator"
+	help
+	  This option enables Keystone's hardware random generator.

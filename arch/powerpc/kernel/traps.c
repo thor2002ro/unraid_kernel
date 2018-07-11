@@ -208,6 +208,12 @@ static void oops_end(unsigned long flags, struct pt_regs *regs,
 	}
 	raw_local_irq_restore(flags);
 
+	/*
+	 * system_reset_excption handles debugger, crash dump, panic, for 0x100
+	 */
+	if (TRAP(regs) == 0x100)
+		return;
+
 	crash_fadump(regs, "die oops");
 
 	if (kexec_should_crash(current))
@@ -272,8 +278,13 @@ void die(const char *str, struct pt_regs *regs, long err)
 {
 	unsigned long flags;
 
-	if (debugger(regs))
-		return;
+	/*
+	 * system_reset_excption handles debugger, crash dump, panic, for 0x100
+	 */
+	if (TRAP(regs) != 0x100) {
+		if (debugger(regs))
+			return;
+	}
 
 	flags = oops_begin(regs);
 	if (__die(str, regs, err))
@@ -285,7 +296,6 @@ NOKPROBE_SYMBOL(die);
 void user_single_step_siginfo(struct task_struct *tsk,
 				struct pt_regs *regs, siginfo_t *info)
 {
-	memset(info, 0, sizeof(*info));
 	info->si_signo = SIGTRAP;
 	info->si_code = TRAP_TRACE;
 	info->si_addr = (void __user *)regs->nip;
@@ -323,7 +333,7 @@ void _exception_pkey(int signr, struct pt_regs *regs, int code,
 	 */
 	thread_pkey_regs_save(&current->thread);
 
-	memset(&info, 0, sizeof(info));
+	clear_siginfo(&info);
 	info.si_signo = signr;
 	info.si_code = code;
 	info.si_addr = (void __user *) addr;
@@ -460,7 +470,7 @@ static inline int check_io_access(struct pt_regs *regs)
 /* single-step stuff */
 #define single_stepping(regs)	(current->thread.debug.dbcr0 & DBCR0_IC)
 #define clear_single_step(regs)	(current->thread.debug.dbcr0 &= ~DBCR0_IC)
-
+#define clear_br_trace(regs)	do {} while(0)
 #else
 /* On non-4xx, the reason for the machine check or program
    exception is in the MSR. */
@@ -473,6 +483,7 @@ static inline int check_io_access(struct pt_regs *regs)
 
 #define single_stepping(regs)	((regs)->msr & MSR_SE)
 #define clear_single_step(regs)	((regs)->msr &= ~MSR_SE)
+#define clear_br_trace(regs)	((regs)->msr &= ~MSR_BE)
 #endif
 
 #if defined(CONFIG_E500)
@@ -958,7 +969,7 @@ void unknown_exception(struct pt_regs *regs)
 	printk("Bad trap at PC: %lx, SR: %lx, vector=%lx\n",
 	       regs->nip, regs->msr, regs->trap);
 
-	_exception(SIGTRAP, regs, TRAP_FIXME, 0);
+	_exception(SIGTRAP, regs, TRAP_UNK, 0);
 
 	exception_exit(prev_state);
 }
@@ -980,7 +991,7 @@ bail:
 
 void RunModeException(struct pt_regs *regs)
 {
-	_exception(SIGTRAP, regs, TRAP_FIXME, 0);
+	_exception(SIGTRAP, regs, TRAP_UNK, 0);
 }
 
 void single_step_exception(struct pt_regs *regs)
@@ -988,6 +999,7 @@ void single_step_exception(struct pt_regs *regs)
 	enum ctx_state prev_state = exception_enter();
 
 	clear_single_step(regs);
+	clear_br_trace(regs);
 
 	if (kprobe_post_handler(regs))
 		return;
@@ -1019,7 +1031,7 @@ static void emulate_single_step(struct pt_regs *regs)
 
 static inline int __parse_fpscr(unsigned long fpscr)
 {
-	int ret = FPE_FIXME;
+	int ret = FPE_FLTUNK;
 
 	/* Invalid operation */
 	if ((fpscr & FPSCR_VE) && (fpscr & FPSCR_VX))
@@ -1495,18 +1507,6 @@ bail:
 	exception_exit(prev_state);
 }
 
-void slb_miss_bad_addr(struct pt_regs *regs)
-{
-	enum ctx_state prev_state = exception_enter();
-
-	if (user_mode(regs))
-		_exception(SIGSEGV, regs, SEGV_BNDERR, regs->dar);
-	else
-		bad_page_fault(regs, regs->dar, SIGSEGV);
-
-	exception_exit(prev_state);
-}
-
 void StackOverflow(struct pt_regs *regs)
 {
 	printk(KERN_CRIT "Kernel stack overflow in process %p, r1=%lx\n",
@@ -1612,6 +1612,22 @@ void facility_unavailable_exception(struct pt_regs *regs)
 		value = mfspr(SPRN_FSCR);
 
 	status = value >> 56;
+	if ((hv || status >= 2) &&
+	    (status < ARRAY_SIZE(facility_strings)) &&
+	    facility_strings[status])
+		facility = facility_strings[status];
+
+	/* We should not have taken this interrupt in kernel */
+	if (!user_mode(regs)) {
+		pr_emerg("Facility '%s' unavailable (%d) exception in kernel mode at %lx\n",
+			 facility, status, regs->nip);
+		die("Unexpected facility unavailable exception", regs, SIGABRT);
+	}
+
+	/* We restore the interrupt state now */
+	if (!arch_irq_disabled_regs(regs))
+		local_irq_enable();
+
 	if (status == FSCR_DSCR_LG) {
 		/*
 		 * User is accessing the DSCR register using the problem
@@ -1678,25 +1694,11 @@ void facility_unavailable_exception(struct pt_regs *regs)
 		return;
 	}
 
-	if ((hv || status >= 2) &&
-	    (status < ARRAY_SIZE(facility_strings)) &&
-	    facility_strings[status])
-		facility = facility_strings[status];
-
-	/* We restore the interrupt state now */
-	if (!arch_irq_disabled_regs(regs))
-		local_irq_enable();
-
 	pr_err_ratelimited("%sFacility '%s' unavailable (%d), exception at 0x%lx, MSR=%lx\n",
 		hv ? "Hypervisor " : "", facility, status, regs->nip, regs->msr);
 
 out:
-	if (user_mode(regs)) {
-		_exception(SIGILL, regs, ILL_ILLOPC, regs->nip);
-		return;
-	}
-
-	die("Unexpected facility unavailable exception", regs, SIGABRT);
+	_exception(SIGILL, regs, ILL_ILLOPC, regs->nip);
 }
 #endif
 
@@ -1970,7 +1972,7 @@ void SPEFloatingPointException(struct pt_regs *regs)
 	extern int do_spe_mathemu(struct pt_regs *regs);
 	unsigned long spefscr;
 	int fpexc_mode;
-	int code = FPE_FIXME;
+	int code = FPE_FLTUNK;
 	int err;
 
 	flush_spe_to_thread(current);
@@ -2039,7 +2041,7 @@ void SPEFloatingPointRoundException(struct pt_regs *regs)
 		printk(KERN_ERR "unrecognized spe instruction "
 		       "in %s at %lx\n", current->comm, regs->nip);
 	} else {
-		_exception(SIGFPE, regs, FPE_FIXME, regs->nip);
+		_exception(SIGFPE, regs, FPE_FLTUNK, regs->nip);
 		return;
 	}
 }

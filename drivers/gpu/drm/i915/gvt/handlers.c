@@ -188,7 +188,11 @@ void enter_failsafe_mode(struct intel_vgpu *vgpu, int reason)
 static int sanitize_fence_mmio_access(struct intel_vgpu *vgpu,
 		unsigned int fence_num, void *p_data, unsigned int bytes)
 {
-	if (fence_num >= vgpu_fence_sz(vgpu)) {
+	unsigned int max_fence = vgpu_fence_sz(vgpu);
+
+	if (fence_num >= max_fence) {
+		gvt_vgpu_err("access oob fence reg %d/%d\n",
+			     fence_num, max_fence);
 
 		/* When guest access oob fence regs without access
 		 * pv_info first, we treat guest not supporting GVT,
@@ -198,11 +202,6 @@ static int sanitize_fence_mmio_access(struct intel_vgpu *vgpu,
 			enter_failsafe_mode(vgpu,
 					GVT_FAILSAFE_UNSUPPORTED_GUEST);
 
-		if (!vgpu->mmio.disable_warn_untrack) {
-			gvt_vgpu_err("found oob fence register access\n");
-			gvt_vgpu_err("total fence %d, access fence %d\n",
-					vgpu_fence_sz(vgpu), fence_num);
-		}
 		memset(p_data, 0, bytes);
 		return -EINVAL;
 	}
@@ -320,7 +319,7 @@ static int gdrst_mmio_write(struct intel_vgpu *vgpu, unsigned int offset,
 	intel_gvt_reset_vgpu_locked(vgpu, false, engine_mask);
 
 	/* sw will wait for the device to ack the reset request */
-	 vgpu_vreg(vgpu, offset) = 0;
+	vgpu_vreg(vgpu, offset) = 0;
 
 	return 0;
 }
@@ -475,22 +474,28 @@ static int force_nonpriv_write(struct intel_vgpu *vgpu,
 	unsigned int offset, void *p_data, unsigned int bytes)
 {
 	u32 reg_nonpriv = *(u32 *)p_data;
+	int ring_id = intel_gvt_render_mmio_to_ring_id(vgpu->gvt, offset);
+	u32 ring_base;
+	struct drm_i915_private *dev_priv = vgpu->gvt->dev_priv;
 	int ret = -EINVAL;
 
-	if ((bytes != 4) || ((offset & (bytes - 1)) != 0)) {
-		gvt_err("vgpu(%d) Invalid FORCE_NONPRIV offset %x(%dB)\n",
-			vgpu->id, offset, bytes);
+	if ((bytes != 4) || ((offset & (bytes - 1)) != 0) || ring_id < 0) {
+		gvt_err("vgpu(%d) ring %d Invalid FORCE_NONPRIV offset %x(%dB)\n",
+			vgpu->id, ring_id, offset, bytes);
 		return ret;
 	}
 
-	if (in_whitelist(reg_nonpriv)) {
+	ring_base = dev_priv->engine[ring_id]->mmio_base;
+
+	if (in_whitelist(reg_nonpriv) ||
+		reg_nonpriv == i915_mmio_reg_offset(RING_NOPID(ring_base))) {
 		ret = intel_vgpu_default_mmio_write(vgpu, offset, p_data,
 			bytes);
-	} else {
-		gvt_err("vgpu(%d) Invalid FORCE_NONPRIV write %x\n",
-			vgpu->id, reg_nonpriv);
-	}
-	return ret;
+	} else
+		gvt_err("vgpu(%d) Invalid FORCE_NONPRIV write %x at offset %x\n",
+			vgpu->id, reg_nonpriv, offset);
+
+	return 0;
 }
 
 static int ddi_buf_ctl_mmio_write(struct intel_vgpu *vgpu, unsigned int offset,
@@ -898,11 +903,14 @@ static int dp_aux_ch_ctl_mmio_write(struct intel_vgpu *vgpu,
 		}
 
 		/*
-		 * Write request format: (command + address) occupies
-		 * 3 bytes, followed by (len + 1) bytes of data.
+		 * Write request format: Headr (command + address + size) occupies
+		 * 4 bytes, followed by (len + 1) bytes of data. See details at
+		 * intel_dp_aux_transfer().
 		 */
-		if (WARN_ON((len + 4) > AUX_BURST_SIZE))
+		if ((len + 1 + 4) > AUX_BURST_SIZE) {
+			gvt_vgpu_err("dp_aux_header: len %d is too large\n", len);
 			return -EINVAL;
+		}
 
 		/* unpack data from vreg to buf */
 		for (t = 0; t < 4; t++) {
@@ -966,8 +974,10 @@ static int dp_aux_ch_ctl_mmio_write(struct intel_vgpu *vgpu,
 		/*
 		 * Read reply format: ACK (1 byte) plus (len + 1) bytes of data.
 		 */
-		if (WARN_ON((len + 2) > AUX_BURST_SIZE))
+		if ((len + 2) > AUX_BURST_SIZE) {
+			gvt_vgpu_err("dp_aux_header: len %d is too large\n", len);
 			return -EINVAL;
+		}
 
 		/* read from virtual DPCD to vreg */
 		/* first 4 bytes: [ACK][addr][addr+1][addr+2] */
@@ -1139,21 +1149,22 @@ static int pvinfo_mmio_read(struct intel_vgpu *vgpu, unsigned int offset,
 
 static int handle_g2v_notification(struct intel_vgpu *vgpu, int notification)
 {
-	int ret = 0;
+	intel_gvt_gtt_type_t root_entry_type = GTT_TYPE_PPGTT_ROOT_L4_ENTRY;
+	struct intel_vgpu_mm *mm;
+	u64 *pdps;
+
+	pdps = (u64 *)&vgpu_vreg64_t(vgpu, vgtif_reg(pdp[0]));
 
 	switch (notification) {
 	case VGT_G2V_PPGTT_L3_PAGE_TABLE_CREATE:
-		ret = intel_vgpu_g2v_create_ppgtt_mm(vgpu, 3);
-		break;
-	case VGT_G2V_PPGTT_L3_PAGE_TABLE_DESTROY:
-		ret = intel_vgpu_g2v_destroy_ppgtt_mm(vgpu, 3);
-		break;
+		root_entry_type = GTT_TYPE_PPGTT_ROOT_L3_ENTRY;
+		/* fall through */
 	case VGT_G2V_PPGTT_L4_PAGE_TABLE_CREATE:
-		ret = intel_vgpu_g2v_create_ppgtt_mm(vgpu, 4);
-		break;
+		mm = intel_vgpu_get_ppgtt_mm(vgpu, root_entry_type, pdps);
+		return PTR_ERR_OR_ZERO(mm);
+	case VGT_G2V_PPGTT_L3_PAGE_TABLE_DESTROY:
 	case VGT_G2V_PPGTT_L4_PAGE_TABLE_DESTROY:
-		ret = intel_vgpu_g2v_destroy_ppgtt_mm(vgpu, 4);
-		break;
+		return intel_vgpu_put_ppgtt_mm(vgpu, pdps);
 	case VGT_G2V_EXECLIST_CONTEXT_CREATE:
 	case VGT_G2V_EXECLIST_CONTEXT_DESTROY:
 	case 1:	/* Remove this in guest driver. */
@@ -1161,7 +1172,7 @@ static int handle_g2v_notification(struct intel_vgpu *vgpu, int notification)
 	default:
 		gvt_vgpu_err("Invalid PV notification %d\n", notification);
 	}
-	return ret;
+	return 0;
 }
 
 static int send_display_ready_uevent(struct intel_vgpu *vgpu, int ready)
@@ -1389,8 +1400,8 @@ static int hws_pga_write(struct intel_vgpu *vgpu, unsigned int offset,
 	int ring_id = intel_gvt_render_mmio_to_ring_id(vgpu->gvt, offset);
 
 	if (!intel_gvt_ggtt_validate_range(vgpu, value, I915_GTT_PAGE_SIZE)) {
-		gvt_vgpu_err("VM(%d) write invalid HWSP address, reg:0x%x, value:0x%x\n",
-			      vgpu->id, offset, value);
+		gvt_vgpu_err("write invalid HWSP address, reg:0x%x, value:0x%x\n",
+			      offset, value);
 		return -EINVAL;
 	}
 	/*
@@ -1399,8 +1410,8 @@ static int hws_pga_write(struct intel_vgpu *vgpu, unsigned int offset,
 	 * support BDW, SKL or other platforms with same HWSP registers.
 	 */
 	if (unlikely(ring_id < 0 || ring_id >= I915_NUM_ENGINES)) {
-		gvt_vgpu_err("VM(%d) access unknown hardware status page register:0x%x\n",
-			     vgpu->id, offset);
+		gvt_vgpu_err("access unknown hardware status page register:0x%x\n",
+			     offset);
 		return -EINVAL;
 	}
 	vgpu->hws_pga[ring_id] = value;
@@ -1764,6 +1775,10 @@ static int init_generic_mmio_info(struct intel_gvt *gvt)
 	MMIO_D(CURBASE(PIPE_A), D_ALL);
 	MMIO_D(CURBASE(PIPE_B), D_ALL);
 	MMIO_D(CURBASE(PIPE_C), D_ALL);
+
+	MMIO_D(CUR_FBC_CTL(PIPE_A), D_ALL);
+	MMIO_D(CUR_FBC_CTL(PIPE_B), D_ALL);
+	MMIO_D(CUR_FBC_CTL(PIPE_C), D_ALL);
 
 	MMIO_D(_MMIO(0x700ac), D_ALL);
 	MMIO_D(_MMIO(0x710ac), D_ALL);
@@ -2226,6 +2241,7 @@ static int init_generic_mmio_info(struct intel_gvt *gvt)
 
 	MMIO_D(HSW_AUD_CFG(PIPE_A), D_ALL);
 	MMIO_D(HSW_AUD_PIN_ELD_CP_VLD, D_ALL);
+	MMIO_D(HSW_AUD_MISC_CTRL(PIPE_A), D_ALL);
 
 	MMIO_DH(_MMIO(_TRANS_DDI_FUNC_CTL_A), D_ALL, NULL, NULL);
 	MMIO_DH(_MMIO(_TRANS_DDI_FUNC_CTL_B), D_ALL, NULL, NULL);
@@ -2557,6 +2573,7 @@ static int init_broadwell_mmio_info(struct intel_gvt *gvt)
 	MMIO_D(WM_MISC, D_BDW);
 	MMIO_D(_MMIO(BDW_EDP_PSR_BASE), D_BDW);
 
+	MMIO_D(_MMIO(0x6671c), D_BDW_PLUS);
 	MMIO_D(_MMIO(0x66c00), D_BDW_PLUS);
 	MMIO_D(_MMIO(0x66c04), D_BDW_PLUS);
 
@@ -2785,6 +2802,7 @@ static int init_skl_mmio_info(struct intel_gvt *gvt)
 	MMIO_D(_MMIO(0x70380), D_SKL_PLUS);
 	MMIO_D(_MMIO(0x71380), D_SKL_PLUS);
 	MMIO_D(_MMIO(0x72380), D_SKL_PLUS);
+	MMIO_D(_MMIO(0x7239c), D_SKL_PLUS);
 	MMIO_D(_MMIO(0x7039c), D_SKL_PLUS);
 
 	MMIO_D(_MMIO(0x8f074), D_SKL | D_KBL);
@@ -2799,7 +2817,9 @@ static int init_skl_mmio_info(struct intel_gvt *gvt)
 	MMIO_F(_MMIO(0xc800), 0x7f8, F_CMD_ACCESS, 0, 0, D_SKL | D_KBL, NULL, NULL);
 	MMIO_F(_MMIO(0xb020), 0x80, F_CMD_ACCESS, 0, 0, D_SKL | D_KBL, NULL, NULL);
 
+	MMIO_D(RPM_CONFIG0, D_SKL_PLUS);
 	MMIO_D(_MMIO(0xd08), D_SKL_PLUS);
+	MMIO_D(RC6_LOCATION, D_SKL_PLUS);
 	MMIO_DFH(_MMIO(0x20e0), D_SKL_PLUS, F_MODE_MASK, NULL, NULL);
 	MMIO_DFH(_MMIO(0x20ec), D_SKL_PLUS, F_MODE_MASK | F_CMD_ACCESS, NULL, NULL);
 
@@ -3080,9 +3100,7 @@ int intel_vgpu_mmio_reg_rw(struct intel_vgpu *vgpu, unsigned int offset,
 	 */
 	mmio_info = find_mmio_info(gvt, offset);
 	if (!mmio_info) {
-		if (!vgpu->mmio.disable_warn_untrack)
-			gvt_vgpu_err("untracked MMIO %08x len %d\n",
-				     offset, bytes);
+		gvt_dbg_mmio("untracked MMIO %08x len %d\n", offset, bytes);
 		goto default_rw;
 	}
 

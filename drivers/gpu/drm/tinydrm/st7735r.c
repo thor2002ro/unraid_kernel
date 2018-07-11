@@ -5,6 +5,7 @@
  * Copyright 2017 David Lechner <david@lechnology.com>
  */
 
+#include <linux/backlight.h>
 #include <linux/delay.h>
 #include <linux/dma-buf.h>
 #include <linux/gpio/consumer.h>
@@ -36,23 +37,19 @@
 #define ST7735R_MV	BIT(5)
 
 static void jd_t18003_t01_pipe_enable(struct drm_simple_display_pipe *pipe,
-				      struct drm_crtc_state *crtc_state)
+				      struct drm_crtc_state *crtc_state,
+				      struct drm_plane_state *plane_state)
 {
 	struct tinydrm_device *tdev = pipe_to_tinydrm(pipe);
 	struct mipi_dbi *mipi = mipi_dbi_from_tinydrm(tdev);
-	struct device *dev = tdev->drm->dev;
 	int ret;
 	u8 addr_mode;
 
 	DRM_DEBUG_KMS("\n");
 
-	mipi_dbi_hw_reset(mipi);
-
-	ret = mipi_dbi_command(mipi, MIPI_DCS_SOFT_RESET);
-	if (ret) {
-		DRM_DEV_ERROR(dev, "Error sending command %d\n", ret);
+	ret = mipi_dbi_poweron_reset(mipi);
+	if (ret)
 		return;
-	}
 
 	msleep(150);
 
@@ -102,14 +99,14 @@ static void jd_t18003_t01_pipe_enable(struct drm_simple_display_pipe *pipe,
 
 	msleep(20);
 
-	mipi_dbi_pipe_enable(pipe, crtc_state);
+	mipi_dbi_enable_flush(mipi, crtc_state, plane_state);
 }
 
 static const struct drm_simple_display_pipe_funcs jd_t18003_t01_pipe_funcs = {
 	.enable		= jd_t18003_t01_pipe_enable,
 	.disable	= mipi_dbi_pipe_disable,
 	.update		= tinydrm_display_pipe_update,
-	.prepare_fb	= tinydrm_display_pipe_prepare_fb,
+	.prepare_fb	= drm_gem_fb_simple_display_pipe_prepare_fb,
 };
 
 static const struct drm_display_mode jd_t18003_t01_mode = {
@@ -168,7 +165,7 @@ static int st7735r_probe(struct spi_device *spi)
 		return PTR_ERR(dc);
 	}
 
-	mipi->backlight = tinydrm_of_find_backlight(dev);
+	mipi->backlight = devm_of_find_backlight(dev);
 	if (IS_ERR(mipi->backlight))
 		return PTR_ERR(mipi->backlight);
 

@@ -416,20 +416,18 @@ abort:
  * Session (and tunnel control) socket create/destroy.
  *****************************************************************************/
 
+static void pppol2tp_put_sk(struct rcu_head *head)
+{
+	struct pppol2tp_session *ps;
+
+	ps = container_of(head, typeof(*ps), rcu);
+	sock_put(ps->__sk);
+}
+
 /* Called by l2tp_core when a session socket is being closed.
  */
 static void pppol2tp_session_close(struct l2tp_session *session)
 {
-	struct sock *sk;
-
-	BUG_ON(session->magic != L2TP_SESSION_MAGIC);
-
-	sk = pppol2tp_session_get_sock(session);
-	if (sk) {
-		if (sk->sk_socket)
-			inet_shutdown(sk->sk_socket, SEND_SHUTDOWN);
-		sock_put(sk);
-	}
 }
 
 /* Really kill the session socket. (Called from sock_put() if
@@ -447,14 +445,6 @@ static void pppol2tp_session_destruct(struct sock *sk)
 		BUG_ON(session->magic != L2TP_SESSION_MAGIC);
 		l2tp_session_dec_refcount(session);
 	}
-}
-
-static void pppol2tp_put_sk(struct rcu_head *head)
-{
-	struct pppol2tp_session *ps;
-
-	ps = container_of(head, typeof(*ps), rcu);
-	sock_put(ps->__sk);
 }
 
 /* Called when the PPPoX socket (session) is closed.
@@ -481,8 +471,7 @@ static int pppol2tp_release(struct socket *sock)
 	sock->sk = NULL;
 
 	session = pppol2tp_sock_to_session(sk);
-
-	if (session != NULL) {
+	if (session) {
 		struct pppol2tp_session *ps;
 
 		l2tp_session_delete(session);
@@ -500,6 +489,7 @@ static int pppol2tp_release(struct socket *sock)
 		 * The last reference will be dropped by pppol2tp_put_sk().
 		 */
 	}
+
 	release_sock(sk);
 
 	/* This will delete the session context via
@@ -622,12 +612,21 @@ static int pppol2tp_connect(struct socket *sock, struct sockaddr *uservaddr,
 	u32 session_id, peer_session_id;
 	bool drop_refcnt = false;
 	bool drop_tunnel = false;
+	bool new_session = false;
+	bool new_tunnel = false;
 	int ver = 2;
 	int fd;
 
 	lock_sock(sk);
 
 	error = -EINVAL;
+
+	if (sockaddr_len != sizeof(struct sockaddr_pppol2tp) &&
+	    sockaddr_len != sizeof(struct sockaddr_pppol2tpv3) &&
+	    sockaddr_len != sizeof(struct sockaddr_pppol2tpin6) &&
+	    sockaddr_len != sizeof(struct sockaddr_pppol2tpv3in6))
+		goto end;
+
 	if (sp->sa_protocol != PX_PROTO_OL2TP)
 		goto end;
 
@@ -704,9 +703,28 @@ static int pppol2tp_connect(struct socket *sock, struct sockaddr *uservaddr,
 				.encap = L2TP_ENCAPTYPE_UDP,
 				.debug = 0,
 			};
+
+			/* Prevent l2tp_tunnel_register() from trying to set up
+			 * a kernel socket.
+			 */
+			if (fd < 0) {
+				error = -EBADF;
+				goto end;
+			}
+
 			error = l2tp_tunnel_create(sock_net(sk), fd, ver, tunnel_id, peer_tunnel_id, &tcfg, &tunnel);
 			if (error < 0)
 				goto end;
+
+			l2tp_tunnel_inc_refcount(tunnel);
+			error = l2tp_tunnel_register(tunnel, sock_net(sk),
+						     &tcfg);
+			if (error < 0) {
+				kfree(tunnel);
+				goto end;
+			}
+			drop_tunnel = true;
+			new_tunnel = true;
 		}
 	} else {
 		/* Error if we can't find the tunnel */
@@ -728,6 +746,12 @@ static int pppol2tp_connect(struct socket *sock, struct sockaddr *uservaddr,
 	session = l2tp_session_get(sock_net(sk), tunnel, session_id);
 	if (session) {
 		drop_refcnt = true;
+
+		if (session->pwtype != L2TP_PWTYPE_PPP) {
+			error = -EPROTOTYPE;
+			goto end;
+		}
+
 		ps = l2tp_session_priv(session);
 
 		/* Using a pre-existing session is fine as long as it hasn't
@@ -735,7 +759,8 @@ static int pppol2tp_connect(struct socket *sock, struct sockaddr *uservaddr,
 		 */
 		mutex_lock(&ps->sk_lock);
 		if (rcu_dereference_protected(ps->sk,
-					      lockdep_is_held(&ps->sk_lock))) {
+					      lockdep_is_held(&ps->sk_lock)) ||
+		    ps->__sk) {
 			mutex_unlock(&ps->sk_lock);
 			error = -EEXIST;
 			goto end;
@@ -744,6 +769,7 @@ static int pppol2tp_connect(struct socket *sock, struct sockaddr *uservaddr,
 		/* Default MTU must allow space for UDP/L2TP/PPP headers */
 		cfg.mtu = 1500 - PPPOL2TP_HEADER_OVERHEAD;
 		cfg.mru = cfg.mtu;
+		cfg.pw_type = L2TP_PWTYPE_PPP;
 
 		session = l2tp_session_create(sizeof(struct pppol2tp_session),
 					      tunnel, session_id,
@@ -765,6 +791,7 @@ static int pppol2tp_connect(struct socket *sock, struct sockaddr *uservaddr,
 			goto end;
 		}
 		drop_refcnt = true;
+		new_session = true;
 	}
 
 	/* Special case: if source & dest session_id == 0x0000, this
@@ -811,6 +838,12 @@ out_no_ppp:
 		  session->name);
 
 end:
+	if (error) {
+		if (new_session)
+			l2tp_session_delete(session);
+		if (new_tunnel)
+			l2tp_tunnel_delete(tunnel);
+	}
 	if (drop_refcnt)
 		l2tp_session_dec_refcount(session);
 	if (drop_tunnel)
@@ -870,7 +903,7 @@ err:
 /* getname() support.
  */
 static int pppol2tp_getname(struct socket *sock, struct sockaddr *uaddr,
-			    int *usockaddr_len, int peer)
+			    int peer)
 {
 	int len = 0;
 	int error = 0;
@@ -969,8 +1002,7 @@ static int pppol2tp_getname(struct socket *sock, struct sockaddr *uaddr,
 		memcpy(uaddr, &sp, len);
 	}
 
-	*usockaddr_len = len;
-	error = 0;
+	error = len;
 
 	sock_put(sk);
 end:
@@ -1169,7 +1201,7 @@ static int pppol2tp_tunnel_ioctl(struct l2tp_tunnel *tunnel,
 				l2tp_session_get(sock_net(sk), tunnel,
 						 stats.session_id);
 
-			if (session) {
+			if (session && session->pwtype == L2TP_PWTYPE_PPP) {
 				err = pppol2tp_session_ioctl(session, cmd,
 							     arg);
 				l2tp_session_dec_refcount(session);
@@ -1551,21 +1583,28 @@ struct pppol2tp_seq_data {
 
 static void pppol2tp_next_tunnel(struct net *net, struct pppol2tp_seq_data *pd)
 {
+	/* Drop reference taken during previous invocation */
+	if (pd->tunnel)
+		l2tp_tunnel_dec_refcount(pd->tunnel);
+
 	for (;;) {
-		pd->tunnel = l2tp_tunnel_find_nth(net, pd->tunnel_idx);
+		pd->tunnel = l2tp_tunnel_get_nth(net, pd->tunnel_idx);
 		pd->tunnel_idx++;
 
-		if (pd->tunnel == NULL)
-			break;
+		/* Only accept L2TPv2 tunnels */
+		if (!pd->tunnel || pd->tunnel->version == 2)
+			return;
 
-		/* Ignore L2TPv3 tunnels */
-		if (pd->tunnel->version < 3)
-			break;
+		l2tp_tunnel_dec_refcount(pd->tunnel);
 	}
 }
 
 static void pppol2tp_next_session(struct net *net, struct pppol2tp_seq_data *pd)
 {
+	/* Drop reference taken during previous invocation */
+	if (pd->session)
+		l2tp_session_dec_refcount(pd->session);
+
 	pd->session = l2tp_session_get_nth(pd->tunnel, pd->session_idx);
 	pd->session_idx++;
 
@@ -1609,7 +1648,22 @@ static void *pppol2tp_seq_next(struct seq_file *m, void *v, loff_t *pos)
 
 static void pppol2tp_seq_stop(struct seq_file *p, void *v)
 {
-	/* nothing to do */
+	struct pppol2tp_seq_data *pd = v;
+
+	if (!pd || pd == SEQ_START_TOKEN)
+		return;
+
+	/* Drop reference taken by last invocation of pppol2tp_next_session()
+	 * or pppol2tp_next_tunnel().
+	 */
+	if (pd->session) {
+		l2tp_session_dec_refcount(pd->session);
+		pd->session = NULL;
+	}
+	if (pd->tunnel) {
+		l2tp_tunnel_dec_refcount(pd->tunnel);
+		pd->tunnel = NULL;
+	}
 }
 
 static void pppol2tp_seq_tunnel_show(struct seq_file *m, void *v)
@@ -1703,14 +1757,10 @@ static int pppol2tp_seq_show(struct seq_file *m, void *v)
 		goto out;
 	}
 
-	/* Show the tunnel or session context.
-	 */
-	if (!pd->session) {
+	if (!pd->session)
 		pppol2tp_seq_tunnel_show(m, pd->tunnel);
-	} else {
+	else
 		pppol2tp_seq_session_show(m, pd->session);
-		l2tp_session_dec_refcount(pd->session);
-	}
 
 out:
 	return 0;
@@ -1722,24 +1772,6 @@ static const struct seq_operations pppol2tp_seq_ops = {
 	.stop		= pppol2tp_seq_stop,
 	.show		= pppol2tp_seq_show,
 };
-
-/* Called when our /proc file is opened. We allocate data for use when
- * iterating our tunnel / session contexts and store it in the private
- * data of the seq_file.
- */
-static int pppol2tp_proc_open(struct inode *inode, struct file *file)
-{
-	return seq_open_net(inode, file, &pppol2tp_seq_ops,
-			    sizeof(struct pppol2tp_seq_data));
-}
-
-static const struct file_operations pppol2tp_proc_fops = {
-	.open		= pppol2tp_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= seq_release_net,
-};
-
 #endif /* CONFIG_PROC_FS */
 
 /*****************************************************************************
@@ -1751,8 +1783,8 @@ static __net_init int pppol2tp_init_net(struct net *net)
 	struct proc_dir_entry *pde;
 	int err = 0;
 
-	pde = proc_create("pppol2tp", S_IRUGO, net->proc_net,
-			  &pppol2tp_proc_fops);
+	pde = proc_create_net("pppol2tp", 0444, net->proc_net,
+			&pppol2tp_seq_ops, sizeof(struct pppol2tp_seq_data));
 	if (!pde) {
 		err = -ENOMEM;
 		goto out;

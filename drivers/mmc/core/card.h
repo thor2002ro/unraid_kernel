@@ -82,6 +82,7 @@ struct mmc_fixup {
 #define CID_MANFID_APACER       0x27
 #define CID_MANFID_KINGSTON     0x70
 #define CID_MANFID_HYNIX	0x90
+#define CID_MANFID_NUMONYX	0xFE
 
 #define END_FIXUP { NULL }
 
@@ -146,6 +147,12 @@ static inline void __maybe_unused add_quirk(struct mmc_card *card, int data)
 static inline void __maybe_unused remove_quirk(struct mmc_card *card, int data)
 {
 	card->quirks &= ~data;
+}
+
+static inline void __maybe_unused add_limit_rate_quirk(struct mmc_card *card,
+						       int data)
+{
+	card->quirk_max_rate = data;
 }
 
 /*

@@ -110,13 +110,15 @@ static int imc_get_mem_addr_nest(struct device_node *node,
 	if (nr_chips <= 0)
 		return -ENODEV;
 
-	base_addr_arr = kcalloc(nr_chips, sizeof(u64), GFP_KERNEL);
+	base_addr_arr = kcalloc(nr_chips, sizeof(*base_addr_arr), GFP_KERNEL);
 	if (!base_addr_arr)
 		return -ENOMEM;
 
-	chipid_arr = kcalloc(nr_chips, sizeof(u32), GFP_KERNEL);
-	if (!chipid_arr)
+	chipid_arr = kcalloc(nr_chips, sizeof(*chipid_arr), GFP_KERNEL);
+	if (!chipid_arr) {
+		kfree(base_addr_arr);
 		return -ENOMEM;
+	}
 
 	if (of_property_read_u32_array(node, "chip-id", chipid_arr, nr_chips))
 		goto error;
@@ -125,8 +127,8 @@ static int imc_get_mem_addr_nest(struct device_node *node,
 								nr_chips))
 		goto error;
 
-	pmu_ptr->mem_info = kcalloc(nr_chips, sizeof(struct imc_mem_info),
-								GFP_KERNEL);
+	pmu_ptr->mem_info = kcalloc(nr_chips, sizeof(*pmu_ptr->mem_info),
+				    GFP_KERNEL);
 	if (!pmu_ptr->mem_info)
 		goto error;
 
@@ -143,7 +145,6 @@ static int imc_get_mem_addr_nest(struct device_node *node,
 	return 0;
 
 error:
-	kfree(pmu_ptr->mem_info);
 	kfree(base_addr_arr);
 	kfree(chipid_arr);
 	return -1;
@@ -161,7 +162,7 @@ static int imc_pmu_create(struct device_node *parent, int pmu_index, int domain)
 	u32 offset;
 
 	/* memory for pmu */
-	pmu_ptr = kzalloc(sizeof(struct imc_pmu), GFP_KERNEL);
+	pmu_ptr = kzalloc(sizeof(*pmu_ptr), GFP_KERNEL);
 	if (!pmu_ptr)
 		return -ENOMEM;
 
@@ -183,8 +184,14 @@ static int imc_pmu_create(struct device_node *parent, int pmu_index, int domain)
 
 	/* Function to register IMC pmu */
 	ret = init_imc_pmu(parent, pmu_ptr, pmu_index);
-	if (ret)
+	if (ret) {
 		pr_err("IMC PMU %s Register failed\n", pmu_ptr->pmu.name);
+		kfree(pmu_ptr->pmu.name);
+		if (pmu_ptr->domain == IMC_DOMAIN_NEST)
+			kfree(pmu_ptr->mem_info);
+		kfree(pmu_ptr);
+		return ret;
+	}
 
 	return 0;
 
@@ -199,9 +206,11 @@ static void disable_nest_pmu_counters(void)
 	const struct cpumask *l_cpumask;
 
 	get_online_cpus();
-	for_each_online_node(nid) {
+	for_each_node_with_cpus(nid) {
 		l_cpumask = cpumask_of_node(nid);
-		cpu = cpumask_first(l_cpumask);
+		cpu = cpumask_first_and(l_cpumask, cpu_online_mask);
+		if (cpu >= nr_cpu_ids)
+			continue;
 		opal_imc_counters_stop(OPAL_IMC_COUNTERS_NEST,
 				       get_hard_smp_processor_id(cpu));
 	}
@@ -246,6 +255,7 @@ static int opal_imc_counters_probe(struct platform_device *pdev)
 {
 	struct device_node *imc_dev = pdev->dev.of_node;
 	int pmu_count = 0, domain;
+	bool core_imc_reg = false, thread_imc_reg = false;
 	u32 type;
 
 	/*
@@ -283,12 +293,20 @@ static int opal_imc_counters_probe(struct platform_device *pdev)
 		if (!imc_pmu_create(imc_dev, pmu_count, domain)) {
 			if (domain == IMC_DOMAIN_NEST)
 				pmu_count++;
+			if (domain == IMC_DOMAIN_CORE)
+				core_imc_reg = true;
+			if (domain == IMC_DOMAIN_THREAD)
+				thread_imc_reg = true;
 		}
 	}
 
 	/* If none of the nest units are registered, remove debugfs interface */
 	if (pmu_count == 0)
 		debugfs_remove_recursive(imc_debugfs_parent);
+
+	/* If core imc is not registered, unregister thread-imc */
+	if (!core_imc_reg && thread_imc_reg)
+		unregister_thread_imc();
 
 	return 0;
 }

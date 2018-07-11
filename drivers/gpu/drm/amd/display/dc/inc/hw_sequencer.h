@@ -32,6 +32,8 @@
 #include "inc/hw/link_encoder.h"
 #include "core_status.h"
 
+#define EDP_BACKLIGHT_RAMP_DISABLE_LEVEL 0xFFFFFFFF
+
 enum pipe_gating_control {
 	PIPE_GATING_CONTROL_DISABLE = 0,
 	PIPE_GATING_CONTROL_ENABLE,
@@ -63,6 +65,7 @@ struct dchub_init_data;
 struct dc_static_screen_events;
 struct resource_pool;
 struct resource_context;
+struct stream_resource;
 
 struct hw_sequencer_funcs {
 
@@ -80,11 +83,6 @@ struct hw_sequencer_funcs {
 			int num_planes,
 			struct dc_state *context);
 
-	void (*set_plane_config)(
-			const struct dc *dc,
-			struct pipe_ctx *pipe_ctx,
-			struct resource_context *res_ctx);
-
 	void (*program_gamut_remap)(
 			struct pipe_ctx *pipe_ctx);
 
@@ -92,6 +90,12 @@ struct hw_sequencer_funcs {
 			struct pipe_ctx *pipe_ctx,
 			enum dc_color_space colorspace,
 			uint16_t *matrix);
+
+	void (*program_output_csc)(struct dc *dc,
+			struct pipe_ctx *pipe_ctx,
+			enum dc_color_space colorspace,
+			uint16_t *matrix,
+			int opp_id);
 
 	void (*update_plane_addr)(
 		const struct dc *dc,
@@ -114,7 +118,7 @@ struct hw_sequencer_funcs {
 
 	void (*power_down)(struct dc *dc);
 
-	void (*enable_accelerated_mode)(struct dc *dc);
+	void (*enable_accelerated_mode)(struct dc *dc, struct dc_state *context);
 
 	void (*enable_timing_synchronization)(
 			struct dc *dc,
@@ -149,10 +153,16 @@ struct hw_sequencer_funcs {
 	void (*unblank_stream)(struct pipe_ctx *pipe_ctx,
 			struct dc_link_settings *link_settings);
 
+	void (*blank_stream)(struct pipe_ctx *pipe_ctx);
 	void (*pipe_control_lock)(
 				struct dc *dc,
 				struct pipe_ctx *pipe,
 				bool lock);
+	void (*blank_pixel_data)(
+			struct dc *dc,
+			struct stream_resource *stream_res,
+			struct dc_stream_state *stream,
+			bool blank);
 
 	void (*set_bandwidth)(
 			struct dc *dc,
@@ -168,7 +178,7 @@ struct hw_sequencer_funcs {
 	void (*set_static_screen_control)(struct pipe_ctx **pipe_ctx,
 			int num_pipes, const struct dc_static_screen_events *events);
 
-	enum dc_status (*prog_pixclk_crtc_otg)(
+	enum dc_status (*enable_stream_timing)(
 			struct pipe_ctx *pipe_ctx,
 			struct dc_state *context,
 			struct dc *dc);
@@ -197,6 +207,9 @@ struct hw_sequencer_funcs {
 			struct dc_link *link,
 			bool enable);
 	void (*edp_wait_for_hpd_ready)(struct dc_link *link, bool power_up);
+
+	void (*set_cursor_position)(struct pipe_ctx *pipe);
+	void (*set_cursor_attribute)(struct pipe_ctx *pipe);
 
 };
 

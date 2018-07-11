@@ -155,6 +155,8 @@ void drm_atomic_state_default_clear(struct drm_atomic_state *state)
 						       state->connectors[i].state);
 		state->connectors[i].ptr = NULL;
 		state->connectors[i].state = NULL;
+		state->connectors[i].old_state = NULL;
+		state->connectors[i].new_state = NULL;
 		drm_connector_put(connector);
 	}
 
@@ -169,6 +171,8 @@ void drm_atomic_state_default_clear(struct drm_atomic_state *state)
 
 		state->crtcs[i].ptr = NULL;
 		state->crtcs[i].state = NULL;
+		state->crtcs[i].old_state = NULL;
+		state->crtcs[i].new_state = NULL;
 	}
 
 	for (i = 0; i < config->num_total_plane; i++) {
@@ -181,6 +185,8 @@ void drm_atomic_state_default_clear(struct drm_atomic_state *state)
 						   state->planes[i].state);
 		state->planes[i].ptr = NULL;
 		state->planes[i].state = NULL;
+		state->planes[i].old_state = NULL;
+		state->planes[i].new_state = NULL;
 	}
 
 	for (i = 0; i < state->num_private_objs; i++) {
@@ -190,6 +196,8 @@ void drm_atomic_state_default_clear(struct drm_atomic_state *state)
 						 state->private_objs[i].state);
 		state->private_objs[i].ptr = NULL;
 		state->private_objs[i].state = NULL;
+		state->private_objs[i].old_state = NULL;
+		state->private_objs[i].new_state = NULL;
 	}
 	state->num_private_objs = 0;
 
@@ -390,9 +398,8 @@ int drm_atomic_set_mode_prop_for_crtc(struct drm_crtc_state *state,
 
 	if (blob) {
 		if (blob->length != sizeof(struct drm_mode_modeinfo) ||
-		    drm_mode_convert_umode(&state->mode,
-		                           (const struct drm_mode_modeinfo *)
-		                            blob->data))
+		    drm_mode_convert_umode(state->crtc->dev, &state->mode,
+					   blob->data))
 			return -EINVAL;
 
 		state->mode_blob = drm_property_blob_get(blob);
@@ -409,11 +416,36 @@ int drm_atomic_set_mode_prop_for_crtc(struct drm_crtc_state *state,
 }
 EXPORT_SYMBOL(drm_atomic_set_mode_prop_for_crtc);
 
+/**
+ * drm_atomic_replace_property_blob_from_id - lookup the new blob and replace the old one with it
+ * @dev: DRM device
+ * @blob: a pointer to the member blob to be replaced
+ * @blob_id: ID of the new blob
+ * @expected_size: total expected size of the blob data (in bytes)
+ * @expected_elem_size: expected element size of the blob data (in bytes)
+ * @replaced: did the blob get replaced?
+ *
+ * Replace @blob with another blob with the ID @blob_id. If @blob_id is zero
+ * @blob becomes NULL.
+ *
+ * If @expected_size is positive the new blob length is expected to be equal
+ * to @expected_size bytes. If @expected_elem_size is positive the new blob
+ * length is expected to be a multiple of @expected_elem_size bytes. Otherwise
+ * an error is returned.
+ *
+ * @replaced will indicate to the caller whether the blob was replaced or not.
+ * If the old and new blobs were in fact the same blob @replaced will be false
+ * otherwise it will be true.
+ *
+ * RETURNS:
+ * Zero on success, error code on failure.
+ */
 static int
 drm_atomic_replace_property_blob_from_id(struct drm_device *dev,
 					 struct drm_property_blob **blob,
 					 uint64_t blob_id,
 					 ssize_t expected_size,
+					 ssize_t expected_elem_size,
 					 bool *replaced)
 {
 	struct drm_property_blob *new_blob = NULL;
@@ -423,7 +455,13 @@ drm_atomic_replace_property_blob_from_id(struct drm_device *dev,
 		if (new_blob == NULL)
 			return -EINVAL;
 
-		if (expected_size > 0 && expected_size != new_blob->length) {
+		if (expected_size > 0 &&
+		    new_blob->length != expected_size) {
+			drm_property_blob_put(new_blob);
+			return -EINVAL;
+		}
+		if (expected_elem_size > 0 &&
+		    new_blob->length % expected_elem_size != 0) {
 			drm_property_blob_put(new_blob);
 			return -EINVAL;
 		}
@@ -471,7 +509,7 @@ int drm_atomic_crtc_set_property(struct drm_crtc *crtc,
 		ret = drm_atomic_replace_property_blob_from_id(dev,
 					&state->degamma_lut,
 					val,
-					-1,
+					-1, sizeof(struct drm_color_lut),
 					&replaced);
 		state->color_mgmt_changed |= replaced;
 		return ret;
@@ -479,7 +517,7 @@ int drm_atomic_crtc_set_property(struct drm_crtc *crtc,
 		ret = drm_atomic_replace_property_blob_from_id(dev,
 					&state->ctm,
 					val,
-					sizeof(struct drm_color_ctm),
+					sizeof(struct drm_color_ctm), -1,
 					&replaced);
 		state->color_mgmt_changed |= replaced;
 		return ret;
@@ -487,7 +525,7 @@ int drm_atomic_crtc_set_property(struct drm_crtc *crtc,
 		ret = drm_atomic_replace_property_blob_from_id(dev,
 					&state->gamma_lut,
 					val,
-					-1,
+					-1, sizeof(struct drm_color_lut),
 					&replaced);
 		state->color_mgmt_changed |= replaced;
 		return ret;
@@ -753,12 +791,18 @@ static int drm_atomic_plane_set_property(struct drm_plane *plane,
 		state->src_w = val;
 	} else if (property == config->prop_src_h) {
 		state->src_h = val;
+	} else if (property == plane->alpha_property) {
+		state->alpha = val;
 	} else if (property == plane->rotation_property) {
 		if (!is_power_of_2(val & DRM_MODE_ROTATE_MASK))
 			return -EINVAL;
 		state->rotation = val;
 	} else if (property == plane->zpos_property) {
 		state->zpos = val;
+	} else if (property == plane->color_encoding_property) {
+		state->color_encoding = val;
+	} else if (property == plane->color_range_property) {
+		state->color_range = val;
 	} else if (plane->funcs->atomic_set_property) {
 		return plane->funcs->atomic_set_property(plane, state,
 				property, val);
@@ -814,10 +858,16 @@ drm_atomic_plane_get_property(struct drm_plane *plane,
 		*val = state->src_w;
 	} else if (property == config->prop_src_h) {
 		*val = state->src_h;
+	} else if (property == plane->alpha_property) {
+		*val = state->alpha;
 	} else if (property == plane->rotation_property) {
 		*val = state->rotation;
 	} else if (property == plane->zpos_property) {
 		*val = state->zpos;
+	} else if (property == plane->color_encoding_property) {
+		*val = state->color_encoding;
+	} else if (property == plane->color_range_property) {
+		*val = state->color_range;
 	} else if (plane->funcs->atomic_get_property) {
 		return plane->funcs->atomic_get_property(plane, state, property, val);
 	} else {
@@ -863,10 +913,10 @@ static int drm_atomic_plane_check(struct drm_plane *plane,
 	int ret;
 
 	/* either *both* CRTC and FB must be set, or neither */
-	if (WARN_ON(state->crtc && !state->fb)) {
+	if (state->crtc && !state->fb) {
 		DRM_DEBUG_ATOMIC("CRTC set but no FB\n");
 		return -EINVAL;
-	} else if (WARN_ON(state->fb && !state->crtc)) {
+	} else if (state->fb && !state->crtc) {
 		DRM_DEBUG_ATOMIC("FB set but no CRTC\n");
 		return -EINVAL;
 	}
@@ -882,12 +932,14 @@ static int drm_atomic_plane_check(struct drm_plane *plane,
 	}
 
 	/* Check whether this plane supports the fb pixel format. */
-	ret = drm_plane_check_pixel_format(plane, state->fb->format->format);
+	ret = drm_plane_check_pixel_format(plane, state->fb->format->format,
+					   state->fb->modifier);
 	if (ret) {
 		struct drm_format_name_buf format_name;
-		DRM_DEBUG_ATOMIC("Invalid pixel format %s\n",
-		                 drm_get_format_name(state->fb->format->format,
-		                                     &format_name));
+		DRM_DEBUG_ATOMIC("Invalid pixel format %s, modifier 0x%llx\n",
+				 drm_get_format_name(state->fb->format->format,
+						     &format_name),
+				 state->fb->modifier);
 		return ret;
 	}
 
@@ -944,6 +996,10 @@ static void drm_atomic_plane_print_state(struct drm_printer *p,
 	drm_printf(p, "\tcrtc-pos=" DRM_RECT_FMT "\n", DRM_RECT_ARG(&dest));
 	drm_printf(p, "\tsrc-pos=" DRM_RECT_FP_FMT "\n", DRM_RECT_FP_ARG(&src));
 	drm_printf(p, "\trotation=%x\n", state->rotation);
+	drm_printf(p, "\tcolor-encoding=%s\n",
+		   drm_get_color_encoding_name(state->color_encoding));
+	drm_printf(p, "\tcolor-range=%s\n",
+		   drm_get_color_range_name(state->color_range));
 
 	if (plane->funcs->atomic_print_state)
 		plane->funcs->atomic_print_state(p, state);
@@ -1224,6 +1280,12 @@ static int drm_atomic_connector_set_property(struct drm_connector *connector,
 		state->picture_aspect_ratio = val;
 	} else if (property == connector->scaling_mode_property) {
 		state->scaling_mode = val;
+	} else if (property == connector->content_protection_property) {
+		if (val == DRM_MODE_CONTENT_PROTECTION_ENABLED) {
+			DRM_DEBUG_KMS("only drivers can set CP Enabled\n");
+			return -EINVAL;
+		}
+		state->content_protection = val;
 	} else if (connector->funcs->atomic_set_property) {
 		return connector->funcs->atomic_set_property(connector,
 				state, property, val);
@@ -1303,6 +1365,8 @@ drm_atomic_connector_get_property(struct drm_connector *connector,
 		*val = state->picture_aspect_ratio;
 	} else if (property == connector->scaling_mode_property) {
 		*val = state->scaling_mode;
+	} else if (property == connector->content_protection_property) {
+		*val = state->content_protection;
 	} else if (connector->funcs->atomic_get_property) {
 		return connector->funcs->atomic_get_property(connector,
 				state, property, val);
@@ -1369,7 +1433,9 @@ drm_atomic_set_crtc_for_plane(struct drm_plane_state *plane_state,
 {
 	struct drm_plane *plane = plane_state->plane;
 	struct drm_crtc_state *crtc_state;
-
+	/* Nothing to do for same crtc*/
+	if (plane_state->crtc == crtc)
+		return 0;
 	if (plane_state->crtc) {
 		crtc_state = drm_atomic_get_crtc_state(plane_state->state,
 						       plane_state->crtc);
@@ -1440,6 +1506,14 @@ EXPORT_SYMBOL(drm_atomic_set_fb_for_plane);
  * Otherwise, if &drm_plane_state.fence is not set this function we just set it
  * with the received implicit fence. In both cases this function consumes a
  * reference for @fence.
+ *
+ * This way explicit fencing can be used to overrule implicit fencing, which is
+ * important to make explicit fencing use-cases work: One example is using one
+ * buffer for 2 screens with different refresh rates. Implicit fencing will
+ * clamp rendering to the refresh rate of the slower screen, whereas explicit
+ * fence allows 2 independent render and display loops on a single buffer. If a
+ * driver allows obeys both implicit and explicit fences for plane updates, then
+ * it will break all the benefits of explicit fencing.
  */
 void
 drm_atomic_set_fence_for_plane(struct drm_plane_state *plane_state,
@@ -1650,11 +1724,15 @@ int drm_atomic_check_only(struct drm_atomic_state *state)
 		}
 	}
 
-	if (config->funcs->atomic_check)
+	if (config->funcs->atomic_check) {
 		ret = config->funcs->atomic_check(state->dev, state);
 
-	if (ret)
-		return ret;
+		if (ret) {
+			DRM_DEBUG_ATOMIC("atomic driver check for %p failed: %d\n",
+					 state, ret);
+			return ret;
+		}
+	}
 
 	if (!state->allow_modeset) {
 		for_each_new_crtc_in_state(state, crtc, crtc_state, i) {

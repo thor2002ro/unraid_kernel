@@ -31,7 +31,6 @@
 #include "efuse.h"
 #include <linux/interrupt.h>
 #include <linux/export.h>
-#include <linux/kmemleak.h>
 #include <linux/module.h>
 
 MODULE_AUTHOR("lizhaoming	<chaoming_li@realsil.com.cn>");
@@ -620,12 +619,15 @@ static void _rtl_pci_tx_isr(struct ieee80211_hw *hw, int prio)
 			rtlpriv->link_info.tidtx_inperiod[tid]++;
 
 		info = IEEE80211_SKB_CB(skb);
-		ieee80211_tx_info_clear_status(info);
 
-		info->flags |= IEEE80211_TX_STAT_ACK;
-		/*info->status.rates[0].count = 1; */
-
-		ieee80211_tx_status_irqsafe(hw, skb);
+		if (likely(!ieee80211_is_nullfunc(fc))) {
+			ieee80211_tx_info_clear_status(info);
+			info->flags |= IEEE80211_TX_STAT_ACK;
+			/*info->status.rates[0].count = 1; */
+			ieee80211_tx_status_irqsafe(hw, skb);
+		} else {
+			rtl_tx_ackqueue(hw, skb);
+		}
 
 		if ((ring->entries - skb_queue_len(&ring->queue)) <= 4) {
 			RT_TRACE(rtlpriv, COMP_ERR, DBG_DMESG,
@@ -828,9 +830,8 @@ static void _rtl_pci_rx_interrupt(struct ieee80211_hw *hw)
 			goto new_trx_end;
 		}
 		/* handle command packet here */
-		if (rtlpriv->cfg->ops->rx_command_packet &&
-		    rtlpriv->cfg->ops->rx_command_packet(hw, &stats, skb)) {
-			dev_kfree_skb_any(skb);
+		if (stats.packet_report_type == C2H_PACKET) {
+			rtl_c2hcmd_enqueue(hw, skb);
 			goto new_trx_end;
 		}
 
@@ -2238,6 +2239,7 @@ int rtl_pci_probe(struct pci_dev *pdev,
 	rtlpriv->cfg = (struct rtl_hal_cfg *)(id->driver_data);
 	rtlpriv->intf_ops = &rtl_pci_ops;
 	rtlpriv->glb_var = &rtl_global_var;
+	rtl_efuse_ops_init(hw);
 
 	/* MEM map */
 	err = pci_request_regions(pdev, KBUILD_MODNAME);

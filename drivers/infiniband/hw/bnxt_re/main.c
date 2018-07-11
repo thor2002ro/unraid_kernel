@@ -185,12 +185,65 @@ static void bnxt_re_shutdown(void *p)
 	bnxt_re_ib_unreg(rdev, false);
 }
 
+static void bnxt_re_stop_irq(void *handle)
+{
+	struct bnxt_re_dev *rdev = (struct bnxt_re_dev *)handle;
+	struct bnxt_qplib_rcfw *rcfw = &rdev->rcfw;
+	struct bnxt_qplib_nq *nq;
+	int indx;
+
+	for (indx = BNXT_RE_NQ_IDX; indx < rdev->num_msix; indx++) {
+		nq = &rdev->nq[indx - 1];
+		bnxt_qplib_nq_stop_irq(nq, false);
+	}
+
+	bnxt_qplib_rcfw_stop_irq(rcfw, false);
+}
+
+static void bnxt_re_start_irq(void *handle, struct bnxt_msix_entry *ent)
+{
+	struct bnxt_re_dev *rdev = (struct bnxt_re_dev *)handle;
+	struct bnxt_msix_entry *msix_ent = rdev->msix_entries;
+	struct bnxt_qplib_rcfw *rcfw = &rdev->rcfw;
+	struct bnxt_qplib_nq *nq;
+	int indx, rc;
+
+	if (!ent) {
+		/* Not setting the f/w timeout bit in rcfw.
+		 * During the driver unload the first command
+		 * to f/w will timeout and that will set the
+		 * timeout bit.
+		 */
+		dev_err(rdev_to_dev(rdev), "Failed to re-start IRQs\n");
+		return;
+	}
+
+	/* Vectors may change after restart, so update with new vectors
+	 * in device sctructure.
+	 */
+	for (indx = 0; indx < rdev->num_msix; indx++)
+		rdev->msix_entries[indx].vector = ent[indx].vector;
+
+	bnxt_qplib_rcfw_start_irq(rcfw, msix_ent[BNXT_RE_AEQ_IDX].vector,
+				  false);
+	for (indx = BNXT_RE_NQ_IDX ; indx < rdev->num_msix; indx++) {
+		nq = &rdev->nq[indx - 1];
+		rc = bnxt_qplib_nq_start_irq(nq, indx - 1,
+					     msix_ent[indx].vector, false);
+		if (rc)
+			dev_warn(rdev_to_dev(rdev),
+				 "Failed to reinit NQ index %d\n", indx - 1);
+	}
+}
+
 static struct bnxt_ulp_ops bnxt_re_ulp_ops = {
 	.ulp_async_notifier = NULL,
 	.ulp_stop = bnxt_re_stop,
 	.ulp_start = bnxt_re_start,
 	.ulp_sriov_config = bnxt_re_sriov_config,
-	.ulp_shutdown = bnxt_re_shutdown
+	.ulp_shutdown = bnxt_re_shutdown,
+	.ulp_irq_stop = bnxt_re_stop_irq,
+	.ulp_irq_restart = bnxt_re_start_irq
 };
 
 /* RoCE -> Net driver */
@@ -574,7 +627,6 @@ static int bnxt_re_register_ib(struct bnxt_re_dev *rdev)
 	ibdev->get_port_immutable	= bnxt_re_get_port_immutable;
 	ibdev->get_dev_fw_str           = bnxt_re_query_fw_str;
 	ibdev->query_pkey		= bnxt_re_query_pkey;
-	ibdev->query_gid		= bnxt_re_query_gid;
 	ibdev->get_netdev		= bnxt_re_get_netdev;
 	ibdev->add_gid			= bnxt_re_add_gid;
 	ibdev->del_gid			= bnxt_re_del_gid;
@@ -619,6 +671,7 @@ static int bnxt_re_register_ib(struct bnxt_re_dev *rdev)
 	ibdev->get_hw_stats             = bnxt_re_ib_get_hw_stats;
 	ibdev->alloc_hw_stats           = bnxt_re_ib_alloc_hw_stats;
 
+	ibdev->driver_id = RDMA_DRIVER_BNXT_RE;
 	return ib_register_device(ibdev, NULL);
 }
 
@@ -656,7 +709,6 @@ static void bnxt_re_dev_remove(struct bnxt_re_dev *rdev)
 	mutex_unlock(&bnxt_re_dev_lock);
 
 	synchronize_rcu();
-	flush_workqueue(bnxt_re_wq);
 
 	ib_dealloc_device(&rdev->ibdev);
 	/* rdev is gone */
@@ -731,6 +783,13 @@ static int bnxt_re_handle_qp_async_event(struct creq_qp_event *qp_event,
 					 struct bnxt_re_qp *qp)
 {
 	struct ib_event event;
+	unsigned int flags;
+
+	if (qp->qplib_qp.state == CMDQ_MODIFY_QP_NEW_STATE_ERR) {
+		flags = bnxt_re_lock_cqs(qp);
+		bnxt_qplib_add_flush_qp(&qp->qplib_qp);
+		bnxt_re_unlock_cqs(qp, flags);
+	}
 
 	memset(&event, 0, sizeof(event));
 	if (qp->qplib_qp.srq) {
@@ -1417,9 +1476,12 @@ static void bnxt_re_task(struct work_struct *work)
 	switch (re_work->event) {
 	case NETDEV_REGISTER:
 		rc = bnxt_re_ib_reg(rdev);
-		if (rc)
+		if (rc) {
 			dev_err(rdev_to_dev(rdev),
 				"Failed to register with IB: %#x", rc);
+			bnxt_re_remove_one(rdev);
+			bnxt_re_dev_unreg(rdev);
+		}
 		break;
 	case NETDEV_UP:
 		bnxt_re_dispatch_event(&rdev->ibdev, NULL, 1,
@@ -1441,7 +1503,7 @@ static void bnxt_re_task(struct work_struct *work)
 		break;
 	}
 	smp_mb__before_atomic();
-	clear_bit(BNXT_RE_FLAG_TASK_IN_PROG, &rdev->flags);
+	atomic_dec(&rdev->sched_count);
 	kfree(re_work);
 }
 
@@ -1503,7 +1565,7 @@ static int bnxt_re_netdev_event(struct notifier_block *notifier,
 		/* netdev notifier will call NETDEV_UNREGISTER again later since
 		 * we are still holding the reference to the netdev
 		 */
-		if (test_bit(BNXT_RE_FLAG_TASK_IN_PROG, &rdev->flags))
+		if (atomic_read(&rdev->sched_count) > 0)
 			goto exit;
 		bnxt_re_ib_unreg(rdev, false);
 		bnxt_re_remove_one(rdev);
@@ -1523,7 +1585,7 @@ static int bnxt_re_netdev_event(struct notifier_block *notifier,
 			re_work->vlan_dev = (real_dev == netdev ?
 					     NULL : netdev);
 			INIT_WORK(&re_work->work, bnxt_re_task);
-			set_bit(BNXT_RE_FLAG_TASK_IN_PROG, &rdev->flags);
+			atomic_inc(&rdev->sched_count);
 			queue_work(bnxt_re_wq, &re_work->work);
 		}
 	}
@@ -1578,6 +1640,11 @@ static void __exit bnxt_re_mod_exit(void)
 	*/
 	list_for_each_entry_safe_reverse(rdev, next, &to_be_deleted, list) {
 		dev_info(rdev_to_dev(rdev), "Unregistering Device");
+		/*
+		 * Flush out any scheduled tasks before destroying the
+		 * resources
+		 */
+		flush_workqueue(bnxt_re_wq);
 		bnxt_re_dev_stop(rdev);
 		bnxt_re_ib_unreg(rdev, true);
 		bnxt_re_remove_one(rdev);

@@ -31,6 +31,7 @@
 #include <linux/slab.h>
 #include <linux/list.h>
 #include <linux/module.h>
+#include <linux/nospec.h>
 #include <linux/vmalloc.h>
 #include <linux/delay.h>
 #include <linux/spinlock.h>
@@ -1254,8 +1255,8 @@ static void dvb_ca_en50221_thread_state_machine(struct dvb_ca_private *ca,
 		ca->pub->slot_ts_enable(ca->pub, slot);
 		sl->slot_state = DVB_CA_SLOTSTATE_RUNNING;
 		dvb_ca_en50221_thread_update_delay(ca);
-		pr_err("dvb_ca adapter %d: DVB CAM detected and initialised successfully\n",
-		       ca->dvbdev->adapter->num);
+		pr_info("dvb_ca adapter %d: DVB CAM detected and initialised successfully\n",
+			ca->dvbdev->adapter->num);
 		break;
 
 	case DVB_CA_SLOTSTATE_RUNNING:
@@ -1476,6 +1477,7 @@ static ssize_t dvb_ca_en50221_io_write(struct file *file,
 
 	if (slot >= ca->slot_count)
 		return -EINVAL;
+	slot = array_index_nospec(slot, ca->slot_count);
 	sl = &ca->slot_info[slot];
 
 	/* check if the slot is actually running */

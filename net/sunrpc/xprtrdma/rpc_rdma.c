@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
  * Copyright (c) 2014-2017 Oracle.  All rights reserved.
  * Copyright (c) 2003-2007 Network Appliance, Inc. All rights reserved.
@@ -46,21 +47,16 @@
  * to the Linux RPC framework lives.
  */
 
-#include "xprt_rdma.h"
-
 #include <linux/highmem.h>
+
+#include <linux/sunrpc/svc_rdma.h>
+
+#include "xprt_rdma.h"
+#include <trace/events/rpcrdma.h>
 
 #if IS_ENABLED(CONFIG_SUNRPC_DEBUG)
 # define RPCDBG_FACILITY	RPCDBG_TRANS
 #endif
-
-static const char transfertypes[][12] = {
-	"inline",	/* no chunks */
-	"read list",	/* some argument via rdma read */
-	"*read list",	/* entire request via rdma read */
-	"write list",	/* some result via rdma write */
-	"reply chunk"	/* entire reply via rdma write */
-};
 
 /* Returns size of largest RPC-over-RDMA header in a Call message
  *
@@ -230,7 +226,7 @@ rpcrdma_convert_iovs(struct rpcrdma_xprt *r_xprt, struct xdr_buf *xdrbuf,
 			 */
 			*ppages = alloc_page(GFP_ATOMIC);
 			if (!*ppages)
-				return -EAGAIN;
+				return -ENOBUFS;
 		}
 		seg->mr_page = *ppages;
 		seg->mr_offset = (char *)page_base;
@@ -694,7 +690,7 @@ rpcrdma_prepare_send_sges(struct rpcrdma_xprt *r_xprt,
 {
 	req->rl_sendctx = rpcrdma_sendctx_get_locked(&r_xprt->rx_buf);
 	if (!req->rl_sendctx)
-		return -ENOBUFS;
+		return -EAGAIN;
 	req->rl_sendctx->sc_wr.num_sge = 0;
 	req->rl_sendctx->sc_unmap_count = 0;
 	req->rl_sendctx->sc_req = req;
@@ -724,8 +720,8 @@ rpcrdma_prepare_send_sges(struct rpcrdma_xprt *r_xprt,
  * Returns:
  *	%0 if the RPC was sent successfully,
  *	%-ENOTCONN if the connection was lost,
- *	%-EAGAIN if not enough pages are available for on-demand reply buffer,
- *	%-ENOBUFS if no MRs are available to register chunks,
+ *	%-EAGAIN if the caller should call again with the same arguments,
+ *	%-ENOBUFS if the caller should call again after a delay,
  *	%-EMSGSIZE if the transport header is too small,
  *	%-EIO if a permanent problem occurred while marshaling.
  */
@@ -868,8 +864,13 @@ rpcrdma_marshal_req(struct rpcrdma_xprt *r_xprt, struct rpc_rqst *rqst)
 	return 0;
 
 out_err:
-	if (ret != -ENOBUFS) {
-		pr_err("rpcrdma: header marshaling failed (%d)\n", ret);
+	switch (ret) {
+	case -EAGAIN:
+		xprt_wait_for_buffer_space(rqst->rq_task, NULL);
+		break;
+	case -ENOBUFS:
+		break;
+	default:
 		r_xprt->rx_stats.failed_marshal_count++;
 	}
 	return ret;
@@ -1014,8 +1015,6 @@ rpcrdma_is_bcall(struct rpcrdma_xprt *r_xprt, struct rpcrdma_rep *rep)
 
 out_short:
 	pr_warn("RPC/RDMA short backward direction call\n");
-	if (rpcrdma_ep_post_recv(&r_xprt->rx_ia, rep))
-		xprt_disconnect_done(&r_xprt->rx_xprt);
 	return true;
 }
 #else	/* CONFIG_SUNRPC_BACKCHANNEL */
@@ -1321,13 +1320,14 @@ void rpcrdma_reply_handler(struct rpcrdma_rep *rep)
 	u32 credits;
 	__be32 *p;
 
+	--buf->rb_posted_receives;
+
 	if (rep->rr_hdrbuf.head[0].iov_len == 0)
 		goto out_badstatus;
 
+	/* Fixed transport header fields */
 	xdr_init_decode(&rep->rr_stream, &rep->rr_hdrbuf,
 			rep->rr_hdrbuf.head[0].iov_base);
-
-	/* Fixed transport header fields */
 	p = xdr_inline_decode(&rep->rr_stream, 4 * sizeof(*p));
 	if (unlikely(!p))
 		goto out_shortreply;
@@ -1366,15 +1366,8 @@ void rpcrdma_reply_handler(struct rpcrdma_rep *rep)
 
 	trace_xprtrdma_reply(rqst->rq_task, rep, req, credits);
 
-	queue_work_on(req->rl_cpu, rpcrdma_receive_wq, &rep->rr_work);
-	return;
-
-out_badstatus:
-	rpcrdma_recv_buffer_put(rep);
-	if (r_xprt->rx_ep.rep_connected == 1) {
-		r_xprt->rx_ep.rep_connected = -EIO;
-		rpcrdma_conn_func(&r_xprt->rx_ep);
-	}
+	rpcrdma_post_recvs(r_xprt, false);
+	queue_work(rpcrdma_receive_wq, &rep->rr_work);
 	return;
 
 out_badversion:
@@ -1396,7 +1389,7 @@ out_shortreply:
  * receive buffer before returning.
  */
 repost:
-	r_xprt->rx_stats.bad_reply_count++;
-	if (rpcrdma_ep_post_recv(&r_xprt->rx_ia, rep))
-		rpcrdma_recv_buffer_put(rep);
+	rpcrdma_post_recvs(r_xprt, false);
+out_badstatus:
+	rpcrdma_recv_buffer_put(rep);
 }

@@ -1,21 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2012 Fusion-io  All rights reserved.
  * Copyright (C) 2012 Intel Corp. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public
- * License v2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public
- * License along with this program; if not, write to the
- * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 021110-1307, USA.
  */
+
 #include <linux/sched.h>
 #include <linux/wait.h>
 #include <linux/bio.h>
@@ -175,6 +163,12 @@ struct btrfs_raid_bio {
 	 * bitmap to record which horizontal stripe has data
 	 */
 	unsigned long *dbitmap;
+
+	/* allocated with real_stripes-many pointers for finish_*() calls */
+	void **finish_pointers;
+
+	/* allocated with stripe_npages-many bits for finish_*() calls */
+	unsigned long *finish_pbitmap;
 };
 
 static int __raid56_parity_recover(struct btrfs_raid_bio *rbio);
@@ -993,9 +987,14 @@ static struct btrfs_raid_bio *alloc_rbio(struct btrfs_fs_info *fs_info,
 	int stripe_npages = DIV_ROUND_UP(stripe_len, PAGE_SIZE);
 	void *p;
 
-	rbio = kzalloc(sizeof(*rbio) + num_pages * sizeof(struct page *) * 2 +
-		       DIV_ROUND_UP(stripe_npages, BITS_PER_LONG) *
-		       sizeof(long), GFP_NOFS);
+	rbio = kzalloc(sizeof(*rbio) +
+		       sizeof(*rbio->stripe_pages) * num_pages +
+		       sizeof(*rbio->bio_pages) * num_pages +
+		       sizeof(*rbio->finish_pointers) * real_stripes +
+		       sizeof(*rbio->dbitmap) * BITS_TO_LONGS(stripe_npages) +
+		       sizeof(*rbio->finish_pbitmap) *
+				BITS_TO_LONGS(stripe_npages),
+		       GFP_NOFS);
 	if (!rbio)
 		return ERR_PTR(-ENOMEM);
 
@@ -1017,13 +1016,20 @@ static struct btrfs_raid_bio *alloc_rbio(struct btrfs_fs_info *fs_info,
 	atomic_set(&rbio->stripes_pending, 0);
 
 	/*
-	 * the stripe_pages and bio_pages array point to the extra
+	 * the stripe_pages, bio_pages, etc arrays point to the extra
 	 * memory we allocated past the end of the rbio
 	 */
 	p = rbio + 1;
-	rbio->stripe_pages = p;
-	rbio->bio_pages = p + sizeof(struct page *) * num_pages;
-	rbio->dbitmap = p + sizeof(struct page *) * num_pages * 2;
+#define CONSUME_ALLOC(ptr, count)	do {				\
+		ptr = p;						\
+		p = (unsigned char *)p + sizeof(*(ptr)) * (count);	\
+	} while (0)
+	CONSUME_ALLOC(rbio->stripe_pages, num_pages);
+	CONSUME_ALLOC(rbio->bio_pages, num_pages);
+	CONSUME_ALLOC(rbio->finish_pointers, real_stripes);
+	CONSUME_ALLOC(rbio->dbitmap, BITS_TO_LONGS(stripe_npages));
+	CONSUME_ALLOC(rbio->finish_pbitmap, BITS_TO_LONGS(stripe_npages));
+#undef  CONSUME_ALLOC
 
 	if (bbio->map_type & BTRFS_BLOCK_GROUP_RAID5)
 		nr_data = real_stripes - 1;
@@ -1192,7 +1198,7 @@ static void index_rbio_pages(struct btrfs_raid_bio *rbio)
 static noinline void finish_rmw(struct btrfs_raid_bio *rbio)
 {
 	struct btrfs_bio *bbio = rbio->bbio;
-	void *pointers[rbio->real_stripes];
+	void **pointers = rbio->finish_pointers;
 	int nr_data = rbio->nr_data;
 	int stripe;
 	int pagenr;
@@ -1370,6 +1376,7 @@ static int find_bio_stripe(struct btrfs_raid_bio *rbio,
 		stripe_start = stripe->physical;
 		if (physical >= stripe_start &&
 		    physical < stripe_start + rbio->stripe_len &&
+		    stripe->dev->bdev &&
 		    bio->bi_disk == stripe->dev->bdev->bd_disk &&
 		    bio->bi_partno == stripe->dev->bdev->bd_partno) {
 			return i;
@@ -1986,7 +1993,13 @@ cleanup:
 	kfree(pointers);
 
 cleanup_io:
-	if (rbio->operation == BTRFS_RBIO_READ_REBUILD) {
+	/*
+	 * Similar to READ_REBUILD, REBUILD_MISSING at this point also has a
+	 * valid rbio which is consistent with ondisk content, thus such a
+	 * valid rbio can be cached to avoid further disk reads.
+	 */
+	if (rbio->operation == BTRFS_RBIO_READ_REBUILD ||
+	    rbio->operation == BTRFS_RBIO_REBUILD_MISSING) {
 		/*
 		 * - In case of two failures, where rbio->failb != -1:
 		 *
@@ -2007,8 +2020,6 @@ cleanup_io:
 		else
 			clear_bit(RBIO_CACHE_READY_BIT, &rbio->flags);
 
-		rbio_orig_end_io(rbio, err);
-	} else if (rbio->operation == BTRFS_RBIO_REBUILD_MISSING) {
 		rbio_orig_end_io(rbio, err);
 	} else if (err == BLK_STS_OK) {
 		rbio->faila = -1;
@@ -2357,8 +2368,8 @@ static noinline void finish_parity_scrub(struct btrfs_raid_bio *rbio,
 					 int need_check)
 {
 	struct btrfs_bio *bbio = rbio->bbio;
-	void *pointers[rbio->real_stripes];
-	DECLARE_BITMAP(pbitmap, rbio->stripe_npages);
+	void **pointers = rbio->finish_pointers;
+	unsigned long *pbitmap = rbio->finish_pbitmap;
 	int nr_data = rbio->nr_data;
 	int stripe;
 	int pagenr;
@@ -2767,24 +2778,8 @@ raid56_alloc_missing_rbio(struct btrfs_fs_info *fs_info, struct bio *bio,
 	return rbio;
 }
 
-static void missing_raid56_work(struct btrfs_work *work)
-{
-	struct btrfs_raid_bio *rbio;
-
-	rbio = container_of(work, struct btrfs_raid_bio, work);
-	__raid56_parity_recover(rbio);
-}
-
-static void async_missing_raid56(struct btrfs_raid_bio *rbio)
-{
-	btrfs_init_work(&rbio->work, btrfs_rmw_helper,
-			missing_raid56_work, NULL, NULL);
-
-	btrfs_queue_work(rbio->fs_info->rmw_workers, &rbio->work);
-}
-
 void raid56_submit_missing_rbio(struct btrfs_raid_bio *rbio)
 {
 	if (!lock_stripe_add(rbio))
-		async_missing_raid56(rbio);
+		async_read_rebuild(rbio);
 }

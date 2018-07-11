@@ -92,7 +92,7 @@ MODULE_PARM_DESC(resetwaittime, "Wait time in seconds after I/O timeout "
 
 int smp_affinity_enable = 1;
 module_param(smp_affinity_enable, int, S_IRUGO);
-MODULE_PARM_DESC(smp_affinity_enable, "SMP affinity feature enable/disbale Default: enable(1)");
+MODULE_PARM_DESC(smp_affinity_enable, "SMP affinity feature enable/disable Default: enable(1)");
 
 int rdpq_enable = 1;
 module_param(rdpq_enable, int, S_IRUGO);
@@ -1864,7 +1864,7 @@ megasas_set_nvme_device_properties(struct scsi_device *sdev, u32 max_io_size)
 
 	blk_queue_max_hw_sectors(sdev->request_queue, (max_io_size / 512));
 
-	queue_flag_set_unlocked(QUEUE_FLAG_NOMERGES, sdev->request_queue);
+	blk_queue_flag_set(QUEUE_FLAG_NOMERGES, sdev->request_queue);
 	blk_queue_virt_boundary(sdev->request_queue, mr_nvme_pg_size - 1);
 }
 
@@ -2224,9 +2224,9 @@ static int megasas_get_ld_vf_affiliation_111(struct megasas_instance *instance,
 			       sizeof(struct MR_LD_VF_AFFILIATION_111));
 	else {
 		new_affiliation_111 =
-			pci_alloc_consistent(instance->pdev,
-					     sizeof(struct MR_LD_VF_AFFILIATION_111),
-					     &new_affiliation_111_h);
+			pci_zalloc_consistent(instance->pdev,
+					      sizeof(struct MR_LD_VF_AFFILIATION_111),
+					      &new_affiliation_111_h);
 		if (!new_affiliation_111) {
 			dev_printk(KERN_DEBUG, &instance->pdev->dev, "SR-IOV: Couldn't allocate "
 			       "memory for new affiliation for scsi%d\n",
@@ -2234,8 +2234,6 @@ static int megasas_get_ld_vf_affiliation_111(struct megasas_instance *instance,
 			megasas_return_cmd(instance, cmd);
 			return -ENOMEM;
 		}
-		memset(new_affiliation_111, 0,
-		       sizeof(struct MR_LD_VF_AFFILIATION_111));
 	}
 
 	memset(dcmd->mbox.b, 0, MFI_MBOX_SIZE);
@@ -2333,10 +2331,10 @@ static int megasas_get_ld_vf_affiliation_12(struct megasas_instance *instance,
 		       sizeof(struct MR_LD_VF_AFFILIATION));
 	else {
 		new_affiliation =
-			pci_alloc_consistent(instance->pdev,
-					     (MAX_LOGICAL_DRIVES + 1) *
-					     sizeof(struct MR_LD_VF_AFFILIATION),
-					     &new_affiliation_h);
+			pci_zalloc_consistent(instance->pdev,
+					      (MAX_LOGICAL_DRIVES + 1) *
+					      sizeof(struct MR_LD_VF_AFFILIATION),
+					      &new_affiliation_h);
 		if (!new_affiliation) {
 			dev_printk(KERN_DEBUG, &instance->pdev->dev, "SR-IOV: Couldn't allocate "
 			       "memory for new affiliation for scsi%d\n",
@@ -2344,8 +2342,6 @@ static int megasas_get_ld_vf_affiliation_12(struct megasas_instance *instance,
 			megasas_return_cmd(instance, cmd);
 			return -ENOMEM;
 		}
-		memset(new_affiliation, 0, (MAX_LOGICAL_DRIVES + 1) *
-		       sizeof(struct MR_LD_VF_AFFILIATION));
 	}
 
 	memset(dcmd->mbox.b, 0, MFI_MBOX_SIZE);
@@ -2772,7 +2768,7 @@ blk_eh_timer_return megasas_reset_timer(struct scsi_cmnd *scmd)
 
 	if (time_after(jiffies, scmd->jiffies_at_alloc +
 				(scmd_timeout * 2) * HZ)) {
-		return BLK_EH_NOT_HANDLED;
+		return BLK_EH_DONE;
 	}
 
 	instance = (struct megasas_instance *)scmd->device->host->hostdata;
@@ -4022,7 +4018,7 @@ static int megasas_create_frame_pool(struct megasas_instance *instance)
 
 		cmd = instance->cmd_list[i];
 
-		cmd->frame = dma_pool_alloc(instance->frame_dma_pool,
+		cmd->frame = dma_pool_zalloc(instance->frame_dma_pool,
 					    GFP_KERNEL, &cmd->frame_phys_addr);
 
 		cmd->sense = dma_pool_alloc(instance->sense_dma_pool,
@@ -4038,7 +4034,6 @@ static int megasas_create_frame_pool(struct megasas_instance *instance)
 			return -ENOMEM;
 		}
 
-		memset(cmd->frame, 0, instance->mfi_frame_size);
 		cmd->frame->io.context = cpu_to_le32(cmd->index);
 		cmd->frame->io.pad_0 = 0;
 		if ((instance->adapter_type == MFI_SERIES) && reset_devices)
@@ -5165,6 +5160,26 @@ skip_alloc:
 		instance->use_seqnum_jbod_fp = false;
 }
 
+static void megasas_setup_reply_map(struct megasas_instance *instance)
+{
+	const struct cpumask *mask;
+	unsigned int queue, cpu;
+
+	for (queue = 0; queue < instance->msix_vectors; queue++) {
+		mask = pci_irq_get_affinity(instance->pdev, queue);
+		if (!mask)
+			goto fallback;
+
+		for_each_cpu(cpu, mask)
+			instance->reply_map[cpu] = queue;
+	}
+	return;
+
+fallback:
+	for_each_possible_cpu(cpu)
+		instance->reply_map[cpu] = cpu % instance->msix_vectors;
+}
+
 /**
  * megasas_init_fw -	Initializes the FW
  * @instance:		Adapter soft state
@@ -5343,6 +5358,8 @@ static int megasas_init_fw(struct megasas_instance *instance)
 			goto fail_setup_irqs;
 	}
 
+	megasas_setup_reply_map(instance);
+
 	dev_info(&instance->pdev->dev,
 		"firmware supports msix\t: (%d)", fw_msix_count);
 	dev_info(&instance->pdev->dev,
@@ -5402,9 +5419,9 @@ static int megasas_init_fw(struct megasas_instance *instance)
 	/* stream detection initialization */
 	if (instance->adapter_type == VENTURA_SERIES) {
 		fusion->stream_detect_by_ld =
-			kzalloc(sizeof(struct LD_STREAM_DETECT *)
-			* MAX_LOGICAL_DRIVES_EXT,
-			GFP_KERNEL);
+			kcalloc(MAX_LOGICAL_DRIVES_EXT,
+				sizeof(struct LD_STREAM_DETECT *),
+				GFP_KERNEL);
 		if (!fusion->stream_detect_by_ld) {
 			dev_err(&instance->pdev->dev,
 				"unable to allocate stream detection for pool of LDs\n");
@@ -5615,16 +5632,15 @@ megasas_get_seq_num(struct megasas_instance *instance,
 	}
 
 	dcmd = &cmd->frame->dcmd;
-	el_info = pci_alloc_consistent(instance->pdev,
-				       sizeof(struct megasas_evt_log_info),
-				       &el_info_h);
+	el_info = pci_zalloc_consistent(instance->pdev,
+					sizeof(struct megasas_evt_log_info),
+					&el_info_h);
 
 	if (!el_info) {
 		megasas_return_cmd(instance, cmd);
 		return -ENOMEM;
 	}
 
-	memset(el_info, 0, sizeof(*el_info));
 	memset(dcmd->mbox.b, 0, MFI_MBOX_SIZE);
 
 	dcmd->cmd = MFI_CMD_DCMD;
@@ -6123,20 +6139,29 @@ static inline int megasas_alloc_mfi_ctrl_mem(struct megasas_instance *instance)
  */
 static int megasas_alloc_ctrl_mem(struct megasas_instance *instance)
 {
+	instance->reply_map = kcalloc(nr_cpu_ids, sizeof(unsigned int),
+				      GFP_KERNEL);
+	if (!instance->reply_map)
+		return -ENOMEM;
+
 	switch (instance->adapter_type) {
 	case MFI_SERIES:
 		if (megasas_alloc_mfi_ctrl_mem(instance))
-			return -ENOMEM;
+			goto fail;
 		break;
 	case VENTURA_SERIES:
 	case THUNDERBOLT_SERIES:
 	case INVADER_SERIES:
 		if (megasas_alloc_fusion_context(instance))
-			return -ENOMEM;
+			goto fail;
 		break;
 	}
 
 	return 0;
+ fail:
+	kfree(instance->reply_map);
+	instance->reply_map = NULL;
+	return -ENOMEM;
 }
 
 /*
@@ -6148,6 +6173,7 @@ static int megasas_alloc_ctrl_mem(struct megasas_instance *instance)
  */
 static inline void megasas_free_ctrl_mem(struct megasas_instance *instance)
 {
+	kfree(instance->reply_map);
 	if (instance->adapter_type == MFI_SERIES) {
 		if (instance->producer)
 			pci_free_consistent(instance->pdev, sizeof(u32),
@@ -6540,7 +6566,6 @@ fail_io_attach:
 		pci_free_irq_vectors(instance->pdev);
 fail_init_mfi:
 	scsi_host_put(host);
-
 fail_alloc_instance:
 	pci_disable_device(pdev);
 
@@ -6745,6 +6770,8 @@ megasas_resume(struct pci_dev *pdev)
 				     instance->msix_vectors : 1, irq_flags);
 	if (rval < 0)
 		goto fail_reenable_msix;
+
+	megasas_setup_reply_map(instance);
 
 	if (instance->adapter_type != MFI_SERIES) {
 		megasas_reset_reply_desc(instance);

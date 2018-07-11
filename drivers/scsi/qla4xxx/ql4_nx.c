@@ -45,6 +45,8 @@ qla4_8xxx_pci_base_offsetfset(struct scsi_qla_host *ha, unsigned long off)
 	return NULL;
 }
 
+static const int MD_MIU_TEST_AGT_RDDATA[] = { 0x410000A8,
+				0x410000AC, 0x410000B8, 0x410000BC };
 #define MAX_CRB_XFORM 60
 static unsigned long crb_addr_xform[MAX_CRB_XFORM];
 static int qla4_8xxx_crb_table_initialized;
@@ -1075,7 +1077,7 @@ qla4_82xx_pinit_from_rom(struct scsi_qla_host *ha, int verbose)
 	ql4_printk(KERN_INFO, ha,
 		"%s: %d CRB init values found in ROM.\n", DRIVER_NAME, n);
 
-	buf = kmalloc(n * sizeof(struct crb_addr_pair), GFP_KERNEL);
+	buf = kmalloc_array(n, sizeof(struct crb_addr_pair), GFP_KERNEL);
 	if (buf == NULL) {
 		ql4_printk(KERN_WARNING, ha,
 		    "%s: [ERROR] Unable to malloc memory.\n", DRIVER_NAME);

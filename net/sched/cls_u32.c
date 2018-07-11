@@ -68,10 +68,7 @@ struct tc_u_knode {
 	u32 __percpu		*pcpu_success;
 #endif
 	struct tcf_proto	*tp;
-	union {
-		struct work_struct	work;
-		struct rcu_head		rcu;
-	};
+	struct rcu_work		rwork;
 	/* The 'sel' field MUST be the last field in structure to allow for
 	 * tc_u32_keys allocated at end of structure.
 	 */
@@ -96,7 +93,7 @@ struct tc_u_hnode {
 
 struct tc_u_common {
 	struct tc_u_hnode __rcu	*hlist;
-	struct tcf_block	*block;
+	void			*ptr;
 	int			refcnt;
 	struct idr		handle_idr;
 	struct hlist_node	hnode;
@@ -330,9 +327,25 @@ static struct hlist_head *tc_u_common_hash;
 #define U32_HASH_SHIFT 10
 #define U32_HASH_SIZE (1 << U32_HASH_SHIFT)
 
+static void *tc_u_common_ptr(const struct tcf_proto *tp)
+{
+	struct tcf_block *block = tp->chain->block;
+
+	/* The block sharing is currently supported only
+	 * for classless qdiscs. In that case we use block
+	 * for tc_u_common identification. In case the
+	 * block is not shared, block->q is a valid pointer
+	 * and we can use that. That works for classful qdiscs.
+	 */
+	if (tcf_block_shared(block))
+		return block;
+	else
+		return block->q;
+}
+
 static unsigned int tc_u_hash(const struct tcf_proto *tp)
 {
-	return hash_ptr(tp->chain->block, U32_HASH_SHIFT);
+	return hash_ptr(tc_u_common_ptr(tp), U32_HASH_SHIFT);
 }
 
 static struct tc_u_common *tc_u_common_find(const struct tcf_proto *tp)
@@ -342,7 +355,7 @@ static struct tc_u_common *tc_u_common_find(const struct tcf_proto *tp)
 
 	h = tc_u_hash(tp);
 	hlist_for_each_entry(tc, &tc_u_common_hash[h], hnode) {
-		if (tc->block == tp->chain->block)
+		if (tc->ptr == tc_u_common_ptr(tp))
 			return tc;
 	}
 	return NULL;
@@ -371,7 +384,7 @@ static int u32_init(struct tcf_proto *tp)
 			kfree(root_ht);
 			return -ENOBUFS;
 		}
-		tp_c->block = tp->chain->block;
+		tp_c->ptr = tc_u_common_ptr(tp);
 		INIT_HLIST_NODE(&tp_c->hnode);
 		idr_init(&tp_c->handle_idr);
 
@@ -420,19 +433,12 @@ static int u32_destroy_key(struct tcf_proto *tp, struct tc_u_knode *n,
  */
 static void u32_delete_key_work(struct work_struct *work)
 {
-	struct tc_u_knode *key = container_of(work, struct tc_u_knode, work);
-
+	struct tc_u_knode *key = container_of(to_rcu_work(work),
+					      struct tc_u_knode,
+					      rwork);
 	rtnl_lock();
 	u32_destroy_key(key->tp, key, false);
 	rtnl_unlock();
-}
-
-static void u32_delete_key_rcu(struct rcu_head *rcu)
-{
-	struct tc_u_knode *key = container_of(rcu, struct tc_u_knode, rcu);
-
-	INIT_WORK(&key->work, u32_delete_key_work);
-	tcf_queue_work(&key->work);
 }
 
 /* u32_delete_key_freepf_rcu is the rcu callback variant
@@ -444,19 +450,12 @@ static void u32_delete_key_rcu(struct rcu_head *rcu)
  */
 static void u32_delete_key_freepf_work(struct work_struct *work)
 {
-	struct tc_u_knode *key = container_of(work, struct tc_u_knode, work);
-
+	struct tc_u_knode *key = container_of(to_rcu_work(work),
+					      struct tc_u_knode,
+					      rwork);
 	rtnl_lock();
 	u32_destroy_key(key->tp, key, true);
 	rtnl_unlock();
-}
-
-static void u32_delete_key_freepf_rcu(struct rcu_head *rcu)
-{
-	struct tc_u_knode *key = container_of(rcu, struct tc_u_knode, rcu);
-
-	INIT_WORK(&key->work, u32_delete_key_freepf_work);
-	tcf_queue_work(&key->work);
 }
 
 static int u32_delete_key(struct tcf_proto *tp, struct tc_u_knode *key)
@@ -473,8 +472,9 @@ static int u32_delete_key(struct tcf_proto *tp, struct tc_u_knode *key)
 				RCU_INIT_POINTER(*kp, key->next);
 
 				tcf_unbind_filter(tp, &key->res);
+				idr_remove(&ht->handle_idr, key->handle);
 				tcf_exts_get_net(&key->exts);
-				call_rcu(&key->rcu, u32_delete_key_freepf_rcu);
+				tcf_queue_work(&key->rwork, u32_delete_key_freepf_work);
 				return 0;
 			}
 		}
@@ -594,7 +594,7 @@ static void u32_clear_hnode(struct tcf_proto *tp, struct tc_u_hnode *ht,
 			u32_remove_hw_knode(tp, n, extack);
 			idr_remove(&ht->handle_idr, n->handle);
 			if (tcf_exts_get_net(&n->exts))
-				call_rcu(&n->rcu, u32_delete_key_freepf_rcu);
+				tcf_queue_work(&n->rwork, u32_delete_key_freepf_work);
 			else
 				u32_destroy_key(n->tp, n, true);
 		}
@@ -978,7 +978,7 @@ static int u32_change(struct net *net, struct sk_buff *in_skb,
 		u32_replace_knode(tp, tp_c, new);
 		tcf_unbind_filter(tp, &n->res);
 		tcf_exts_get_net(&n->exts);
-		call_rcu(&n->rcu, u32_delete_key_rcu);
+		tcf_queue_work(&n->rwork, u32_delete_key_work);
 		return 0;
 	}
 

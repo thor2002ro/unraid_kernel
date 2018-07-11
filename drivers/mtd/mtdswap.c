@@ -536,18 +536,10 @@ static void mtdswap_store_eb(struct mtdswap_dev *d, struct swap_eb *eb)
 		mtdswap_rb_add(d, eb, MTDSWAP_HIFRAG);
 }
 
-
-static void mtdswap_erase_callback(struct erase_info *done)
-{
-	wait_queue_head_t *wait_q = (wait_queue_head_t *)done->priv;
-	wake_up(wait_q);
-}
-
 static int mtdswap_erase_block(struct mtdswap_dev *d, struct swap_eb *eb)
 {
 	struct mtd_info *mtd = d->mtd;
 	struct erase_info erase;
-	wait_queue_head_t wq;
 	unsigned int retries = 0;
 	int ret;
 
@@ -556,14 +548,9 @@ static int mtdswap_erase_block(struct mtdswap_dev *d, struct swap_eb *eb)
 		d->max_erase_count = eb->erase_count;
 
 retry:
-	init_waitqueue_head(&wq);
 	memset(&erase, 0, sizeof(struct erase_info));
-
-	erase.mtd	= mtd;
-	erase.callback	= mtdswap_erase_callback;
 	erase.addr	= mtdswap_eb_offset(d, eb);
 	erase.len	= mtd->erasesize;
-	erase.priv	= (u_long)&wq;
 
 	ret = mtd_erase(mtd, &erase);
 	if (ret) {
@@ -577,27 +564,6 @@ retry:
 
 		dev_err(d->dev, "Cannot erase erase block %#llx on %s\n",
 			erase.addr, mtd->name);
-
-		mtdswap_handle_badblock(d, eb);
-		return -EIO;
-	}
-
-	ret = wait_event_interruptible(wq, erase.state == MTD_ERASE_DONE ||
-					   erase.state == MTD_ERASE_FAILED);
-	if (ret) {
-		dev_err(d->dev, "Interrupted erase block %#llx erasure on %s\n",
-			erase.addr, mtd->name);
-		return -EINTR;
-	}
-
-	if (erase.state == MTD_ERASE_FAILED) {
-		if (retries++ < MTDSWAP_ERASE_RETRIES) {
-			dev_warn(d->dev,
-				"erase of erase block %#llx on %s failed",
-				erase.addr, mtd->name);
-			yield();
-			goto retry;
-		}
 
 		mtdswap_handle_badblock(d, eb);
 		return -EIO;
@@ -1351,11 +1317,11 @@ static int mtdswap_init(struct mtdswap_dev *d, unsigned int eblocks,
 	for (i = 0; i < MTDSWAP_TREE_CNT; i++)
 		d->trees[i].root = RB_ROOT;
 
-	d->page_data = vmalloc(sizeof(int)*pages);
+	d->page_data = vmalloc(array_size(pages, sizeof(int)));
 	if (!d->page_data)
 		goto page_data_fail;
 
-	d->revmap = vmalloc(sizeof(int)*blocks);
+	d->revmap = vmalloc(array_size(blocks, sizeof(int)));
 	if (!d->revmap)
 		goto revmap_fail;
 
@@ -1374,7 +1340,7 @@ static int mtdswap_init(struct mtdswap_dev *d, unsigned int eblocks,
 	if (!d->page_buf)
 		goto page_buf_fail;
 
-	d->oob_buf = kmalloc(2 * mtd->oobavail, GFP_KERNEL);
+	d->oob_buf = kmalloc_array(2, mtd->oobavail, GFP_KERNEL);
 	if (!d->oob_buf)
 		goto oob_buf_fail;
 

@@ -60,25 +60,6 @@
 /* Max physical address bit as per radix table */
 #define _RPAGE_PA_MAX		57
 
-#ifdef CONFIG_PPC_MEM_KEYS
-#ifdef CONFIG_PPC_64K_PAGES
-#define H_PTE_PKEY_BIT0	_RPAGE_RSV1
-#define H_PTE_PKEY_BIT1	_RPAGE_RSV2
-#else /* CONFIG_PPC_64K_PAGES */
-#define H_PTE_PKEY_BIT0	0 /* _RPAGE_RSV1 is not available */
-#define H_PTE_PKEY_BIT1	0 /* _RPAGE_RSV2 is not available */
-#endif /* CONFIG_PPC_64K_PAGES */
-#define H_PTE_PKEY_BIT2	_RPAGE_RSV3
-#define H_PTE_PKEY_BIT3	_RPAGE_RSV4
-#define H_PTE_PKEY_BIT4	_RPAGE_RSV5
-#else /*  CONFIG_PPC_MEM_KEYS */
-#define H_PTE_PKEY_BIT0	0
-#define H_PTE_PKEY_BIT1	0
-#define H_PTE_PKEY_BIT2	0
-#define H_PTE_PKEY_BIT3	0
-#define H_PTE_PKEY_BIT4	0
-#endif /*  CONFIG_PPC_MEM_KEYS */
-
 /*
  * Max physical address bit we will use for now.
  *
@@ -231,12 +212,14 @@ extern unsigned long __pte_index_size;
 extern unsigned long __pmd_index_size;
 extern unsigned long __pud_index_size;
 extern unsigned long __pgd_index_size;
-extern unsigned long __pmd_cache_index;
+extern unsigned long __pud_cache_index;
 #define PTE_INDEX_SIZE  __pte_index_size
 #define PMD_INDEX_SIZE  __pmd_index_size
 #define PUD_INDEX_SIZE  __pud_index_size
 #define PGD_INDEX_SIZE  __pgd_index_size
-#define PMD_CACHE_INDEX __pmd_cache_index
+/* pmd table use page table fragments */
+#define PMD_CACHE_INDEX  0
+#define PUD_CACHE_INDEX __pud_cache_index
 /*
  * Because of use of pte fragments and THP, size of page table
  * are not always derived out of index size above.
@@ -262,6 +245,12 @@ extern unsigned long __pte_frag_nr;
 extern unsigned long __pte_frag_size_shift;
 #define PTE_FRAG_SIZE_SHIFT __pte_frag_size_shift
 #define PTE_FRAG_SIZE (1UL << PTE_FRAG_SIZE_SHIFT)
+
+extern unsigned long __pmd_frag_nr;
+#define PMD_FRAG_NR __pmd_frag_nr
+extern unsigned long __pmd_frag_size_shift;
+#define PMD_FRAG_SIZE_SHIFT __pmd_frag_size_shift
+#define PMD_FRAG_SIZE (1UL << PMD_FRAG_SIZE_SHIFT)
 
 #define PTRS_PER_PTE	(1 << PTE_INDEX_SIZE)
 #define PTRS_PER_PMD	(1 << PMD_INDEX_SIZE)
@@ -289,6 +278,21 @@ extern unsigned long __pte_frag_size_shift;
 #define PUD_MASKED_BITS		0xc0000000000000ffUL
 /* Bits to mask out from a PGD to get to the PUD page */
 #define PGD_MASKED_BITS		0xc0000000000000ffUL
+
+/*
+ * Used as an indicator for rcu callback functions
+ */
+enum pgtable_index {
+	PTE_INDEX = 0,
+	PMD_INDEX,
+	PUD_INDEX,
+	PGD_INDEX,
+	/*
+	 * Below are used with 4k page size and hugetlb
+	 */
+	HTLB_16M_INDEX,
+	HTLB_16G_INDEX,
+};
 
 extern unsigned long __vmalloc_start;
 extern unsigned long __vmalloc_end;
@@ -336,9 +340,6 @@ extern unsigned long pci_io_base;
 /* Advertise special mapping type for AGP */
 #define HAVE_PAGE_AGP
 
-/* Advertise support for _PAGE_SPECIAL */
-#define __HAVE_ARCH_PTE_SPECIAL
-
 #ifndef __ASSEMBLY__
 
 /*
@@ -348,7 +349,7 @@ extern unsigned long pci_io_base;
  */
 #ifndef __real_pte
 
-#define __real_pte(e,p)		((real_pte_t){(e)})
+#define __real_pte(e, p, o)		((real_pte_t){(e)})
 #define __rpte_to_pte(r)	((r).pte)
 #define __rpte_to_hidx(r,index)	(pte_val(__rpte_to_pte(r)) >> H_PAGE_F_GIX_SHIFT)
 
@@ -768,12 +769,14 @@ static inline bool check_pte_access(unsigned long access, unsigned long ptev)
  * Generic functions with hash/radix callbacks
  */
 
-static inline void __ptep_set_access_flags(struct mm_struct *mm,
+static inline void __ptep_set_access_flags(struct vm_area_struct *vma,
 					   pte_t *ptep, pte_t entry,
-					   unsigned long address)
+					   unsigned long address,
+					   int psize)
 {
 	if (radix_enabled())
-		return radix__ptep_set_access_flags(mm, ptep, entry, address);
+		return radix__ptep_set_access_flags(vma, ptep, entry,
+						    address, psize);
 	return hash__ptep_set_access_flags(ptep, entry);
 }
 

@@ -26,14 +26,20 @@
 #include "dm_services.h"
 
 #include "ObjectID.h"
-#include "atomfirmware.h"
 
+#include "atomfirmware.h"
+#include "atom.h"
 #include "include/bios_parser_interface.h"
 
 #include "command_table2.h"
 #include "command_table_helper2.h"
 #include "bios_parser_helper.h"
 #include "bios_parser_types_internal2.h"
+#include "amdgpu.h"
+
+
+#define DC_LOGGER \
+	bp->base.ctx->logger
 
 #define GET_INDEX_INTO_MASTER_TABLE(MasterOrData, FieldName)\
 	(((char *)(&((\
@@ -41,16 +47,16 @@
 		->FieldName)-(char *)0)/sizeof(uint16_t))
 
 #define EXEC_BIOS_CMD_TABLE(fname, params)\
-	(cgs_atom_exec_cmd_table(bp->base.ctx->cgs_device, \
+	(amdgpu_atom_execute_table(((struct amdgpu_device *)bp->base.ctx->driver_context)->mode_info.atom_context, \
 		GET_INDEX_INTO_MASTER_TABLE(command, fname), \
-		&params) == 0)
+		(uint32_t *)&params) == 0)
 
 #define BIOS_CMD_TABLE_REVISION(fname, frev, crev)\
-	cgs_atom_get_cmd_table_revs(bp->base.ctx->cgs_device, \
+	amdgpu_atom_parse_cmd_header(((struct amdgpu_device *)bp->base.ctx->driver_context)->mode_info.atom_context, \
 		GET_INDEX_INTO_MASTER_TABLE(command, fname), &frev, &crev)
 
 #define BIOS_CMD_TABLE_PARA_REVISION(fname)\
-	bios_cmd_table_para_revision(bp->base.ctx->cgs_device, \
+	bios_cmd_table_para_revision(bp->base.ctx->driver_context, \
 			GET_INDEX_INTO_MASTER_TABLE(command, fname))
 
 static void init_dig_encoder_control(struct bios_parser *bp);
@@ -84,16 +90,18 @@ void dal_firmware_parser_init_cmd_tbl(struct bios_parser *bp)
 	init_get_smu_clock_info(bp);
 }
 
-static uint32_t bios_cmd_table_para_revision(void *cgs_device,
+static uint32_t bios_cmd_table_para_revision(void *dev,
 					     uint32_t index)
 {
+	struct amdgpu_device *adev = dev;
 	uint8_t frev, crev;
 
-	if (cgs_atom_get_cmd_table_revs(cgs_device,
+	if (amdgpu_atom_parse_cmd_header(adev->mode_info.atom_context,
 					index,
-					&frev, &crev) != 0)
+					&frev, &crev))
+		return crev;
+	else
 		return 0;
-	return crev;
 }
 
 /******************************************************************************
@@ -199,7 +207,7 @@ static void init_transmitter_control(struct bios_parser *bp)
 	uint8_t frev;
 	uint8_t crev;
 
-	if (BIOS_CMD_TABLE_REVISION(dig1transmittercontrol, frev, crev) != 0)
+	if (BIOS_CMD_TABLE_REVISION(dig1transmittercontrol, frev, crev) == false)
 		BREAK_TO_DEBUGGER();
 	switch (crev) {
 	case 6:
@@ -239,8 +247,7 @@ static enum bp_result transmitter_control_v1_6(
 	if (cntl->action == TRANSMITTER_CONTROL_ENABLE ||
 		cntl->action == TRANSMITTER_CONTROL_ACTIAVATE ||
 		cntl->action == TRANSMITTER_CONTROL_DEACTIVATE) {
-		dm_logger_write(bp->base.ctx->logger, LOG_BIOS,\
-		"%s:ps.param.symclk_10khz = %d\n",\
+		DC_LOG_BIOS("%s:ps.param.symclk_10khz = %d\n",\
 		__func__, ps.param.symclk_10khz);
 	}
 
@@ -331,8 +338,7 @@ static enum bp_result set_pixel_clock_v7(
 			(uint8_t) bp->cmd_helper->
 				transmitter_color_depth_to_atom(
 					bp_params->color_depth);
-		dm_logger_write(bp->base.ctx->logger, LOG_BIOS,\
-				"%s:program display clock = %d"\
+		DC_LOG_BIOS("%s:program display clock = %d"\
 				"colorDepth = %d\n", __func__,\
 				bp_params->target_pixel_clock, bp_params->color_depth);
 
@@ -772,8 +778,7 @@ static enum bp_result set_dce_clock_v2_1(
 		 */
 		params.param.dceclk_10khz = cpu_to_le32(
 				bp_params->target_clock_frequency / 10);
-	dm_logger_write(bp->base.ctx->logger, LOG_BIOS,
-			"%s:target_clock_frequency = %d"\
+	DC_LOG_BIOS("%s:target_clock_frequency = %d"\
 			"clock_type = %d \n", __func__,\
 			bp_params->target_clock_frequency,\
 			bp_params->clock_type);
@@ -797,7 +802,7 @@ static enum bp_result set_dce_clock_v2_1(
  ******************************************************************************
  *****************************************************************************/
 
-static unsigned int get_smu_clock_info_v3_1(struct bios_parser *bp);
+static unsigned int get_smu_clock_info_v3_1(struct bios_parser *bp, uint8_t id);
 
 static void init_get_smu_clock_info(struct bios_parser *bp)
 {
@@ -806,12 +811,13 @@ static void init_get_smu_clock_info(struct bios_parser *bp)
 
 }
 
-static unsigned int get_smu_clock_info_v3_1(struct bios_parser *bp)
+static unsigned int get_smu_clock_info_v3_1(struct bios_parser *bp, uint8_t id)
 {
 	struct atom_get_smu_clock_info_parameters_v3_1 smu_input = {0};
 	struct atom_get_smu_clock_info_output_parameters_v3_1 smu_output;
 
 	smu_input.command = GET_SMU_CLOCK_INFO_V3_1_GET_PLLVCO_FREQ;
+	smu_input.syspll_id = id;
 
 	/* Get Specific Clock */
 	if (EXEC_BIOS_CMD_TABLE(getsmuclockinfo, smu_input)) {

@@ -51,6 +51,9 @@
 #include "dce/dce_10_0_d.h"
 #include "dce/dce_10_0_sh_mask.h"
 
+#include "dce/dce_dmcu.h"
+#include "dce/dce_abm.h"
+
 #ifndef mmMC_HUB_RDREQ_DMIF_LIMIT
 #include "gmc/gmc_8_2_d.h"
 #include "gmc/gmc_8_2_sh_mask.h"
@@ -320,7 +323,29 @@ static const struct dce110_clk_src_mask cs_mask = {
 		CS_COMMON_MASK_SH_LIST_DCE_COMMON_BASE(_MASK)
 };
 
+static const struct dce_dmcu_registers dmcu_regs = {
+		DMCU_DCE110_COMMON_REG_LIST()
+};
 
+static const struct dce_dmcu_shift dmcu_shift = {
+		DMCU_MASK_SH_LIST_DCE110(__SHIFT)
+};
+
+static const struct dce_dmcu_mask dmcu_mask = {
+		DMCU_MASK_SH_LIST_DCE110(_MASK)
+};
+
+static const struct dce_abm_registers abm_regs = {
+		ABM_DCE110_COMMON_REG_LIST()
+};
+
+static const struct dce_abm_shift abm_shift = {
+		ABM_MASK_SH_LIST_DCE110(__SHIFT)
+};
+
+static const struct dce_abm_mask abm_mask = {
+		ABM_MASK_SH_LIST_DCE110(_MASK)
+};
 
 #define DCFE_MEM_PWR_CTRL_REG_BASE 0x1b03
 
@@ -622,6 +647,12 @@ static void destruct(struct dce110_resource_pool *pool)
 	if (pool->base.display_clock != NULL)
 		dce_disp_clk_destroy(&pool->base.display_clock);
 
+	if (pool->base.abm != NULL)
+				dce_abm_destroy(&pool->base.abm);
+
+	if (pool->base.dmcu != NULL)
+			dce_dmcu_destroy(&pool->base.dmcu);
+
 	if (pool->base.irqs != NULL)
 		dal_irq_service_destroy(&pool->base.irqs);
 }
@@ -702,38 +733,6 @@ enum dc_status dce100_add_stream_to_ctx(
 	return result;
 }
 
-enum dc_status dce100_validate_guaranteed(
-		struct dc  *dc,
-		struct dc_stream_state *dc_stream,
-		struct dc_state *context)
-{
-	enum dc_status result = DC_ERROR_UNEXPECTED;
-
-	context->streams[0] = dc_stream;
-	dc_stream_retain(context->streams[0]);
-	context->stream_count++;
-
-	result = resource_map_pool_resources(dc, context, dc_stream);
-
-	if (result == DC_OK)
-		result = resource_map_clock_resources(dc, context, dc_stream);
-
-	if (result == DC_OK)
-		result = build_mapped_resource(dc, context, dc_stream);
-
-	if (result == DC_OK) {
-		validate_guaranteed_copy_streams(
-				context, dc->caps.max_streams);
-		result = resource_build_scaling_params_for_context(dc, context);
-	}
-
-	if (result == DC_OK)
-		if (!dce100_validate_bandwidth(dc, context))
-			result = DC_FAIL_BANDWIDTH_VALIDATE;
-
-	return result;
-}
-
 static void dce100_destroy_resource_pool(struct resource_pool **pool)
 {
 	struct dce110_resource_pool *dce110_pool = TO_DCE110_RES_POOL(*pool);
@@ -755,7 +754,6 @@ enum dc_status dce100_validate_plane(const struct dc_plane_state *plane_state, s
 static const struct resource_funcs dce100_res_pool_funcs = {
 	.destroy = dce100_destroy_resource_pool,
 	.link_enc_create = dce100_link_encoder_create,
-	.validate_guaranteed = dce100_validate_guaranteed,
 	.validate_bandwidth = dce100_validate_bandwidth,
 	.validate_plane = dce100_validate_plane,
 	.add_stream_to_ctx = dce100_add_stream_to_ctx,
@@ -829,6 +827,25 @@ static bool construct(
 		goto res_create_fail;
 	}
 
+	pool->base.dmcu = dce_dmcu_create(ctx,
+			&dmcu_regs,
+			&dmcu_shift,
+			&dmcu_mask);
+	if (pool->base.dmcu == NULL) {
+		dm_error("DC: failed to create dmcu!\n");
+		BREAK_TO_DEBUGGER();
+		goto res_create_fail;
+	}
+
+	pool->base.abm = dce_abm_create(ctx,
+				&abm_regs,
+				&abm_shift,
+				&abm_mask);
+	if (pool->base.abm == NULL) {
+		dm_error("DC: failed to create abm!\n");
+		BREAK_TO_DEBUGGER();
+		goto res_create_fail;
+	}
 
 	/* get static clock information for PPLIB or firmware, save
 	 * max_clock_state
@@ -849,9 +866,11 @@ static bool construct(
 	*************************************************/
 	pool->base.underlay_pipe_index = NO_UNDERLAY_PIPE;
 	pool->base.pipe_count = res_cap.num_timing_generator;
+	pool->base.timing_generator_count = pool->base.res_cap->num_timing_generator;
 	dc->caps.max_downscale_ratio = 200;
 	dc->caps.i2c_speed_in_khz = 40;
 	dc->caps.max_cursor_size = 128;
+	dc->caps.dual_link_dvi = true;
 
 	for (i = 0; i < pool->base.pipe_count; i++) {
 		pool->base.timing_generators[i] =

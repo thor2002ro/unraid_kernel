@@ -1,19 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2007 Oracle.  All rights reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public
- * License v2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public
- * License along with this program; if not, write to the
- * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 021110-1307, USA.
  */
 
 #include <linux/sched.h>
@@ -223,10 +210,40 @@ static struct attribute *btrfs_supported_feature_attrs[] = {
 	NULL
 };
 
+/*
+ * Features which depend on feature bits and may differ between each fs.
+ *
+ * /sys/fs/btrfs/features lists all available features of this kernel while
+ * /sys/fs/btrfs/UUID/features shows features of the fs which are enabled or
+ * can be changed online.
+ */
 static const struct attribute_group btrfs_feature_attr_group = {
 	.name = "features",
 	.is_visible = btrfs_feature_visible,
 	.attrs = btrfs_supported_feature_attrs,
+};
+
+static ssize_t rmdir_subvol_show(struct kobject *kobj,
+				 struct kobj_attribute *ka, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "0\n");
+}
+BTRFS_ATTR(static_feature, rmdir_subvol, rmdir_subvol_show);
+
+static struct attribute *btrfs_supported_static_feature_attrs[] = {
+	BTRFS_ATTR_PTR(static_feature, rmdir_subvol),
+	NULL
+};
+
+/*
+ * Features which only depend on kernel version.
+ *
+ * These are listed in /sys/fs/btrfs/features along with
+ * btrfs_feature_attr_group
+ */
+static const struct attribute_group btrfs_static_feature_attr_group = {
+	.name = "features",
+	.attrs = btrfs_supported_static_feature_attrs,
 };
 
 static ssize_t btrfs_show_u64(u64 *value_ptr, spinlock_t *lock, char *buf)
@@ -272,7 +289,7 @@ static ssize_t raid_bytes_show(struct kobject *kobj,
 {
 	struct btrfs_space_info *sinfo = to_space_info(kobj->parent);
 	struct btrfs_block_group_cache *block_group;
-	int index = to_raid_kobj(kobj)->raid_type;
+	int index = btrfs_bg_flags_to_raid_index(to_raid_kobj(kobj)->flags);
 	u64 val = 0;
 
 	down_read(&sinfo->groups_sem);
@@ -527,10 +544,11 @@ static inline struct btrfs_fs_info *to_fs_info(struct kobject *kobj)
 }
 
 #define NUM_FEATURE_BITS 64
-static char btrfs_unknown_feature_names[3][NUM_FEATURE_BITS][13];
-static struct btrfs_feature_attr btrfs_feature_attrs[3][NUM_FEATURE_BITS];
+#define BTRFS_FEATURE_NAME_MAX 13
+static char btrfs_unknown_feature_names[FEAT_MAX][NUM_FEATURE_BITS][BTRFS_FEATURE_NAME_MAX];
+static struct btrfs_feature_attr btrfs_feature_attrs[FEAT_MAX][NUM_FEATURE_BITS];
 
-static const u64 supported_feature_masks[3] = {
+static const u64 supported_feature_masks[FEAT_MAX] = {
 	[FEAT_COMPAT]    = BTRFS_FEATURE_COMPAT_SUPP,
 	[FEAT_COMPAT_RO] = BTRFS_FEATURE_COMPAT_RO_SUPP,
 	[FEAT_INCOMPAT]  = BTRFS_FEATURE_INCOMPAT_SUPP,
@@ -602,7 +620,7 @@ void btrfs_sysfs_remove_fsid(struct btrfs_fs_devices *fs_devs)
 		return;
 	}
 
-	list_for_each_entry(fs_devs, fs_uuids, list) {
+	list_for_each_entry(fs_devs, fs_uuids, fs_list) {
 		__btrfs_sysfs_remove_fsid(fs_devs);
 	}
 }
@@ -622,7 +640,7 @@ void btrfs_sysfs_remove_mounted(struct btrfs_fs_info *fs_info)
 	btrfs_sysfs_rm_device_link(fs_info->fs_devices, NULL);
 }
 
-const char * const btrfs_feature_set_names[3] = {
+const char * const btrfs_feature_set_names[FEAT_MAX] = {
 	[FEAT_COMPAT]	 = "compat",
 	[FEAT_COMPAT_RO] = "compat_ro",
 	[FEAT_INCOMPAT]	 = "incompat",
@@ -686,7 +704,7 @@ static void init_feature_attrs(void)
 			if (fa->kobj_attr.attr.name)
 				continue;
 
-			snprintf(name, 13, "%s:%u",
+			snprintf(name, BTRFS_FEATURE_NAME_MAX, "%s:%u",
 				 btrfs_feature_set_names[set], i);
 
 			fa->kobj_attr.attr.name = name;
@@ -913,8 +931,15 @@ int __init btrfs_init_sysfs(void)
 	ret = sysfs_create_group(&btrfs_kset->kobj, &btrfs_feature_attr_group);
 	if (ret)
 		goto out2;
+	ret = sysfs_merge_group(&btrfs_kset->kobj,
+				&btrfs_static_feature_attr_group);
+	if (ret)
+		goto out_remove_group;
 
 	return 0;
+
+out_remove_group:
+	sysfs_remove_group(&btrfs_kset->kobj, &btrfs_feature_attr_group);
 out2:
 	debugfs_remove_recursive(btrfs_debugfs_root_dentry);
 out1:
@@ -923,8 +948,10 @@ out1:
 	return ret;
 }
 
-void btrfs_exit_sysfs(void)
+void __cold btrfs_exit_sysfs(void)
 {
+	sysfs_unmerge_group(&btrfs_kset->kobj,
+			    &btrfs_static_feature_attr_group);
 	sysfs_remove_group(&btrfs_kset->kobj, &btrfs_feature_attr_group);
 	kset_unregister(btrfs_kset);
 	debugfs_remove_recursive(btrfs_debugfs_root_dentry);

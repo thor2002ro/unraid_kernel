@@ -55,6 +55,7 @@ static void qedi_free_global_queues(struct qedi_ctx *qedi);
 static struct qedi_cmd *qedi_get_cmd_from_tid(struct qedi_ctx *qedi, u32 tid);
 static void qedi_reset_uio_rings(struct qedi_uio_dev *udev);
 static void qedi_ll2_free_skbs(struct qedi_ctx *qedi);
+static struct nvm_iscsi_block *qedi_get_nvram_block(struct qedi_ctx *qedi);
 
 static int qedi_iscsi_event_cb(void *context, u8 fw_event_code, void *fw_handle)
 {
@@ -523,7 +524,7 @@ static int qedi_init_id_tbl(struct qedi_portid_tbl *id_tbl, u16 size,
 	id_tbl->max = size;
 	id_tbl->next = next;
 	spin_lock_init(&id_tbl->lock);
-	id_tbl->table = kzalloc(DIV_ROUND_UP(size, 32) * 4, GFP_KERNEL);
+	id_tbl->table = kcalloc(DIV_ROUND_UP(size, 32), 4, GFP_KERNEL);
 	if (!id_tbl->table)
 		return -ENOMEM;
 
@@ -879,6 +880,201 @@ static void qedi_free_iscsi_pf_param(struct qedi_ctx *qedi)
 	kfree(qedi->global_queues);
 }
 
+static void qedi_get_boot_tgt_info(struct nvm_iscsi_block *block,
+				   struct qedi_boot_target *tgt, u8 index)
+{
+	u32 ipv6_en;
+
+	ipv6_en = !!(block->generic.ctrl_flags &
+		     NVM_ISCSI_CFG_GEN_IPV6_ENABLED);
+
+	snprintf(tgt->iscsi_name, NVM_ISCSI_CFG_ISCSI_NAME_MAX_LEN, "%s\n",
+		 block->target[index].target_name.byte);
+
+	tgt->ipv6_en = ipv6_en;
+
+	if (ipv6_en)
+		snprintf(tgt->ip_addr, IPV6_LEN, "%pI6\n",
+			 block->target[index].ipv6_addr.byte);
+	else
+		snprintf(tgt->ip_addr, IPV4_LEN, "%pI4\n",
+			 block->target[index].ipv4_addr.byte);
+}
+
+static int qedi_find_boot_info(struct qedi_ctx *qedi,
+			       struct qed_mfw_tlv_iscsi *iscsi,
+			       struct nvm_iscsi_block *block)
+{
+	struct qedi_boot_target *pri_tgt = NULL, *sec_tgt = NULL;
+	u32 pri_ctrl_flags = 0, sec_ctrl_flags = 0, found = 0;
+	struct iscsi_cls_session *cls_sess;
+	struct iscsi_cls_conn *cls_conn;
+	struct qedi_conn *qedi_conn;
+	struct iscsi_session *sess;
+	struct iscsi_conn *conn;
+	char ep_ip_addr[64];
+	int i, ret = 0;
+
+	pri_ctrl_flags = !!(block->target[0].ctrl_flags &
+					NVM_ISCSI_CFG_TARGET_ENABLED);
+	if (pri_ctrl_flags) {
+		pri_tgt = kzalloc(sizeof(*pri_tgt), GFP_KERNEL);
+		if (!pri_tgt)
+			return -1;
+		qedi_get_boot_tgt_info(block, pri_tgt, 0);
+	}
+
+	sec_ctrl_flags = !!(block->target[1].ctrl_flags &
+					NVM_ISCSI_CFG_TARGET_ENABLED);
+	if (sec_ctrl_flags) {
+		sec_tgt = kzalloc(sizeof(*sec_tgt), GFP_KERNEL);
+		if (!sec_tgt) {
+			ret = -1;
+			goto free_tgt;
+		}
+		qedi_get_boot_tgt_info(block, sec_tgt, 1);
+	}
+
+	for (i = 0; i < qedi->max_active_conns; i++) {
+		qedi_conn = qedi_get_conn_from_id(qedi, i);
+		if (!qedi_conn)
+			continue;
+
+		if (qedi_conn->ep->ip_type == TCP_IPV4)
+			snprintf(ep_ip_addr, IPV4_LEN, "%pI4\n",
+				 qedi_conn->ep->dst_addr);
+		else
+			snprintf(ep_ip_addr, IPV6_LEN, "%pI6\n",
+				 qedi_conn->ep->dst_addr);
+
+		cls_conn = qedi_conn->cls_conn;
+		conn = cls_conn->dd_data;
+		cls_sess = iscsi_conn_to_session(cls_conn);
+		sess = cls_sess->dd_data;
+
+		if (pri_ctrl_flags) {
+			if (!strcmp(pri_tgt->iscsi_name, sess->targetname) &&
+			    !strcmp(pri_tgt->ip_addr, ep_ip_addr)) {
+				found = 1;
+				break;
+			}
+		}
+
+		if (sec_ctrl_flags) {
+			if (!strcmp(sec_tgt->iscsi_name, sess->targetname) &&
+			    !strcmp(sec_tgt->ip_addr, ep_ip_addr)) {
+				found = 1;
+				break;
+			}
+		}
+	}
+
+	if (found) {
+		if (conn->hdrdgst_en) {
+			iscsi->header_digest_set = true;
+			iscsi->header_digest = 1;
+		}
+
+		if (conn->datadgst_en) {
+			iscsi->data_digest_set = true;
+			iscsi->data_digest = 1;
+		}
+		iscsi->boot_taget_portal_set = true;
+		iscsi->boot_taget_portal = sess->tpgt;
+
+	} else {
+		ret = -1;
+	}
+
+	if (sec_ctrl_flags)
+		kfree(sec_tgt);
+free_tgt:
+	if (pri_ctrl_flags)
+		kfree(pri_tgt);
+
+	return ret;
+}
+
+static void qedi_get_generic_tlv_data(void *dev, struct qed_generic_tlvs *data)
+{
+	struct qedi_ctx *qedi;
+
+	if (!dev) {
+		QEDI_INFO(NULL, QEDI_LOG_EVT,
+			  "dev is NULL so ignoring get_generic_tlv_data request.\n");
+		return;
+	}
+	qedi = (struct qedi_ctx *)dev;
+
+	memset(data, 0, sizeof(struct qed_generic_tlvs));
+	ether_addr_copy(data->mac[0], qedi->mac);
+}
+
+/*
+ * Protocol TLV handler
+ */
+static void qedi_get_protocol_tlv_data(void *dev, void *data)
+{
+	struct qed_mfw_tlv_iscsi *iscsi = data;
+	struct qed_iscsi_stats *fw_iscsi_stats;
+	struct nvm_iscsi_block *block = NULL;
+	u32 chap_en = 0, mchap_en = 0;
+	struct qedi_ctx *qedi = dev;
+	int rval = 0;
+
+	fw_iscsi_stats = kmalloc(sizeof(*fw_iscsi_stats), GFP_KERNEL);
+	if (!fw_iscsi_stats) {
+		QEDI_ERR(&qedi->dbg_ctx,
+			 "Could not allocate memory for fw_iscsi_stats.\n");
+		goto exit_get_data;
+	}
+
+	mutex_lock(&qedi->stats_lock);
+	/* Query firmware for offload stats */
+	qedi_ops->get_stats(qedi->cdev, fw_iscsi_stats);
+	mutex_unlock(&qedi->stats_lock);
+
+	iscsi->rx_frames_set = true;
+	iscsi->rx_frames = fw_iscsi_stats->iscsi_rx_packet_cnt;
+	iscsi->rx_bytes_set = true;
+	iscsi->rx_bytes = fw_iscsi_stats->iscsi_rx_bytes_cnt;
+	iscsi->tx_frames_set = true;
+	iscsi->tx_frames = fw_iscsi_stats->iscsi_tx_packet_cnt;
+	iscsi->tx_bytes_set = true;
+	iscsi->tx_bytes = fw_iscsi_stats->iscsi_tx_bytes_cnt;
+	iscsi->frame_size_set = true;
+	iscsi->frame_size = qedi->ll2_mtu;
+	block = qedi_get_nvram_block(qedi);
+	if (block) {
+		chap_en = !!(block->generic.ctrl_flags &
+			     NVM_ISCSI_CFG_GEN_CHAP_ENABLED);
+		mchap_en = !!(block->generic.ctrl_flags &
+			      NVM_ISCSI_CFG_GEN_CHAP_MUTUAL_ENABLED);
+
+		iscsi->auth_method_set = (chap_en || mchap_en) ? true : false;
+		iscsi->auth_method = 1;
+		if (chap_en)
+			iscsi->auth_method = 2;
+		if (mchap_en)
+			iscsi->auth_method = 3;
+
+		iscsi->tx_desc_size_set = true;
+		iscsi->tx_desc_size = QEDI_SQ_SIZE;
+		iscsi->rx_desc_size_set = true;
+		iscsi->rx_desc_size = QEDI_CQ_SIZE;
+
+		/* tpgt, hdr digest, data digest */
+		rval = qedi_find_boot_info(qedi, iscsi, block);
+		if (rval)
+			QEDI_INFO(&qedi->dbg_ctx, QEDI_LOG_INFO,
+				  "Boot target not set");
+	}
+
+	kfree(fw_iscsi_stats);
+exit_get_data:
+	return;
+}
+
 static void qedi_link_update(void *dev, struct qed_link_output *link)
 {
 	struct qedi_ctx *qedi = (struct qedi_ctx *)dev;
@@ -896,6 +1092,8 @@ static void qedi_link_update(void *dev, struct qed_link_output *link)
 static struct qed_iscsi_cb_ops qedi_cb_ops = {
 	{
 		.link_update =		qedi_link_update,
+		.get_protocol_tlv_data = qedi_get_protocol_tlv_data,
+		.get_generic_tlv_data = qedi_get_generic_tlv_data,
 	}
 };
 
@@ -1724,7 +1922,6 @@ static ssize_t qedi_show_boot_eth_info(void *data, int type, char *buf)
 {
 	struct qedi_ctx *qedi = data;
 	struct nvm_iscsi_initiator *initiator;
-	char *str = buf;
 	int rc = 1;
 	u32 ipv6_en, dhcp_en, ip_len;
 	struct nvm_iscsi_block *block;
@@ -1758,32 +1955,32 @@ static ssize_t qedi_show_boot_eth_info(void *data, int type, char *buf)
 
 	switch (type) {
 	case ISCSI_BOOT_ETH_IP_ADDR:
-		rc = snprintf(str, ip_len, fmt, ip);
+		rc = snprintf(buf, ip_len, fmt, ip);
 		break;
 	case ISCSI_BOOT_ETH_SUBNET_MASK:
-		rc = snprintf(str, ip_len, fmt, sub);
+		rc = snprintf(buf, ip_len, fmt, sub);
 		break;
 	case ISCSI_BOOT_ETH_GATEWAY:
-		rc = snprintf(str, ip_len, fmt, gw);
+		rc = snprintf(buf, ip_len, fmt, gw);
 		break;
 	case ISCSI_BOOT_ETH_FLAGS:
-		rc = snprintf(str, 3, "%hhd\n",
+		rc = snprintf(buf, 3, "%hhd\n",
 			      SYSFS_FLAG_FW_SEL_BOOT);
 		break;
 	case ISCSI_BOOT_ETH_INDEX:
-		rc = snprintf(str, 3, "0\n");
+		rc = snprintf(buf, 3, "0\n");
 		break;
 	case ISCSI_BOOT_ETH_MAC:
-		rc = sysfs_format_mac(str, qedi->mac, ETH_ALEN);
+		rc = sysfs_format_mac(buf, qedi->mac, ETH_ALEN);
 		break;
 	case ISCSI_BOOT_ETH_VLAN:
-		rc = snprintf(str, 12, "%d\n",
+		rc = snprintf(buf, 12, "%d\n",
 			      GET_FIELD2(initiator->generic_cont0,
 					 NVM_ISCSI_CFG_INITIATOR_VLAN));
 		break;
 	case ISCSI_BOOT_ETH_ORIGIN:
 		if (dhcp_en)
-			rc = snprintf(str, 3, "3\n");
+			rc = snprintf(buf, 3, "3\n");
 		break;
 	default:
 		rc = 0;
@@ -1819,7 +2016,6 @@ static ssize_t qedi_show_boot_ini_info(void *data, int type, char *buf)
 {
 	struct qedi_ctx *qedi = data;
 	struct nvm_iscsi_initiator *initiator;
-	char *str = buf;
 	int rc;
 	struct nvm_iscsi_block *block;
 
@@ -1831,8 +2027,8 @@ static ssize_t qedi_show_boot_ini_info(void *data, int type, char *buf)
 
 	switch (type) {
 	case ISCSI_BOOT_INI_INITIATOR_NAME:
-		rc = snprintf(str, NVM_ISCSI_CFG_ISCSI_NAME_MAX_LEN, "%s\n",
-			      initiator->initiator_name.byte);
+		rc = sprintf(buf, "%.*s\n", NVM_ISCSI_CFG_ISCSI_NAME_MAX_LEN,
+			     initiator->initiator_name.byte);
 		break;
 	default:
 		rc = 0;
@@ -1860,7 +2056,6 @@ static ssize_t
 qedi_show_boot_tgt_info(struct qedi_ctx *qedi, int type,
 			char *buf, enum qedi_nvm_tgts idx)
 {
-	char *str = buf;
 	int rc = 1;
 	u32 ctrl_flags, ipv6_en, chap_en, mchap_en, ip_len;
 	struct nvm_iscsi_block *block;
@@ -1899,48 +2094,48 @@ qedi_show_boot_tgt_info(struct qedi_ctx *qedi, int type,
 
 	switch (type) {
 	case ISCSI_BOOT_TGT_NAME:
-		rc = snprintf(str, NVM_ISCSI_CFG_ISCSI_NAME_MAX_LEN, "%s\n",
-			      block->target[idx].target_name.byte);
+		rc = sprintf(buf, "%.*s\n", NVM_ISCSI_CFG_ISCSI_NAME_MAX_LEN,
+			     block->target[idx].target_name.byte);
 		break;
 	case ISCSI_BOOT_TGT_IP_ADDR:
 		if (ipv6_en)
-			rc = snprintf(str, ip_len, "%pI6\n",
+			rc = snprintf(buf, ip_len, "%pI6\n",
 				      block->target[idx].ipv6_addr.byte);
 		else
-			rc = snprintf(str, ip_len, "%pI4\n",
+			rc = snprintf(buf, ip_len, "%pI4\n",
 				      block->target[idx].ipv4_addr.byte);
 		break;
 	case ISCSI_BOOT_TGT_PORT:
-		rc = snprintf(str, 12, "%d\n",
+		rc = snprintf(buf, 12, "%d\n",
 			      GET_FIELD2(block->target[idx].generic_cont0,
 					 NVM_ISCSI_CFG_TARGET_TCP_PORT));
 		break;
 	case ISCSI_BOOT_TGT_LUN:
-		rc = snprintf(str, 22, "%.*d\n",
+		rc = snprintf(buf, 22, "%.*d\n",
 			      block->target[idx].lun.value[1],
 			      block->target[idx].lun.value[0]);
 		break;
 	case ISCSI_BOOT_TGT_CHAP_NAME:
-		rc = snprintf(str, NVM_ISCSI_CFG_CHAP_NAME_MAX_LEN, "%s\n",
-			      chap_name);
+		rc = sprintf(buf, "%.*s\n", NVM_ISCSI_CFG_CHAP_NAME_MAX_LEN,
+			     chap_name);
 		break;
 	case ISCSI_BOOT_TGT_CHAP_SECRET:
-		rc = snprintf(str, NVM_ISCSI_CFG_CHAP_PWD_MAX_LEN, "%s\n",
-			      chap_secret);
+		rc = sprintf(buf, "%.*s\n", NVM_ISCSI_CFG_CHAP_NAME_MAX_LEN,
+			     chap_secret);
 		break;
 	case ISCSI_BOOT_TGT_REV_CHAP_NAME:
-		rc = snprintf(str, NVM_ISCSI_CFG_CHAP_NAME_MAX_LEN, "%s\n",
-			      mchap_name);
+		rc = sprintf(buf, "%.*s\n", NVM_ISCSI_CFG_CHAP_NAME_MAX_LEN,
+			     mchap_name);
 		break;
 	case ISCSI_BOOT_TGT_REV_CHAP_SECRET:
-		rc = snprintf(str, NVM_ISCSI_CFG_CHAP_PWD_MAX_LEN, "%s\n",
-			      mchap_secret);
+		rc = sprintf(buf, "%.*s\n", NVM_ISCSI_CFG_CHAP_NAME_MAX_LEN,
+			     mchap_secret);
 		break;
 	case ISCSI_BOOT_TGT_FLAGS:
-		rc = snprintf(str, 3, "%hhd\n", SYSFS_FLAG_FW_SEL_BOOT);
+		rc = snprintf(buf, 3, "%hhd\n", SYSFS_FLAG_FW_SEL_BOOT);
 		break;
 	case ISCSI_BOOT_TGT_NIC_ASSOC:
-		rc = snprintf(str, 3, "0\n");
+		rc = snprintf(buf, 3, "0\n");
 		break;
 	default:
 		rc = 0;
@@ -2303,8 +2498,8 @@ static int __qedi_probe(struct pci_dev *pdev, int mode)
 	}
 
 #ifdef CONFIG_DEBUG_FS
-	qedi_dbg_host_init(&qedi->dbg_ctx, &qedi_debugfs_ops,
-			   &qedi_dbg_fops);
+	qedi_dbg_host_init(&qedi->dbg_ctx, qedi_debugfs_ops,
+			   qedi_dbg_fops);
 #endif
 	QEDI_INFO(&qedi->dbg_ctx, QEDI_LOG_INFO,
 		  "QLogic FastLinQ iSCSI Module qedi %s, FW %d.%d.%d.%d\n",

@@ -36,6 +36,7 @@ struct drm_device;
 struct drm_atomic_state;
 struct drm_mode_fb_cmd2;
 struct drm_format_info;
+struct drm_display_mode;
 
 /**
  * struct drm_mode_config_funcs - basic driver provided mode setting functions
@@ -100,6 +101,17 @@ struct drm_mode_config_funcs {
 	 * there's no reason this is a core function.
 	 */
 	void (*output_poll_changed)(struct drm_device *dev);
+
+	/**
+	 * @mode_valid:
+	 *
+	 * Device specific validation of display modes. Can be used to reject
+	 * modes that can never be supported. Only device wide constraints can
+	 * be checked here. crtc/encoder/bridge/connector specific constraints
+	 * should be checked in the .mode_valid() hook for each specific object.
+	 */
+	enum drm_mode_status (*mode_valid)(struct drm_device *dev,
+					   const struct drm_display_mode *mode);
 
 	/**
 	 * @atomic_check:
@@ -782,6 +794,14 @@ struct drm_mode_config {
 	 * Whether the driver supports fb modifiers in the ADDFB2.1 ioctl call.
 	 */
 	bool allow_fb_modifiers;
+
+	/**
+	 * @normalize_zpos:
+	 *
+	 * If true the drm core will call drm_atomic_normalize_zpos() as part of
+	 * atomic mode checking from drm_atomic_helper_check()
+	 */
+	bool normalize_zpos;
 
 	/**
 	 * @modifiers_property: Plane property to list support modifier/format

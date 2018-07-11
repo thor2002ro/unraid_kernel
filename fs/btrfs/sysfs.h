@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-#ifndef _BTRFS_SYSFS_H_
-#define _BTRFS_SYSFS_H_
+
+#ifndef BTRFS_SYSFS_H
+#define BTRFS_SYSFS_H
 
 /*
  * Data exported through sysfs
@@ -8,7 +9,7 @@
 extern u64 btrfs_debugfs_test;
 
 enum btrfs_feature_set {
-	FEAT_COMPAT,
+	FEAT_COMPAT = 0,
 	FEAT_COMPAT_RO,
 	FEAT_INCOMPAT,
 	FEAT_MAX
@@ -76,7 +77,7 @@ attr_to_btrfs_feature_attr(struct attribute *attr)
 }
 
 char *btrfs_printable_features(enum btrfs_feature_set set, u64 flags);
-extern const char * const btrfs_feature_set_names[3];
+extern const char * const btrfs_feature_set_names[FEAT_MAX];
 extern struct kobj_type space_info_ktype;
 extern struct kobj_type btrfs_raid_ktype;
 int btrfs_sysfs_add_device_link(struct btrfs_fs_devices *fs_devices,
@@ -90,4 +91,4 @@ void btrfs_sysfs_remove_fsid(struct btrfs_fs_devices *fs_devs);
 void btrfs_sysfs_feature_update(struct btrfs_fs_info *fs_info,
 		u64 bit, enum btrfs_feature_set set);
 
-#endif /* _BTRFS_SYSFS_H_ */
+#endif

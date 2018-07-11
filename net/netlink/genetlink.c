@@ -352,8 +352,9 @@ int genl_register_family(struct genl_family *family)
 	}
 
 	if (family->maxattr && !family->parallel_ops) {
-		family->attrbuf = kmalloc((family->maxattr+1) *
-					sizeof(struct nlattr *), GFP_KERNEL);
+		family->attrbuf = kmalloc_array(family->maxattr + 1,
+						sizeof(struct nlattr *),
+						GFP_KERNEL);
 		if (family->attrbuf == NULL) {
 			err = -ENOMEM;
 			goto errout_locked;
@@ -566,8 +567,9 @@ static int genl_family_rcv_msg(const struct genl_family *family,
 		return -EOPNOTSUPP;
 
 	if (family->maxattr && family->parallel_ops) {
-		attrbuf = kmalloc((family->maxattr+1) *
-					sizeof(struct nlattr *), GFP_KERNEL);
+		attrbuf = kmalloc_array(family->maxattr + 1,
+					sizeof(struct nlattr *),
+					GFP_KERNEL);
 		if (attrbuf == NULL)
 			return -ENOMEM;
 	} else
@@ -1106,7 +1108,7 @@ static int genlmsg_mcast(struct sk_buff *skb, u32 portid, unsigned long group,
 	if (!err)
 		delivered = true;
 	else if (err != -ESRCH)
-		goto error;
+		return err;
 	return delivered ? 0 : -ESRCH;
  error:
 	kfree_skb(skb);

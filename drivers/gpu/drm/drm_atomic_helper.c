@@ -699,7 +699,6 @@ EXPORT_SYMBOL(drm_atomic_helper_check_modeset);
  * drm_atomic_helper_check_plane_state() - Check plane state for validity
  * @plane_state: plane state to check
  * @crtc_state: crtc state to check
- * @clip: integer clipping coordinates
  * @min_scale: minimum @src:@dest scaling factor in 16.16 fixed point
  * @max_scale: maximum @src:@dest scaling factor in 16.16 fixed point
  * @can_position: is it legal to position the plane such that it
@@ -719,7 +718,6 @@ EXPORT_SYMBOL(drm_atomic_helper_check_modeset);
  */
 int drm_atomic_helper_check_plane_state(struct drm_plane_state *plane_state,
 					const struct drm_crtc_state *crtc_state,
-					const struct drm_rect *clip,
 					int min_scale,
 					int max_scale,
 					bool can_position,
@@ -729,6 +727,7 @@ int drm_atomic_helper_check_plane_state(struct drm_plane_state *plane_state,
 	struct drm_rect *src = &plane_state->src;
 	struct drm_rect *dst = &plane_state->dst;
 	unsigned int rotation = plane_state->rotation;
+	struct drm_rect clip = {};
 	int hscale, vscale;
 
 	WARN_ON(plane_state->crtc && plane_state->crtc != crtc_state->crtc);
@@ -764,7 +763,10 @@ int drm_atomic_helper_check_plane_state(struct drm_plane_state *plane_state,
 		return -ERANGE;
 	}
 
-	plane_state->visible = drm_rect_clip_scaled(src, dst, clip, hscale, vscale);
+	if (crtc_state->enable)
+		drm_mode_get_hv_timing(&crtc_state->mode, &clip.x2, &clip.y2);
+
+	plane_state->visible = drm_rect_clip_scaled(src, dst, &clip);
 
 	drm_rect_rotate_inv(src, fb->width << 16, fb->height << 16, rotation);
 
@@ -778,10 +780,10 @@ int drm_atomic_helper_check_plane_state(struct drm_plane_state *plane_state,
 		 */
 		return 0;
 
-	if (!can_position && !drm_rect_equals(dst, clip)) {
+	if (!can_position && !drm_rect_equals(dst, &clip)) {
 		DRM_DEBUG_KMS("Plane must cover entire CRTC\n");
 		drm_rect_debug_print("dst: ", dst, false);
-		drm_rect_debug_print("clip: ", clip, false);
+		drm_rect_debug_print("clip: ", &clip, false);
 		return -EINVAL;
 	}
 
@@ -873,6 +875,11 @@ EXPORT_SYMBOL(drm_atomic_helper_check_planes);
  * functions depend upon an updated adjusted_mode.clock to e.g. properly compute
  * watermarks.
  *
+ * Note that zpos normalization will add all enable planes to the state which
+ * might not desired for some drivers.
+ * For example enable/disable of a cursor plane which have fixed zpos value
+ * would trigger all other enabled planes to be forced to the state change.
+ *
  * RETURNS:
  * Zero for success or -errno
  */
@@ -884,6 +891,12 @@ int drm_atomic_helper_check(struct drm_device *dev,
 	ret = drm_atomic_helper_check_modeset(dev, state);
 	if (ret)
 		return ret;
+
+	if (dev->mode_config.normalize_zpos) {
+		ret = drm_atomic_normalize_zpos(dev, state);
+		if (ret)
+			return ret;
+	}
 
 	ret = drm_atomic_helper_check_planes(dev, state);
 	if (ret)
@@ -1559,6 +1572,17 @@ void drm_atomic_helper_async_commit(struct drm_device *dev,
 	for_each_new_plane_in_state(state, plane, plane_state, i) {
 		funcs = plane->helper_private;
 		funcs->atomic_async_update(plane, plane_state);
+
+		/*
+		 * ->atomic_async_update() is supposed to update the
+		 * plane->state in-place, make sure at least common
+		 * properties have been properly updated.
+		 */
+		WARN_ON_ONCE(plane->state->fb != plane_state->fb);
+		WARN_ON_ONCE(plane->state->crtc_x != plane_state->crtc_x);
+		WARN_ON_ONCE(plane->state->crtc_y != plane_state->crtc_y);
+		WARN_ON_ONCE(plane->state->src_x != plane_state->src_x);
+		WARN_ON_ONCE(plane->state->src_y != plane_state->src_y);
 	}
 }
 EXPORT_SYMBOL(drm_atomic_helper_async_commit);
@@ -1878,6 +1902,8 @@ int drm_atomic_helper_setup_commit(struct drm_atomic_state *state,
 		new_crtc_state->event->base.completion = &commit->flip_done;
 		new_crtc_state->event->base.completion_release = release_crtc_commit;
 		drm_crtc_commit_get(commit);
+
+		commit->abort_completion = true;
 	}
 
 	for_each_oldnew_connector_in_state(state, conn, old_conn_state, new_conn_state, i) {
@@ -2655,7 +2681,7 @@ int drm_atomic_helper_disable_plane(struct drm_plane *plane,
 		goto fail;
 	}
 
-	if (plane_state->crtc && (plane == plane->crtc->cursor))
+	if (plane_state->crtc && plane_state->crtc->cursor == plane)
 		plane_state->state->legacy_cursor_update = true;
 
 	ret = __drm_atomic_helper_disable_plane(plane, plane_state);
@@ -2877,31 +2903,9 @@ commit:
 	return 0;
 }
 
-/**
- * drm_atomic_helper_disable_all - disable all currently active outputs
- * @dev: DRM device
- * @ctx: lock acquisition context
- *
- * Loops through all connectors, finding those that aren't turned off and then
- * turns them off by setting their DPMS mode to OFF and deactivating the CRTC
- * that they are connected to.
- *
- * This is used for example in suspend/resume to disable all currently active
- * functions when suspending. If you just want to shut down everything at e.g.
- * driver unload, look at drm_atomic_helper_shutdown().
- *
- * Note that if callers haven't already acquired all modeset locks this might
- * return -EDEADLK, which must be handled by calling drm_modeset_backoff().
- *
- * Returns:
- * 0 on success or a negative error code on failure.
- *
- * See also:
- * drm_atomic_helper_suspend(), drm_atomic_helper_resume() and
- * drm_atomic_helper_shutdown().
- */
-int drm_atomic_helper_disable_all(struct drm_device *dev,
-				  struct drm_modeset_acquire_ctx *ctx)
+static int __drm_atomic_helper_disable_all(struct drm_device *dev,
+					   struct drm_modeset_acquire_ctx *ctx,
+					   bool clean_old_fbs)
 {
 	struct drm_atomic_state *state;
 	struct drm_connector_state *conn_state;
@@ -2953,8 +2957,11 @@ int drm_atomic_helper_disable_all(struct drm_device *dev,
 			goto free;
 
 		drm_atomic_set_fb_for_plane(plane_state, NULL);
-		plane_mask |= BIT(drm_plane_index(plane));
-		plane->old_fb = plane->fb;
+
+		if (clean_old_fbs) {
+			plane->old_fb = plane->fb;
+			plane_mask |= BIT(drm_plane_index(plane));
+		}
 	}
 
 	ret = drm_atomic_commit(state);
@@ -2965,6 +2972,34 @@ free:
 	return ret;
 }
 
+/**
+ * drm_atomic_helper_disable_all - disable all currently active outputs
+ * @dev: DRM device
+ * @ctx: lock acquisition context
+ *
+ * Loops through all connectors, finding those that aren't turned off and then
+ * turns them off by setting their DPMS mode to OFF and deactivating the CRTC
+ * that they are connected to.
+ *
+ * This is used for example in suspend/resume to disable all currently active
+ * functions when suspending. If you just want to shut down everything at e.g.
+ * driver unload, look at drm_atomic_helper_shutdown().
+ *
+ * Note that if callers haven't already acquired all modeset locks this might
+ * return -EDEADLK, which must be handled by calling drm_modeset_backoff().
+ *
+ * Returns:
+ * 0 on success or a negative error code on failure.
+ *
+ * See also:
+ * drm_atomic_helper_suspend(), drm_atomic_helper_resume() and
+ * drm_atomic_helper_shutdown().
+ */
+int drm_atomic_helper_disable_all(struct drm_device *dev,
+				  struct drm_modeset_acquire_ctx *ctx)
+{
+	return __drm_atomic_helper_disable_all(dev, ctx, false);
+}
 EXPORT_SYMBOL(drm_atomic_helper_disable_all);
 
 /**
@@ -2987,7 +3022,7 @@ void drm_atomic_helper_shutdown(struct drm_device *dev)
 	while (1) {
 		ret = drm_modeset_lock_all_ctx(dev, &ctx);
 		if (!ret)
-			ret = drm_atomic_helper_disable_all(dev, &ctx);
+			ret = __drm_atomic_helper_disable_all(dev, &ctx, true);
 
 		if (ret != -EDEADLK)
 			break;
@@ -3091,14 +3126,14 @@ int drm_atomic_helper_commit_duplicated_state(struct drm_atomic_state *state,
 	struct drm_connector_state *new_conn_state;
 	struct drm_crtc *crtc;
 	struct drm_crtc_state *new_crtc_state;
-	unsigned plane_mask = 0;
-	struct drm_device *dev = state->dev;
-	int ret;
 
 	state->acquire_ctx = ctx;
 
 	for_each_new_plane_in_state(state, plane, new_plane_state, i) {
-		plane_mask |= BIT(drm_plane_index(plane));
+		WARN_ON(plane->crtc != new_plane_state->crtc);
+		WARN_ON(plane->fb != new_plane_state->fb);
+		WARN_ON(plane->old_fb);
+
 		state->planes[i].old_state = plane->state;
 	}
 
@@ -3108,11 +3143,7 @@ int drm_atomic_helper_commit_duplicated_state(struct drm_atomic_state *state,
 	for_each_new_connector_in_state(state, connector, new_conn_state, i)
 		state->connectors[i].old_state = connector->state;
 
-	ret = drm_atomic_commit(state);
-	if (plane_mask)
-		drm_atomic_clean_old_fb(dev, plane_mask, ret);
-
-	return ret;
+	return drm_atomic_commit(state);
 }
 EXPORT_SYMBOL(drm_atomic_helper_commit_duplicated_state);
 
@@ -3421,8 +3452,21 @@ EXPORT_SYMBOL(drm_atomic_helper_crtc_duplicate_state);
 void __drm_atomic_helper_crtc_destroy_state(struct drm_crtc_state *state)
 {
 	if (state->commit) {
+		/*
+		 * In the event that a non-blocking commit returns
+		 * -ERESTARTSYS before the commit_tail work is queued, we will
+		 * have an extra reference to the commit object. Release it, if
+		 * the event has not been consumed by the worker.
+		 *
+		 * state->event may be freed, so we can't directly look at
+		 * state->event->base.completion.
+		 */
+		if (state->event && state->commit->abort_completion)
+			drm_crtc_commit_put(state->commit);
+
 		kfree(state->commit->event);
 		state->commit->event = NULL;
+
 		drm_crtc_commit_put(state->commit);
 	}
 
@@ -3467,6 +3511,10 @@ void drm_atomic_helper_plane_reset(struct drm_plane *plane)
 	if (plane->state) {
 		plane->state->plane = plane;
 		plane->state->rotation = DRM_MODE_ROTATE_0;
+
+		/* Reset the alpha value to fully opaque if it matters */
+		if (plane->alpha_property)
+			plane->state->alpha = plane->alpha_property->values[1];
 	}
 }
 EXPORT_SYMBOL(drm_atomic_helper_plane_reset);
@@ -3801,7 +3849,7 @@ int drm_atomic_helper_legacy_gamma_set(struct drm_crtc *crtc,
 	}
 
 	/* Prepare GAMMA_LUT with the legacy values. */
-	blob_data = (struct drm_color_lut *) blob->data;
+	blob_data = blob->data;
 	for (i = 0; i < size; i++) {
 		blob_data[i].red = red[i];
 		blob_data[i].green = green[i];

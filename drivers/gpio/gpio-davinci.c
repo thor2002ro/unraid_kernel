@@ -20,6 +20,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/platform_device.h>
 #include <linux/platform_data/gpio-davinci.h>
 #include <linux/irqchip/chained_irq.h>
@@ -197,8 +198,8 @@ static int davinci_gpio_probe(struct platform_device *pdev)
 		ngpio = ARCH_NR_GPIOS;
 
 	nbank = DIV_ROUND_UP(ngpio, 32);
-	chips = devm_kzalloc(dev,
-			     nbank * sizeof(struct davinci_gpio_controller),
+	chips = devm_kcalloc(dev,
+			     nbank, sizeof(struct davinci_gpio_controller),
 			     GFP_KERNEL);
 	if (!chips)
 		return -ENOMEM;
@@ -225,6 +226,11 @@ static int davinci_gpio_probe(struct platform_device *pdev)
 	chips->chip.of_gpio_n_cells = 2;
 	chips->chip.parent = dev;
 	chips->chip.of_node = dev->of_node;
+
+	if (of_property_read_bool(dev->of_node, "gpio-ranges")) {
+		chips->chip.request = gpiochip_generic_request;
+		chips->chip.free = gpiochip_generic_free;
+	}
 #endif
 	spin_lock_init(&chips->lock);
 	bank_base += ngpio;
@@ -604,14 +610,12 @@ done:
 	return 0;
 }
 
-#if IS_ENABLED(CONFIG_OF)
 static const struct of_device_id davinci_gpio_ids[] = {
 	{ .compatible = "ti,keystone-gpio", keystone_gpio_get_irq_chip},
 	{ .compatible = "ti,dm6441-gpio", davinci_gpio_get_irq_chip},
 	{ /* sentinel */ },
 };
 MODULE_DEVICE_TABLE(of, davinci_gpio_ids);
-#endif
 
 static struct platform_driver davinci_gpio_driver = {
 	.probe		= davinci_gpio_probe,

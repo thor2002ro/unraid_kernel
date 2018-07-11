@@ -683,10 +683,11 @@ static int emac_tx_q_desc_alloc(struct emac_adapter *adpt,
 				struct emac_tx_queue *tx_q)
 {
 	struct emac_ring_header *ring_header = &adpt->ring_header;
+	int node = dev_to_node(adpt->netdev->dev.parent);
 	size_t size;
 
 	size = sizeof(struct emac_buffer) * tx_q->tpd.count;
-	tx_q->tpd.tpbuff = kzalloc(size, GFP_KERNEL);
+	tx_q->tpd.tpbuff = kzalloc_node(size, GFP_KERNEL, node);
 	if (!tx_q->tpd.tpbuff)
 		return -ENOMEM;
 
@@ -723,11 +724,12 @@ static void emac_rx_q_bufs_free(struct emac_adapter *adpt)
 static int emac_rx_descs_alloc(struct emac_adapter *adpt)
 {
 	struct emac_ring_header *ring_header = &adpt->ring_header;
+	int node = dev_to_node(adpt->netdev->dev.parent);
 	struct emac_rx_queue *rx_q = &adpt->rx_q;
 	size_t size;
 
 	size = sizeof(struct emac_buffer) * rx_q->rfd.count;
-	rx_q->rfd.rfbuff = kzalloc(size, GFP_KERNEL);
+	rx_q->rfd.rfbuff = kzalloc_node(size, GFP_KERNEL, node);
 	if (!rx_q->rfd.rfbuff)
 		return -ENOMEM;
 
@@ -920,14 +922,13 @@ static void emac_mac_rx_descs_refill(struct emac_adapter *adpt,
 static void emac_adjust_link(struct net_device *netdev)
 {
 	struct emac_adapter *adpt = netdev_priv(netdev);
-	struct emac_sgmii *sgmii = &adpt->phy;
 	struct phy_device *phydev = netdev->phydev;
 
 	if (phydev->link) {
 		emac_mac_start(adpt);
-		sgmii->link_up(adpt);
+		emac_sgmii_link_change(adpt, true);
 	} else {
-		sgmii->link_down(adpt);
+		emac_sgmii_link_change(adpt, false);
 		emac_mac_stop(adpt);
 	}
 
@@ -1194,9 +1195,9 @@ void emac_mac_tx_process(struct emac_adapter *adpt, struct emac_tx_queue *tx_q)
 	while (tx_q->tpd.consume_idx != hw_consume_idx) {
 		tpbuf = GET_TPD_BUFFER(tx_q, tx_q->tpd.consume_idx);
 		if (tpbuf->dma_addr) {
-			dma_unmap_single(adpt->netdev->dev.parent,
-					 tpbuf->dma_addr, tpbuf->length,
-					 DMA_TO_DEVICE);
+			dma_unmap_page(adpt->netdev->dev.parent,
+				       tpbuf->dma_addr, tpbuf->length,
+				       DMA_TO_DEVICE);
 			tpbuf->dma_addr = 0;
 		}
 
@@ -1353,9 +1354,11 @@ static void emac_tx_fill_tpd(struct emac_adapter *adpt,
 
 		tpbuf = GET_TPD_BUFFER(tx_q, tx_q->tpd.produce_idx);
 		tpbuf->length = mapped_len;
-		tpbuf->dma_addr = dma_map_single(adpt->netdev->dev.parent,
-						 skb->data, tpbuf->length,
-						 DMA_TO_DEVICE);
+		tpbuf->dma_addr = dma_map_page(adpt->netdev->dev.parent,
+					       virt_to_page(skb->data),
+					       offset_in_page(skb->data),
+					       tpbuf->length,
+					       DMA_TO_DEVICE);
 		ret = dma_mapping_error(adpt->netdev->dev.parent,
 					tpbuf->dma_addr);
 		if (ret)
@@ -1371,9 +1374,12 @@ static void emac_tx_fill_tpd(struct emac_adapter *adpt,
 	if (mapped_len < len) {
 		tpbuf = GET_TPD_BUFFER(tx_q, tx_q->tpd.produce_idx);
 		tpbuf->length = len - mapped_len;
-		tpbuf->dma_addr = dma_map_single(adpt->netdev->dev.parent,
-						 skb->data + mapped_len,
-						 tpbuf->length, DMA_TO_DEVICE);
+		tpbuf->dma_addr = dma_map_page(adpt->netdev->dev.parent,
+					       virt_to_page(skb->data +
+							    mapped_len),
+					       offset_in_page(skb->data +
+							      mapped_len),
+					       tpbuf->length, DMA_TO_DEVICE);
 		ret = dma_mapping_error(adpt->netdev->dev.parent,
 					tpbuf->dma_addr);
 		if (ret)

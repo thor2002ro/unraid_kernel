@@ -33,6 +33,7 @@ static void amdgpu_do_test_moves(struct amdgpu_device *adev)
 	struct amdgpu_ring *ring = adev->mman.buffer_funcs_ring;
 	struct amdgpu_bo *vram_obj = NULL;
 	struct amdgpu_bo **gtt_obj = NULL;
+	struct amdgpu_bo_param bp;
 	uint64_t gart_addr, vram_addr;
 	unsigned n, size;
 	int i, r;
@@ -42,7 +43,7 @@ static void amdgpu_do_test_moves(struct amdgpu_device *adev)
 	/* Number of tests =
 	 * (Total GTT - IB pool - writeback page - ring buffers) / test size
 	 */
-	n = adev->mc.gart_size - AMDGPU_IB_POOL_SIZE*64*1024;
+	n = adev->gmc.gart_size - AMDGPU_IB_POOL_SIZE*64*1024;
 	for (i = 0; i < AMDGPU_MAX_RINGS; ++i)
 		if (adev->rings[i])
 			n -= adev->rings[i]->ring_size;
@@ -52,16 +53,21 @@ static void amdgpu_do_test_moves(struct amdgpu_device *adev)
 		n -= adev->irq.ih.ring_size;
 	n /= size;
 
-	gtt_obj = kzalloc(n * sizeof(*gtt_obj), GFP_KERNEL);
+	gtt_obj = kcalloc(n, sizeof(*gtt_obj), GFP_KERNEL);
 	if (!gtt_obj) {
 		DRM_ERROR("Failed to allocate %d pointers\n", n);
 		r = 1;
 		goto out_cleanup;
 	}
+	memset(&bp, 0, sizeof(bp));
+	bp.size = size;
+	bp.byte_align = PAGE_SIZE;
+	bp.domain = AMDGPU_GEM_DOMAIN_VRAM;
+	bp.flags = 0;
+	bp.type = ttm_bo_type_kernel;
+	bp.resv = NULL;
 
-	r = amdgpu_bo_create(adev, size, PAGE_SIZE, true,
-			     AMDGPU_GEM_DOMAIN_VRAM, 0,
-			     NULL, NULL, 0, &vram_obj);
+	r = amdgpu_bo_create(adev, &bp, &vram_obj);
 	if (r) {
 		DRM_ERROR("Failed to create VRAM object\n");
 		goto out_cleanup;
@@ -80,9 +86,8 @@ static void amdgpu_do_test_moves(struct amdgpu_device *adev)
 		void **vram_start, **vram_end;
 		struct dma_fence *fence = NULL;
 
-		r = amdgpu_bo_create(adev, size, PAGE_SIZE, true,
-				     AMDGPU_GEM_DOMAIN_GTT, 0, NULL,
-				     NULL, 0, gtt_obj + i);
+		bp.domain = AMDGPU_GEM_DOMAIN_GTT;
+		r = amdgpu_bo_create(adev, &bp, gtt_obj + i);
 		if (r) {
 			DRM_ERROR("Failed to create GTT object %d\n", i);
 			goto out_lclean;
@@ -142,10 +147,10 @@ static void amdgpu_do_test_moves(struct amdgpu_device *adev)
 					  "0x%16llx/0x%16llx)\n",
 					  i, *vram_start, gart_start,
 					  (unsigned long long)
-					  (gart_addr - adev->mc.gart_start +
+					  (gart_addr - adev->gmc.gart_start +
 					   (void*)gart_start - gtt_map),
 					  (unsigned long long)
-					  (vram_addr - adev->mc.vram_start +
+					  (vram_addr - adev->gmc.vram_start +
 					   (void*)gart_start - gtt_map));
 				amdgpu_bo_kunmap(vram_obj);
 				goto out_lclean_unpin;
@@ -187,10 +192,10 @@ static void amdgpu_do_test_moves(struct amdgpu_device *adev)
 					  "0x%16llx/0x%16llx)\n",
 					  i, *gart_start, vram_start,
 					  (unsigned long long)
-					  (vram_addr - adev->mc.vram_start +
+					  (vram_addr - adev->gmc.vram_start +
 					   (void*)vram_start - vram_map),
 					  (unsigned long long)
-					  (gart_addr - adev->mc.gart_start +
+					  (gart_addr - adev->gmc.gart_start +
 					   (void*)vram_start - vram_map));
 				amdgpu_bo_kunmap(gtt_obj[i]);
 				goto out_lclean_unpin;
@@ -200,7 +205,7 @@ static void amdgpu_do_test_moves(struct amdgpu_device *adev)
 		amdgpu_bo_kunmap(gtt_obj[i]);
 
 		DRM_INFO("Tested GTT->VRAM and VRAM->GTT copy for GTT offset 0x%llx\n",
-			 gart_addr - adev->mc.gart_start);
+			 gart_addr - adev->gmc.gart_start);
 		continue;
 
 out_lclean_unpin:

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
  * Copyright (c) 2014-2017 Oracle.  All rights reserved.
  * Copyright (c) 2003-2007 Network Appliance, Inc. All rights reserved.
@@ -51,10 +52,13 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/seq_file.h>
-#include <linux/sunrpc/addr.h>
 #include <linux/smp.h>
 
+#include <linux/sunrpc/addr.h>
+#include <linux/sunrpc/svc_rdma.h>
+
 #include "xprt_rdma.h"
+#include <trace/events/rpcrdma.h>
 
 #if IS_ENABLED(CONFIG_SUNRPC_DEBUG)
 # define RPCDBG_FACILITY	RPCDBG_TRANS
@@ -237,8 +241,6 @@ rpcrdma_connect_worker(struct work_struct *work)
 	struct rpc_xprt *xprt = &r_xprt->rx_xprt;
 
 	spin_lock_bh(&xprt->transport_lock);
-	if (++xprt->connect_cookie == 0)	/* maintain a reserved value */
-		++xprt->connect_cookie;
 	if (ep->rep_connected > 0) {
 		if (!xprt_test_and_set_connected(xprt))
 			xprt_wake_pending_tasks(xprt, 0);
@@ -333,9 +335,7 @@ xprt_setup_rdma(struct xprt_create *args)
 		return ERR_PTR(-EBADF);
 	}
 
-	xprt = xprt_alloc(args->net, sizeof(struct rpcrdma_xprt),
-			xprt_rdma_slot_table_entries,
-			xprt_rdma_slot_table_entries);
+	xprt = xprt_alloc(args->net, sizeof(struct rpcrdma_xprt), 0, 0);
 	if (xprt == NULL) {
 		dprintk("RPC:       %s: couldn't allocate rpcrdma_xprt\n",
 			__func__);
@@ -367,7 +367,7 @@ xprt_setup_rdma(struct xprt_create *args)
 		xprt_set_bound(xprt);
 	xprt_rdma_format_addresses(xprt, sap);
 
-	cdata.max_requests = xprt->max_reqs;
+	cdata.max_requests = xprt_rdma_slot_table_entries;
 
 	cdata.rsize = RPCRDMA_MAX_SEGS * PAGE_SIZE; /* RDMA write max */
 	cdata.wsize = RPCRDMA_MAX_SEGS * PAGE_SIZE; /* RDMA read max */
@@ -540,27 +540,45 @@ xprt_rdma_connect(struct rpc_xprt *xprt, struct rpc_task *task)
 	}
 }
 
-/* Allocate a fixed-size buffer in which to construct and send the
- * RPC-over-RDMA header for this request.
+/**
+ * xprt_rdma_alloc_slot - allocate an rpc_rqst
+ * @xprt: controlling RPC transport
+ * @task: RPC task requesting a fresh rpc_rqst
+ *
+ * tk_status values:
+ *	%0 if task->tk_rqstp points to a fresh rpc_rqst
+ *	%-EAGAIN if no rpc_rqst is available; queued on backlog
  */
-static bool
-rpcrdma_get_rdmabuf(struct rpcrdma_xprt *r_xprt, struct rpcrdma_req *req,
-		    gfp_t flags)
+static void
+xprt_rdma_alloc_slot(struct rpc_xprt *xprt, struct rpc_task *task)
 {
-	size_t size = RPCRDMA_HDRBUF_SIZE;
-	struct rpcrdma_regbuf *rb;
+	struct rpcrdma_xprt *r_xprt = rpcx_to_rdmax(xprt);
+	struct rpcrdma_req *req;
 
-	if (req->rl_rdmabuf)
-		return true;
+	req = rpcrdma_buffer_get(&r_xprt->rx_buf);
+	if (!req)
+		goto out_sleep;
+	task->tk_rqstp = &req->rl_slot;
+	task->tk_status = 0;
+	return;
 
-	rb = rpcrdma_alloc_regbuf(size, DMA_TO_DEVICE, flags);
-	if (IS_ERR(rb))
-		return false;
+out_sleep:
+	rpc_sleep_on(&xprt->backlog, task, NULL);
+	task->tk_status = -EAGAIN;
+}
 
-	r_xprt->rx_stats.hardway_register_count += size;
-	req->rl_rdmabuf = rb;
-	xdr_buf_init(&req->rl_hdrbuf, rb->rg_base, rdmab_length(rb));
-	return true;
+/**
+ * xprt_rdma_free_slot - release an rpc_rqst
+ * @xprt: controlling RPC transport
+ * @rqst: rpc_rqst to release
+ *
+ */
+static void
+xprt_rdma_free_slot(struct rpc_xprt *xprt, struct rpc_rqst *rqst)
+{
+	memset(rqst, 0, sizeof(*rqst));
+	rpcrdma_buffer_put(rpcr_to_rdmar(rqst));
+	rpc_wake_up_next(&xprt->backlog);
 }
 
 static bool
@@ -633,35 +651,24 @@ xprt_rdma_allocate(struct rpc_task *task)
 {
 	struct rpc_rqst *rqst = task->tk_rqstp;
 	struct rpcrdma_xprt *r_xprt = rpcx_to_rdmax(rqst->rq_xprt);
-	struct rpcrdma_req *req;
+	struct rpcrdma_req *req = rpcr_to_rdmar(rqst);
 	gfp_t flags;
-
-	req = rpcrdma_buffer_get(&r_xprt->rx_buf);
-	if (req == NULL)
-		goto out_get;
 
 	flags = RPCRDMA_DEF_GFP;
 	if (RPC_IS_SWAPPER(task))
 		flags = __GFP_MEMALLOC | GFP_NOWAIT | __GFP_NOWARN;
 
-	if (!rpcrdma_get_rdmabuf(r_xprt, req, flags))
-		goto out_fail;
 	if (!rpcrdma_get_sendbuf(r_xprt, req, rqst->rq_callsize, flags))
 		goto out_fail;
 	if (!rpcrdma_get_recvbuf(r_xprt, req, rqst->rq_rcvsize, flags))
 		goto out_fail;
 
-	req->rl_cpu = smp_processor_id();
-	req->rl_connect_cookie = 0;	/* our reserved value */
-	rpcrdma_set_xprtdata(rqst, req);
 	rqst->rq_buffer = req->rl_sendbuf->rg_base;
 	rqst->rq_rbuffer = req->rl_recvbuf->rg_base;
 	trace_xprtrdma_allocate(task, req);
 	return 0;
 
 out_fail:
-	rpcrdma_buffer_put(req);
-out_get:
 	trace_xprtrdma_allocate(task, NULL);
 	return -ENOMEM;
 }
@@ -682,7 +689,6 @@ xprt_rdma_free(struct rpc_task *task)
 	if (test_bit(RPCRDMA_REQ_F_PENDING, &req->rl_flags))
 		rpcrdma_release_rqst(r_xprt, req);
 	trace_xprtrdma_rpc_done(task, req);
-	rpcrdma_buffer_put(req);
 }
 
 /**
@@ -694,7 +700,8 @@ xprt_rdma_free(struct rpc_task *task)
  * Returns:
  *	%0 if the RPC message has been sent
  *	%-ENOTCONN if the caller should reconnect and call again
- *	%-ENOBUFS if the caller should call again later
+ *	%-EAGAIN if the caller should call again
+ *	%-ENOBUFS if the caller should call again after a delay
  *	%-EIO if a permanent error occurred and the request was not
  *		sent. Do not try to send this message again.
  */
@@ -719,13 +726,10 @@ xprt_rdma_send_request(struct rpc_task *task)
 	if (rc < 0)
 		goto failed_marshal;
 
-	if (req->rl_reply == NULL) 		/* e.g. reconnection */
-		rpcrdma_recv_buffer_get(req);
-
 	/* Must suppress retransmit to maintain credits */
-	if (req->rl_connect_cookie == xprt->connect_cookie)
+	if (rqst->rq_connect_cookie == xprt->connect_cookie)
 		goto drop_connection;
-	req->rl_connect_cookie = xprt->connect_cookie;
+	rqst->rq_xtime = ktime_get();
 
 	__set_bit(RPCRDMA_REQ_F_PENDING, &req->rl_flags);
 	if (rpcrdma_ep_post(&r_xprt->rx_ia, &r_xprt->rx_ep, req))
@@ -733,6 +737,12 @@ xprt_rdma_send_request(struct rpc_task *task)
 
 	rqst->rq_xmit_bytes_sent += rqst->rq_snd_buf.len;
 	rqst->rq_bytes_sent = 0;
+
+	/* An RPC with no reply will throw off credit accounting,
+	 * so drop the connection to reset the credit grant.
+	 */
+	if (!rpc_reply_expected(task))
+		goto drop_connection;
 	return 0;
 
 failed_marshal:
@@ -802,7 +812,8 @@ xprt_rdma_disable_swap(struct rpc_xprt *xprt)
 static const struct rpc_xprt_ops xprt_rdma_procs = {
 	.reserve_xprt		= xprt_reserve_xprt_cong,
 	.release_xprt		= xprt_release_xprt_cong, /* sunrpc/xprt.c */
-	.alloc_slot		= xprt_alloc_slot,
+	.alloc_slot		= xprt_rdma_alloc_slot,
+	.free_slot		= xprt_rdma_free_slot,
 	.release_request	= xprt_release_rqst_cong,       /* ditto */
 	.set_retrans_timeout	= xprt_set_retrans_timeout_def, /* ditto */
 	.timer			= xprt_rdma_timer,

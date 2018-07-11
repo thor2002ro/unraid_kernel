@@ -45,7 +45,7 @@ the kernel interface as seen by application developers.
 .. toctree::
    :maxdepth: 2
 
-   userspace-api/index	      
+   userspace-api/index
 
 
 Introduction to kernel development
@@ -64,6 +64,7 @@ merged much easier.
    dev-tools/index
    doc-guide/index
    kernel-hacking/index
+   trace/index
    maintainer/index
 
 Kernel API documentation
@@ -88,6 +89,7 @@ needed).
    sound/index
    crypto/index
    filesystems/index
+   vm/index
 
 Architecture-specific documentation
 -----------------------------------

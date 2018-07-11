@@ -190,8 +190,8 @@ struct chcr_aead_reqctx {
 	short int dst_nents;
 	u16 imm;
 	u16 verify;
-	u8 iv[CHCR_MAX_CRYPTO_IV_LEN];
-	unsigned char scratch_pad[MAX_SCRATCH_PAD_SIZE];
+	u8 iv[CHCR_MAX_CRYPTO_IV_LEN + MAX_SCRATCH_PAD_SIZE];
+	u8 *scratch_pad;
 };
 
 struct ulptx_walk {
@@ -258,21 +258,32 @@ struct chcr_context {
 	struct __crypto_ctx crypto_ctx[0];
 };
 
-struct chcr_ahash_req_ctx {
-	u32 result;
-	u8 bfr1[CHCR_HASH_MAX_BLOCK_SIZE_128];
-	u8 bfr2[CHCR_HASH_MAX_BLOCK_SIZE_128];
-	u8 *reqbfr;
-	u8 *skbfr;
+struct chcr_hctx_per_wr {
+	struct scatterlist *srcsg;
+	struct sk_buff *skb;
 	dma_addr_t dma_addr;
 	u32 dma_len;
-	u8 reqlen;
-	u8 imm;
+	unsigned int src_ofst;
+	unsigned int processed;
+	u32 result;
 	u8 is_sg_map;
-	u8 partial_hash[CHCR_HASH_MAX_DIGEST_SIZE];
-	u64 data_len;  /* Data len till time */
+	u8 imm;
+	/*Final callback called. Driver cannot rely on nbytes to decide
+	 * final call
+	 */
+	u8 isfinal;
+};
+
+struct chcr_ahash_req_ctx {
+	struct chcr_hctx_per_wr hctx_wr;
+	u8 *reqbfr;
+	u8 *skbfr;
 	/* SKB which is being sent to the hardware for processing */
-	struct sk_buff *skb;
+	u64 data_len;  /* Data len till time */
+	u8 reqlen;
+	u8 partial_hash[CHCR_HASH_MAX_DIGEST_SIZE];
+	u8 bfr1[CHCR_HASH_MAX_BLOCK_SIZE_128];
+	u8 bfr2[CHCR_HASH_MAX_BLOCK_SIZE_128];
 };
 
 struct chcr_blkcipher_req_ctx {
@@ -284,7 +295,6 @@ struct chcr_blkcipher_req_ctx {
 	unsigned int src_ofst;
 	unsigned int dst_ofst;
 	unsigned int op;
-	dma_addr_t iv_dma;
 	u16 imm;
 	u8 iv[CHCR_MAX_CRYPTO_IV_LEN];
 };
@@ -301,8 +311,7 @@ struct chcr_alg_template {
 
 typedef struct sk_buff *(*create_wr_t)(struct aead_request *req,
 				       unsigned short qid,
-				       int size,
-				       unsigned short op_type);
+				       int size);
 
 void chcr_verify_tag(struct aead_request *req, u8 *input, int *err);
 int chcr_aead_dma_map(struct device *dev, struct aead_request *req,
@@ -311,12 +320,12 @@ void chcr_aead_dma_unmap(struct device *dev, struct aead_request *req,
 			 unsigned short op_type);
 void chcr_add_aead_dst_ent(struct aead_request *req,
 			   struct cpl_rx_phys_dsgl *phys_cpl,
-			   unsigned int assoclen, unsigned short op_type,
+			   unsigned int assoclen,
 			   unsigned short qid);
 void chcr_add_aead_src_ent(struct aead_request *req, struct ulptx_sgl *ulptx,
-			   unsigned int assoclen, unsigned short op_type);
+			   unsigned int assoclen);
 void chcr_add_cipher_src_ent(struct ablkcipher_request *req,
-			     struct ulptx_sgl *ulptx,
+			     void *ulptx,
 			     struct  cipher_wr_param *wrparam);
 int chcr_cipher_dma_map(struct device *dev, struct ablkcipher_request *req);
 void chcr_cipher_dma_unmap(struct device *dev, struct ablkcipher_request *req);
@@ -329,4 +338,5 @@ void chcr_add_hash_src_ent(struct ahash_request *req, struct ulptx_sgl *ulptx,
 			   struct hash_wr_param *param);
 int chcr_hash_dma_map(struct device *dev, struct ahash_request *req);
 void chcr_hash_dma_unmap(struct device *dev, struct ahash_request *req);
+void chcr_aead_common_exit(struct aead_request *req);
 #endif /* __CHCR_CRYPTO_H__ */

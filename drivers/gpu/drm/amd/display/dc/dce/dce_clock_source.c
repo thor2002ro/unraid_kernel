@@ -42,6 +42,8 @@
 #define CTX \
 	clk_src->base.ctx
 
+#define DC_LOGGER_INIT()
+
 #undef FN
 #define FN(reg_name, field_name) \
 	clk_src->cs_shift->field_name, clk_src->cs_mask->field_name
@@ -288,7 +290,7 @@ static uint32_t calculate_pixel_clock_pll_dividers(
 	uint32_t max_ref_divider;
 
 	if (pll_settings->adjusted_pix_clk == 0) {
-		dm_logger_write(calc_pll_cs->ctx->logger, LOG_ERROR,
+		DC_LOG_ERROR(
 			"%s Bad requested pixel clock", __func__);
 		return MAX_PLL_CALC_ERROR;
 	}
@@ -349,13 +351,13 @@ static uint32_t calculate_pixel_clock_pll_dividers(
  *  ## SVS Wed 15 Jul 2009 */
 
 	if (min_post_divider > max_post_divider) {
-		dm_logger_write(calc_pll_cs->ctx->logger, LOG_ERROR,
+		DC_LOG_ERROR(
 			"%s Post divider range is invalid", __func__);
 		return MAX_PLL_CALC_ERROR;
 	}
 
 	if (min_ref_divider > max_ref_divider) {
-		dm_logger_write(calc_pll_cs->ctx->logger, LOG_ERROR,
+		DC_LOG_ERROR(
 			"%s Reference divider range is invalid", __func__);
 		return MAX_PLL_CALC_ERROR;
 	}
@@ -466,7 +468,7 @@ static uint32_t dce110_get_pix_clk_dividers_helper (
 {
 	uint32_t field = 0;
 	uint32_t pll_calc_error = MAX_PLL_CALC_ERROR;
-
+	DC_LOGGER_INIT();
 	/* Check if reference clock is external (not pcie/xtalin)
 	* HW Dce80 spec:
 	* 00 - PCIE_REFCLK, 01 - XTALIN,    02 - GENERICA,    03 - GENERICB
@@ -493,7 +495,7 @@ static uint32_t dce110_get_pix_clk_dividers_helper (
 	if (!pll_adjust_pix_clk(clk_src, pix_clk_params, pll_settings)) {
 		/* Should never happen, ASSERT and fill up values to be able
 		 * to continue. */
-		dm_logger_write(clk_src->base.ctx->logger, LOG_ERROR,
+		DC_LOG_ERROR(
 			"%s: Failed to adjust pixel clock!!", __func__);
 		pll_settings->actual_pix_clk =
 				pix_clk_params->requested_pix_clk;
@@ -557,10 +559,11 @@ static uint32_t dce110_get_pix_clk_dividers(
 {
 	struct dce110_clk_src *clk_src = TO_DCE110_CLK_SRC(cs);
 	uint32_t pll_calc_error = MAX_PLL_CALC_ERROR;
+	DC_LOGGER_INIT();
 
 	if (pix_clk_params == NULL || pll_settings == NULL
 			|| pix_clk_params->requested_pix_clk == 0) {
-		dm_logger_write(clk_src->base.ctx->logger, LOG_ERROR,
+		DC_LOG_ERROR(
 			"%s: Invalid parameters!!\n", __func__);
 		return pll_calc_error;
 	}
@@ -587,6 +590,7 @@ static uint32_t dce110_get_pix_clk_dividers(
 			pll_settings, pix_clk_params);
 		break;
 	case DCE_VERSION_11_2:
+	case DCE_VERSION_11_22:
 	case DCE_VERSION_12_0:
 #if defined(CONFIG_DRM_AMD_DC_DCN1_0)
 	case DCN_VERSION_1_0:
@@ -653,12 +657,12 @@ static uint32_t dce110_get_d_to_pixel_rate_in_hz(
 			return 0;
 		}
 
-		pix_rate = dal_fixed31_32_from_int(clk_src->ref_freq_khz);
-		pix_rate = dal_fixed31_32_mul_int(pix_rate, 1000);
-		pix_rate = dal_fixed31_32_mul_int(pix_rate, phase);
-		pix_rate = dal_fixed31_32_div_int(pix_rate, modulo);
+		pix_rate = dc_fixpt_from_int(clk_src->ref_freq_khz);
+		pix_rate = dc_fixpt_mul_int(pix_rate, 1000);
+		pix_rate = dc_fixpt_mul_int(pix_rate, phase);
+		pix_rate = dc_fixpt_div_int(pix_rate, modulo);
 
-		return dal_fixed31_32_round(pix_rate);
+		return dc_fixpt_round(pix_rate);
 	} else {
 		return dce110_get_dp_pixel_rate_from_combo_phy_pll(cs, pix_clk_params, pll_settings);
 	}
@@ -707,12 +711,12 @@ static bool calculate_ss(
 		const struct spread_spectrum_data *ss_data,
 		struct delta_sigma_data *ds_data)
 {
-	struct fixed32_32 fb_div;
-	struct fixed32_32 ss_amount;
-	struct fixed32_32 ss_nslip_amount;
-	struct fixed32_32 ss_ds_frac_amount;
-	struct fixed32_32 ss_step_size;
-	struct fixed32_32 modulation_time;
+	struct fixed31_32 fb_div;
+	struct fixed31_32 ss_amount;
+	struct fixed31_32 ss_nslip_amount;
+	struct fixed31_32 ss_ds_frac_amount;
+	struct fixed31_32 ss_step_size;
+	struct fixed31_32 modulation_time;
 
 	if (ds_data == NULL)
 		return false;
@@ -727,42 +731,42 @@ static bool calculate_ss(
 
 	/* compute SS_AMOUNT_FBDIV & SS_AMOUNT_NFRAC_SLIP & SS_AMOUNT_DSFRAC*/
 	/* 6 decimal point support in fractional feedback divider */
-	fb_div  = dal_fixed32_32_from_fraction(
+	fb_div  = dc_fixpt_from_fraction(
 		pll_settings->fract_feedback_divider, 1000000);
-	fb_div = dal_fixed32_32_add_int(fb_div, pll_settings->feedback_divider);
+	fb_div = dc_fixpt_add_int(fb_div, pll_settings->feedback_divider);
 
 	ds_data->ds_frac_amount = 0;
 	/*spreadSpectrumPercentage is in the unit of .01%,
 	 * so have to divided by 100 * 100*/
-	ss_amount = dal_fixed32_32_mul(
-		fb_div, dal_fixed32_32_from_fraction(ss_data->percentage,
+	ss_amount = dc_fixpt_mul(
+		fb_div, dc_fixpt_from_fraction(ss_data->percentage,
 					100 * ss_data->percentage_divider));
-	ds_data->feedback_amount = dal_fixed32_32_floor(ss_amount);
+	ds_data->feedback_amount = dc_fixpt_floor(ss_amount);
 
-	ss_nslip_amount = dal_fixed32_32_sub(ss_amount,
-		dal_fixed32_32_from_int(ds_data->feedback_amount));
-	ss_nslip_amount = dal_fixed32_32_mul_int(ss_nslip_amount, 10);
-	ds_data->nfrac_amount = dal_fixed32_32_floor(ss_nslip_amount);
+	ss_nslip_amount = dc_fixpt_sub(ss_amount,
+		dc_fixpt_from_int(ds_data->feedback_amount));
+	ss_nslip_amount = dc_fixpt_mul_int(ss_nslip_amount, 10);
+	ds_data->nfrac_amount = dc_fixpt_floor(ss_nslip_amount);
 
-	ss_ds_frac_amount = dal_fixed32_32_sub(ss_nslip_amount,
-		dal_fixed32_32_from_int(ds_data->nfrac_amount));
-	ss_ds_frac_amount = dal_fixed32_32_mul_int(ss_ds_frac_amount, 65536);
-	ds_data->ds_frac_amount = dal_fixed32_32_floor(ss_ds_frac_amount);
+	ss_ds_frac_amount = dc_fixpt_sub(ss_nslip_amount,
+		dc_fixpt_from_int(ds_data->nfrac_amount));
+	ss_ds_frac_amount = dc_fixpt_mul_int(ss_ds_frac_amount, 65536);
+	ds_data->ds_frac_amount = dc_fixpt_floor(ss_ds_frac_amount);
 
 	/* compute SS_STEP_SIZE_DSFRAC */
-	modulation_time = dal_fixed32_32_from_fraction(
+	modulation_time = dc_fixpt_from_fraction(
 		pll_settings->reference_freq * 1000,
 		pll_settings->reference_divider * ss_data->modulation_freq_hz);
 
 	if (ss_data->flags.CENTER_SPREAD)
-		modulation_time = dal_fixed32_32_div_int(modulation_time, 4);
+		modulation_time = dc_fixpt_div_int(modulation_time, 4);
 	else
-		modulation_time = dal_fixed32_32_div_int(modulation_time, 2);
+		modulation_time = dc_fixpt_div_int(modulation_time, 2);
 
-	ss_step_size = dal_fixed32_32_div(ss_amount, modulation_time);
+	ss_step_size = dc_fixpt_div(ss_amount, modulation_time);
 	/* SS_STEP_SIZE_DSFRAC_DEC = Int(SS_STEP_SIZE * 2 ^ 16 * 10)*/
-	ss_step_size = dal_fixed32_32_mul_int(ss_step_size, 65536 * 10);
-	ds_data->ds_frac_size =  dal_fixed32_32_floor(ss_step_size);
+	ss_step_size = dc_fixpt_mul_int(ss_step_size, 65536 * 10);
+	ds_data->ds_frac_size =  dc_fixpt_floor(ss_step_size);
 
 	return true;
 }
@@ -908,18 +912,8 @@ static bool dce110_program_pix_clk(
 #if defined(CONFIG_DRM_AMD_DC_DCN1_0)
 	if (IS_FPGA_MAXIMUS_DC(clock_source->ctx->dce_environment)) {
 		unsigned int inst = pix_clk_params->controller_id - CONTROLLER_ID_D0;
-		unsigned dp_dto_ref_kHz = 600000;
-		/* DPREF clock from FPGA TODO: Does FPGA have this value? */
+		unsigned dp_dto_ref_kHz = 700000;
 		unsigned clock_kHz = pll_settings->actual_pix_clk;
-
-		/* For faster simulation, if mode pixe clock less than 290MHz,
-		 * pixel clock can be hard coded to 290Mhz. For 4K mode, pixel clock
-		 * is greater than 500Mhz, need real pixel clock
-		 * clock_kHz = 290000;
-		 */
-		/* TODO: un-hardcode when we can set display clock properly*/
-		/*clock_kHz = pix_clk_params->requested_pix_clk;*/
-		clock_kHz = 290000;
 
 		/* Set DTO values: phase = target clock, modulo = reference clock */
 		REG_WRITE(PHASE[inst], clock_kHz);
@@ -986,6 +980,7 @@ static bool dce110_program_pix_clk(
 
 		break;
 	case DCE_VERSION_11_2:
+	case DCE_VERSION_11_22:
 	case DCE_VERSION_12_0:
 #if defined(CONFIG_DRM_AMD_DC_DCN1_0)
 	case DCN_VERSION_1_0:
@@ -1062,14 +1057,14 @@ static void get_ss_info_from_atombios(
 	struct spread_spectrum_info *ss_info_cur;
 	struct spread_spectrum_data *ss_data_cur;
 	uint32_t i;
-
+	DC_LOGGER_INIT();
 	if (ss_entries_num == NULL) {
-		dm_logger_write(clk_src->base.ctx->logger, LOG_SYNC,
+		DC_LOG_SYNC(
 			"Invalid entry !!!\n");
 		return;
 	}
 	if (spread_spectrum_data == NULL) {
-		dm_logger_write(clk_src->base.ctx->logger, LOG_SYNC,
+		DC_LOG_SYNC(
 			"Invalid array pointer!!!\n");
 		return;
 	}
@@ -1084,13 +1079,15 @@ static void get_ss_info_from_atombios(
 	if (*ss_entries_num == 0)
 		return;
 
-	ss_info = kzalloc(sizeof(struct spread_spectrum_info) * (*ss_entries_num),
+	ss_info = kcalloc(*ss_entries_num,
+			  sizeof(struct spread_spectrum_info),
 			  GFP_KERNEL);
 	ss_info_cur = ss_info;
 	if (ss_info == NULL)
 		return;
 
-	ss_data = kzalloc(sizeof(struct spread_spectrum_data) * (*ss_entries_num),
+	ss_data = kcalloc(*ss_entries_num,
+			  sizeof(struct spread_spectrum_data),
 			  GFP_KERNEL);
 	if (ss_data == NULL)
 		goto out_free_info;
@@ -1114,7 +1111,7 @@ static void get_ss_info_from_atombios(
 		++i, ++ss_info_cur, ++ss_data_cur) {
 
 		if (ss_info_cur->type.STEP_AND_DELAY_INFO != false) {
-			dm_logger_write(clk_src->base.ctx->logger, LOG_SYNC,
+			DC_LOG_SYNC(
 				"Invalid ATOMBIOS SS Table!!!\n");
 			goto out_free_data;
 		}
@@ -1124,9 +1121,9 @@ static void get_ss_info_from_atombios(
 		if (as_signal == AS_SIGNAL_TYPE_HDMI
 				&& ss_info_cur->spread_spectrum_percentage > 6){
 			/* invalid input, do nothing */
-			dm_logger_write(clk_src->base.ctx->logger, LOG_SYNC,
+			DC_LOG_SYNC(
 				"Invalid SS percentage ");
-			dm_logger_write(clk_src->base.ctx->logger, LOG_SYNC,
+			DC_LOG_SYNC(
 				"for HDMI in ATOMBIOS info Table!!!\n");
 			continue;
 		}
@@ -1238,12 +1235,12 @@ static bool calc_pll_max_vco_construct(
 	if (init_data->num_fract_fb_divider_decimal_point == 0 ||
 		init_data->num_fract_fb_divider_decimal_point_precision >
 				init_data->num_fract_fb_divider_decimal_point) {
-		dm_logger_write(calc_pll_cs->ctx->logger, LOG_ERROR,
+		DC_LOG_ERROR(
 			"The dec point num or precision is incorrect!");
 		return false;
 	}
 	if (init_data->num_fract_fb_divider_decimal_point_precision == 0) {
-		dm_logger_write(calc_pll_cs->ctx->logger, LOG_ERROR,
+		DC_LOG_ERROR(
 			"Incorrect fract feedback divider precision num!");
 		return false;
 	}

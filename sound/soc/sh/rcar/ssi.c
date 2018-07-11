@@ -11,6 +11,15 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
+
+/*
+ * you can enable below define if you don't need
+ * SSI interrupt status debug message when debugging
+ * see rsnd_dbg_irq_status()
+ *
+ * #define RSND_DEBUG_NO_IRQ_STATUS 1
+ */
+
 #include <sound/simple_card_utils.h>
 #include <linux/delay.h>
 #include "rsnd.h"
@@ -162,7 +171,7 @@ static void rsnd_ssi_status_check(struct rsnd_mod *mod,
 		if (status & bit)
 			return;
 
-		udelay(50);
+		udelay(5);
 	}
 
 	dev_warn(dev, "%s[%d] status check failed\n",
@@ -603,6 +612,7 @@ static void __rsnd_ssi_interrupt(struct rsnd_mod *mod,
 				 struct rsnd_dai_stream *io)
 {
 	struct rsnd_priv *priv = rsnd_mod_to_priv(mod);
+	struct device *dev = rsnd_priv_to_dev(priv);
 	int is_dma = rsnd_ssi_is_dma_mode(mod);
 	u32 status;
 	bool elapsed = false;
@@ -621,8 +631,12 @@ static void __rsnd_ssi_interrupt(struct rsnd_mod *mod,
 		elapsed = rsnd_ssi_pio_interrupt(mod, io);
 
 	/* DMA only */
-	if (is_dma && (status & (UIRQ | OIRQ)))
+	if (is_dma && (status & (UIRQ | OIRQ))) {
+		rsnd_dbg_irq_status(dev, "%s[%d] err status : 0x%08x\n",
+			rsnd_mod_name(mod), rsnd_mod_id(mod), status);
+
 		stop = true;
+	}
 
 	rsnd_ssi_status_clear(mod);
 rsnd_ssi_interrupt_out:
@@ -990,19 +1004,26 @@ static void __rsnd_ssi_parse_hdmi_connection(struct rsnd_priv *priv,
 	struct device *dev = rsnd_priv_to_dev(priv);
 	struct rsnd_mod *mod = rsnd_io_to_mod_ssi(io);
 	struct rsnd_ssi *ssi;
+	struct device_node *remote_node = of_graph_get_port_parent(remote_ep);
+
+	/* support Gen3 only */
+	if (!rsnd_is_gen3(priv))
+		return;
 
 	if (!mod)
 		return;
 
 	ssi  = rsnd_mod_to_ssi(mod);
 
-	if (strstr(remote_ep->full_name, "hdmi0")) {
+	/* HDMI0 */
+	if (strstr(remote_node->full_name, "hdmi@fead0000")) {
 		rsnd_flags_set(ssi, RSND_SSI_HDMI0);
 		dev_dbg(dev, "%s[%d] connected to HDMI0\n",
 			 rsnd_mod_name(mod), rsnd_mod_id(mod));
 	}
 
-	if (strstr(remote_ep->full_name, "hdmi1")) {
+	/* HDMI1 */
+	if (strstr(remote_node->full_name, "hdmi@feae0000")) {
 		rsnd_flags_set(ssi, RSND_SSI_HDMI1);
 		dev_dbg(dev, "%s[%d] connected to HDMI1\n",
 			rsnd_mod_name(mod), rsnd_mod_id(mod));
@@ -1095,7 +1116,7 @@ int rsnd_ssi_probe(struct rsnd_priv *priv)
 		goto rsnd_ssi_probe_done;
 	}
 
-	ssi	= devm_kzalloc(dev, sizeof(*ssi) * nr, GFP_KERNEL);
+	ssi	= devm_kcalloc(dev, nr, sizeof(*ssi), GFP_KERNEL);
 	if (!ssi) {
 		ret = -ENOMEM;
 		goto rsnd_ssi_probe_done;

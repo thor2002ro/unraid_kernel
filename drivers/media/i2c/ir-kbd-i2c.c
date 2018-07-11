@@ -168,11 +168,15 @@ static int get_key_haup_xvr(struct IR_i2c *ir, enum rc_proto *protocol,
 static int get_key_pixelview(struct IR_i2c *ir, enum rc_proto *protocol,
 			     u32 *scancode, u8 *toggle)
 {
+	int rc;
 	unsigned char b;
 
 	/* poll IR chip */
-	if (1 != i2c_master_recv(ir->c, &b, 1)) {
+	rc = i2c_master_recv(ir->c, &b, 1);
+	if (rc != 1) {
 		dev_dbg(&ir->rc->dev, "read error\n");
+		if (rc < 0)
+			return rc;
 		return -EIO;
 	}
 
@@ -185,11 +189,15 @@ static int get_key_pixelview(struct IR_i2c *ir, enum rc_proto *protocol,
 static int get_key_fusionhdtv(struct IR_i2c *ir, enum rc_proto *protocol,
 			      u32 *scancode, u8 *toggle)
 {
+	int rc;
 	unsigned char buf[4];
 
 	/* poll IR chip */
-	if (4 != i2c_master_recv(ir->c, buf, 4)) {
+	rc = i2c_master_recv(ir->c, buf, 4);
+	if (rc != 4) {
 		dev_dbg(&ir->rc->dev, "read error\n");
+		if (rc < 0)
+			return rc;
 		return -EIO;
 	}
 
@@ -209,11 +217,15 @@ static int get_key_fusionhdtv(struct IR_i2c *ir, enum rc_proto *protocol,
 static int get_key_knc1(struct IR_i2c *ir, enum rc_proto *protocol,
 			u32 *scancode, u8 *toggle)
 {
+	int rc;
 	unsigned char b;
 
 	/* poll IR chip */
-	if (1 != i2c_master_recv(ir->c, &b, 1)) {
+	rc = i2c_master_recv(ir->c, &b, 1);
+	if (rc != 1) {
 		dev_dbg(&ir->rc->dev, "read error\n");
+		if (rc < 0)
+			return rc;
 		return -EIO;
 	}
 
@@ -571,7 +583,7 @@ static int zilog_ir_format(struct rc_dev *rcdev, unsigned int *txbuf,
 		/* first copy any leading non-repeating */
 		int leading = c - rep * 3;
 
-		if (leading + rep >= ARRAY_SIZE(code_block->codes) - 3) {
+		if (leading >= ARRAY_SIZE(code_block->codes) - 3 - rep) {
 			dev_warn(&rcdev->dev, "IR too long, cannot transmit\n");
 			return -EINVAL;
 		}
@@ -727,6 +739,7 @@ static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	struct rc_dev *rc = NULL;
 	struct i2c_adapter *adap = client->adapter;
 	unsigned short addr = client->addr;
+	bool probe_tx = (id->driver_data & FLAG_TX) != 0;
 	int err;
 
 	if ((id->driver_data & FLAG_HDPVR) && !enable_hdpvr) {
@@ -788,6 +801,7 @@ static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		rc_proto    = RC_PROTO_BIT_RC5 | RC_PROTO_BIT_RC6_MCE |
 							RC_PROTO_BIT_RC6_6A_32;
 		ir_codes    = RC_MAP_HAUPPAUGE;
+		probe_tx = true;
 		break;
 	}
 
@@ -880,7 +894,7 @@ static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id)
 
 	INIT_DELAYED_WORK(&ir->work, ir_work);
 
-	if (id->driver_data & FLAG_TX) {
+	if (probe_tx) {
 		ir->tx_c = i2c_new_dummy(client->adapter, 0x70);
 		if (!ir->tx_c) {
 			dev_err(&client->dev, "failed to setup tx i2c address");

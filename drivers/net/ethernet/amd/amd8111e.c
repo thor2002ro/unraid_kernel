@@ -649,7 +649,7 @@ static void amd8111e_free_ring(struct amd8111e_priv *lp)
 static int amd8111e_tx(struct net_device *dev)
 {
 	struct amd8111e_priv *lp = netdev_priv(dev);
-	int tx_index = lp->tx_complete_idx & TX_RING_DR_MOD_MASK;
+	int tx_index;
 	int status;
 	/* Complete all the transmit packet */
 	while (lp->tx_complete_idx != lp->tx_idx){
@@ -1074,16 +1074,12 @@ static int amd8111e_calc_coalesce(struct net_device *dev)
 				amd8111e_set_coalesce(dev,TX_INTR_COAL);
 				coal_conf->tx_coal_type = MEDIUM_COALESCE;
 			}
-
-		}
-		else if(tx_pkt_size >= 1024){
-			if (tx_pkt_size >= 1024){
-				if(coal_conf->tx_coal_type !=  HIGH_COALESCE){
-					coal_conf->tx_timeout = 4;
-					coal_conf->tx_event_count = 8;
-					amd8111e_set_coalesce(dev,TX_INTR_COAL);
-					coal_conf->tx_coal_type = HIGH_COALESCE;
-				}
+		} else if (tx_pkt_size >= 1024) {
+			if (coal_conf->tx_coal_type != HIGH_COALESCE) {
+				coal_conf->tx_timeout = 4;
+				coal_conf->tx_event_count = 8;
+				amd8111e_set_coalesce(dev, TX_INTR_COAL);
+				coal_conf->tx_coal_type = HIGH_COALESCE;
 			}
 		}
 	}

@@ -170,6 +170,12 @@ struct nouveau_drm {
 	/* synchronisation */
 	void *fence;
 
+	/* Global channel management. */
+	struct {
+		int nr;
+		u64 context_base;
+	} chan;
+
 	/* context for accelerated drm-internal operations */
 	struct nouveau_channel *cechan;
 	struct nouveau_channel *channel;
@@ -208,7 +214,6 @@ struct nouveau_drm {
 	bool have_disp_power_ref;
 
 	struct dev_pm_domain vga_pm_domain;
-	struct pci_dev *hdmi_device;
 };
 
 static inline struct nouveau_drm *

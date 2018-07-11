@@ -26,7 +26,7 @@
 #include "dce_clocks.h"
 #include "dm_services.h"
 #include "reg_helper.h"
-#include "fixed32_32.h"
+#include "fixed31_32.h"
 #include "bios_parser_interface.h"
 #include "dc.h"
 #include "dmcu.h"
@@ -34,7 +34,8 @@
 #include "dcn_calcs.h"
 #endif
 #include "core_types.h"
-
+#include "dc_types.h"
+#include "dal_asic_id.h"
 
 #define TO_DCE_CLOCKS(clocks)\
 	container_of(clocks, struct dce_disp_clk, base)
@@ -48,6 +49,8 @@
 
 #define CTX \
 	clk_dce->base.ctx
+#define DC_LOGGER \
+	clk->ctx->logger
 
 /* Max clock values for each state indexed by "enum clocks_state": */
 static const struct state_dependent_clocks dce80_max_clks_by_state[] = {
@@ -225,19 +228,19 @@ static int dce_clocks_get_dp_ref_freq(struct display_clock *clk)
 	 generated according to average value (case as with previous ASICs)
 	  */
 	if (clk_dce->ss_on_dprefclk && clk_dce->dprefclk_ss_divider != 0) {
-		struct fixed32_32 ss_percentage = dal_fixed32_32_div_int(
-				dal_fixed32_32_from_fraction(
+		struct fixed31_32 ss_percentage = dc_fixpt_div_int(
+				dc_fixpt_from_fraction(
 						clk_dce->dprefclk_ss_percentage,
 						clk_dce->dprefclk_ss_divider), 200);
-		struct fixed32_32 adj_dp_ref_clk_khz;
+		struct fixed31_32 adj_dp_ref_clk_khz;
 
-		ss_percentage = dal_fixed32_32_sub(dal_fixed32_32_one,
+		ss_percentage = dc_fixpt_sub(dc_fixpt_one,
 								ss_percentage);
 		adj_dp_ref_clk_khz =
-			dal_fixed32_32_mul_int(
+			dc_fixpt_mul_int(
 				ss_percentage,
 				dp_ref_clk_khz);
-		dp_ref_clk_khz = dal_fixed32_32_floor(adj_dp_ref_clk_khz);
+		dp_ref_clk_khz = dc_fixpt_floor(adj_dp_ref_clk_khz);
 	}
 
 	return dp_ref_clk_khz;
@@ -253,19 +256,19 @@ static int dce_clocks_get_dp_ref_freq_wrkaround(struct display_clock *clk)
 	int dp_ref_clk_khz = 600000;
 
 	if (clk_dce->ss_on_dprefclk && clk_dce->dprefclk_ss_divider != 0) {
-		struct fixed32_32 ss_percentage = dal_fixed32_32_div_int(
-				dal_fixed32_32_from_fraction(
+		struct fixed31_32 ss_percentage = dc_fixpt_div_int(
+				dc_fixpt_from_fraction(
 						clk_dce->dprefclk_ss_percentage,
 						clk_dce->dprefclk_ss_divider), 200);
-		struct fixed32_32 adj_dp_ref_clk_khz;
+		struct fixed31_32 adj_dp_ref_clk_khz;
 
-		ss_percentage = dal_fixed32_32_sub(dal_fixed32_32_one,
+		ss_percentage = dc_fixpt_sub(dc_fixpt_one,
 								ss_percentage);
 		adj_dp_ref_clk_khz =
-			dal_fixed32_32_mul_int(
+			dc_fixpt_mul_int(
 				ss_percentage,
 				dp_ref_clk_khz);
-		dp_ref_clk_khz = dal_fixed32_32_floor(adj_dp_ref_clk_khz);
+		dp_ref_clk_khz = dc_fixpt_floor(adj_dp_ref_clk_khz);
 	}
 
 	return dp_ref_clk_khz;
@@ -291,8 +294,10 @@ static enum dm_pp_clocks_state dce_get_required_clocks_state(
 
 	low_req_clk = i + 1;
 	if (low_req_clk > clk->max_clks_state) {
-		dm_logger_write(clk->ctx->logger, LOG_WARNING,
-				"%s: clocks unsupported", __func__);
+		DC_LOG_WARNING("%s: clocks unsupported disp_clk %d pix_clk %d",
+				__func__,
+				req_clocks->display_clk_khz,
+				req_clocks->pixel_clk_khz);
 		low_req_clk = DM_PP_CLOCKS_STATE_INVALID;
 	}
 
@@ -308,8 +313,7 @@ static bool dce_clock_set_min_clocks_state(
 
 	if (clocks_state > clk->max_clks_state) {
 		/*Requested state exceeds max supported state.*/
-		dm_logger_write(clk->ctx->logger, LOG_WARNING,
-				"Requested state exceeds max supported state");
+		DC_LOG_WARNING("Requested state exceeds max supported state");
 		return false;
 	} else if (clocks_state == clk->cur_min_clks_state) {
 		/*if we're trying to set the same state, we can just return
@@ -409,15 +413,21 @@ static int dce112_set_clock(
 	/*VBIOS will determine DPREFCLK frequency, so we don't set it*/
 	dce_clk_params.target_clock_frequency = 0;
 	dce_clk_params.clock_type = DCECLOCK_TYPE_DPREFCLK;
-	dce_clk_params.flags.USE_GENLOCK_AS_SOURCE_FOR_DPREFCLK =
+	if (!ASICREV_IS_VEGA20_P(clk->ctx->asic_id.hw_internal_rev))
+		dce_clk_params.flags.USE_GENLOCK_AS_SOURCE_FOR_DPREFCLK =
 			(dce_clk_params.pll_id ==
 					CLOCK_SOURCE_COMBO_DISPLAY_PLL0);
+	else
+		dce_clk_params.flags.USE_GENLOCK_AS_SOURCE_FOR_DPREFCLK = false;
 
 	bp->funcs->set_dce_clock(bp, &dce_clk_params);
 
-	if (clk_dce->dfs_bypass_disp_clk != actual_clock)
-		dmcu->funcs->set_psr_wait_loop(dmcu,
-				actual_clock / 1000 / 7);
+	if (!IS_FPGA_MAXIMUS_DC(core_dc->ctx->dce_environment)) {
+		if (clk_dce->dfs_bypass_disp_clk != actual_clock)
+			dmcu->funcs->set_psr_wait_loop(dmcu,
+					actual_clock / 1000 / 7);
+	}
+
 	clk_dce->dfs_bypass_disp_clk = actual_clock;
 	return actual_clock;
 }

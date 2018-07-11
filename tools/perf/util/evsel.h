@@ -30,7 +30,7 @@ struct perf_sample_id {
 	u64			period;
 };
 
-struct cgroup_sel;
+struct cgroup;
 
 /*
  * The 'struct perf_evsel_config_term' is used to pass event
@@ -107,7 +107,7 @@ struct perf_evsel {
 	struct perf_stat_evsel  *stats;
 	void			*priv;
 	u64			db_id;
-	struct cgroup_sel	*cgrp;
+	struct cgroup		*cgrp;
 	void			*handler;
 	struct cpu_map		*cpus;
 	struct cpu_map		*own_cpus;
@@ -115,6 +115,7 @@ struct perf_evsel {
 	unsigned int		sample_size;
 	int			id_pos;
 	int			is_pos;
+	bool			uniquified_name;
 	bool			snapshot;
 	bool 			supported;
 	bool 			needs_swap;
@@ -125,6 +126,8 @@ struct perf_evsel {
 	bool			per_pkg;
 	bool			precise_max;
 	bool			ignore_missing_thread;
+	bool			forced_leader;
+	bool			use_uncore_alias;
 	/* parse modifier helper */
 	int			exclude_GH;
 	int			nr_members;
@@ -142,12 +145,27 @@ struct perf_evsel {
 	struct perf_evsel	**metric_events;
 	bool			collect_stat;
 	bool			weak_group;
+	const char		*pmu_name;
 };
 
 union u64_swap {
 	u64 val64;
 	u32 val32[2];
 };
+
+struct perf_missing_features {
+	bool sample_id_all;
+	bool exclude_guest;
+	bool mmap2;
+	bool cloexec;
+	bool clockid;
+	bool clockid_wrong;
+	bool lbr_flags;
+	bool write_backward;
+	bool group_read;
+};
+
+extern struct perf_missing_features perf_missing_features;
 
 struct cpu_map;
 struct target;
@@ -439,6 +457,11 @@ for ((_evsel) = list_entry((_leader)->node.next, struct perf_evsel, node); 	\
 static inline bool perf_evsel__has_branch_callstack(const struct perf_evsel *evsel)
 {
 	return evsel->attr.branch_sample_type & PERF_SAMPLE_BRANCH_CALL_STACK;
+}
+
+static inline bool evsel__has_callchain(const struct perf_evsel *evsel)
+{
+	return (evsel->attr.sample_type & PERF_SAMPLE_CALLCHAIN) != 0;
 }
 
 typedef int (*attr__fprintf_f)(FILE *, const char *, const char *, void *);

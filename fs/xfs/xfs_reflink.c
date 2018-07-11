@@ -1,21 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (C) 2016 Oracle.  All Rights Reserved.
- *
  * Author: Darrick J. Wong <darrick.wong@oracle.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it would be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write the Free Software Foundation,
- * Inc.,  51 Franklin St, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 #include "xfs.h"
 #include "xfs_fs.h"
@@ -305,7 +291,7 @@ xfs_reflink_reserve_cow(
 	 * Fork all the shared blocks from our write offset until the end of
 	 * the extent.
 	 */
-	error = xfs_qm_dqattach_locked(ip, 0);
+	error = xfs_qm_dqattach_locked(ip, false);
 	if (error)
 		return error;
 
@@ -394,7 +380,7 @@ xfs_reflink_allocate_cow(
 
 retry:
 	ASSERT(xfs_is_reflink_inode(ip));
-	ASSERT(xfs_isilocked(ip, XFS_ILOCK_EXCL | XFS_ILOCK_SHARED));
+	ASSERT(xfs_isilocked(ip, XFS_ILOCK_EXCL));
 
 	/*
 	 * Even if the extent is not shared we might have a preallocation for
@@ -431,7 +417,7 @@ retry:
 		if (error)
 			return error;
 
-		error = xfs_qm_dqattach_locked(ip, 0);
+		error = xfs_qm_dqattach_locked(ip, false);
 		if (error)
 			goto out;
 		goto retry;
@@ -552,6 +538,9 @@ xfs_reflink_trim_irec_to_next_cow(
  *
  * If cancel_real is true this function cancels all COW fork extents for the
  * inode; if cancel_real is false, real extents are not cleared.
+ *
+ * Caller must have already joined the inode to the current transaction. The
+ * inode will be joined to the transaction returned to the caller.
  */
 int
 xfs_reflink_cancel_cow_blocks(
@@ -592,7 +581,6 @@ xfs_reflink_cancel_cow_blocks(
 			if (error)
 				break;
 		} else if (del.br_state == XFS_EXT_UNWRITTEN || cancel_real) {
-			xfs_trans_ijoin(*tpp, ip, 0);
 			xfs_defer_init(&dfops, &firstfsb);
 
 			/* Free the CoW orphan record. */
@@ -668,7 +656,7 @@ xfs_reflink_cancel_cow_range(
 
 	/* Start a rolling transaction to remove the mappings */
 	error = xfs_trans_alloc(ip->i_mount, &M_RES(ip->i_mount)->tr_write,
-			0, 0, 0, &tp);
+			0, 0, XFS_TRANS_NOFS, &tp);
 	if (error)
 		goto out;
 
@@ -741,7 +729,7 @@ xfs_reflink_end_cow(
 			(unsigned int)(end_fsb - offset_fsb),
 			XFS_DATA_FORK);
 	error = xfs_trans_alloc(ip->i_mount, &M_RES(ip->i_mount)->tr_write,
-			resblks, 0, XFS_TRANS_RESERVE, &tp);
+			resblks, 0, XFS_TRANS_RESERVE | XFS_TRANS_NOFS, &tp);
 	if (error)
 		goto out;
 
@@ -762,10 +750,8 @@ xfs_reflink_end_cow(
 		xfs_trim_extent(&del, offset_fsb, end_fsb - offset_fsb);
 
 		/* Extent delete may have bumped ext forward */
-		if (!del.br_blockcount) {
-			xfs_iext_prev(ifp, &icur);
-			goto next_extent;
-		}
+		if (!del.br_blockcount)
+			goto prev_extent;
 
 		ASSERT(!isnullstartblock(got.br_startblock));
 
@@ -774,10 +760,8 @@ xfs_reflink_end_cow(
 		 * speculatively preallocated CoW extents that have been
 		 * allocated but have not yet been involved in a write.
 		 */
-		if (got.br_state == XFS_EXT_UNWRITTEN) {
-			xfs_iext_prev(ifp, &icur);
-			goto next_extent;
-		}
+		if (got.br_state == XFS_EXT_UNWRITTEN)
+			goto prev_extent;
 
 		/* Unmap the old blocks in the data fork. */
 		xfs_defer_init(&dfops, &firstfsb);
@@ -816,8 +800,11 @@ xfs_reflink_end_cow(
 		error = xfs_defer_finish(&tp, &dfops);
 		if (error)
 			goto out_defer;
-next_extent:
 		if (!xfs_iext_get_extent(ifp, &icur, &got))
+			break;
+		continue;
+prev_extent:
+		if (!xfs_iext_prev_extent(ifp, &icur, &got))
 			break;
 	}
 
@@ -1061,7 +1048,7 @@ xfs_reflink_ag_has_free_space(
 		return 0;
 
 	pag = xfs_perag_get(mp, agno);
-	if (xfs_ag_resv_critical(pag, XFS_AG_RESV_AGFL) ||
+	if (xfs_ag_resv_critical(pag, XFS_AG_RESV_RMAPBT) ||
 	    xfs_ag_resv_critical(pag, XFS_AG_RESV_METADATA))
 		error = -ENOSPC;
 	xfs_perag_put(pag);
@@ -1360,7 +1347,7 @@ xfs_reflink_remap_range(
 		goto out_unlock;
 
 	/* Attach dquots to dest inode before changing block map */
-	ret = xfs_qm_dqattach(dest, 0);
+	ret = xfs_qm_dqattach(dest);
 	if (ret)
 		goto out_unlock;
 
@@ -1552,7 +1539,12 @@ next:
 	return 0;
 }
 
-/* Clear the inode reflink flag if there are no shared extents. */
+/*
+ * Clear the inode reflink flag if there are no shared extents.
+ *
+ * The caller is responsible for joining the inode to the transaction passed in.
+ * The inode will be joined to the transaction that is returned to the caller.
+ */
 int
 xfs_reflink_clear_inode_flag(
 	struct xfs_inode	*ip,
@@ -1579,7 +1571,6 @@ xfs_reflink_clear_inode_flag(
 	trace_xfs_reflink_unset_inode_flag(ip);
 	ip->i_d.di_flags2 &= ~XFS_DIFLAG2_REFLINK;
 	xfs_inode_clear_cowblocks_tag(ip);
-	xfs_trans_ijoin(*tpp, ip, 0);
 	xfs_trans_log_inode(*tpp, ip, XFS_ILOG_CORE);
 
 	return error;

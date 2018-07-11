@@ -30,6 +30,7 @@
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/partitions.h>
 #include <linux/err.h>
+#include <linux/of.h>
 
 #include "mtdcore.h"
 
@@ -205,27 +206,12 @@ static int part_erase(struct mtd_info *mtd, struct erase_info *instr)
 
 	instr->addr += part->offset;
 	ret = part->parent->_erase(part->parent, instr);
-	if (ret) {
-		if (instr->fail_addr != MTD_FAIL_ADDR_UNKNOWN)
-			instr->fail_addr -= part->offset;
-		instr->addr -= part->offset;
-	}
+	if (instr->fail_addr != MTD_FAIL_ADDR_UNKNOWN)
+		instr->fail_addr -= part->offset;
+	instr->addr -= part->offset;
+
 	return ret;
 }
-
-void mtd_erase_callback(struct erase_info *instr)
-{
-	if (instr->mtd->_erase == part_erase) {
-		struct mtd_part *part = mtd_to_part(instr->mtd);
-
-		if (instr->fail_addr != MTD_FAIL_ADDR_UNKNOWN)
-			instr->fail_addr -= part->offset;
-		instr->addr -= part->offset;
-	}
-	if (instr->callback)
-		instr->callback(instr);
-}
-EXPORT_SYMBOL_GPL(mtd_erase_callback);
 
 static int part_lock(struct mtd_info *mtd, loff_t ofs, uint64_t len)
 {
@@ -349,20 +335,7 @@ static inline void free_partition(struct mtd_part *p)
  */
 static int mtd_parse_part(struct mtd_part *slave, const char *const *types)
 {
-	struct mtd_partitions parsed;
-	int err;
-
-	err = parse_mtd_partitions(&slave->mtd, types, &parsed, NULL);
-	if (err)
-		return err;
-	else if (!parsed.nr_parts)
-		return -ENOENT;
-
-	err = add_mtd_partitions(&slave->mtd, parsed.parts, parsed.nr_parts);
-
-	mtd_part_parser_cleanup(&parsed);
-
-	return err;
+	return parse_mtd_partitions(&slave->mtd, types, NULL);
 }
 
 static struct mtd_part *allocate_partition(struct mtd_info *parent,
@@ -861,30 +834,113 @@ static int mtd_part_do_parse(struct mtd_part_parser *parser,
 }
 
 /**
- * parse_mtd_partitions - parse MTD partitions
+ * mtd_part_get_compatible_parser - find MTD parser by a compatible string
+ *
+ * @compat: compatible string describing partitions in a device tree
+ *
+ * MTD parsers can specify supported partitions by providing a table of
+ * compatibility strings. This function finds a parser that advertises support
+ * for a passed value of "compatible".
+ */
+static struct mtd_part_parser *mtd_part_get_compatible_parser(const char *compat)
+{
+	struct mtd_part_parser *p, *ret = NULL;
+
+	spin_lock(&part_parser_lock);
+
+	list_for_each_entry(p, &part_parsers, list) {
+		const struct of_device_id *matches;
+
+		matches = p->of_match_table;
+		if (!matches)
+			continue;
+
+		for (; matches->compatible[0]; matches++) {
+			if (!strcmp(matches->compatible, compat) &&
+			    try_module_get(p->owner)) {
+				ret = p;
+				break;
+			}
+		}
+
+		if (ret)
+			break;
+	}
+
+	spin_unlock(&part_parser_lock);
+
+	return ret;
+}
+
+static int mtd_part_of_parse(struct mtd_info *master,
+			     struct mtd_partitions *pparts)
+{
+	struct mtd_part_parser *parser;
+	struct device_node *np;
+	struct property *prop;
+	const char *compat;
+	const char *fixed = "fixed-partitions";
+	int ret, err = 0;
+
+	np = of_get_child_by_name(mtd_get_of_node(master), "partitions");
+	of_property_for_each_string(np, "compatible", prop, compat) {
+		parser = mtd_part_get_compatible_parser(compat);
+		if (!parser)
+			continue;
+		ret = mtd_part_do_parse(parser, master, pparts, NULL);
+		if (ret > 0) {
+			of_node_put(np);
+			return ret;
+		}
+		mtd_part_parser_put(parser);
+		if (ret < 0 && !err)
+			err = ret;
+	}
+	of_node_put(np);
+
+	/*
+	 * For backward compatibility we have to try the "fixed-partitions"
+	 * parser. It supports old DT format with partitions specified as a
+	 * direct subnodes of a flash device DT node without any compatibility
+	 * specified we could match.
+	 */
+	parser = mtd_part_parser_get(fixed);
+	if (!parser && !request_module("%s", fixed))
+		parser = mtd_part_parser_get(fixed);
+	if (parser) {
+		ret = mtd_part_do_parse(parser, master, pparts, NULL);
+		if (ret > 0)
+			return ret;
+		mtd_part_parser_put(parser);
+		if (ret < 0 && !err)
+			err = ret;
+	}
+
+	return err;
+}
+
+/**
+ * parse_mtd_partitions - parse and register MTD partitions
+ *
  * @master: the master partition (describes whole MTD device)
  * @types: names of partition parsers to try or %NULL
- * @pparts: info about partitions found is returned here
  * @data: MTD partition parser-specific data
  *
- * This function tries to find partition on MTD device @master. It uses MTD
- * partition parsers, specified in @types. However, if @types is %NULL, then
- * the default list of parsers is used. The default list contains only the
+ * This function tries to find & register partitions on MTD device @master. It
+ * uses MTD partition parsers, specified in @types. However, if @types is %NULL,
+ * then the default list of parsers is used. The default list contains only the
  * "cmdlinepart" and "ofpart" parsers ATM.
  * Note: If there are more then one parser in @types, the kernel only takes the
  * partitions parsed out by the first parser.
  *
  * This function may return:
  * o a negative error code in case of failure
- * o zero otherwise, and @pparts will describe the partitions, number of
- *   partitions, and the parser which parsed them. Caller must release
- *   resources with mtd_part_parser_cleanup() when finished with the returned
- *   data.
+ * o number of found partitions otherwise
  */
 int parse_mtd_partitions(struct mtd_info *master, const char *const *types,
-			 struct mtd_partitions *pparts,
 			 struct mtd_part_parser_data *data)
 {
+	struct mtd_partitions pparts = { };
 	struct mtd_part_parser *parser;
 	int ret, err = 0;
 
@@ -892,19 +948,34 @@ int parse_mtd_partitions(struct mtd_info *master, const char *const *types,
 		types = default_mtd_part_types;
 
 	for ( ; *types; types++) {
-		pr_debug("%s: parsing partitions %s\n", master->name, *types);
-		parser = mtd_part_parser_get(*types);
-		if (!parser && !request_module("%s", *types))
+		/*
+		 * ofpart is a special type that means OF partitioning info
+		 * should be used. It requires a bit different logic so it is
+		 * handled in a separated function.
+		 */
+		if (!strcmp(*types, "ofpart")) {
+			ret = mtd_part_of_parse(master, &pparts);
+		} else {
+			pr_debug("%s: parsing partitions %s\n", master->name,
+				 *types);
 			parser = mtd_part_parser_get(*types);
-		pr_debug("%s: got parser %s\n", master->name,
-			 parser ? parser->name : NULL);
-		if (!parser)
-			continue;
-		ret = mtd_part_do_parse(parser, master, pparts, data);
+			if (!parser && !request_module("%s", *types))
+				parser = mtd_part_parser_get(*types);
+			pr_debug("%s: got parser %s\n", master->name,
+				parser ? parser->name : NULL);
+			if (!parser)
+				continue;
+			ret = mtd_part_do_parse(parser, master, &pparts, data);
+			if (ret <= 0)
+				mtd_part_parser_put(parser);
+		}
 		/* Found partitions! */
-		if (ret > 0)
-			return 0;
-		mtd_part_parser_put(parser);
+		if (ret > 0) {
+			err = add_mtd_partitions(master, pparts.parts,
+						 pparts.nr_parts);
+			mtd_part_parser_cleanup(&pparts);
+			return err ? err : pparts.nr_parts;
+		}
 		/*
 		 * Stash the first error we see; only report it if no parser
 		 * succeeds

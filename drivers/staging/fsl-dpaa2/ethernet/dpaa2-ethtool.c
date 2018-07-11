@@ -30,6 +30,8 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <linux/net_tstamp.h>
+
 #include "dpni.h"	/* DPNI_LINK_OPT_* */
 #include "dpaa2-eth.h"
 
@@ -78,20 +80,13 @@ static void dpaa2_eth_get_drvinfo(struct net_device *net_dev,
 				  struct ethtool_drvinfo *drvinfo)
 {
 	struct dpaa2_eth_priv *priv = netdev_priv(net_dev);
-	u16 fw_major, fw_minor;
-	int err;
 
 	strlcpy(drvinfo->driver, KBUILD_MODNAME, sizeof(drvinfo->driver));
 	strlcpy(drvinfo->version, dpaa2_eth_drv_version,
 		sizeof(drvinfo->version));
 
-	err =  dpni_get_api_version(priv->mc_io, 0, &fw_major, &fw_minor);
-	if (!err)
-		snprintf(drvinfo->fw_version, sizeof(drvinfo->fw_version),
-			 "%u.%u", fw_major, fw_minor);
-	else
-		strlcpy(drvinfo->fw_version, "N/A",
-			sizeof(drvinfo->fw_version));
+	snprintf(drvinfo->fw_version, sizeof(drvinfo->fw_version),
+		 "%u.%u", priv->dpni_ver_major, priv->dpni_ver_minor);
 
 	strlcpy(drvinfo->bus_info, dev_name(net_dev->dev.parent->parent),
 		sizeof(drvinfo->bus_info));
@@ -126,6 +121,8 @@ out:
 	return err;
 }
 
+#define DPNI_DYNAMIC_LINK_SET_VER_MAJOR		7
+#define DPNI_DYNAMIC_LINK_SET_VER_MINOR		1
 static int
 dpaa2_eth_set_link_ksettings(struct net_device *net_dev,
 			     const struct ethtool_link_ksettings *link_settings)
@@ -134,15 +131,16 @@ dpaa2_eth_set_link_ksettings(struct net_device *net_dev,
 	struct dpaa2_eth_priv *priv = netdev_priv(net_dev);
 	int err = 0;
 
-	netdev_dbg(net_dev, "Setting link parameters...");
-
-	/* Due to a temporary MC limitation, the DPNI must be down
+	/* If using an older MC version, the DPNI must be down
 	 * in order to be able to change link settings. Taking steps to let
 	 * the user know that.
 	 */
-	if (netif_running(net_dev)) {
-		netdev_info(net_dev, "Sorry, interface must be brought down first.\n");
-		return -EACCES;
+	if (dpaa2_eth_cmp_dpni_ver(priv, DPNI_DYNAMIC_LINK_SET_VER_MAJOR,
+				   DPNI_DYNAMIC_LINK_SET_VER_MINOR) < 0) {
+		if (netif_running(net_dev)) {
+			netdev_info(net_dev, "Interface must be brought down first.\n");
+			return -EACCES;
+		}
 	}
 
 	cfg.rate = link_settings->base.speed;
@@ -278,6 +276,26 @@ static int dpaa2_eth_get_rxnfc(struct net_device *net_dev,
 	return 0;
 }
 
+int dpaa2_phc_index = -1;
+EXPORT_SYMBOL(dpaa2_phc_index);
+
+static int dpaa2_eth_get_ts_info(struct net_device *dev,
+				 struct ethtool_ts_info *info)
+{
+	info->so_timestamping = SOF_TIMESTAMPING_TX_HARDWARE |
+				SOF_TIMESTAMPING_RX_HARDWARE |
+				SOF_TIMESTAMPING_RAW_HARDWARE;
+
+	info->phc_index = dpaa2_phc_index;
+
+	info->tx_types = (1 << HWTSTAMP_TX_OFF) |
+			 (1 << HWTSTAMP_TX_ON);
+
+	info->rx_filters = (1 << HWTSTAMP_FILTER_NONE) |
+			   (1 << HWTSTAMP_FILTER_ALL);
+	return 0;
+}
+
 const struct ethtool_ops dpaa2_ethtool_ops = {
 	.get_drvinfo = dpaa2_eth_get_drvinfo,
 	.get_link = ethtool_op_get_link,
@@ -287,4 +305,5 @@ const struct ethtool_ops dpaa2_ethtool_ops = {
 	.get_ethtool_stats = dpaa2_eth_get_ethtool_stats,
 	.get_strings = dpaa2_eth_get_strings,
 	.get_rxnfc = dpaa2_eth_get_rxnfc,
+	.get_ts_info = dpaa2_eth_get_ts_info,
 };

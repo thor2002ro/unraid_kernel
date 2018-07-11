@@ -48,6 +48,7 @@ enum fs_node_type {
 
 enum fs_flow_table_type {
 	FS_FT_NIC_RX          = 0x0,
+	FS_FT_NIC_TX          = 0x1,
 	FS_FT_ESW_EGRESS_ACL  = 0x2,
 	FS_FT_ESW_INGRESS_ACL = 0x3,
 	FS_FT_FDB             = 0X4,
@@ -75,6 +76,7 @@ struct mlx5_flow_steering {
 	struct mlx5_flow_root_namespace **esw_ingress_root_ns;
 	struct mlx5_flow_root_namespace	*sniffer_tx_root_ns;
 	struct mlx5_flow_root_namespace	*sniffer_rx_root_ns;
+	struct mlx5_flow_root_namespace	*egress_root_ns;
 };
 
 struct fs_node {
@@ -157,7 +159,7 @@ struct mlx5_ft_underlay_qp {
 	u32 qpn;
 };
 
-#define MLX5_FTE_MATCH_PARAM_RESERVED	reserved_at_600
+#define MLX5_FTE_MATCH_PARAM_RESERVED	reserved_at_800
 /* Calculate the fte_match_param length and without the reserved length.
  * Make sure the reserved field is the last.
  */
@@ -174,11 +176,8 @@ struct fs_fte {
 	struct fs_node			node;
 	u32				val[MLX5_ST_SZ_DW_MATCH_PARAM];
 	u32				dests_size;
-	u32				flow_tag;
 	u32				index;
-	u32				action;
-	u32				encap_id;
-	u32				modify_id;
+	struct mlx5_flow_act		action;
 	enum fs_fte_status		status;
 	struct mlx5_fc			*counter;
 	struct rhash_head		hash;
@@ -224,6 +223,7 @@ struct mlx5_flow_root_namespace {
 	/* Should be held when chaining flow tables */
 	struct mutex			chain_lock;
 	struct list_head		underlay_qpns;
+	const struct mlx5_flow_cmds	*cmds;
 };
 
 int mlx5_init_fc_stats(struct mlx5_core_dev *dev);
@@ -233,8 +233,6 @@ void mlx5_fc_queue_stats_work(struct mlx5_core_dev *dev,
 			      unsigned long delay);
 void mlx5_fc_update_sampling_interval(struct mlx5_core_dev *dev,
 				      unsigned long interval);
-int mlx5_fc_query(struct mlx5_core_dev *dev, u16 id,
-		  u64 *packets, u64 *bytes);
 
 int mlx5_init_fs(struct mlx5_core_dev *dev);
 void mlx5_cleanup_fs(struct mlx5_core_dev *dev);

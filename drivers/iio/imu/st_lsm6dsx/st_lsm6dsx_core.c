@@ -17,7 +17,7 @@
  *   - Gyroscope supported full-scale [dps]: +-125/+-245/+-500/+-1000/+-2000
  *   - FIFO size: 8KB
  *
- * - LSM6DS3H/LSM6DSL/LSM6DSM:
+ * - LSM6DS3H/LSM6DSL/LSM6DSM/ISM330DLC:
  *   - Accelerometer/Gyroscope supported ODR [Hz]: 13, 26, 52, 104, 208, 416
  *   - Accelerometer supported full-scale [g]: +-2/+-4/+-8/+-16
  *   - Gyroscope supported full-scale [dps]: +-125/+-245/+-500/+-1000/+-2000
@@ -181,6 +181,24 @@ static const struct st_lsm6dsx_settings st_lsm6dsx_sensor_settings[] = {
 			},
 			.th_wl = 3, /* 1LSB = 2B */
 		},
+		.ts_settings = {
+			.timer_en = {
+				.addr = 0x58,
+				.mask = BIT(7),
+			},
+			.hr_timer = {
+				.addr = 0x5c,
+				.mask = BIT(4),
+			},
+			.fifo_en = {
+				.addr = 0x07,
+				.mask = BIT(7),
+			},
+			.decimator = {
+				.addr = 0x09,
+				.mask = GENMASK(5, 3),
+			},
+		},
 	},
 	{
 		.wai = 0x69,
@@ -209,6 +227,24 @@ static const struct st_lsm6dsx_settings st_lsm6dsx_sensor_settings[] = {
 			},
 			.th_wl = 3, /* 1LSB = 2B */
 		},
+		.ts_settings = {
+			.timer_en = {
+				.addr = 0x58,
+				.mask = BIT(7),
+			},
+			.hr_timer = {
+				.addr = 0x5c,
+				.mask = BIT(4),
+			},
+			.fifo_en = {
+				.addr = 0x07,
+				.mask = BIT(7),
+			},
+			.decimator = {
+				.addr = 0x09,
+				.mask = GENMASK(5, 3),
+			},
+		},
 	},
 	{
 		.wai = 0x6a,
@@ -216,6 +252,7 @@ static const struct st_lsm6dsx_settings st_lsm6dsx_sensor_settings[] = {
 		.id = {
 			[0] = ST_LSM6DSL_ID,
 			[1] = ST_LSM6DSM_ID,
+			[2] = ST_ISM330DLC_ID,
 		},
 		.decimator = {
 			[ST_LSM6DSX_ID_ACC] = {
@@ -230,13 +267,31 @@ static const struct st_lsm6dsx_settings st_lsm6dsx_sensor_settings[] = {
 		.fifo_ops = {
 			.fifo_th = {
 				.addr = 0x06,
-				.mask = GENMASK(11, 0),
+				.mask = GENMASK(10, 0),
 			},
 			.fifo_diff = {
 				.addr = 0x3a,
-				.mask = GENMASK(11, 0),
+				.mask = GENMASK(10, 0),
 			},
 			.th_wl = 3, /* 1LSB = 2B */
+		},
+		.ts_settings = {
+			.timer_en = {
+				.addr = 0x19,
+				.mask = BIT(5),
+			},
+			.hr_timer = {
+				.addr = 0x5c,
+				.mask = BIT(4),
+			},
+			.fifo_en = {
+				.addr = 0x07,
+				.mask = BIT(7),
+			},
+			.decimator = {
+				.addr = 0x09,
+				.mask = GENMASK(5, 3),
+			},
 		},
 	},
 };
@@ -630,6 +685,44 @@ static int st_lsm6dsx_get_drdy_reg(struct st_lsm6dsx_hw *hw, u8 *drdy_reg)
 	return err;
 }
 
+static int st_lsm6dsx_init_hw_timer(struct st_lsm6dsx_hw *hw)
+{
+	const struct st_lsm6dsx_hw_ts_settings *ts_settings;
+	int err, val;
+
+	ts_settings = &hw->settings->ts_settings;
+	/* enable hw timestamp generation if necessary */
+	if (ts_settings->timer_en.addr) {
+		val = ST_LSM6DSX_SHIFT_VAL(1, ts_settings->timer_en.mask);
+		err = regmap_update_bits(hw->regmap,
+					 ts_settings->timer_en.addr,
+					 ts_settings->timer_en.mask, val);
+		if (err < 0)
+			return err;
+	}
+
+	/* enable high resolution for hw ts timer if necessary */
+	if (ts_settings->hr_timer.addr) {
+		val = ST_LSM6DSX_SHIFT_VAL(1, ts_settings->hr_timer.mask);
+		err = regmap_update_bits(hw->regmap,
+					 ts_settings->hr_timer.addr,
+					 ts_settings->hr_timer.mask, val);
+		if (err < 0)
+			return err;
+	}
+
+	/* enable ts queueing in FIFO if necessary */
+	if (ts_settings->fifo_en.addr) {
+		val = ST_LSM6DSX_SHIFT_VAL(1, ts_settings->fifo_en.mask);
+		err = regmap_update_bits(hw->regmap,
+					 ts_settings->fifo_en.addr,
+					 ts_settings->fifo_en.mask, val);
+		if (err < 0)
+			return err;
+	}
+	return 0;
+}
+
 static int st_lsm6dsx_init_device(struct st_lsm6dsx_hw *hw)
 {
 	u8 drdy_int_reg;
@@ -654,10 +747,14 @@ static int st_lsm6dsx_init_device(struct st_lsm6dsx_hw *hw)
 	if (err < 0)
 		return err;
 
-	return regmap_update_bits(hw->regmap, drdy_int_reg,
-				  ST_LSM6DSX_REG_FIFO_FTH_IRQ_MASK,
-				  FIELD_PREP(ST_LSM6DSX_REG_FIFO_FTH_IRQ_MASK,
-					     1));
+	err = regmap_update_bits(hw->regmap, drdy_int_reg,
+				 ST_LSM6DSX_REG_FIFO_FTH_IRQ_MASK,
+				 FIELD_PREP(ST_LSM6DSX_REG_FIFO_FTH_IRQ_MASK,
+					    1));
+	if (err < 0)
+		return err;
+
+	return st_lsm6dsx_init_hw_timer(hw);
 }
 
 static struct iio_dev *st_lsm6dsx_alloc_iiodev(struct st_lsm6dsx_hw *hw,

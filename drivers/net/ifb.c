@@ -102,7 +102,7 @@ static void ifb_ri_tasklet(unsigned long _txp)
 		if (!skb->tc_from_ingress) {
 			dev_queue_xmit(skb);
 		} else {
-			skb_pull(skb, skb->mac_len);
+			skb_pull_rcsum(skb, skb->mac_len);
 			netif_receive_skb(skb);
 		}
 	}
@@ -330,6 +330,7 @@ static int __init ifb_init_module(void)
 {
 	int i, err;
 
+	down_write(&pernet_ops_rwsem);
 	rtnl_lock();
 	err = __rtnl_link_register(&ifb_link_ops);
 	if (err < 0)
@@ -344,6 +345,7 @@ static int __init ifb_init_module(void)
 
 out:
 	rtnl_unlock();
+	up_write(&pernet_ops_rwsem);
 
 	return err;
 }

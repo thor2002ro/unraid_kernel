@@ -34,10 +34,14 @@
 
 #ifdef __KERNEL__
 
+#include <linux/build_bug.h>
+#include <linux/cache.h>
+#include <linux/init.h>
+#include <linux/stddef.h>
 #include <linux/string.h>
 
 #include <asm/alternative.h>
-#include <asm/fpsimd.h>
+#include <asm/cpufeature.h>
 #include <asm/hw_breakpoint.h>
 #include <asm/lse.h>
 #include <asm/pgtable-hwdef.h>
@@ -103,11 +107,19 @@ struct cpu_context {
 
 struct thread_struct {
 	struct cpu_context	cpu_context;	/* cpu context */
-	unsigned long		tp_value;	/* TLS register */
-#ifdef CONFIG_COMPAT
-	unsigned long		tp2_value;
-#endif
-	struct fpsimd_state	fpsimd_state;
+
+	/*
+	 * Whitelisted fields for hardened usercopy:
+	 * Maintainers must ensure manually that this contains no
+	 * implicit padding.
+	 */
+	struct {
+		unsigned long	tp_value;	/* TLS register */
+		unsigned long	tp2_value;
+		struct user_fpsimd_state fpsimd_state;
+	} uw;
+
+	unsigned int		fpsimd_cpu;
 	void			*sve_state;	/* SVE registers, if any */
 	unsigned int		sve_vl;		/* SVE vector length */
 	unsigned int		sve_vl_onexec;	/* SVE vl after next exec */
@@ -116,14 +128,17 @@ struct thread_struct {
 	struct debug_info	debug;		/* debugging */
 };
 
-/*
- * Everything usercopied to/from thread_struct is statically-sized, so
- * no hardened usercopy whitelist is needed.
- */
 static inline void arch_thread_struct_whitelist(unsigned long *offset,
 						unsigned long *size)
 {
-	*offset = *size = 0;
+	/* Verify that there is no padding among the whitelisted fields: */
+	BUILD_BUG_ON(sizeof_field(struct thread_struct, uw) !=
+		     sizeof_field(struct thread_struct, uw.tp_value) +
+		     sizeof_field(struct thread_struct, uw.tp2_value) +
+		     sizeof_field(struct thread_struct, uw.fpsimd_state));
+
+	*offset = offsetof(struct thread_struct, uw);
+	*size = sizeof_field(struct thread_struct, uw);
 }
 
 #ifdef CONFIG_COMPAT
@@ -131,19 +146,21 @@ static inline void arch_thread_struct_whitelist(unsigned long *offset,
 ({									\
 	unsigned long *__tls;						\
 	if (is_compat_thread(task_thread_info(t)))			\
-		__tls = &(t)->thread.tp2_value;				\
+		__tls = &(t)->thread.uw.tp2_value;			\
 	else								\
-		__tls = &(t)->thread.tp_value;				\
+		__tls = &(t)->thread.uw.tp_value;			\
 	__tls;								\
  })
 #else
-#define task_user_tls(t)	(&(t)->thread.tp_value)
+#define task_user_tls(t)	(&(t)->thread.uw.tp_value)
 #endif
 
 /* Sync TPIDR_EL0 back to thread_struct for current */
 void tls_preserve_current_state(void);
 
-#define INIT_THREAD  {	}
+#define INIT_THREAD {				\
+	.fpsimd_cpu = NR_CPUS,			\
+}
 
 static inline void start_thread_common(struct pt_regs *regs, unsigned long pc)
 {
@@ -227,9 +244,23 @@ static inline void spin_lock_prefetch(const void *ptr)
 
 #endif
 
-int cpu_enable_pan(void *__unused);
-int cpu_enable_cache_maint_trap(void *__unused);
-int cpu_clear_disr(void *__unused);
+void cpu_enable_pan(const struct arm64_cpu_capabilities *__unused);
+void cpu_enable_cache_maint_trap(const struct arm64_cpu_capabilities *__unused);
+void cpu_clear_disr(const struct arm64_cpu_capabilities *__unused);
+
+extern unsigned long __ro_after_init signal_minsigstksz; /* sigframe size */
+extern void __init minsigstksz_setup(void);
+
+/*
+ * Not at the top of the file due to a direct #include cycle between
+ * <asm/fpsimd.h> and <asm/processor.h>.  Deferring this #include
+ * ensures that contents of processor.h are visible to fpsimd.h even if
+ * processor.h is included first.
+ *
+ * These prctl helpers are the only things in this file that require
+ * fpsimd.h.  The core code expects them to be in this header.
+ */
+#include <asm/fpsimd.h>
 
 /* Userspace interface for PR_SVE_{SET,GET}_VL prctl()s: */
 #define SVE_SET_VL(arg)	sve_set_current_vl(arg)

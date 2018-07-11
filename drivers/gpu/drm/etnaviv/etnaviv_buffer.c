@@ -1,18 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2014 Etnaviv Project
- * Author: Christian Gmeiner <christian.gmeiner@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2014-2018 Etnaviv Project
  */
 
 #include "etnaviv_cmdbuf.h"
@@ -207,6 +195,24 @@ u16 etnaviv_buffer_config_mmuv2(struct etnaviv_gpu *gpu, u32 mtlb_addr, u32 safe
 		CMD_SEM(buffer, SYNC_RECIPIENT_FE, SYNC_RECIPIENT_PE);
 		CMD_STALL(buffer, SYNC_RECIPIENT_FE, SYNC_RECIPIENT_PE);
 	}
+
+	CMD_END(buffer);
+
+	buffer->user_size = ALIGN(buffer->user_size, 8);
+
+	return buffer->user_size / 8;
+}
+
+u16 etnaviv_buffer_config_pta(struct etnaviv_gpu *gpu)
+{
+	struct etnaviv_cmdbuf *buffer = &gpu->buffer;
+
+	lockdep_assert_held(&gpu->lock);
+
+	buffer->user_size = 0;
+
+	CMD_LOAD_STATE(buffer, VIVS_MMUv2_PTA_CONFIG,
+		       VIVS_MMUv2_PTA_CONFIG_INDEX(0));
 
 	CMD_END(buffer);
 

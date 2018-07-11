@@ -26,6 +26,7 @@
 #define _INTEL_HUC_H_
 
 #include "intel_uc_fw.h"
+#include "intel_huc_fw.h"
 
 struct intel_huc {
 	/* Generic uC firmware management */
@@ -35,7 +36,13 @@ struct intel_huc {
 };
 
 void intel_huc_init_early(struct intel_huc *huc);
-int intel_huc_init_hw(struct intel_huc *huc);
 int intel_huc_auth(struct intel_huc *huc);
+int intel_huc_check_status(struct intel_huc *huc);
+
+static inline int intel_huc_sanitize(struct intel_huc *huc)
+{
+	intel_uc_fw_sanitize(&huc->fw);
+	return 0;
+}
 
 #endif

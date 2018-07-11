@@ -18,11 +18,11 @@
 
 #include "pblk.h"
 
-static void pblk_map_page_data(struct pblk *pblk, unsigned int sentry,
-			       struct ppa_addr *ppa_list,
-			       unsigned long *lun_bitmap,
-			       struct pblk_sec_meta *meta_list,
-			       unsigned int valid_secs)
+static int pblk_map_page_data(struct pblk *pblk, unsigned int sentry,
+			      struct ppa_addr *ppa_list,
+			      unsigned long *lun_bitmap,
+			      struct pblk_sec_meta *meta_list,
+			      unsigned int valid_secs)
 {
 	struct pblk_line *line = pblk_line_get_data(pblk);
 	struct pblk_emeta *emeta;
@@ -35,8 +35,14 @@ static void pblk_map_page_data(struct pblk *pblk, unsigned int sentry,
 	if (pblk_line_is_full(line)) {
 		struct pblk_line *prev_line = line;
 
+		/* If we cannot allocate a new line, make sure to store metadata
+		 * on current line and then fail
+		 */
 		line = pblk_line_replace_data(pblk);
 		pblk_line_close_meta(pblk, prev_line);
+
+		if (!line)
+			return -EINTR;
 	}
 
 	emeta = line->emeta;
@@ -65,6 +71,8 @@ static void pblk_map_page_data(struct pblk *pblk, unsigned int sentry,
 			lba_list[paddr] = cpu_to_le64(w_ctx->lba);
 			if (lba_list[paddr] != addr_empty)
 				line->nr_valid_lbas++;
+			else
+				atomic64_inc(&pblk->pad_wa);
 		} else {
 			lba_list[paddr] = meta_list[i].lba = addr_empty;
 			__pblk_map_invalidate(pblk, line, paddr);
@@ -72,6 +80,7 @@ static void pblk_map_page_data(struct pblk *pblk, unsigned int sentry,
 	}
 
 	pblk_down_rq(pblk, ppa_list, nr_secs, lun_bitmap);
+	return 0;
 }
 
 void pblk_map_rq(struct pblk *pblk, struct nvm_rq *rqd, unsigned int sentry,
@@ -85,8 +94,12 @@ void pblk_map_rq(struct pblk *pblk, struct nvm_rq *rqd, unsigned int sentry,
 
 	for (i = off; i < rqd->nr_ppas; i += min) {
 		map_secs = (i + min > valid_secs) ? (valid_secs % min) : min;
-		pblk_map_page_data(pblk, sentry + i, &rqd->ppa_list[i],
-					lun_bitmap, &meta_list[i], map_secs);
+		if (pblk_map_page_data(pblk, sentry + i, &rqd->ppa_list[i],
+					lun_bitmap, &meta_list[i], map_secs)) {
+			bio_put(rqd->bio);
+			pblk_free_rqd(pblk, rqd, PBLK_WRITE);
+			pblk_pipeline_stop(pblk);
+		}
 	}
 }
 
@@ -106,8 +119,12 @@ void pblk_map_erase_rq(struct pblk *pblk, struct nvm_rq *rqd,
 
 	for (i = 0; i < rqd->nr_ppas; i += min) {
 		map_secs = (i + min > valid_secs) ? (valid_secs % min) : min;
-		pblk_map_page_data(pblk, sentry + i, &rqd->ppa_list[i],
-					lun_bitmap, &meta_list[i], map_secs);
+		if (pblk_map_page_data(pblk, sentry + i, &rqd->ppa_list[i],
+					lun_bitmap, &meta_list[i], map_secs)) {
+			bio_put(rqd->bio);
+			pblk_free_rqd(pblk, rqd, PBLK_WRITE);
+			pblk_pipeline_stop(pblk);
+		}
 
 		erase_lun = pblk_ppa_to_pos(geo, rqd->ppa_list[i]);
 
@@ -125,7 +142,7 @@ void pblk_map_erase_rq(struct pblk *pblk, struct nvm_rq *rqd,
 			atomic_dec(&e_line->left_eblks);
 
 			*erase_ppa = rqd->ppa_list[i];
-			erase_ppa->g.blk = e_line->id;
+			erase_ppa->a.blk = e_line->id;
 
 			spin_unlock(&e_line->lock);
 
@@ -166,6 +183,6 @@ retry:
 		set_bit(bit, e_line->erase_bitmap);
 		atomic_dec(&e_line->left_eblks);
 		*erase_ppa = pblk->luns[bit].bppa; /* set ch and lun */
-		erase_ppa->g.blk = e_line->id;
+		erase_ppa->a.blk = e_line->id;
 	}
 }

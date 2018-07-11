@@ -52,7 +52,7 @@ enum emulation_result {
 	EMULATE_EXIT_USER,    /* emulation requires exit to user-space */
 };
 
-enum instruction_type {
+enum instruction_fetch_type {
 	INST_GENERIC,
 	INST_SC,		/* system call */
 };
@@ -81,10 +81,10 @@ extern int kvmppc_handle_loads(struct kvm_run *run, struct kvm_vcpu *vcpu,
 extern int kvmppc_handle_vsx_load(struct kvm_run *run, struct kvm_vcpu *vcpu,
 				unsigned int rt, unsigned int bytes,
 			int is_default_endian, int mmio_sign_extend);
-extern int kvmppc_handle_load128_by2x64(struct kvm_run *run,
-		struct kvm_vcpu *vcpu, unsigned int rt, int is_default_endian);
-extern int kvmppc_handle_store128_by2x64(struct kvm_run *run,
-		struct kvm_vcpu *vcpu, unsigned int rs, int is_default_endian);
+extern int kvmppc_handle_vmx_load(struct kvm_run *run, struct kvm_vcpu *vcpu,
+		unsigned int rt, unsigned int bytes, int is_default_endian);
+extern int kvmppc_handle_vmx_store(struct kvm_run *run, struct kvm_vcpu *vcpu,
+		unsigned int rs, unsigned int bytes, int is_default_endian);
 extern int kvmppc_handle_store(struct kvm_run *run, struct kvm_vcpu *vcpu,
 			       u64 val, unsigned int bytes,
 			       int is_default_endian);
@@ -93,7 +93,7 @@ extern int kvmppc_handle_vsx_store(struct kvm_run *run, struct kvm_vcpu *vcpu,
 				int is_default_endian);
 
 extern int kvmppc_load_last_inst(struct kvm_vcpu *vcpu,
-				 enum instruction_type type, u32 *inst);
+				 enum instruction_fetch_type type, u32 *inst);
 
 extern int kvmppc_ld(struct kvm_vcpu *vcpu, ulong *eaddr, int size, void *ptr,
 		     bool data);
@@ -265,6 +265,8 @@ union kvmppc_one_reg {
 	vector128 vval;
 	u64	vsxval[2];
 	u32	vsx32val[4];
+	u16	vsx16val[8];
+	u8	vsx8val[16];
 	struct {
 		u64	addr;
 		u64	length;
@@ -295,7 +297,6 @@ struct kvmppc_ops {
 				     const struct kvm_userspace_memory_region *mem,
 				     const struct kvm_memory_slot *old,
 				     const struct kvm_memory_slot *new);
-	int (*unmap_hva)(struct kvm *kvm, unsigned long hva);
 	int (*unmap_hva_range)(struct kvm *kvm, unsigned long start,
 			   unsigned long end);
 	int (*age_hva)(struct kvm *kvm, unsigned long start, unsigned long end);
@@ -325,13 +326,14 @@ struct kvmppc_ops {
 	int (*get_rmmu_info)(struct kvm *kvm, struct kvm_ppc_rmmu_info *info);
 	int (*set_smt_mode)(struct kvm *kvm, unsigned long mode,
 			    unsigned long flags);
+	void (*giveup_ext)(struct kvm_vcpu *vcpu, ulong msr);
 };
 
 extern struct kvmppc_ops *kvmppc_hv_ops;
 extern struct kvmppc_ops *kvmppc_pr_ops;
 
 static inline int kvmppc_get_last_inst(struct kvm_vcpu *vcpu,
-					enum instruction_type type, u32 *inst)
+				enum instruction_fetch_type type, u32 *inst)
 {
 	int ret = EMULATE_DONE;
 	u32 fetched_inst;
@@ -436,15 +438,15 @@ struct openpic;
 extern void kvm_cma_reserve(void) __init;
 static inline void kvmppc_set_xics_phys(int cpu, unsigned long addr)
 {
-	paca[cpu].kvm_hstate.xics_phys = (void __iomem *)addr;
+	paca_ptrs[cpu]->kvm_hstate.xics_phys = (void __iomem *)addr;
 }
 
 static inline void kvmppc_set_xive_tima(int cpu,
 					unsigned long phys_addr,
 					void __iomem *virt_addr)
 {
-	paca[cpu].kvm_hstate.xive_tima_phys = (void __iomem *)phys_addr;
-	paca[cpu].kvm_hstate.xive_tima_virt = virt_addr;
+	paca_ptrs[cpu]->kvm_hstate.xive_tima_phys = (void __iomem *)phys_addr;
+	paca_ptrs[cpu]->kvm_hstate.xive_tima_virt = virt_addr;
 }
 
 static inline u32 kvmppc_get_xics_latch(void)
@@ -458,7 +460,7 @@ static inline u32 kvmppc_get_xics_latch(void)
 
 static inline void kvmppc_set_host_ipi(int cpu, u8 host_ipi)
 {
-	paca[cpu].kvm_hstate.host_ipi = host_ipi;
+	paca_ptrs[cpu]->kvm_hstate.host_ipi = host_ipi;
 }
 
 static inline void kvmppc_fast_vcpu_kick(struct kvm_vcpu *vcpu)

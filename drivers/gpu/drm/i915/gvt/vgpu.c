@@ -121,7 +121,7 @@ int intel_gvt_init_vgpu_types(struct intel_gvt *gvt)
 	high_avail = gvt_hidden_sz(gvt) - HOST_HIGH_GM_SIZE;
 	num_types = sizeof(vgpu_types) / sizeof(vgpu_types[0]);
 
-	gvt->types = kzalloc(num_types * sizeof(struct intel_vgpu_type),
+	gvt->types = kcalloc(num_types, sizeof(struct intel_vgpu_type),
 			     GFP_KERNEL);
 	if (!gvt->types)
 		return -ENOMEM;
@@ -354,6 +354,7 @@ static struct intel_vgpu *__intel_gvt_create_vgpu(struct intel_gvt *gvt,
 	vgpu->gvt = gvt;
 	vgpu->sched_ctl.weight = param->weight;
 	INIT_LIST_HEAD(&vgpu->dmabuf_obj_list_head);
+	INIT_RADIX_TREE(&vgpu->page_track_tree, GFP_KERNEL);
 	idr_init(&vgpu->object_idr);
 	intel_vgpu_init_cfg_space(vgpu, param->primary);
 
@@ -521,6 +522,7 @@ void intel_gvt_reset_vgpu_locked(struct intel_vgpu *vgpu, bool dmlr,
 	/* full GPU reset or device model level reset */
 	if (engine_mask == ALL_ENGINES || dmlr) {
 		intel_vgpu_select_submission_ops(vgpu, ALL_ENGINES, 0);
+		intel_vgpu_invalidate_ppgtt(vgpu);
 		/*fence will not be reset during virtual reset */
 		if (dmlr) {
 			intel_vgpu_reset_gtt(vgpu);

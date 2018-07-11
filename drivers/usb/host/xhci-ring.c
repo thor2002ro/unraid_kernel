@@ -1436,7 +1436,8 @@ static void handle_cmd_completion(struct xhci_hcd *xhci,
 	case TRB_STOP_RING:
 		WARN_ON(slot_id != TRB_TO_SLOT_ID(
 				le32_to_cpu(cmd_trb->generic.field[3])));
-		xhci_handle_cmd_stop_ep(xhci, slot_id, cmd_trb, event);
+		if (!cmd->completion)
+			xhci_handle_cmd_stop_ep(xhci, slot_id, cmd_trb, event);
 		break;
 	case TRB_SET_DEQ:
 		WARN_ON(slot_id != TRB_TO_SLOT_ID(
@@ -1496,44 +1497,6 @@ static void handle_vendor_event(struct xhci_hcd *xhci,
 		handle_cmd_completion(xhci, &event->event_cmd);
 }
 
-/* @port_id: the one-based port ID from the hardware (indexed from array of all
- * port registers -- USB 3.0 and USB 2.0).
- *
- * Returns a zero-based port number, which is suitable for indexing into each of
- * the split roothubs' port arrays and bus state arrays.
- * Add one to it in order to call xhci_find_slot_id_by_port.
- */
-static unsigned int find_faked_portnum_from_hw_portnum(struct usb_hcd *hcd,
-		struct xhci_hcd *xhci, u32 port_id)
-{
-	unsigned int i;
-	unsigned int num_similar_speed_ports = 0;
-
-	/* port_id from the hardware is 1-based, but port_array[], usb3_ports[],
-	 * and usb2_ports are 0-based indexes.  Count the number of similar
-	 * speed ports, up to 1 port before this port.
-	 */
-	for (i = 0; i < (port_id - 1); i++) {
-		u8 port_speed = xhci->port_array[i];
-
-		/*
-		 * Skip ports that don't have known speeds, or have duplicate
-		 * Extended Capabilities port speed entries.
-		 */
-		if (port_speed == 0 || port_speed == DUPLICATE_ENTRY)
-			continue;
-
-		/*
-		 * USB 3.0 ports are always under a USB 3.0 hub.  USB 2.0 and
-		 * 1.1 ports are under the USB 2.0 hub.  If the port speed
-		 * matches the device speed, it's a similar speed port.
-		 */
-		if ((port_speed == 0x03) == (hcd->speed >= HCD_USB3))
-			num_similar_speed_ports++;
-	}
-	return num_similar_speed_ports;
-}
-
 static void handle_device_notification(struct xhci_hcd *xhci,
 		union xhci_trb *event)
 {
@@ -1562,11 +1525,10 @@ static void handle_port_status(struct xhci_hcd *xhci,
 	u32 portsc, cmd_reg;
 	int max_ports;
 	int slot_id;
-	unsigned int faked_port_index;
-	u8 major_revision;
+	unsigned int hcd_portnum;
 	struct xhci_bus_state *bus_state;
-	__le32 __iomem **port_array;
 	bool bogus_port_status = false;
+	struct xhci_port *port;
 
 	/* Port status change events always have a successful completion code */
 	if (GET_COMP_CODE(le32_to_cpu(event->generic.field[2])) != COMP_SUCCESS)
@@ -1583,49 +1545,19 @@ static void handle_port_status(struct xhci_hcd *xhci,
 		return;
 	}
 
-	/* Figure out which usb_hcd this port is attached to:
-	 * is it a USB 3.0 port or a USB 2.0/1.1 port?
-	 */
-	major_revision = xhci->port_array[port_id - 1];
-
-	/* Find the right roothub. */
-	hcd = xhci_to_hcd(xhci);
-	if ((major_revision == 0x03) != (hcd->speed >= HCD_USB3))
-		hcd = xhci->shared_hcd;
-
-	if (major_revision == 0) {
-		xhci_warn(xhci, "Event for port %u not in "
-				"Extended Capabilities, ignoring.\n",
-				port_id);
-		bogus_port_status = true;
-		goto cleanup;
-	}
-	if (major_revision == DUPLICATE_ENTRY) {
-		xhci_warn(xhci, "Event for port %u duplicated in"
-				"Extended Capabilities, ignoring.\n",
-				port_id);
+	port = &xhci->hw_ports[port_id - 1];
+	if (!port || !port->rhub || port->hcd_portnum == DUPLICATE_ENTRY) {
+		xhci_warn(xhci, "Event for invalid port %u\n", port_id);
 		bogus_port_status = true;
 		goto cleanup;
 	}
 
-	/*
-	 * Hardware port IDs reported by a Port Status Change Event include USB
-	 * 3.0 and USB 2.0 ports.  We want to check if the port has reported a
-	 * resume event, but we first need to translate the hardware port ID
-	 * into the index into the ports on the correct split roothub, and the
-	 * correct bus_state structure.
-	 */
+	hcd = port->rhub->hcd;
 	bus_state = &xhci->bus_state[hcd_index(hcd)];
-	if (hcd->speed >= HCD_USB3)
-		port_array = xhci->usb3_ports;
-	else
-		port_array = xhci->usb2_ports;
-	/* Find the faked port hub number */
-	faked_port_index = find_faked_portnum_from_hw_portnum(hcd, xhci,
-			port_id);
-	portsc = readl(port_array[faked_port_index]);
+	hcd_portnum = port->hcd_portnum;
+	portsc = readl(port->addr);
 
-	trace_xhci_handle_port_status(faked_port_index, portsc);
+	trace_xhci_handle_port_status(hcd_portnum, portsc);
 
 	if (hcd->state == HC_STATE_SUSPENDED) {
 		xhci_dbg(xhci, "resume root hub\n");
@@ -1633,7 +1565,7 @@ static void handle_port_status(struct xhci_hcd *xhci,
 	}
 
 	if (hcd->speed >= HCD_USB3 && (portsc & PORT_PLS_MASK) == XDEV_INACTIVE)
-		bus_state->port_remote_wakeup &= ~(1 << faked_port_index);
+		bus_state->port_remote_wakeup &= ~(1 << hcd_portnum);
 
 	if ((portsc & PORT_PLC) && (portsc & PORT_PLS_MASK) == XDEV_RESUME) {
 		xhci_dbg(xhci, "port resume event for port %d\n", port_id);
@@ -1650,29 +1582,26 @@ static void handle_port_status(struct xhci_hcd *xhci,
 			 * so we can tell the difference between the end of
 			 * device and host initiated resume.
 			 */
-			bus_state->port_remote_wakeup |= 1 << faked_port_index;
-			xhci_test_and_clear_bit(xhci, port_array,
-					faked_port_index, PORT_PLC);
-			xhci_set_link_state(xhci, port_array, faked_port_index,
-						XDEV_U0);
+			bus_state->port_remote_wakeup |= 1 << hcd_portnum;
+			xhci_test_and_clear_bit(xhci, port, PORT_PLC);
+			xhci_set_link_state(xhci, port, XDEV_U0);
 			/* Need to wait until the next link state change
 			 * indicates the device is actually in U0.
 			 */
 			bogus_port_status = true;
 			goto cleanup;
-		} else if (!test_bit(faked_port_index,
-				     &bus_state->resuming_ports)) {
+		} else if (!test_bit(hcd_portnum, &bus_state->resuming_ports)) {
 			xhci_dbg(xhci, "resume HS port %d\n", port_id);
-			bus_state->resume_done[faked_port_index] = jiffies +
+			bus_state->resume_done[hcd_portnum] = jiffies +
 				msecs_to_jiffies(USB_RESUME_TIMEOUT);
-			set_bit(faked_port_index, &bus_state->resuming_ports);
+			set_bit(hcd_portnum, &bus_state->resuming_ports);
 			/* Do the rest in GetPortStatus after resume time delay.
 			 * Avoid polling roothub status before that so that a
 			 * usb device auto-resume latency around ~40ms.
 			 */
 			set_bit(HCD_FLAG_POLL_RH, &hcd->flags);
 			mod_timer(&hcd->rh_timer,
-				  bus_state->resume_done[faked_port_index]);
+				  bus_state->resume_done[hcd_portnum]);
 			bogus_port_status = true;
 		}
 	}
@@ -1687,17 +1616,14 @@ static void handle_port_status(struct xhci_hcd *xhci,
 		 * so the roothub behavior is consistent with external
 		 * USB 3.0 hub behavior.
 		 */
-		slot_id = xhci_find_slot_id_by_port(hcd, xhci,
-				faked_port_index + 1);
+		slot_id = xhci_find_slot_id_by_port(hcd, xhci, hcd_portnum + 1);
 		if (slot_id && xhci->devs[slot_id])
 			xhci_ring_device(xhci, slot_id);
-		if (bus_state->port_remote_wakeup & (1 << faked_port_index)) {
-			bus_state->port_remote_wakeup &=
-				~(1 << faked_port_index);
-			xhci_test_and_clear_bit(xhci, port_array,
-					faked_port_index, PORT_PLC);
+		if (bus_state->port_remote_wakeup & (1 << hcd_portnum)) {
+			bus_state->port_remote_wakeup &= ~(1 << hcd_portnum);
+			xhci_test_and_clear_bit(xhci, port, PORT_PLC);
 			usb_wakeup_notification(hcd->self.root_hub,
-					faked_port_index + 1);
+					hcd_portnum + 1);
 			bogus_port_status = true;
 			goto cleanup;
 		}
@@ -1709,16 +1635,15 @@ static void handle_port_status(struct xhci_hcd *xhci,
 	 * out of the RExit state.
 	 */
 	if (!DEV_SUPERSPEED_ANY(portsc) &&
-			test_and_clear_bit(faked_port_index,
+			test_and_clear_bit(hcd_portnum,
 				&bus_state->rexit_ports)) {
-		complete(&bus_state->rexit_done[faked_port_index]);
+		complete(&bus_state->rexit_done[hcd_portnum]);
 		bogus_port_status = true;
 		goto cleanup;
 	}
 
 	if (hcd->speed < HCD_USB3)
-		xhci_test_and_clear_bit(xhci, port_array, faked_port_index,
-					PORT_PLC);
+		xhci_test_and_clear_bit(xhci, port, PORT_PLC);
 
 cleanup:
 	/* Update event ring dequeue pointer before dropping the lock */
@@ -1815,8 +1740,7 @@ struct xhci_segment *trb_in_td(struct xhci_hcd *xhci,
 
 static void xhci_cleanup_halted_endpoint(struct xhci_hcd *xhci,
 		unsigned int slot_id, unsigned int ep_index,
-		unsigned int stream_id,
-		struct xhci_td *td, union xhci_trb *ep_trb,
+		unsigned int stream_id, struct xhci_td *td,
 		enum xhci_ep_reset_type reset_type)
 {
 	struct xhci_virt_ep *ep = &xhci->devs[slot_id]->eps[ep_index];
@@ -1829,9 +1753,10 @@ static void xhci_cleanup_halted_endpoint(struct xhci_hcd *xhci,
 
 	xhci_queue_reset_ep(xhci, command, slot_id, ep_index, reset_type);
 
-	if (reset_type == EP_HARD_RESET)
+	if (reset_type == EP_HARD_RESET) {
+		ep->ep_state |= EP_HARD_CLEAR_TOGGLE;
 		xhci_cleanup_stalled_ring(xhci, ep_index, stream_id, td);
-
+	}
 	xhci_ring_cmd_db(xhci);
 }
 
@@ -1922,7 +1847,7 @@ static int xhci_td_cleanup(struct xhci_hcd *xhci, struct xhci_td *td,
 }
 
 static int finish_td(struct xhci_hcd *xhci, struct xhci_td *td,
-	union xhci_trb *ep_trb, struct xhci_transfer_event *event,
+	struct xhci_transfer_event *event,
 	struct xhci_virt_ep *ep, int *status)
 {
 	struct xhci_virt_device *xdev;
@@ -1957,8 +1882,7 @@ static int finish_td(struct xhci_hcd *xhci, struct xhci_td *td,
 		 * The class driver clears the device side halt later.
 		 */
 		xhci_cleanup_halted_endpoint(xhci, slot_id, ep_index,
-					ep_ring->stream_id, td, ep_trb,
-					EP_HARD_RESET);
+					ep_ring->stream_id, td, EP_HARD_RESET);
 	} else {
 		/* Update ring dequeue pointer */
 		while (ep_ring->dequeue != td->last_trb)
@@ -2083,7 +2007,7 @@ static int process_ctrl_td(struct xhci_hcd *xhci, struct xhci_td *td,
 		td->urb->actual_length = requested;
 
 finish_td:
-	return finish_td(xhci, td, ep_trb, event, ep, status);
+	return finish_td(xhci, td, event, ep, status);
 }
 
 /*
@@ -2170,7 +2094,7 @@ static int process_isoc_td(struct xhci_hcd *xhci, struct xhci_td *td,
 
 	td->urb->actual_length += frame->actual_length;
 
-	return finish_td(xhci, td, ep_trb, event, ep, status);
+	return finish_td(xhci, td, event, ep, status);
 }
 
 static int skip_isoc_td(struct xhci_hcd *xhci, struct xhci_td *td,
@@ -2260,7 +2184,7 @@ finish_td:
 			  remaining);
 		td->urb->actual_length = 0;
 	}
-	return finish_td(xhci, td, ep_trb, event, ep, status);
+	return finish_td(xhci, td, event, ep, status);
 }
 
 /*
@@ -2318,7 +2242,7 @@ static int handle_tx_event(struct xhci_hcd *xhci,
 		case COMP_INVALID_STREAM_TYPE_ERROR:
 		case COMP_INVALID_STREAM_ID_ERROR:
 			xhci_cleanup_halted_endpoint(xhci, slot_id, ep_index, 0,
-						     NULL, NULL, EP_SOFT_RESET);
+						     NULL, EP_SOFT_RESET);
 			goto cleanup;
 		case COMP_RING_UNDERRUN:
 		case COMP_RING_OVERRUN:
@@ -2584,8 +2508,7 @@ static int handle_tx_event(struct xhci_hcd *xhci,
 				xhci_cleanup_halted_endpoint(xhci, slot_id,
 							     ep_index,
 							     ep_ring->stream_id,
-							     td, ep_trb,
-							     EP_HARD_RESET);
+							     td, EP_HARD_RESET);
 			goto cleanup;
 		}
 

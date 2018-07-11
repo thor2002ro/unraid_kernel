@@ -60,8 +60,8 @@ Plain Pointers
 Pointers printed without a specifier extension (i.e unadorned %p) are
 hashed to prevent leaking information about the kernel memory layout. This
 has the added benefit of providing a unique identifier. On 64-bit machines
-the first 32 bits are zeroed. If you *really* want the address see %px
-below.
+the first 32 bits are zeroed. The kernel will print ``(ptrval)`` until it
+gathers enough entropy. If you *really* want the address see %px below.
 
 Symbols/Function Pointers
 -------------------------
@@ -419,11 +419,10 @@ struct clk
 
 	%pC	pll1
 	%pCn	pll1
-	%pCr	1560000000
 
 For printing struct clk structures. %pC and %pCn print the name
 (Common Clock Framework) or address (legacy clock framework) of the
-structure; %pCr prints the current clock rate.
+structure.
 
 Passed by reference.
 

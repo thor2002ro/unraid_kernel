@@ -463,6 +463,7 @@ static int load_elf_fdpic_binary(struct linux_binprm *bprm)
 			    dynaddr);
 #endif
 
+	finalize_exec(bprm);
 	/* everything is now ready... get the userspace context ready to roll */
 	entryaddr = interp_params.entry_addr ?: exec_params.entry_addr;
 	start_thread(regs, entryaddr, current->mm->start_stack);
@@ -1599,7 +1600,8 @@ static int elf_fdpic_core_dump(struct coredump_params *cprm)
 	psinfo = kmalloc(sizeof(*psinfo), GFP_KERNEL);
 	if (!psinfo)
 		goto cleanup;
-	notes = kmalloc(NUM_NOTES * sizeof(struct memelfnote), GFP_KERNEL);
+	notes = kmalloc_array(NUM_NOTES, sizeof(struct memelfnote),
+			      GFP_KERNEL);
 	if (!notes)
 		goto cleanup;
 	fpu = kmalloc(sizeof(*fpu), GFP_KERNEL);

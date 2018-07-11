@@ -382,6 +382,10 @@ struct xhci_op_regs {
 #define PORT_PLC	(1 << 22)
 /* port configure error change - port failed to configure its link partner */
 #define PORT_CEC	(1 << 23)
+#define PORT_CHANGE_MASK	(PORT_CSC | PORT_PEC | PORT_WRC | PORT_OCC | \
+				 PORT_RC | PORT_PLC | PORT_CEC)
+
+
 /* Cold Attach Status - xHC can set this bit to report device attached during
  * Sx state. Warm port reset should be perfomed to clear this bit and move port
  * to connected state.
@@ -718,11 +722,12 @@ struct xhci_ep_ctx {
 /* bits 10:14 are Max Primary Streams */
 /* bit 15 is Linear Stream Array */
 /* Interval - period between requests to an endpoint - 125u increments. */
-#define EP_INTERVAL(p)		(((p) & 0xff) << 16)
-#define EP_INTERVAL_TO_UFRAMES(p)		(1 << (((p) >> 16) & 0xff))
-#define CTX_TO_EP_INTERVAL(p)	(((p) >> 16) & 0xff)
-#define EP_MAXPSTREAMS_MASK	(0x1f << 10)
-#define EP_MAXPSTREAMS(p)	(((p) << 10) & EP_MAXPSTREAMS_MASK)
+#define EP_INTERVAL(p)			(((p) & 0xff) << 16)
+#define EP_INTERVAL_TO_UFRAMES(p)	(1 << (((p) >> 16) & 0xff))
+#define CTX_TO_EP_INTERVAL(p)		(((p) >> 16) & 0xff)
+#define EP_MAXPSTREAMS_MASK		(0x1f << 10)
+#define EP_MAXPSTREAMS(p)		(((p) << 10) & EP_MAXPSTREAMS_MASK)
+#define CTX_TO_EP_MAXPSTREAMS(p)	(((p) & EP_MAXPSTREAMS_MASK) >> 10)
 /* Endpoint is set up with a Linear Stream Array (vs. Secondary Stream Array) */
 #define	EP_HAS_LSA		(1 << 15)
 /* hosts with LEC=1 use bits 31:24 as ESIT high bits. */
@@ -921,6 +926,8 @@ struct xhci_virt_ep {
 #define EP_HAS_STREAMS		(1 << 4)
 /* Transitioning the endpoint to not using streams, don't enqueue URBs */
 #define EP_GETTING_NO_STREAMS	(1 << 5)
+#define EP_HARD_CLEAR_TOGGLE	(1 << 6)
+#define EP_SOFT_CLEAR_TOGGLE	(1 << 7)
 	/* ----  Related to URB cancellation ---- */
 	struct list_head	cancelled_td_list;
 	/* Watchdog timer for stop endpoint command to cancel URBs */
@@ -1680,13 +1687,23 @@ static inline unsigned int hcd_index(struct usb_hcd *hcd)
 	else
 		return 1;
 }
+struct xhci_port {
+	__le32 __iomem		*addr;
+	int			hw_portnum;
+	int			hcd_portnum;
+	struct xhci_hub		*rhub;
+};
 
 struct xhci_hub {
-	u8	maj_rev;
-	u8	min_rev;
-	u32	*psi;		/* array of protocol speed ID entries */
-	u8	psi_count;
-	u8	psi_uid_count;
+	struct xhci_port	**ports;
+	unsigned int		num_ports;
+	struct usb_hcd		*hcd;
+	/* supported prococol extended capabiliy values */
+	u8			maj_rev;
+	u8			min_rev;
+	u32			*psi;	/* array of protocol speed ID entries */
+	u8			psi_count;
+	u8			psi_uid_count;
 };
 
 /* There is one xhci_hcd structure per controller */
@@ -1726,8 +1743,9 @@ struct xhci_hcd {
 	int		page_shift;
 	/* msi-x vectors */
 	int		msix_count;
-	/* optional clock */
+	/* optional clocks */
 	struct clk		*clk;
+	struct clk		*reg_clk;
 	/* data structures */
 	struct xhci_device_context_array *dcbaa;
 	struct xhci_ring	*cmd_ring;
@@ -1783,12 +1801,12 @@ struct xhci_hcd {
 #define XHCI_STATE_DYING	(1 << 0)
 #define XHCI_STATE_HALTED	(1 << 1)
 #define XHCI_STATE_REMOVING	(1 << 2)
-	unsigned int		quirks;
-#define	XHCI_LINK_TRB_QUIRK	(1 << 0)
-#define XHCI_RESET_EP_QUIRK	(1 << 1)
-#define XHCI_NEC_HOST		(1 << 2)
-#define XHCI_AMD_PLL_FIX	(1 << 3)
-#define XHCI_SPURIOUS_SUCCESS	(1 << 4)
+	unsigned long long	quirks;
+#define	XHCI_LINK_TRB_QUIRK	BIT_ULL(0)
+#define XHCI_RESET_EP_QUIRK	BIT_ULL(1)
+#define XHCI_NEC_HOST		BIT_ULL(2)
+#define XHCI_AMD_PLL_FIX	BIT_ULL(3)
+#define XHCI_SPURIOUS_SUCCESS	BIT_ULL(4)
 /*
  * Certain Intel host controllers have a limit to the number of endpoint
  * contexts they can handle.  Ideally, they would signal that they can't handle
@@ -1798,48 +1816,44 @@ struct xhci_hcd {
  * commands, reset device commands, disable slot commands, and address device
  * commands.
  */
-#define XHCI_EP_LIMIT_QUIRK	(1 << 5)
-#define XHCI_BROKEN_MSI		(1 << 6)
-#define XHCI_RESET_ON_RESUME	(1 << 7)
-#define	XHCI_SW_BW_CHECKING	(1 << 8)
-#define XHCI_AMD_0x96_HOST	(1 << 9)
-#define XHCI_TRUST_TX_LENGTH	(1 << 10)
-#define XHCI_LPM_SUPPORT	(1 << 11)
-#define XHCI_INTEL_HOST		(1 << 12)
-#define XHCI_SPURIOUS_REBOOT	(1 << 13)
-#define XHCI_COMP_MODE_QUIRK	(1 << 14)
-#define XHCI_AVOID_BEI		(1 << 15)
-#define XHCI_PLAT		(1 << 16)
-#define XHCI_SLOW_SUSPEND	(1 << 17)
-#define XHCI_SPURIOUS_WAKEUP	(1 << 18)
+#define XHCI_EP_LIMIT_QUIRK	BIT_ULL(5)
+#define XHCI_BROKEN_MSI		BIT_ULL(6)
+#define XHCI_RESET_ON_RESUME	BIT_ULL(7)
+#define	XHCI_SW_BW_CHECKING	BIT_ULL(8)
+#define XHCI_AMD_0x96_HOST	BIT_ULL(9)
+#define XHCI_TRUST_TX_LENGTH	BIT_ULL(10)
+#define XHCI_LPM_SUPPORT	BIT_ULL(11)
+#define XHCI_INTEL_HOST		BIT_ULL(12)
+#define XHCI_SPURIOUS_REBOOT	BIT_ULL(13)
+#define XHCI_COMP_MODE_QUIRK	BIT_ULL(14)
+#define XHCI_AVOID_BEI		BIT_ULL(15)
+#define XHCI_PLAT		BIT_ULL(16)
+#define XHCI_SLOW_SUSPEND	BIT_ULL(17)
+#define XHCI_SPURIOUS_WAKEUP	BIT_ULL(18)
 /* For controllers with a broken beyond repair streams implementation */
-#define XHCI_BROKEN_STREAMS	(1 << 19)
-#define XHCI_PME_STUCK_QUIRK	(1 << 20)
-#define XHCI_MTK_HOST		(1 << 21)
-#define XHCI_SSIC_PORT_UNUSED	(1 << 22)
-#define XHCI_NO_64BIT_SUPPORT	(1 << 23)
-#define XHCI_MISSING_CAS	(1 << 24)
+#define XHCI_BROKEN_STREAMS	BIT_ULL(19)
+#define XHCI_PME_STUCK_QUIRK	BIT_ULL(20)
+#define XHCI_MTK_HOST		BIT_ULL(21)
+#define XHCI_SSIC_PORT_UNUSED	BIT_ULL(22)
+#define XHCI_NO_64BIT_SUPPORT	BIT_ULL(23)
+#define XHCI_MISSING_CAS	BIT_ULL(24)
 /* For controller with a broken Port Disable implementation */
-#define XHCI_BROKEN_PORT_PED	(1 << 25)
-#define XHCI_LIMIT_ENDPOINT_INTERVAL_7	(1 << 26)
-/* Reserved. It was XHCI_U2_DISABLE_WAKE */
-#define XHCI_ASMEDIA_MODIFY_FLOWCONTROL	(1 << 28)
-#define XHCI_HW_LPM_DISABLE	(1 << 29)
+#define XHCI_BROKEN_PORT_PED	BIT_ULL(25)
+#define XHCI_LIMIT_ENDPOINT_INTERVAL_7	BIT_ULL(26)
+#define XHCI_U2_DISABLE_WAKE	BIT_ULL(27)
+#define XHCI_ASMEDIA_MODIFY_FLOWCONTROL	BIT_ULL(28)
+#define XHCI_HW_LPM_DISABLE	BIT_ULL(29)
+#define XHCI_SUSPEND_DELAY	BIT_ULL(30)
+#define XHCI_INTEL_USB_ROLE_SW	BIT_ULL(31)
+#define XHCI_ZERO_64B_REGS	BIT_ULL(32)
 
 	unsigned int		num_active_eps;
 	unsigned int		limit_active_eps;
 	/* There are two roothubs to keep track of bus suspend info for */
 	struct xhci_bus_state   bus_state[2];
-	/* Is each xHCI roothub port a USB 3.0, USB 2.0, or USB 1.1 port? */
-	u8			*port_array;
-	/* Array of pointers to USB 3.0 PORTSC registers */
-	__le32 __iomem		**usb3_ports;
-	unsigned int		num_usb3_ports;
-	/* Array of pointers to USB 2.0 PORTSC registers */
-	__le32 __iomem		**usb2_ports;
+	struct xhci_port	*hw_ports;
 	struct xhci_hub		usb2_rhub;
 	struct xhci_hub		usb3_rhub;
-	unsigned int		num_usb2_ports;
 	/* support xHCI 0.96 spec USB2 software LPM */
 	unsigned		sw_lpm_support:1;
 	/* support xHCI 1.0 spec USB2 hardware LPM */
@@ -2020,6 +2034,7 @@ int xhci_gen_setup(struct usb_hcd *hcd, xhci_get_quirks_t get_quirks);
 void xhci_init_driver(struct hc_driver *drv,
 		      const struct xhci_driver_overrides *over);
 int xhci_disable_slot(struct xhci_hcd *xhci, u32 slot_id);
+int xhci_ext_cap_init(struct xhci_hcd *xhci);
 
 int xhci_suspend(struct xhci_hcd *xhci, bool do_wakeup);
 int xhci_resume(struct xhci_hcd *xhci, bool hibernated);
@@ -2084,14 +2099,16 @@ void inc_deq(struct xhci_hcd *xhci, struct xhci_ring *ring);
 unsigned int count_trbs(u64 addr, u64 len);
 
 /* xHCI roothub code */
-void xhci_set_link_state(struct xhci_hcd *xhci, __le32 __iomem **port_array,
-				int port_id, u32 link_state);
-void xhci_test_and_clear_bit(struct xhci_hcd *xhci, __le32 __iomem **port_array,
-				int port_id, u32 port_bit);
+void xhci_set_link_state(struct xhci_hcd *xhci, struct xhci_port *port,
+				u32 link_state);
+void xhci_test_and_clear_bit(struct xhci_hcd *xhci, struct xhci_port *port,
+				u32 port_bit);
 int xhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue, u16 wIndex,
 		char *buf, u16 wLength);
 int xhci_hub_status_data(struct usb_hcd *hcd, char *buf);
 int xhci_find_raw_port_number(struct usb_hcd *hcd, int port1);
+struct xhci_hub *xhci_get_rhub(struct usb_hcd *hcd);
+
 void xhci_hc_died(struct xhci_hcd *xhci);
 
 #ifdef CONFIG_PM
@@ -2549,21 +2566,22 @@ static inline const char *xhci_decode_ep_context(u32 info, u32 info2, u64 deq,
 	u8 burst;
 	u8 cerr;
 	u8 mult;
-	u8 lsa;
-	u8 hid;
+
+	bool lsa;
+	bool hid;
 
 	esit = CTX_TO_MAX_ESIT_PAYLOAD_HI(info) << 16 |
 		CTX_TO_MAX_ESIT_PAYLOAD(tx_info);
 
 	ep_state = info & EP_STATE_MASK;
-	max_pstr = info & EP_MAXPSTREAMS_MASK;
+	max_pstr = CTX_TO_EP_MAXPSTREAMS(info);
 	interval = CTX_TO_EP_INTERVAL(info);
 	mult = CTX_TO_EP_MULT(info) + 1;
-	lsa = info & EP_HAS_LSA;
+	lsa = !!(info & EP_HAS_LSA);
 
 	cerr = (info2 & (3 << 1)) >> 1;
 	ep_type = CTX_TO_EP_TYPE(info2);
-	hid = info2 & (1 << 7);
+	hid = !!(info2 & (1 << 7));
 	burst = CTX_TO_MAX_BURST(info2);
 	maxp = MAX_PACKET_DECODED(info2);
 

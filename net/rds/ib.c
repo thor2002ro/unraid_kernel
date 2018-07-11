@@ -163,7 +163,8 @@ static void rds_ib_add_one(struct ib_device *device)
 	rds_ibdev->max_initiator_depth = device->attrs.max_qp_init_rd_atom;
 	rds_ibdev->max_responder_resources = device->attrs.max_qp_rd_atom;
 
-	rds_ibdev->vector_load = kzalloc(sizeof(int) * device->num_comp_vectors,
+	rds_ibdev->vector_load = kcalloc(device->num_comp_vectors,
+					 sizeof(int),
 					 GFP_KERNEL);
 	if (!rds_ibdev->vector_load) {
 		pr_err("RDS/IB: %s failed to allocate vector memory\n",
@@ -321,8 +322,11 @@ static void rds_ib_ic_info(struct socket *sock, unsigned int len,
 			   struct rds_info_iterator *iter,
 			   struct rds_info_lengths *lens)
 {
+	u64 buffer[(sizeof(struct rds_info_rdma_connection) + 7) / 8];
+
 	rds_for_each_conn_info(sock, len, iter, lens,
 				rds_ib_conn_info_visitor,
+				buffer,
 				sizeof(struct rds_info_rdma_connection));
 }
 
