@@ -76,6 +76,39 @@ void platform_heartbeat(void)
 {
 }
 
+#if !XCHAL_HAVE_PTP_MMU
+
+#define XCHAL_KSEG_CACHED_VADDR	__XTENSA_UL_CONST(0x60000000)
+#define XCHAL_KSEG_BYPASS_VADDR	__XTENSA_UL_CONST(0x90000000)
+#define XCHAL_KSEG_SIZE		__XTENSA_UL_CONST(0x10000000)
+
+bool platform_vaddr_cached(const void *p)
+{
+	unsigned long addr = (unsigned long)p;
+
+	return addr >= XCHAL_KSEG_CACHED_VADDR &&
+		addr - XCHAL_KSEG_CACHED_VADDR < XCHAL_KSEG_SIZE;
+}
+
+bool platform_vaddr_uncached(const void *p)
+{
+	unsigned long addr = (unsigned long)p;
+
+	return addr >= XCHAL_KSEG_BYPASS_VADDR &&
+		addr - XCHAL_KSEG_BYPASS_VADDR < XCHAL_KSEG_SIZE;
+}
+
+void *platform_vaddr_to_uncached(void *p)
+{
+	return p + XCHAL_KSEG_BYPASS_VADDR - XCHAL_KSEG_CACHED_VADDR;
+}
+
+void *platform_vaddr_to_cached(void *p)
+{
+	return p + XCHAL_KSEG_CACHED_VADDR - XCHAL_KSEG_BYPASS_VADDR;
+}
+#endif
+
 #ifdef CONFIG_XTENSA_CALIBRATE_CCOUNT
 
 void __init platform_calibrate_ccount(void)
