@@ -35,20 +35,20 @@
 	.macro	__loop_cache_unroll ar at insn size line_width max_immed
 
 	.if	(1 << (\line_width)) > (\max_immed)
-	reps = 1
+	.set	_reps, 1
 	.elseif	(2 << (\line_width)) > (\max_immed)
-	reps = 2
+	.set	_reps, 2
 	.else
-	reps = 4
+	.set	_reps, 4
 	.endif
 
-	__loopi	\ar, \at, \size, (reps << (\line_width))
-	rep = 0
-	.rep	reps
-	\insn	\ar, rep << (\line_width)
-	rep = rep + 1
+	__loopi	\ar, \at, \size, (_reps << (\line_width))
+	.set	_index, 0
+	.rep	_reps
+	\insn	\ar, _index << (\line_width)
+	.set	_index, _index + 1
 	.endr
-	__endla	\ar, \at, reps << (\line_width)
+	__endla	\ar, \at, _reps << (\line_width)
 
 	.endm
 
