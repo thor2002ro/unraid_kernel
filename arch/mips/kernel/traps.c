@@ -351,6 +351,7 @@ static void __show_regs(const struct pt_regs *regs)
 void show_regs(struct pt_regs *regs)
 {
 	__show_regs((struct pt_regs *)regs);
+	dump_stack();
 }
 
 void show_registers(struct pt_regs *regs)
@@ -1219,13 +1220,6 @@ static int default_cu2_call(struct notifier_block *nfb, unsigned long action,
 static int enable_restore_fp_context(int msa)
 {
 	int err, was_fpu_owner, prior_msa;
-
-	/*
-	 * If an FP mode switch is currently underway, wait for it to
-	 * complete before proceeding.
-	 */
-	wait_var_event(&current->mm->context.fp_mode_switching,
-		       !atomic_read(&current->mm->context.fp_mode_switching));
 
 	if (!used_math()) {
 		/* First time FP context user. */

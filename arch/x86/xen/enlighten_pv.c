@@ -119,6 +119,27 @@ static void __init xen_banner(void)
 	       version >> 16, version & 0xffff, extra.extraversion,
 	       xen_feature(XENFEAT_mmu_pt_update_preserve_ad) ? " (preserve-AD)" : "");
 }
+
+static void __init xen_pv_init_platform(void)
+{
+	set_fixmap(FIX_PARAVIRT_BOOTMAP, xen_start_info->shared_info);
+	HYPERVISOR_shared_info = (void *)fix_to_virt(FIX_PARAVIRT_BOOTMAP);
+
+	/* xen clock uses per-cpu vcpu_info, need to init it for boot cpu */
+	xen_vcpu_info_reset(0);
+
+	/* pvclock is in shared info area */
+	xen_init_time_ops();
+}
+
+static void __init xen_pv_guest_late_init(void)
+{
+#ifndef CONFIG_SMP
+	/* Setup shared vcpu info for non-smp configurations */
+	xen_setup_vcpu_info_placement();
+#endif
+}
+
 /* Check if running on Xen version (major, minor) or later */
 bool
 xen_running_on_version_or_later(unsigned int major, unsigned int minor)
@@ -947,34 +968,8 @@ static void xen_write_msr(unsigned int msr, unsigned low, unsigned high)
 	xen_write_msr_safe(msr, low, high);
 }
 
-void xen_setup_shared_info(void)
-{
-	set_fixmap(FIX_PARAVIRT_BOOTMAP, xen_start_info->shared_info);
-
-	HYPERVISOR_shared_info =
-		(struct shared_info *)fix_to_virt(FIX_PARAVIRT_BOOTMAP);
-
-	xen_setup_mfn_list_list();
-
-	if (system_state == SYSTEM_BOOTING) {
-#ifndef CONFIG_SMP
-		/*
-		 * In UP this is as good a place as any to set up shared info.
-		 * Limit this to boot only, at restore vcpu setup is done via
-		 * xen_vcpu_restore().
-		 */
-		xen_setup_vcpu_info_placement();
-#endif
-		/*
-		 * Now that shared info is set up we can start using routines
-		 * that point to pvclock area.
-		 */
-		xen_init_time_ops();
-	}
-}
-
 /* This is called once we have the cpu_possible_mask */
-void __ref xen_setup_vcpu_info_placement(void)
+void __init xen_setup_vcpu_info_placement(void)
 {
 	int cpu;
 
@@ -1207,12 +1202,20 @@ asmlinkage __visible void __init xen_start_kernel(void)
 
 	xen_setup_features();
 
-	xen_setup_machphys_mapping();
-
 	/* Install Xen paravirt ops */
 	pv_info = xen_info;
 	pv_init_ops.patch = paravirt_patch_default;
 	pv_cpu_ops = xen_cpu_ops;
+	xen_init_irq_ops();
+
+	/*
+	 * Setup xen_vcpu early because it is needed for
+	 * local_irq_disable(), irqs_disabled(), e.g. in printk().
+	 *
+	 * Don't do the full vcpu_info placement stuff until we have
+	 * the cpu_possible_mask and a non-dummy shared_info.
+	 */
+	xen_vcpu_info_reset(0);
 
 	x86_platform.get_nmi_reason = xen_get_nmi_reason;
 
@@ -1220,15 +1223,19 @@ asmlinkage __visible void __init xen_start_kernel(void)
 	x86_init.irqs.intr_mode_init	= x86_init_noop;
 	x86_init.oem.arch_setup = xen_arch_setup;
 	x86_init.oem.banner = xen_banner;
+	x86_init.hyper.init_platform = xen_pv_init_platform;
+	x86_init.hyper.guest_late_init = xen_pv_guest_late_init;
 
 	/*
 	 * Set up some pagetable state before starting to set any ptes.
 	 */
 
+	xen_setup_machphys_mapping();
 	xen_init_mmu_ops();
 
 	/* Prevent unwanted bits from being set in PTEs. */
 	__supported_pte_mask &= ~_PAGE_GLOBAL;
+	__default_kernel_pte_mask &= ~_PAGE_GLOBAL;
 
 	/*
 	 * Prevent page tables from being allocated in highmem, even
@@ -1249,19 +1256,11 @@ asmlinkage __visible void __init xen_start_kernel(void)
 	get_cpu_cap(&boot_cpu_data);
 	x86_configure_nx();
 
-	xen_init_irq_ops();
+	/* Determine virtual and physical address sizes */
+	get_cpu_address_sizes(&boot_cpu_data);
 
 	/* Let's presume PV guests always boot on vCPU with id 0. */
 	per_cpu(xen_vcpu_id, 0) = 0;
-
-	/*
-	 * Setup xen_vcpu early because idt_setup_early_handler needs it for
-	 * local_irq_disable(), irqs_disabled().
-	 *
-	 * Don't do the full vcpu_info placement stuff until we have
-	 * the cpu_possible_mask and a non-dummy shared_info.
-	 */
-	xen_vcpu_info_reset(0);
 
 	idt_setup_early_handler();
 

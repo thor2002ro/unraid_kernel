@@ -86,6 +86,7 @@
 #include <linux/ipc_namespace.h>
 #include <linux/sched/wake_q.h>
 #include <linux/nospec.h>
+#include <linux/rhashtable.h>
 
 #include <linux/uaccess.h>
 #include "util.h"
@@ -2118,7 +2119,7 @@ static long do_semtimedop(int semid, struct sembuf __user *tsops,
 	}
 
 	do {
-		queue.status = -EINTR;
+		WRITE_ONCE(queue.status, -EINTR);
 		queue.sleeper = current;
 
 		__set_current_state(TASK_INTERRUPTIBLE);

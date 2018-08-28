@@ -27,9 +27,16 @@
 #define GPC_PGC_SW2ISO_SHIFT	0x8
 #define GPC_PGC_SW_SHIFT	0x0
 
+#define GPC_PGC_PCI_PDN		0x200
+#define GPC_PGC_PCI_SR		0x20c
+
 #define GPC_PGC_GPU_PDN		0x260
 #define GPC_PGC_GPU_PUPSCR	0x264
 #define GPC_PGC_GPU_PDNSCR	0x268
+#define GPC_PGC_GPU_SR		0x26c
+
+#define GPC_PGC_DISP_PDN	0x240
+#define GPC_PGC_DISP_SR		0x24c
 
 #define GPU_VPU_PUP_REQ		BIT(1)
 #define GPU_VPU_PDN_REQ		BIT(0)
@@ -202,7 +209,7 @@ static int imx_pgc_power_domain_probe(struct platform_device *pdev)
 			goto genpd_err;
 	}
 
-	device_link_add(dev, dev->parent, DL_FLAG_AUTOREMOVE);
+	device_link_add(dev, dev->parent, DL_FLAG_AUTOREMOVE_CONSUMER);
 
 	return 0;
 
@@ -318,10 +325,24 @@ static const struct of_device_id imx_gpc_dt_ids[] = {
 	{ }
 };
 
+static const struct regmap_range yes_ranges[] = {
+	regmap_reg_range(GPC_CNTR, GPC_CNTR),
+	regmap_reg_range(GPC_PGC_PCI_PDN, GPC_PGC_PCI_SR),
+	regmap_reg_range(GPC_PGC_GPU_PDN, GPC_PGC_GPU_SR),
+	regmap_reg_range(GPC_PGC_DISP_PDN, GPC_PGC_DISP_SR),
+};
+
+static const struct regmap_access_table access_table = {
+	.yes_ranges	= yes_ranges,
+	.n_yes_ranges	= ARRAY_SIZE(yes_ranges),
+};
+
 static const struct regmap_config imx_gpc_regmap_config = {
 	.reg_bits = 32,
 	.val_bits = 32,
 	.reg_stride = 4,
+	.rd_table = &access_table,
+	.wr_table = &access_table,
 	.max_register = 0x2ac,
 };
 
