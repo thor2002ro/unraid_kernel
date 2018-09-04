@@ -1516,6 +1516,7 @@ static struct hid_input *hidinput_allocate(struct hid_device *hid,
 	struct hid_input *hidinput = kzalloc(sizeof(*hidinput), GFP_KERNEL);
 	struct input_dev *input_dev = input_allocate_device();
 	const char *suffix = NULL;
+	size_t suffix_len, name_len;
 
 	if (!hidinput || !input_dev)
 		goto fail;
@@ -1559,10 +1560,15 @@ static struct hid_input *hidinput_allocate(struct hid_device *hid,
 	}
 
 	if (suffix) {
-		hidinput->name = kasprintf(GFP_KERNEL, "%s %s",
-					   hid->name, suffix);
-		if (!hidinput->name)
-			goto fail;
+		name_len = strlen(hid->name);
+		suffix_len = strlen(suffix);
+		if ((name_len < suffix_len) ||
+		    strcmp(hid->name + name_len - suffix_len, suffix)) {
+			hidinput->name = kasprintf(GFP_KERNEL, "%s %s",
+						   hid->name, suffix);
+			if (!hidinput->name)
+				goto fail;
+		}
 	}
 
 	input_set_drvdata(input_dev, hid);
@@ -1582,6 +1588,7 @@ static struct hid_input *hidinput_allocate(struct hid_device *hid,
 	input_dev->dev.parent = &hid->dev;
 
 	hidinput->input = input_dev;
+	hidinput->application = application;
 	list_add_tail(&hidinput->list, &hid->inputs);
 
 	INIT_LIST_HEAD(&hidinput->reports);
@@ -1677,8 +1684,7 @@ static struct hid_input *hidinput_match_application(struct hid_report *report)
 	struct hid_input *hidinput;
 
 	list_for_each_entry(hidinput, &hid->inputs, list) {
-		if (hidinput->report &&
-		    hidinput->report->application == report->application)
+		if (hidinput->application == report->application)
 			return hidinput;
 	}
 
