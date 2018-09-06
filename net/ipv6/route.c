@@ -956,7 +956,7 @@ static void ip6_rt_init_dst(struct rt6_info *rt, struct fib6_info *ort)
 	rt->dst.error = 0;
 	rt->dst.output = ip6_output;
 
-	if (ort->fib6_type == RTN_LOCAL) {
+	if (ort->fib6_type == RTN_LOCAL || ort->fib6_type == RTN_ANYCAST) {
 		rt->dst.input = ip6_input;
 	} else if (ipv6_addr_type(&ort->fib6_dst.addr) & IPV6_ADDR_MULTICAST) {
 		rt->dst.input = ip6_mc_input;
@@ -978,10 +978,6 @@ static void rt6_set_from(struct rt6_info *rt, struct fib6_info *from)
 	rt->rt6i_flags &= ~RTF_EXPIRES;
 	rcu_assign_pointer(rt->from, from);
 	dst_init_metrics(&rt->dst, from->fib6_metrics->metrics, true);
-	if (from->fib6_metrics != &dst_default_metrics) {
-		rt->dst._metrics |= DST_METRICS_REFCOUNTED;
-		refcount_inc(&from->fib6_metrics->refcnt);
-	}
 }
 
 /* Caller must already hold reference to @ort */

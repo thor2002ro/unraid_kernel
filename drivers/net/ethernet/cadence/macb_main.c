@@ -10,6 +10,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 #include <linux/clk.h>
+#include <linux/crc32.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/kernel.h>
@@ -481,11 +482,6 @@ static int macb_mii_probe(struct net_device *dev)
 
 	if (np) {
 		if (of_phy_is_fixed_link(np)) {
-			if (of_phy_register_fixed_link(np) < 0) {
-				dev_err(&bp->pdev->dev,
-					"broken fixed-link specification\n");
-				return -ENODEV;
-			}
 			bp->phy_node = of_node_get(np);
 		} else {
 			bp->phy_node = of_parse_phandle(np, "phy-handle", 0);
@@ -568,7 +564,7 @@ static int macb_mii_init(struct macb *bp)
 {
 	struct macb_platform_data *pdata;
 	struct device_node *np;
-	int err;
+	int err = -ENXIO;
 
 	/* Enable management port */
 	macb_writel(bp, NCR, MACB_BIT(MPE));
@@ -591,12 +587,23 @@ static int macb_mii_init(struct macb *bp)
 	dev_set_drvdata(&bp->dev->dev, bp->mii_bus);
 
 	np = bp->pdev->dev.of_node;
-	if (pdata)
-		bp->mii_bus->phy_mask = pdata->phy_mask;
+	if (np && of_phy_is_fixed_link(np)) {
+		if (of_phy_register_fixed_link(np) < 0) {
+			dev_err(&bp->pdev->dev,
+				"broken fixed-link specification %pOF\n", np);
+			goto err_out_free_mdiobus;
+		}
 
-	err = of_mdiobus_register(bp->mii_bus, np);
+		err = mdiobus_register(bp->mii_bus);
+	} else {
+		if (pdata)
+			bp->mii_bus->phy_mask = pdata->phy_mask;
+
+		err = of_mdiobus_register(bp->mii_bus, np);
+	}
+
 	if (err)
-		goto err_out_free_mdiobus;
+		goto err_out_free_fixed_link;
 
 	err = macb_mii_probe(bp->dev);
 	if (err)
@@ -606,6 +613,7 @@ static int macb_mii_init(struct macb *bp)
 
 err_out_unregister_bus:
 	mdiobus_unregister(bp->mii_bus);
+err_out_free_fixed_link:
 	if (np && of_phy_is_fixed_link(np))
 		of_phy_deregister_fixed_link(np);
 err_out_free_mdiobus:
@@ -1565,6 +1573,9 @@ static unsigned int macb_tx_map(struct macb *bp,
 		if (i == queue->tx_head) {
 			ctrl |= MACB_BF(TX_LSO, lso_ctrl);
 			ctrl |= MACB_BF(TX_TCP_SEQ_SRC, seq_ctrl);
+			if ((bp->dev->features & NETIF_F_HW_CSUM) &&
+			    skb->ip_summed != CHECKSUM_PARTIAL && !lso_ctrl)
+				ctrl |= MACB_BIT(TX_NOCRC);
 		} else
 			/* Only set MSS/MFS on payload descriptors
 			 * (second or later descriptor)
@@ -1651,7 +1662,68 @@ static inline int macb_clear_csum(struct sk_buff *skb)
 	return 0;
 }
 
-static int macb_start_xmit(struct sk_buff *skb, struct net_device *dev)
+static int macb_pad_and_fcs(struct sk_buff **skb, struct net_device *ndev)
+{
+	bool cloned = skb_cloned(*skb) || skb_header_cloned(*skb);
+	int padlen = ETH_ZLEN - (*skb)->len;
+	int headroom = skb_headroom(*skb);
+	int tailroom = skb_tailroom(*skb);
+	struct sk_buff *nskb;
+	u32 fcs;
+
+	if (!(ndev->features & NETIF_F_HW_CSUM) ||
+	    !((*skb)->ip_summed != CHECKSUM_PARTIAL) ||
+	    skb_shinfo(*skb)->gso_size)	/* Not available for GSO */
+		return 0;
+
+	if (padlen <= 0) {
+		/* FCS could be appeded to tailroom. */
+		if (tailroom >= ETH_FCS_LEN)
+			goto add_fcs;
+		/* FCS could be appeded by moving data to headroom. */
+		else if (!cloned && headroom + tailroom >= ETH_FCS_LEN)
+			padlen = 0;
+		/* No room for FCS, need to reallocate skb. */
+		else
+			padlen = ETH_FCS_LEN - tailroom;
+	} else {
+		/* Add room for FCS. */
+		padlen += ETH_FCS_LEN;
+	}
+
+	if (!cloned && headroom + tailroom >= padlen) {
+		(*skb)->data = memmove((*skb)->head, (*skb)->data, (*skb)->len);
+		skb_set_tail_pointer(*skb, (*skb)->len);
+	} else {
+		nskb = skb_copy_expand(*skb, 0, padlen, GFP_ATOMIC);
+		if (!nskb)
+			return -ENOMEM;
+
+		dev_kfree_skb_any(*skb);
+		*skb = nskb;
+	}
+
+	if (padlen) {
+		if (padlen >= ETH_FCS_LEN)
+			skb_put_zero(*skb, padlen - ETH_FCS_LEN);
+		else
+			skb_trim(*skb, ETH_FCS_LEN - padlen);
+	}
+
+add_fcs:
+	/* set FCS to packet */
+	fcs = crc32_le(~0, (*skb)->data, (*skb)->len);
+	fcs = ~fcs;
+
+	skb_put_u8(*skb, fcs		& 0xff);
+	skb_put_u8(*skb, (fcs >> 8)	& 0xff);
+	skb_put_u8(*skb, (fcs >> 16)	& 0xff);
+	skb_put_u8(*skb, (fcs >> 24)	& 0xff);
+
+	return 0;
+}
+
+static netdev_tx_t macb_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	u16 queue_index = skb_get_queue_mapping(skb);
 	struct macb *bp = netdev_priv(dev);
@@ -1660,6 +1732,17 @@ static int macb_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	unsigned int desc_cnt, nr_frags, frag_size, f;
 	unsigned int hdrlen;
 	bool is_lso, is_udp = 0;
+	netdev_tx_t ret = NETDEV_TX_OK;
+
+	if (macb_clear_csum(skb)) {
+		dev_kfree_skb_any(skb);
+		return ret;
+	}
+
+	if (macb_pad_and_fcs(&skb, dev)) {
+		dev_kfree_skb_any(skb);
+		return ret;
+	}
 
 	is_lso = (skb_shinfo(skb)->gso_size != 0);
 
@@ -1716,11 +1799,6 @@ static int macb_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		return NETDEV_TX_BUSY;
 	}
 
-	if (macb_clear_csum(skb)) {
-		dev_kfree_skb_any(skb);
-		goto unlock;
-	}
-
 	/* Map socket buffer for DMA transfer */
 	if (!macb_tx_map(bp, queue, skb, hdrlen)) {
 		dev_kfree_skb_any(skb);
@@ -1739,7 +1817,7 @@ static int macb_start_xmit(struct sk_buff *skb, struct net_device *dev)
 unlock:
 	spin_unlock_irqrestore(&bp->lock, flags);
 
-	return NETDEV_TX_OK;
+	return ret;
 }
 
 static void macb_init_rx_buffer_size(struct macb *bp, size_t size)
@@ -1957,14 +2035,17 @@ static void macb_reset_hw(struct macb *bp)
 {
 	struct macb_queue *queue;
 	unsigned int q;
+	u32 ctrl = macb_readl(bp, NCR);
 
 	/* Disable RX and TX (XXX: Should we halt the transmission
 	 * more gracefully?)
 	 */
-	macb_writel(bp, NCR, 0);
+	ctrl &= ~(MACB_BIT(RE) | MACB_BIT(TE));
 
 	/* Clear the stats registers (XXX: Update stats first?) */
-	macb_writel(bp, NCR, MACB_BIT(CLRSTAT));
+	ctrl |= MACB_BIT(CLRSTAT);
+
+	macb_writel(bp, NCR, ctrl);
 
 	/* Clear all status flags */
 	macb_writel(bp, TSR, -1);
@@ -2152,7 +2233,7 @@ static void macb_init_hw(struct macb *bp)
 	}
 
 	/* Enable TX and RX */
-	macb_writel(bp, NCR, MACB_BIT(RE) | MACB_BIT(TE) | MACB_BIT(MPE));
+	macb_writel(bp, NCR, macb_readl(bp, NCR) | MACB_BIT(RE) | MACB_BIT(TE));
 }
 
 /* The hash address register is 64 bits long and takes up two
@@ -3549,7 +3630,8 @@ static int at91ether_close(struct net_device *dev)
 }
 
 /* Transmit packet */
-static int at91ether_start_xmit(struct sk_buff *skb, struct net_device *dev)
+static netdev_tx_t at91ether_start_xmit(struct sk_buff *skb,
+					struct net_device *dev)
 {
 	struct macb *lp = netdev_priv(dev);
 

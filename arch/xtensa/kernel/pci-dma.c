@@ -157,7 +157,7 @@ void *arch_dma_alloc(struct device *dev, size_t size, dma_addr_t *handle,
 
 	if (gfpflags_allow_blocking(flag))
 		page = dma_alloc_from_contiguous(dev, count, get_order(size),
-						 flag);
+						 flag & __GFP_NOWARN);
 
 	if (!page)
 		page = alloc_pages(flag, get_order(size));
