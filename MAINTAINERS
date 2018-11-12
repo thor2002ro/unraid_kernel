@@ -3737,6 +3737,11 @@ L:	platform-driver-x86@vger.kernel.org
 S:	Maintained
 F:	drivers/platform/x86/compal-laptop.c
 
+COMPILER ATTRIBUTES
+M:	Miguel Ojeda <miguel.ojeda.sandonis@gmail.com>
+S:	Maintained
+F:	include/linux/compiler_attributes.h
+
 CONEXANT ACCESSRUNNER USB DRIVER
 L:	accessrunner-general@lists.sourceforge.net
 W:	http://accessrunner.sourceforge.net/
@@ -5877,6 +5882,14 @@ L:	linuxppc-dev@lists.ozlabs.org
 L:	linux-i2c@vger.kernel.org
 S:	Maintained
 F:	drivers/i2c/busses/i2c-cpm.c
+
+FREESCALE IMX LPI2C DRIVER
+M:	Dong Aisheng <aisheng.dong@nxp.com>
+L:	linux-i2c@vger.kernel.org
+L:	linux-imx@nxp.com
+S:	Maintained
+F:	drivers/i2c/busses/i2c-imx-lpi2c.c
+F:	Documentation/devicetree/bindings/i2c/i2c-imx-lpi2c.txt
 
 FREESCALE IMX / MXC FEC DRIVER
 M:	Fugang Duan <fugang.duan@nxp.com>
@@ -15850,7 +15863,6 @@ F:	net/vmw_vsock/virtio_transport_common.c
 F:	net/vmw_vsock/virtio_transport.c
 F:	drivers/net/vsockmon.c
 F:	drivers/vhost/vsock.c
-F:	drivers/vhost/vsock.h
 F:	tools/testing/vsock/
 
 VIRTIO CONSOLE DRIVER
