@@ -27,6 +27,7 @@
 
 #include <drm/drmP.h>
 #include <drm/drm_atomic.h>
+#include <drm/drm_atomic_uapi.h>
 #include <drm/drm_plane_helper.h>
 #include <drm/drm_crtc_helper.h>
 #include <drm/drm_atomic_helper.h>
@@ -1408,15 +1409,16 @@ EXPORT_SYMBOL(drm_atomic_helper_wait_for_vblanks);
 void drm_atomic_helper_wait_for_flip_done(struct drm_device *dev,
 					  struct drm_atomic_state *old_state)
 {
-	struct drm_crtc_state *new_crtc_state;
 	struct drm_crtc *crtc;
 	int i;
 
-	for_each_new_crtc_in_state(old_state, crtc, new_crtc_state, i) {
-		struct drm_crtc_commit *commit = new_crtc_state->commit;
+	for (i = 0; i < dev->mode_config.num_crtc; i++) {
+		struct drm_crtc_commit *commit = old_state->crtcs[i].commit;
 		int ret;
 
-		if (!commit)
+		crtc = old_state->crtcs[i].ptr;
+
+		if (!crtc || !commit)
 			continue;
 
 		ret = wait_for_completion_timeout(&commit->flip_done, 10 * HZ);
@@ -1934,6 +1936,9 @@ int drm_atomic_helper_setup_commit(struct drm_atomic_state *state,
 		drm_crtc_commit_get(commit);
 
 		commit->abort_completion = true;
+
+		state->crtcs[i].commit = commit;
+		drm_crtc_commit_get(commit);
 	}
 
 	for_each_oldnew_connector_in_state(state, conn, old_conn_state, new_conn_state, i) {
@@ -3555,6 +3560,27 @@ void drm_atomic_helper_crtc_destroy_state(struct drm_crtc *crtc,
 EXPORT_SYMBOL(drm_atomic_helper_crtc_destroy_state);
 
 /**
+ * __drm_atomic_helper_plane_reset - resets planes state to default values
+ * @plane: plane object, must not be NULL
+ * @state: atomic plane state, must not be NULL
+ *
+ * Initializes plane state to default. This is useful for drivers that subclass
+ * the plane state.
+ */
+void __drm_atomic_helper_plane_reset(struct drm_plane *plane,
+				     struct drm_plane_state *state)
+{
+	state->plane = plane;
+	state->rotation = DRM_MODE_ROTATE_0;
+
+	state->alpha = DRM_BLEND_ALPHA_OPAQUE;
+	state->pixel_blend_mode = DRM_MODE_BLEND_PREMULTI;
+
+	plane->state = state;
+}
+EXPORT_SYMBOL(__drm_atomic_helper_plane_reset);
+
+/**
  * drm_atomic_helper_plane_reset - default &drm_plane_funcs.reset hook for planes
  * @plane: drm plane
  *
@@ -3568,15 +3594,8 @@ void drm_atomic_helper_plane_reset(struct drm_plane *plane)
 
 	kfree(plane->state);
 	plane->state = kzalloc(sizeof(*plane->state), GFP_KERNEL);
-
-	if (plane->state) {
-		plane->state->plane = plane;
-		plane->state->rotation = DRM_MODE_ROTATE_0;
-
-		/* Reset the alpha value to fully opaque if it matters */
-		if (plane->alpha_property)
-			plane->state->alpha = plane->alpha_property->values[1];
-	}
+	if (plane->state)
+		__drm_atomic_helper_plane_reset(plane, plane->state);
 }
 EXPORT_SYMBOL(drm_atomic_helper_plane_reset);
 

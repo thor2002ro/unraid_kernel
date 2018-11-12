@@ -73,12 +73,14 @@ struct afs_addr_list {
 	struct rcu_head		rcu;		/* Must be first */
 	refcount_t		usage;
 	u32			version;	/* Version */
-	unsigned short		nr_addrs;
-	unsigned short		index;		/* Address currently in use */
-	unsigned short		nr_ipv4;	/* Number of IPv4 addresses */
+	unsigned char		max_addrs;
+	unsigned char		nr_addrs;
+	unsigned char		index;		/* Address currently in use */
+	unsigned char		nr_ipv4;	/* Number of IPv4 addresses */
 	unsigned long		probed;		/* Mask of servers that have been probed */
 	unsigned long		yfs;		/* Mask of servers that are YFS */
 	struct sockaddr_rxrpc	addrs[];
+#define AFS_MAX_ADDRESSES ((unsigned int)(sizeof(unsigned long) * 8))
 };
 
 /*
@@ -242,7 +244,7 @@ struct afs_net {
 	seqlock_t		cells_lock;
 
 	struct mutex		proc_cells_lock;
-	struct list_head	proc_cells;
+	struct hlist_head	proc_cells;
 
 	/* Known servers.  Theoretically each fileserver can only be in one
 	 * cell, but in practice, people create aliases and subsets and there's
@@ -320,7 +322,7 @@ struct afs_cell {
 	struct afs_net		*net;
 	struct key		*anonymous_key;	/* anonymous user key for this cell */
 	struct work_struct	manager;	/* Manager for init/deinit/dns */
-	struct list_head	proc_link;	/* /proc cell list link */
+	struct hlist_node	proc_link;	/* /proc cell list link */
 #ifdef CONFIG_AFS_FSCACHE
 	struct fscache_cookie	*cache;		/* caching cookie */
 #endif
