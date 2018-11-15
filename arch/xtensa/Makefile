@@ -99,6 +99,9 @@ all Image zImage uImage: vmlinux
 dtbs: scripts
 	$(Q)$(MAKE) $(build)=$(boot)/dts
 
+archheaders:
+	$(Q)$(MAKE) $(build)=arch/xtensa/kernel/syscalls all
+
 define archhelp
   @echo '* Image       - Kernel ELF image with reset vector'
   @echo '* zImage      - Compressed kernel image (arch/xtensa/boot/images/zImage.*)'
