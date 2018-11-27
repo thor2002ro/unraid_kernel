@@ -360,7 +360,7 @@ static void tcp_probe_timer(struct sock *sk)
 	 */
 	start_ts = tcp_skb_timestamp(skb);
 	if (!start_ts)
-		skb->skb_mstamp = tp->tcp_mstamp;
+		skb->skb_mstamp_ns = tp->tcp_clock_cache;
 	else if (icsk->icsk_user_timeout &&
 		 (s32)(tcp_time_stamp(tp) - start_ts) > icsk->icsk_user_timeout)
 		goto abort;
@@ -740,7 +740,7 @@ static enum hrtimer_restart tcp_compressed_ack_kick(struct hrtimer *timer)
 
 	bh_lock_sock(sk);
 	if (!sock_owned_by_user(sk)) {
-		if (tp->compressed_ack)
+		if (tp->compressed_ack > TCP_FASTRETRANS_THRESH)
 			tcp_send_ack(sk);
 	} else {
 		if (!test_and_set_bit(TCP_DELACK_TIMER_DEFERRED,
