@@ -241,6 +241,18 @@ static int asus_report_input(struct asus_drvdata *drvdat, u8 *data, int size)
 	return 1;
 }
 
+static int asus_event(struct hid_device *hdev, struct hid_field *field,
+		      struct hid_usage *usage, __s32 value)
+{
+	if ((usage->hid & HID_USAGE_PAGE) == 0xff310000 &&
+	    (usage->hid & HID_USAGE) != 0x00 && !usage->type) {
+		hid_warn(hdev, "Unmapped Asus vendor usagepage code 0x%02x\n",
+			 usage->hid & HID_USAGE);
+	}
+
+	return 0;
+}
+
 static int asus_raw_event(struct hid_device *hdev,
 		struct hid_report *report, u8 *data, int size)
 {
@@ -510,6 +522,7 @@ static int asus_input_mapping(struct hid_device *hdev,
 		case 0x20: asus_map_key_clear(KEY_BRIGHTNESSUP);		break;
 		case 0x35: asus_map_key_clear(KEY_DISPLAY_OFF);		break;
 		case 0x6c: asus_map_key_clear(KEY_SLEEP);		break;
+		case 0x7c: asus_map_key_clear(KEY_MICMUTE);		break;
 		case 0x82: asus_map_key_clear(KEY_CAMERA);		break;
 		case 0x88: asus_map_key_clear(KEY_RFKILL);			break;
 		case 0xb5: asus_map_key_clear(KEY_CALC);			break;
@@ -527,6 +540,9 @@ static int asus_input_mapping(struct hid_device *hdev,
 
 		/* Fn+Space Power4Gear Hybrid */
 		case 0x5c: asus_map_key_clear(KEY_PROG3);		break;
+
+		/* Fn+F5 "fan" symbol on FX503VD */
+		case 0x99: asus_map_key_clear(KEY_PROG4);		break;
 
 		default:
 			/* ASUS lazily declares 256 usages, ignore the rest,
@@ -806,6 +822,9 @@ static const struct hid_device_id asus_devices[] = {
 	{ HID_USB_DEVICE(USB_VENDOR_ID_ASUSTEK,
 		USB_DEVICE_ID_ASUSTEK_ROG_KEYBOARD3), QUIRK_G752_KEYBOARD },
 	{ HID_USB_DEVICE(USB_VENDOR_ID_ASUSTEK,
+		USB_DEVICE_ID_ASUSTEK_FX503VD_KEYBOARD),
+	  QUIRK_USE_KBD_BACKLIGHT },
+	{ HID_USB_DEVICE(USB_VENDOR_ID_ASUSTEK,
 		USB_DEVICE_ID_ASUSTEK_T100TA_KEYBOARD),
 	  QUIRK_T100_KEYBOARD | QUIRK_NO_CONSUMER_USAGES },
 	{ HID_USB_DEVICE(USB_VENDOR_ID_ASUSTEK,
@@ -832,6 +851,7 @@ static struct hid_driver asus_driver = {
 #ifdef CONFIG_PM
 	.reset_resume           = asus_reset_resume,
 #endif
+	.event			= asus_event,
 	.raw_event		= asus_raw_event
 };
 module_hid_driver(asus_driver);
