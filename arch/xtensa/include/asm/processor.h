@@ -212,11 +212,18 @@ extern unsigned long get_wchan(struct task_struct *p);
 
 /* Special register access. */
 
-#define WSR(v,sr) __asm__ __volatile__ ("wsr %0,"__stringify(sr) :: "a"(v));
-#define RSR(v,sr) __asm__ __volatile__ ("rsr %0,"__stringify(sr) : "=a"(v));
+#define xtensa_set_sr(x, sr) \
+	({ \
+	 unsigned int v = (unsigned int)(x); \
+	 __asm__ __volatile__ ("wsr %0, "__stringify(sr) :: "a"(v)); \
+	 })
 
-#define set_sr(x,sr) ({unsigned int v=(unsigned int)x; WSR(v,sr);})
-#define get_sr(sr) ({unsigned int v; RSR(v,sr); v; })
+#define xtensa_get_sr(sr) \
+	({ \
+	 unsigned int v; \
+	 __asm__ __volatile__ ("rsr %0, "__stringify(sr) : "=a"(v)); \
+	 v; \
+	 })
 
 #ifndef XCHAL_HAVE_EXTERN_REGS
 #define XCHAL_HAVE_EXTERN_REGS 0
