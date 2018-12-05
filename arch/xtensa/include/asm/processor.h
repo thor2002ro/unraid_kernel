@@ -13,6 +13,7 @@
 #include <variant/core.h>
 
 #include <linux/compiler.h>
+#include <linux/stringify.h>
 #include <asm/ptrace.h>
 #include <asm/types.h>
 #include <asm/regs.h>
