@@ -396,6 +396,14 @@ struct pci_dev {
 	unsigned int	is_hotplug_bridge:1;
 	unsigned int	shpc_managed:1;		/* SHPC owned by shpchp */
 	unsigned int	is_thunderbolt:1;	/* Thunderbolt controller */
+	/*
+	 * Devices marked being untrusted are the ones that can potentially
+	 * execute DMA attacks and similar. They are typically connected
+	 * through external ports such as Thunderbolt but not limited to
+	 * that. When an IOMMU is enabled they should be getting full
+	 * mappings to make sure they cannot access arbitrary memory.
+	 */
+	unsigned int	untrusted:1;
 	unsigned int	__aer_firmware_first_valid:1;
 	unsigned int	__aer_firmware_first:1;
 	unsigned int	broken_intx_masking:1;	/* INTx masking can't be used */
@@ -1960,7 +1968,11 @@ int pcibios_set_pcie_reset_state(struct pci_dev *dev,
 				 enum pcie_reset_state state);
 int pcibios_add_device(struct pci_dev *dev);
 void pcibios_release_device(struct pci_dev *dev);
+#ifdef CONFIG_PCI
 void pcibios_penalize_isa_irq(int irq, int active);
+#else
+static inline void pcibios_penalize_isa_irq(int irq, int active) {}
+#endif
 int pcibios_alloc_irq(struct pci_dev *dev);
 void pcibios_free_irq(struct pci_dev *dev);
 resource_size_t pcibios_default_alignment(void);
