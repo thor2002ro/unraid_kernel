@@ -109,12 +109,14 @@ struct shmem_falloc {
 #ifdef CONFIG_TMPFS
 static unsigned long shmem_default_max_blocks(void)
 {
-	return totalram_pages / 2;
+	return totalram_pages() / 2;
 }
 
 static unsigned long shmem_default_max_inodes(void)
 {
-	return min(totalram_pages - totalhigh_pages, totalram_pages / 2);
+	unsigned long nr_pages = totalram_pages();
+
+	return min(nr_pages - totalhigh_pages(), nr_pages / 2);
 }
 #endif
 
@@ -661,9 +663,7 @@ static int shmem_free_swap(struct address_space *mapping,
 {
 	void *old;
 
-	xa_lock_irq(&mapping->i_pages);
-	old = __xa_cmpxchg(&mapping->i_pages, index, radswap, NULL, 0);
-	xa_unlock_irq(&mapping->i_pages);
+	old = xa_cmpxchg_irq(&mapping->i_pages, index, radswap, NULL, 0);
 	if (old != radswap)
 		return -ENOENT;
 	free_swap_and_cache(radix_to_swp_entry(radswap));
@@ -760,7 +760,7 @@ void shmem_unlock_mapping(struct address_space *mapping)
 			break;
 		index = indices[pvec.nr - 1] + 1;
 		pagevec_remove_exceptionals(&pvec);
-		check_move_unevictable_pages(pvec.pages, pvec.nr);
+		check_move_unevictable_pages(&pvec);
 		pagevec_release(&pvec);
 		cond_resched();
 	}
@@ -1439,7 +1439,7 @@ static struct page *shmem_alloc_hugepage(gfp_t gfp,
 
 	shmem_pseudo_vma_init(&pvma, info, hindex);
 	page = alloc_pages_vma(gfp | __GFP_COMP | __GFP_NORETRY | __GFP_NOWARN,
-			HPAGE_PMD_ORDER, &pvma, 0, numa_node_id());
+			HPAGE_PMD_ORDER, &pvma, 0, numa_node_id(), true);
 	shmem_pseudo_vma_destroy(&pvma);
 	if (page)
 		prep_transhuge_page(page);
@@ -3303,7 +3303,7 @@ static int shmem_parse_options(char *options, struct shmem_sb_info *sbinfo,
 			size = memparse(value,&rest);
 			if (*rest == '%') {
 				size <<= PAGE_SHIFT;
-				size *= totalram_pages;
+				size *= totalram_pages();
 				do_div(size, 100);
 				rest++;
 			}

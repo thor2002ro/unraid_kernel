@@ -804,9 +804,9 @@ static int vega10_hwmgr_backend_init(struct pp_hwmgr *hwmgr)
 
 	hwmgr->backend = data;
 
-	hwmgr->workload_mask = 1 << hwmgr->workload_prority[PP_SMC_POWER_PROFILE_VIDEO];
-	hwmgr->power_profile_mode = PP_SMC_POWER_PROFILE_VIDEO;
-	hwmgr->default_power_profile_mode = PP_SMC_POWER_PROFILE_VIDEO;
+	hwmgr->workload_mask = 1 << hwmgr->workload_prority[PP_SMC_POWER_PROFILE_BOOTUP_DEFAULT];
+	hwmgr->power_profile_mode = PP_SMC_POWER_PROFILE_BOOTUP_DEFAULT;
+	hwmgr->default_power_profile_mode = PP_SMC_POWER_PROFILE_BOOTUP_DEFAULT;
 
 	vega10_set_default_registry_data(hwmgr);
 	data->disable_dpm_mask = 0xff;
@@ -3266,8 +3266,10 @@ static int vega10_find_dpm_states_clocks_in_dpm_table(struct pp_hwmgr *hwmgr, co
 	}
 
 	if (i >= sclk_table->count) {
-		data->need_update_dpm_table |= DPMTABLE_OD_UPDATE_SCLK;
-		sclk_table->dpm_levels[i-1].value = sclk;
+		if (sclk > sclk_table->dpm_levels[i-1].value) {
+			data->need_update_dpm_table |= DPMTABLE_OD_UPDATE_SCLK;
+			sclk_table->dpm_levels[i-1].value = sclk;
+		}
 	}
 
 	for (i = 0; i < mclk_table->count; i++) {
@@ -3276,8 +3278,10 @@ static int vega10_find_dpm_states_clocks_in_dpm_table(struct pp_hwmgr *hwmgr, co
 	}
 
 	if (i >= mclk_table->count) {
-		data->need_update_dpm_table |= DPMTABLE_OD_UPDATE_MCLK;
-		mclk_table->dpm_levels[i-1].value = mclk;
+		if (mclk > mclk_table->dpm_levels[i-1].value) {
+			data->need_update_dpm_table |= DPMTABLE_OD_UPDATE_MCLK;
+			mclk_table->dpm_levels[i-1].value = mclk;
+		}
 	}
 
 	if (data->display_timing.num_existing_displays != hwmgr->display_config->num_display)
@@ -4664,13 +4668,15 @@ static int vega10_get_power_profile_mode(struct pp_hwmgr *hwmgr, char *buf)
 {
 	struct vega10_hwmgr *data = hwmgr->backend;
 	uint32_t i, size = 0;
-	static const uint8_t profile_mode_setting[5][4] = {{70, 60, 1, 3,},
+	static const uint8_t profile_mode_setting[6][4] = {{70, 60, 0, 0,},
+						{70, 60, 1, 3,},
 						{90, 60, 0, 0,},
 						{70, 60, 0, 0,},
 						{70, 90, 0, 0,},
 						{30, 60, 0, 6,},
 						};
-	static const char *profile_name[6] = {"3D_FULL_SCREEN",
+	static const char *profile_name[7] = {"BOOTUP_DEFAULT",
+					"3D_FULL_SCREEN",
 					"POWER_SAVING",
 					"VIDEO",
 					"VR",

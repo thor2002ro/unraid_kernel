@@ -1256,7 +1256,8 @@ static void tty_driver_remove_tty(struct tty_driver *driver, struct tty_struct *
 static int tty_reopen(struct tty_struct *tty)
 {
 	struct tty_driver *driver = tty->driver;
-	int retval;
+	struct tty_ldisc *ld;
+	int retval = 0;
 
 	if (driver->type == TTY_DRIVER_TYPE_PTY &&
 	    driver->subtype == PTY_TYPE_MASTER)
@@ -1268,14 +1269,21 @@ static int tty_reopen(struct tty_struct *tty)
 	if (test_bit(TTY_EXCLUSIVE, &tty->flags) && !capable(CAP_SYS_ADMIN))
 		return -EBUSY;
 
-	tty->count++;
+	ld = tty_ldisc_ref_wait(tty);
+	if (ld) {
+		tty_ldisc_deref(ld);
+	} else {
+		retval = tty_ldisc_lock(tty, 5 * HZ);
+		if (retval)
+			return retval;
 
-	if (tty->ldisc)
-		return 0;
+		if (!tty->ldisc)
+			retval = tty_ldisc_reinit(tty, tty->termios.c_line);
+		tty_ldisc_unlock(tty);
+	}
 
-	retval = tty_ldisc_reinit(tty, tty->termios.c_line);
-	if (retval)
-		tty->count--;
+	if (retval == 0)
+		tty->count++;
 
 	return retval;
 }
@@ -1373,7 +1381,13 @@ err_release_lock:
 	return ERR_PTR(retval);
 }
 
-static void tty_free_termios(struct tty_struct *tty)
+/**
+ * tty_save_termios() - save tty termios data in driver table
+ * @tty: tty whose termios data to save
+ *
+ * Locking: Caller guarantees serialisation with tty_init_termios().
+ */
+void tty_save_termios(struct tty_struct *tty)
 {
 	struct ktermios *tp;
 	int idx = tty->index;
@@ -1392,6 +1406,7 @@ static void tty_free_termios(struct tty_struct *tty)
 	}
 	*tp = tty->termios;
 }
+EXPORT_SYMBOL_GPL(tty_save_termios);
 
 /**
  *	tty_flush_works		-	flush all works of a tty/pty pair
@@ -1491,7 +1506,7 @@ static void release_tty(struct tty_struct *tty, int idx)
 	WARN_ON(!mutex_is_locked(&tty_mutex));
 	if (tty->ops->shutdown)
 		tty->ops->shutdown(tty);
-	tty_free_termios(tty);
+	tty_save_termios(tty);
 	tty_driver_remove_tty(tty->driver, tty);
 	tty->port->itty = NULL;
 	if (tty->link)
