@@ -29,7 +29,6 @@
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_uapi.h>
 #include <drm/drm_plane_helper.h>
-#include <drm/drm_crtc_helper.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_writeback.h>
 #include <drm/drm_damage_helper.h>
@@ -331,10 +330,17 @@ update_connector_routing(struct drm_atomic_state *state,
 	 * Since the connector can be unregistered at any point during an
 	 * atomic check or commit, this is racy. But that's OK: all we care
 	 * about is ensuring that userspace can't do anything but shut off the
-	 * display on a connector that was destroyed after its been notified,
+	 * display on a connector that was destroyed after it's been notified,
 	 * not before.
+	 *
+	 * Additionally, we also want to ignore connector registration when
+	 * we're trying to restore an atomic state during system resume since
+	 * there's a chance the connector may have been destroyed during the
+	 * process, but it's better to ignore that then cause
+	 * drm_atomic_helper_resume() to fail.
 	 */
-	if (drm_connector_is_unregistered(connector) && crtc_state->active) {
+	if (!state->duplicated && drm_connector_is_unregistered(connector) &&
+	    crtc_state->active) {
 		DRM_DEBUG_ATOMIC("[CONNECTOR:%d:%s] is not registered\n",
 				 connector->base.id, connector->name);
 		return -EINVAL;
@@ -686,7 +692,7 @@ drm_atomic_helper_check_modeset(struct drm_device *dev,
 
 	/*
 	 * After all the routing has been prepared we need to add in any
-	 * connector which is itself unchanged, but who's crtc changes it's
+	 * connector which is itself unchanged, but whose crtc changes its
 	 * configuration. This must be done before calling mode_fixup in case a
 	 * crtc only changed its mode but has the same set of connectors.
 	 */
@@ -1602,6 +1608,15 @@ int drm_atomic_helper_async_check(struct drm_device *dev,
 	    old_plane_state->crtc != new_plane_state->crtc)
 		return -EINVAL;
 
+	/*
+	 * FIXME: Since prepare_fb and cleanup_fb are always called on
+	 * the new_plane_state for async updates we need to block framebuffer
+	 * changes. This prevents use of a fb that's been cleaned up and
+	 * double cleanups from occuring.
+	 */
+	if (old_plane_state->fb != new_plane_state->fb)
+		return -EINVAL;
+
 	funcs = plane->helper_private;
 	if (!funcs->atomic_async_update)
 		return -EINVAL;
@@ -1671,7 +1686,7 @@ EXPORT_SYMBOL(drm_atomic_helper_async_commit);
  * drm_atomic_helper_setup_commit() and related functions.
  *
  * Committing the actual hardware state is done through the
- * &drm_mode_config_helper_funcs.atomic_commit_tail callback, or it's default
+ * &drm_mode_config_helper_funcs.atomic_commit_tail callback, or its default
  * implementation drm_atomic_helper_commit_tail().
  *
  * RETURNS:
@@ -1894,7 +1909,7 @@ crtc_or_fake_commit(struct drm_atomic_state *state, struct drm_crtc *crtc)
  * functions. drm_atomic_helper_wait_for_dependencies() must be called before
  * actually committing the hardware state, and for nonblocking commits this call
  * must be placed in the async worker. See also drm_atomic_helper_swap_state()
- * and it's stall parameter, for when a driver's commit hooks look at the
+ * and its stall parameter, for when a driver's commit hooks look at the
  * &drm_crtc.state, &drm_plane.state or &drm_connector.state pointer directly.
  *
  * Completion of the hardware commit step must be signalled using
@@ -3181,6 +3196,7 @@ drm_atomic_helper_duplicate_state(struct drm_device *dev,
 		return ERR_PTR(-ENOMEM);
 
 	state->acquire_ctx = ctx;
+	state->duplicated = true;
 
 	drm_for_each_crtc(crtc, dev) {
 		struct drm_crtc_state *crtc_state;

@@ -10,6 +10,7 @@ TARGETS += drivers/dma-buf
 TARGETS += efivarfs
 TARGETS += exec
 TARGETS += filesystems
+TARGETS += filesystems/binderfs
 TARGETS += firmware
 TARGETS += ftrace
 TARGETS += futex
@@ -21,6 +22,7 @@ TARGETS += ir
 TARGETS += kcmp
 TARGETS += kvm
 TARGETS += lib
+TARGETS += livepatch
 TARGETS += membarrier
 TARGETS += memfd
 TARGETS += memory-hotplug
@@ -47,6 +49,7 @@ TARGETS += sysctl
 ifneq (1, $(quicktest))
 TARGETS += timers
 endif
+TARGETS += tmpfs
 TARGETS += user
 TARGETS += vm
 TARGETS += x86
