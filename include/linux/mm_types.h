@@ -411,7 +411,7 @@ struct mm_struct {
 
 		unsigned long total_vm;	   /* Total pages mapped */
 		unsigned long locked_vm;   /* Pages that have PG_mlocked set */
-		unsigned long pinned_vm;   /* Refcount permanently increased */
+		atomic64_t    pinned_vm;   /* Refcount permanently increased */
 		unsigned long data_vm;	   /* VM_WRITE & ~VM_SHARED & ~VM_STACK */
 		unsigned long exec_vm;	   /* VM_EXEC & ~VM_WRITE & ~VM_STACK */
 		unsigned long stack_vm;	   /* VM_STACK */
@@ -671,7 +671,7 @@ enum vm_fault_reason {
 
 /* Encode hstate index for a hwpoisoned large page */
 #define VM_FAULT_SET_HINDEX(x) ((__force vm_fault_t)((x) << 16))
-#define VM_FAULT_GET_HINDEX(x) (((x) >> 16) & 0xf)
+#define VM_FAULT_GET_HINDEX(x) (((__force unsigned int)(x) >> 16) & 0xf)
 
 #define VM_FAULT_ERROR (VM_FAULT_OOM | VM_FAULT_SIGBUS |	\
 			VM_FAULT_SIGSEGV | VM_FAULT_HWPOISON |	\

@@ -865,19 +865,18 @@ static int ahash_update_ctx(struct ahash_request *req)
 		if (ret)
 			goto unmap_ctx;
 
-		if (mapped_nents) {
+		if (mapped_nents)
 			sg_to_sec4_sg_last(req->src, mapped_nents,
 					   edesc->sec4_sg + sec4_sg_src_index,
 					   0);
-			if (*next_buflen)
-				scatterwalk_map_and_copy(next_buf, req->src,
-							 to_hash - *buflen,
-							 *next_buflen, 0);
-		} else {
+		else
 			sg_to_sec4_set_last(edesc->sec4_sg + sec4_sg_src_index -
 					    1);
-		}
 
+		if (*next_buflen)
+			scatterwalk_map_and_copy(next_buf, req->src,
+						 to_hash - *buflen,
+						 *next_buflen, 0);
 		desc = edesc->hw_desc;
 
 		edesc->sec4_sg_dma = dma_map_single(jrdev, edesc->sec4_sg,
@@ -1993,7 +1992,6 @@ static int __init caam_algapi_hash_init(void)
 {
 	struct device_node *dev_node;
 	struct platform_device *pdev;
-	struct device *ctrldev;
 	int i = 0, err = 0;
 	struct caam_drv_private *priv;
 	unsigned int md_limit = SHA512_DIGEST_SIZE;
@@ -2012,16 +2010,17 @@ static int __init caam_algapi_hash_init(void)
 		return -ENODEV;
 	}
 
-	ctrldev = &pdev->dev;
-	priv = dev_get_drvdata(ctrldev);
+	priv = dev_get_drvdata(&pdev->dev);
 	of_node_put(dev_node);
 
 	/*
 	 * If priv is NULL, it's probably because the caam driver wasn't
 	 * properly initialized (e.g. RNG4 init failed). Thus, bail out here.
 	 */
-	if (!priv)
-		return -ENODEV;
+	if (!priv) {
+		err = -ENODEV;
+		goto out_put_dev;
+	}
 
 	/*
 	 * Register crypto algorithms the device supports.  First, identify
@@ -2043,8 +2042,10 @@ static int __init caam_algapi_hash_init(void)
 	 * Skip registration of any hashing algorithms if MD block
 	 * is not present.
 	 */
-	if (!md_inst)
-		return -ENODEV;
+	if (!md_inst) {
+		err = -ENODEV;
+		goto out_put_dev;
+	}
 
 	/* Limit digest size based on LP256 */
 	if (md_vid == CHA_VER_VID_MD_LP256)
@@ -2101,6 +2102,8 @@ static int __init caam_algapi_hash_init(void)
 			list_add_tail(&t_alg->entry, &hash_list);
 	}
 
+out_put_dev:
+	put_device(&pdev->dev);
 	return err;
 }
 

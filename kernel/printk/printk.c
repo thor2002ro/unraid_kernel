@@ -65,6 +65,7 @@ int console_printk[4] = {
 	CONSOLE_LOGLEVEL_MIN,		/* minimum_console_loglevel */
 	CONSOLE_LOGLEVEL_DEFAULT,	/* default_console_loglevel */
 };
+EXPORT_SYMBOL_GPL(console_printk);
 
 atomic_t ignore_console_lock_warning __read_mostly = ATOMIC_INIT(0);
 EXPORT_SYMBOL(ignore_console_lock_warning);
@@ -1143,14 +1144,7 @@ void __init setup_log_buf(int early)
 	if (!new_log_buf_len)
 		return;
 
-	if (early) {
-		new_log_buf =
-			memblock_alloc(new_log_buf_len, LOG_ALIGN);
-	} else {
-		new_log_buf = memblock_alloc_nopanic(new_log_buf_len,
-							  LOG_ALIGN);
-	}
-
+	new_log_buf = memblock_alloc(new_log_buf_len, LOG_ALIGN);
 	if (unlikely(!new_log_buf)) {
 		pr_err("log_buf_len: %lu bytes not available\n",
 			new_log_buf_len);

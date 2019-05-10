@@ -1526,14 +1526,6 @@ static int qede_selftest_transmit_traffic(struct qede_dev *edev,
 	barrier();
 	writel(txq->tx_db.raw, txq->doorbell_addr);
 
-	/* mmiowb is needed to synchronize doorbell writes from more than one
-	 * processor. It guarantees that the write arrives to the device before
-	 * the queue lock is released and another start_xmit is called (possibly
-	 * on another CPU). Without this barrier, the next doorbell can bypass
-	 * this doorbell. This is applicable to IA64/Altix systems.
-	 */
-	mmiowb();
-
 	for (i = 0; i < QEDE_SELFTEST_POLL_COUNT; i++) {
 		if (qede_txq_has_work(txq))
 			break;
@@ -1663,8 +1655,11 @@ static int qede_selftest_run_loopback(struct qede_dev *edev, u32 loopback_mode)
 	/* Wait for loopback configuration to apply */
 	msleep_interruptible(500);
 
-	/* prepare the loopback packet */
-	pkt_size = edev->ndev->mtu + ETH_HLEN;
+	/* Setting max packet size to 1.5K to avoid data being split over
+	 * multiple BDs in cases where MTU > PAGE_SIZE.
+	 */
+	pkt_size = (((edev->ndev->mtu < ETH_DATA_LEN) ?
+		     edev->ndev->mtu : ETH_DATA_LEN) + ETH_HLEN);
 
 	skb = netdev_alloc_skb(edev->ndev, pkt_size);
 	if (!skb) {

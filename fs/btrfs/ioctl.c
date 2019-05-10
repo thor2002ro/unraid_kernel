@@ -501,6 +501,16 @@ static noinline int btrfs_ioctl_fitrim(struct file *file, void __user *arg)
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
+	/*
+	 * If the fs is mounted with nologreplay, which requires it to be
+	 * mounted in RO mode as well, we can not allow discard on free space
+	 * inside block groups, because log trees refer to extents that are not
+	 * pinned in a block group's free space cache (pinning the extents is
+	 * precisely the first phase of replaying a log tree).
+	 */
+	if (btrfs_test_opt(fs_info, NOLOGREPLAY))
+		return -EROFS;
+
 	rcu_read_lock();
 	list_for_each_entry_rcu(device, &fs_info->fs_devices->devices,
 				dev_list) {
@@ -3207,21 +3217,6 @@ out:
 	return ret;
 }
 
-static void btrfs_double_inode_unlock(struct inode *inode1, struct inode *inode2)
-{
-	inode_unlock(inode1);
-	inode_unlock(inode2);
-}
-
-static void btrfs_double_inode_lock(struct inode *inode1, struct inode *inode2)
-{
-	if (inode1 < inode2)
-		swap(inode1, inode2);
-
-	inode_lock_nested(inode1, I_MUTEX_PARENT);
-	inode_lock_nested(inode2, I_MUTEX_CHILD);
-}
-
 static void btrfs_double_extent_unlock(struct inode *inode1, u64 loff1,
 				       struct inode *inode2, u64 loff2, u64 len)
 {
@@ -3956,7 +3951,7 @@ static int btrfs_remap_file_range_prep(struct file *file_in, loff_t pos_in,
 	if (same_inode)
 		inode_lock(inode_in);
 	else
-		btrfs_double_inode_lock(inode_in, inode_out);
+		lock_two_nondirectories(inode_in, inode_out);
 
 	/* don't make the dst file partly checksummed */
 	if ((BTRFS_I(inode_in)->flags & BTRFS_INODE_NODATASUM) !=
@@ -4013,7 +4008,7 @@ static int btrfs_remap_file_range_prep(struct file *file_in, loff_t pos_in,
 	if (same_inode)
 		inode_unlock(inode_in);
 	else
-		btrfs_double_inode_unlock(inode_in, inode_out);
+		unlock_two_nondirectories(inode_in, inode_out);
 
 	return ret;
 }
@@ -4043,7 +4038,7 @@ loff_t btrfs_remap_file_range(struct file *src_file, loff_t off,
 	if (same_inode)
 		inode_unlock(src_inode);
 	else
-		btrfs_double_inode_unlock(src_inode, dst_inode);
+		unlock_two_nondirectories(src_inode, dst_inode);
 
 	return ret < 0 ? ret : len;
 }

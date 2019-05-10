@@ -1797,11 +1797,16 @@ static int ethtool_get_strings(struct net_device *dev, void __user *useraddr)
 	WARN_ON_ONCE(!ret);
 
 	gstrings.len = ret;
-	data = vzalloc(array_size(gstrings.len, ETH_GSTRING_LEN));
-	if (gstrings.len && !data)
-		return -ENOMEM;
 
-	__ethtool_get_strings(dev, gstrings.string_set, data);
+	if (gstrings.len) {
+		data = vzalloc(array_size(gstrings.len, ETH_GSTRING_LEN));
+		if (!data)
+			return -ENOMEM;
+
+		__ethtool_get_strings(dev, gstrings.string_set, data);
+	} else {
+		data = NULL;
+	}
 
 	ret = -EFAULT;
 	if (copy_to_user(useraddr, &gstrings, sizeof(gstrings)))
@@ -1897,11 +1902,15 @@ static int ethtool_get_stats(struct net_device *dev, void __user *useraddr)
 		return -EFAULT;
 
 	stats.n_stats = n_stats;
-	data = vzalloc(array_size(n_stats, sizeof(u64)));
-	if (n_stats && !data)
-		return -ENOMEM;
 
-	ops->get_ethtool_stats(dev, &stats, data);
+	if (n_stats) {
+		data = vzalloc(array_size(n_stats, sizeof(u64)));
+		if (!data)
+			return -ENOMEM;
+		ops->get_ethtool_stats(dev, &stats, data);
+	} else {
+		data = NULL;
+	}
 
 	ret = -EFAULT;
 	if (copy_to_user(useraddr, &stats, sizeof(stats)))
@@ -1941,16 +1950,21 @@ static int ethtool_get_phy_stats(struct net_device *dev, void __user *useraddr)
 		return -EFAULT;
 
 	stats.n_stats = n_stats;
-	data = vzalloc(array_size(n_stats, sizeof(u64)));
-	if (n_stats && !data)
-		return -ENOMEM;
 
-	if (dev->phydev && !ops->get_ethtool_phy_stats) {
-		ret = phy_ethtool_get_stats(dev->phydev, &stats, data);
-		if (ret < 0)
-			return ret;
+	if (n_stats) {
+		data = vzalloc(array_size(n_stats, sizeof(u64)));
+		if (!data)
+			return -ENOMEM;
+
+		if (dev->phydev && !ops->get_ethtool_phy_stats) {
+			ret = phy_ethtool_get_stats(dev->phydev, &stats, data);
+			if (ret < 0)
+				goto out;
+		} else {
+			ops->get_ethtool_phy_stats(dev, &stats, data);
+		}
 	} else {
-		ops->get_ethtool_phy_stats(dev, &stats, data);
+		data = NULL;
 	}
 
 	ret = -EFAULT;
@@ -2319,9 +2333,10 @@ static int ethtool_set_tunable(struct net_device *dev, void __user *useraddr)
 	return ret;
 }
 
-static int ethtool_get_per_queue_coalesce(struct net_device *dev,
-					  void __user *useraddr,
-					  struct ethtool_per_queue_op *per_queue_opt)
+static noinline_for_stack int
+ethtool_get_per_queue_coalesce(struct net_device *dev,
+			       void __user *useraddr,
+			       struct ethtool_per_queue_op *per_queue_opt)
 {
 	u32 bit;
 	int ret;
@@ -2349,9 +2364,10 @@ static int ethtool_get_per_queue_coalesce(struct net_device *dev,
 	return 0;
 }
 
-static int ethtool_set_per_queue_coalesce(struct net_device *dev,
-					  void __user *useraddr,
-					  struct ethtool_per_queue_op *per_queue_opt)
+static noinline_for_stack int
+ethtool_set_per_queue_coalesce(struct net_device *dev,
+			       void __user *useraddr,
+			       struct ethtool_per_queue_op *per_queue_opt)
 {
 	u32 bit;
 	int i, ret = 0;
@@ -2405,7 +2421,7 @@ roll_back:
 	return ret;
 }
 
-static int ethtool_set_per_queue(struct net_device *dev,
+static int noinline_for_stack ethtool_set_per_queue(struct net_device *dev,
 				 void __user *useraddr, u32 sub_cmd)
 {
 	struct ethtool_per_queue_op per_queue_opt;

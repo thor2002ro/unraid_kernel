@@ -148,7 +148,7 @@ static inline bool is_ttbr1_addr(unsigned long addr)
 /*
  * Dump out the page tables associated with 'addr' in the currently active mm.
  */
-void show_pte(unsigned long addr)
+static void show_pte(unsigned long addr)
 {
 	struct mm_struct *mm;
 	pgd_t *pgdp;
@@ -810,12 +810,12 @@ void __init hook_debug_fault_code(int nr,
 	debug_fault_info[nr].name	= name;
 }
 
-asmlinkage int __exception do_debug_exception(unsigned long addr,
-					      unsigned int esr,
-					      struct pt_regs *regs)
+asmlinkage void __exception do_debug_exception(unsigned long addr_if_watchpoint,
+					       unsigned int esr,
+					       struct pt_regs *regs)
 {
 	const struct fault_info *inf = esr_to_debug_fault_info(esr);
-	int rv;
+	unsigned long pc = instruction_pointer(regs);
 
 	/*
 	 * Tell lockdep we disabled irqs in entry.S. Do nothing if they were
@@ -824,20 +824,15 @@ asmlinkage int __exception do_debug_exception(unsigned long addr,
 	if (interrupts_enabled(regs))
 		trace_hardirqs_off();
 
-	if (user_mode(regs) && !is_ttbr0_addr(instruction_pointer(regs)))
+	if (user_mode(regs) && !is_ttbr0_addr(pc))
 		arm64_apply_bp_hardening();
 
-	if (!inf->fn(addr, esr, regs)) {
-		rv = 1;
-	} else {
+	if (inf->fn(addr_if_watchpoint, esr, regs)) {
 		arm64_notify_die(inf->name, regs,
-				 inf->sig, inf->code, (void __user *)addr, esr);
-		rv = 0;
+				 inf->sig, inf->code, (void __user *)pc, esr);
 	}
 
 	if (interrupts_enabled(regs))
 		trace_hardirqs_on();
-
-	return rv;
 }
 NOKPROBE_SYMBOL(do_debug_exception);
