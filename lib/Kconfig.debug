@@ -753,9 +753,9 @@ endmenu # "Memory Debugging"
 config ARCH_HAS_KCOV
 	bool
 	help
-	  KCOV does not have any arch-specific code, but currently it is enabled
-	  only for x86_64. KCOV requires testing on other archs, and most likely
-	  disabling of instrumentation for some early boot code.
+	  An architecture should select this when it can successfully
+	  build and run with CONFIG_KCOV. This typically requires
+	  disabling instrumentation for some early boot code.
 
 config CC_HAS_SANCOV_TRACE_PC
 	def_bool $(cc-option,-fsanitize-coverage=trace-pc)
@@ -1769,6 +1769,9 @@ config TEST_HEXDUMP
 config TEST_STRING_HELPERS
 	tristate "Test functions located in the string_helpers module at runtime"
 
+config TEST_STRSCPY
+	tristate "Test strscpy*() family of functions at runtime"
+
 config TEST_KSTRTOX
 	tristate "Test kstrto*() family of functions at runtime"
 
@@ -1929,6 +1932,7 @@ config TEST_KMOD
 	depends on m
 	depends on BLOCK && (64BIT || LBDAF)	  # for XFS, BTRFS
 	depends on NETDEVICES && NET_CORE && INET # for TUN
+	depends on BLOCK
 	select TEST_LKM
 	select XFS_FS
 	select TUN
