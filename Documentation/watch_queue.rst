@@ -7,7 +7,9 @@ receive notifications from the kernel.  This can be used in conjunction with::
 
   * Key/keyring notifications
 
-  * General device event notifications
+  * General device event notifications, including::
+
+    * Block layer event notifications
 
 
 The notifications buffers can be enabled by:

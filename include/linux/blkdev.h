@@ -27,6 +27,7 @@
 #include <linux/percpu-refcount.h>
 #include <linux/scatterlist.h>
 #include <linux/blkzoned.h>
+#include <linux/watch_queue.h>
 
 struct module;
 struct scsi_ioctl_command;
@@ -1772,6 +1773,20 @@ static inline bool blk_req_can_dispatch_to_zone(struct request *rq)
 	return true;
 }
 #endif /* CONFIG_BLK_DEV_ZONED */
+
+#ifdef CONFIG_BLK_NOTIFICATIONS
+static inline void post_block_notification(struct block_notification *n)
+{
+	u64 id = 0; /* Might want to allow dev# here. */
+
+	post_device_notification(&n->watch, id);
+}
+#else
+static inline void post_block_notification(struct block_notification *n)
+{
+}
+#endif
+
 
 #else /* CONFIG_BLOCK */
 
