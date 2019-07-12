@@ -47,7 +47,7 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <regex.h>
-#include "sane_ctype.h"
+#include <linux/ctype.h>
 #include <signal.h>
 #include <linux/bitmap.h>
 #include <linux/stringify.h>
@@ -136,9 +136,6 @@ static int hist_iter__report_callback(struct hist_entry_iter *iter,
 	if (!ui__has_annotation() && !rep->symbol_ipc)
 		return 0;
 
-	hist__account_cycles(sample->branch_stack, al, sample,
-			     rep->nonany_branch_mode);
-
 	if (sort__mode == SORT_MODE__BRANCH) {
 		bi = he->branch_info;
 		err = addr_map_symbol__inc_samples(&bi->from, sample, evsel);
@@ -180,9 +177,6 @@ static int hist_iter__branch_callback(struct hist_entry_iter *iter,
 
 	if (!ui__has_annotation() && !rep->symbol_ipc)
 		return 0;
-
-	hist__account_cycles(sample->branch_stack, al, sample,
-			     rep->nonany_branch_mode);
 
 	bi = he->branch_info;
 	err = addr_map_symbol__inc_samples(&bi->from, sample, evsel);
@@ -281,6 +275,11 @@ static int process_sample_event(struct perf_tool *tool,
 
 	if (al.map != NULL)
 		al.map->dso->hit = 1;
+
+	if (ui__has_annotation() || rep->symbol_ipc) {
+		hist__account_cycles(sample->branch_stack, &al, sample,
+				     rep->nonany_branch_mode);
+	}
 
 	ret = hist_entry_iter__add(&iter, &al, rep->max_stack, rep);
 	if (ret < 0)
@@ -942,8 +941,7 @@ parse_time_quantum(const struct option *opt, const char *arg,
 		pr_err("time quantum cannot be 0");
 		return -1;
 	}
-	while (isspace(*end))
-		end++;
+	end = skip_spaces(end);
 	if (*end == 0)
 		return 0;
 	if (!strcmp(end, "s")) {
@@ -1259,6 +1257,9 @@ repeat:
 	if (session == NULL)
 		return -1;
 
+	if (zstd_init(&(session->zstd_data), 0) < 0)
+		pr_warning("Decompression initialization failed. Reported data may be incomplete.\n");
+
 	if (report.queue_size) {
 		ordered_events__set_alloc_size(&session->ordered_events,
 					       report.queue_size);
@@ -1426,6 +1427,10 @@ repeat:
 						  &report.range_num);
 		if (ret < 0)
 			goto error;
+
+		itrace_synth_opts__set_time_range(&itrace_synth_opts,
+						  report.ptime_range,
+						  report.range_num);
 	}
 
 	if (session->tevent.pevent &&
@@ -1447,9 +1452,11 @@ repeat:
 		ret = 0;
 
 error:
-	if (report.ptime_range)
+	if (report.ptime_range) {
+		itrace_synth_opts__clear_time_range(&itrace_synth_opts);
 		zfree(&report.ptime_range);
-
+	}
+	zstd_fini(&(session->zstd_data));
 	perf_session__delete(session);
 	return ret;
 }

@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Linux I2C core ACPI support code
  *
  * Copyright (C) 2014 Intel Corp, Author: Lan Tianyu <tianyu.lan@intel.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
  */
 
 #include <linux/acpi.h>
@@ -115,8 +111,7 @@ static int i2c_acpi_do_lookup(struct acpi_device *adev,
 	struct list_head resource_list;
 	int ret;
 
-	if (acpi_bus_get_status(adev) || !adev->status.present ||
-	    acpi_device_enumerated(adev))
+	if (acpi_bus_get_status(adev) || !adev->status.present)
 		return -EINVAL;
 
 	if (acpi_match_device_ids(adev, i2c_acpi_ignored_device_ids) == 0)
@@ -150,6 +145,9 @@ static int i2c_acpi_get_info(struct acpi_device *adev,
 	memset(&lookup, 0, sizeof(lookup));
 	lookup.info = info;
 	lookup.index = -1;
+
+	if (acpi_device_enumerated(adev))
+		return -EINVAL;
 
 	ret = i2c_acpi_do_lookup(adev, &lookup);
 	if (ret)

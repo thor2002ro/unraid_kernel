@@ -425,6 +425,26 @@ void __i915_request_submit(struct i915_request *request)
 	if (i915_gem_context_is_banned(request->gem_context))
 		i915_request_skip(request, -EIO);
 
+	/*
+	 * Are we using semaphores when the gpu is already saturated?
+	 *
+	 * Using semaphores incurs a cost in having the GPU poll a
+	 * memory location, busywaiting for it to change. The continual
+	 * memory reads can have a noticeable impact on the rest of the
+	 * system with the extra bus traffic, stalling the cpu as it too
+	 * tries to access memory across the bus (perf stat -e bus-cycles).
+	 *
+	 * If we installed a semaphore on this request and we only submit
+	 * the request after the signaler completed, that indicates the
+	 * system is overloaded and using semaphores at this time only
+	 * increases the amount of work we are doing. If so, we disable
+	 * further use of semaphores until we are idle again, whence we
+	 * optimistically try again.
+	 */
+	if (request->sched.semaphores &&
+	    i915_sw_fence_signaled(&request->semaphore))
+		request->hw_context->saturated |= request->sched.semaphores;
+
 	/* We may be recursing from the signal callback of another i915 fence */
 	spin_lock_nested(&request->lock, SINGLE_DEPTH_NESTING);
 
@@ -432,6 +452,7 @@ void __i915_request_submit(struct i915_request *request)
 	set_bit(I915_FENCE_FLAG_ACTIVE, &request->fence.flags);
 
 	if (test_bit(DMA_FENCE_FLAG_ENABLE_SIGNAL_BIT, &request->fence.flags) &&
+	    !test_bit(DMA_FENCE_FLAG_SIGNALED_BIT, &request->fence.flags) &&
 	    !i915_request_enable_breadcrumb(request))
 		intel_engine_queue_breadcrumbs(engine);
 
@@ -480,15 +501,6 @@ void __i915_request_unsubmit(struct i915_request *request)
 
 	/* We may be recursing from the signal callback of another i915 fence */
 	spin_lock_nested(&request->lock, SINGLE_DEPTH_NESTING);
-
-	/*
-	 * As we do not allow WAIT to preempt inflight requests,
-	 * once we have executed a request, along with triggering
-	 * any execution callbacks, we must preserve its ordering
-	 * within the non-preemptible FIFO.
-	 */
-	BUILD_BUG_ON(__NO_PREEMPTION & ~I915_PRIORITY_MASK); /* only internal */
-	request->sched.attr.priority |= __NO_PREEMPTION;
 
 	if (test_bit(DMA_FENCE_FLAG_ENABLE_SIGNAL_BIT, &request->fence.flags))
 		i915_request_cancel_breadcrumb(request);
@@ -561,18 +573,7 @@ semaphore_notify(struct i915_sw_fence *fence, enum i915_sw_fence_notify state)
 
 	switch (state) {
 	case FENCE_COMPLETE:
-		/*
-		 * We only check a small portion of our dependencies
-		 * and so cannot guarantee that there remains no
-		 * semaphore chain across all. Instead of opting
-		 * for the full NOSEMAPHORE boost, we go for the
-		 * smaller (but still preempting) boost of
-		 * NEWCLIENT. This will be enough to boost over
-		 * a busywaiting request (as that cannot be
-		 * NEWCLIENT) without accidentally boosting
-		 * a busywait over real work elsewhere.
-		 */
-		i915_schedule_bump_priority(request, I915_PRIORITY_NEWCLIENT);
+		i915_schedule_bump_priority(request, I915_PRIORITY_NOSEMAPHORE);
 		break;
 
 	case FENCE_FREE:
@@ -799,6 +800,39 @@ err_unreserve:
 }
 
 static int
+i915_request_await_start(struct i915_request *rq, struct i915_request *signal)
+{
+	if (list_is_first(&signal->ring_link, &signal->ring->request_list))
+		return 0;
+
+	signal = list_prev_entry(signal, ring_link);
+	if (i915_timeline_sync_is_later(rq->timeline, &signal->fence))
+		return 0;
+
+	return i915_sw_fence_await_dma_fence(&rq->submit,
+					     &signal->fence, 0,
+					     I915_FENCE_GFP);
+}
+
+static intel_engine_mask_t
+already_busywaiting(struct i915_request *rq)
+{
+	/*
+	 * Polling a semaphore causes bus traffic, delaying other users of
+	 * both the GPU and CPU. We want to limit the impact on others,
+	 * while taking advantage of early submission to reduce GPU
+	 * latency. Therefore we restrict ourselves to not using more
+	 * than one semaphore from each source, and not using a semaphore
+	 * if we have detected the engine is saturated (i.e. would not be
+	 * submitted early and cause bus traffic reading an already passed
+	 * semaphore).
+	 *
+	 * See the are-we-too-late? check in __i915_request_submit().
+	 */
+	return rq->sched.semaphores | rq->hw_context->saturated;
+}
+
+static int
 emit_semaphore_wait(struct i915_request *to,
 		    struct i915_request *from,
 		    gfp_t gfp)
@@ -811,14 +845,12 @@ emit_semaphore_wait(struct i915_request *to,
 	GEM_BUG_ON(INTEL_GEN(to->i915) < 8);
 
 	/* Just emit the first semaphore we see as request space is limited. */
-	if (to->sched.semaphores & from->engine->mask)
+	if (already_busywaiting(to) & from->engine->mask)
 		return i915_sw_fence_await_dma_fence(&to->submit,
 						     &from->fence, 0,
 						     I915_FENCE_GFP);
 
-	err = i915_sw_fence_await_dma_fence(&to->semaphore,
-					    &from->fence, 0,
-					    I915_FENCE_GFP);
+	err = i915_request_await_start(to, from);
 	if (err < 0)
 		return err;
 
@@ -887,8 +919,18 @@ i915_request_await_request(struct i915_request *to, struct i915_request *from)
 						    &from->fence, 0,
 						    I915_FENCE_GFP);
 	}
+	if (ret < 0)
+		return ret;
 
-	return ret < 0 ? ret : 0;
+	if (to->sched.flags & I915_SCHED_HAS_SEMAPHORE_CHAIN) {
+		ret = i915_sw_fence_await_dma_fence(&to->semaphore,
+						    &from->fence, 0,
+						    I915_FENCE_GFP);
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
 }
 
 int
@@ -1179,7 +1221,7 @@ void i915_request_add(struct i915_request *request)
 		 * the bulk clients. (FQ_CODEL)
 		 */
 		if (list_empty(&request->sched.signalers_list))
-			attr.priority |= I915_PRIORITY_NEWCLIENT;
+			attr.priority |= I915_PRIORITY_WAIT;
 
 		engine->schedule(request, &attr);
 	}

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /**************************************************************************/
 /*                                                                        */
 /*  IBM System i and System p Virtual NIC Device Driver                   */
@@ -6,18 +7,6 @@
 /*  Thomas Falcon (tlfalcon@linux.vnet.ibm.com)                           */
 /*  John Allen (jallen@linux.vnet.ibm.com)                                */
 /*                                                                        */
-/*  This program is free software; you can redistribute it and/or modify  */
-/*  it under the terms of the GNU General Public License as published by  */
-/*  the Free Software Foundation; either version 2 of the License, or     */
-/*  (at your option) any later version.                                   */
-/*                                                                        */
-/*  This program is distributed in the hope that it will be useful,       */
-/*  but WITHOUT ANY WARRANTY; without even the implied warranty of        */
-/*  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         */
-/*  GNU General Public License for more details.                          */
-/*                                                                        */
-/*  You should have received a copy of the GNU General Public License     */
-/*  along with this program.                                              */
 /*                                                                        */
 /* This module contains the implementation of a virtual ethernet device   */
 /* for use with IBM i/p Series LPAR Linux. It utilizes the logical LAN    */
@@ -118,7 +107,7 @@ static int init_sub_crq_irqs(struct ibmvnic_adapter *adapter);
 static int ibmvnic_init(struct ibmvnic_adapter *);
 static int ibmvnic_reset_init(struct ibmvnic_adapter *);
 static void release_crq_queue(struct ibmvnic_adapter *);
-static int __ibmvnic_set_mac(struct net_device *netdev, struct sockaddr *p);
+static int __ibmvnic_set_mac(struct net_device *, u8 *);
 static int init_crq_queue(struct ibmvnic_adapter *adapter);
 static int send_query_phys_parms(struct ibmvnic_adapter *adapter);
 
@@ -439,9 +428,10 @@ static int reset_rx_pools(struct ibmvnic_adapter *adapter)
 		if (rx_pool->buff_size != be64_to_cpu(size_array[i])) {
 			free_long_term_buff(adapter, &rx_pool->long_term_buff);
 			rx_pool->buff_size = be64_to_cpu(size_array[i]);
-			alloc_long_term_buff(adapter, &rx_pool->long_term_buff,
-					     rx_pool->size *
-					     rx_pool->buff_size);
+			rc = alloc_long_term_buff(adapter,
+						  &rx_pool->long_term_buff,
+						  rx_pool->size *
+						  rx_pool->buff_size);
 		} else {
 			rc = reset_long_term_buff(adapter,
 						  &rx_pool->long_term_buff);
@@ -707,9 +697,9 @@ static int init_tx_pools(struct net_device *netdev)
 			return rc;
 		}
 
-		init_one_tx_pool(netdev, &adapter->tso_pool[i],
-				 IBMVNIC_TSO_BUFS,
-				 IBMVNIC_TSO_BUF_SZ);
+		rc = init_one_tx_pool(netdev, &adapter->tso_pool[i],
+				      IBMVNIC_TSO_BUFS,
+				      IBMVNIC_TSO_BUF_SZ);
 		if (rc) {
 			release_tx_pools(adapter);
 			return rc;
@@ -849,11 +839,7 @@ static int ibmvnic_login(struct net_device *netdev)
 		}
 	} while (retry);
 
-	/* handle pending MAC address changes after successful login */
-	if (adapter->mac_change_pending) {
-		__ibmvnic_set_mac(netdev, &adapter->desired.mac);
-		adapter->mac_change_pending = false;
-	}
+	__ibmvnic_set_mac(netdev, adapter->mac_addr);
 
 	return 0;
 }
@@ -1115,7 +1101,6 @@ static int ibmvnic_open(struct net_device *netdev)
 	}
 
 	rc = __ibmvnic_open(netdev);
-	netif_carrier_on(netdev);
 
 	return rc;
 }
@@ -1686,28 +1671,40 @@ static void ibmvnic_set_multi(struct net_device *netdev)
 	}
 }
 
-static int __ibmvnic_set_mac(struct net_device *netdev, struct sockaddr *p)
+static int __ibmvnic_set_mac(struct net_device *netdev, u8 *dev_addr)
 {
 	struct ibmvnic_adapter *adapter = netdev_priv(netdev);
-	struct sockaddr *addr = p;
 	union ibmvnic_crq crq;
 	int rc;
 
-	if (!is_valid_ether_addr(addr->sa_data))
-		return -EADDRNOTAVAIL;
+	if (!is_valid_ether_addr(dev_addr)) {
+		rc = -EADDRNOTAVAIL;
+		goto err;
+	}
 
 	memset(&crq, 0, sizeof(crq));
 	crq.change_mac_addr.first = IBMVNIC_CRQ_CMD;
 	crq.change_mac_addr.cmd = CHANGE_MAC_ADDR;
-	ether_addr_copy(&crq.change_mac_addr.mac_addr[0], addr->sa_data);
+	ether_addr_copy(&crq.change_mac_addr.mac_addr[0], dev_addr);
 
 	init_completion(&adapter->fw_done);
 	rc = ibmvnic_send_crq(adapter, &crq);
-	if (rc)
-		return rc;
+	if (rc) {
+		rc = -EIO;
+		goto err;
+	}
+
 	wait_for_completion(&adapter->fw_done);
 	/* netdev->dev_addr is changed in handle_change_mac_rsp function */
-	return adapter->fw_done_rc ? -EIO : 0;
+	if (adapter->fw_done_rc) {
+		rc = -EIO;
+		goto err;
+	}
+
+	return 0;
+err:
+	ether_addr_copy(adapter->mac_addr, netdev->dev_addr);
+	return rc;
 }
 
 static int ibmvnic_set_mac(struct net_device *netdev, void *p)
@@ -1716,13 +1713,10 @@ static int ibmvnic_set_mac(struct net_device *netdev, void *p)
 	struct sockaddr *addr = p;
 	int rc;
 
-	if (adapter->state == VNIC_PROBED) {
-		memcpy(&adapter->desired.mac, addr, sizeof(struct sockaddr));
-		adapter->mac_change_pending = true;
-		return 0;
-	}
-
-	rc = __ibmvnic_set_mac(netdev, addr);
+	rc = 0;
+	ether_addr_copy(adapter->mac_addr, addr->sa_data);
+	if (adapter->state != VNIC_PROBED)
+		rc = __ibmvnic_set_mac(netdev, addr->sa_data);
 
 	return rc;
 }
@@ -1752,7 +1746,8 @@ static int do_reset(struct ibmvnic_adapter *adapter,
 
 	ibmvnic_cleanup(netdev);
 
-	if (adapter->reset_reason != VNIC_RESET_MOBILITY &&
+	if (reset_state == VNIC_OPEN &&
+	    adapter->reset_reason != VNIC_RESET_MOBILITY &&
 	    adapter->reset_reason != VNIC_RESET_FAILOVER) {
 		rc = __ibmvnic_close(netdev);
 		if (rc)
@@ -1851,6 +1846,9 @@ static int do_reset(struct ibmvnic_adapter *adapter,
 		return 0;
 	}
 
+	/* refresh device's multicast list */
+	ibmvnic_set_multi(netdev);
+
 	/* kick napi */
 	for (i = 0; i < adapter->req_rx_queues; i++)
 		napi_schedule(&adapter->napi[i]);
@@ -1858,8 +1856,6 @@ static int do_reset(struct ibmvnic_adapter *adapter,
 	if (adapter->reset_reason != VNIC_RESET_FAILOVER &&
 	    adapter->reset_reason != VNIC_RESET_CHANGE_PARAM)
 		call_netdevice_notifiers(NETDEV_NOTIFY_PEERS, netdev);
-
-	netif_carrier_on(netdev);
 
 	return 0;
 }
@@ -1929,8 +1925,6 @@ static int do_hard_reset(struct ibmvnic_adapter *adapter,
 
 		return 0;
 	}
-
-	netif_carrier_on(netdev);
 
 	return 0;
 }
@@ -3937,8 +3931,8 @@ static int handle_change_mac_rsp(union ibmvnic_crq *crq,
 		dev_err(dev, "Error %ld in CHANGE_MAC_ADDR_RSP\n", rc);
 		goto out;
 	}
-	memcpy(netdev->dev_addr, &crq->change_mac_addr_rsp.mac_addr[0],
-	       ETH_ALEN);
+	ether_addr_copy(netdev->dev_addr,
+			&crq->change_mac_addr_rsp.mac_addr[0]);
 out:
 	complete(&adapter->fw_done);
 	return rc;
@@ -4475,6 +4469,10 @@ static void ibmvnic_handle_crq(union ibmvnic_crq *crq,
 		    crq->link_state_indication.phys_link_state;
 		adapter->logical_link_state =
 		    crq->link_state_indication.logical_link_state;
+		if (adapter->phys_link_state && adapter->logical_link_state)
+			netif_carrier_on(netdev);
+		else
+			netif_carrier_off(netdev);
 		break;
 	case CHANGE_MAC_ADDR_RSP:
 		netdev_dbg(netdev, "Got MAC address change Response\n");
@@ -4851,8 +4849,6 @@ static int ibmvnic_probe(struct vio_dev *dev, const struct vio_device_id *id)
 	spin_lock_init(&adapter->rwi_lock);
 	init_completion(&adapter->init_done);
 	adapter->resetting = false;
-
-	adapter->mac_change_pending = false;
 
 	do {
 		rc = init_crq_queue(adapter);

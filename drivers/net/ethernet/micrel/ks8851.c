@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* drivers/net/ethernet/micrel/ks8851.c
  *
  * Copyright 2009 Simtec Electronics
  *	http://www.simtec.co.uk/
  *	Ben Dooks <ben@simtec.co.uk>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -426,7 +423,7 @@ static void ks8851_init_mac(struct ks8851_net *ks)
 
 	mac_addr = of_get_mac_address(ks->spidev->dev.of_node);
 	if (!IS_ERR(mac_addr)) {
-		memcpy(dev->dev_addr, mac_addr, ETH_ALEN);
+		ether_addr_copy(dev->dev_addr, mac_addr);
 		ks8851_write_mac_addr(dev);
 		return;
 	}

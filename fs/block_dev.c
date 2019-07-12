@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/fs/block_dev.c
  *
@@ -29,7 +30,6 @@
 #include <linux/namei.h>
 #include <linux/log2.h>
 #include <linux/cleancache.h>
-#include <linux/dax.h>
 #include <linux/task_io_accounting_ops.h>
 #include <linux/falloc.h>
 #include <linux/uaccess.h>
@@ -203,13 +203,12 @@ __blkdev_direct_IO_simple(struct kiocb *iocb, struct iov_iter *iter,
 {
 	struct file *file = iocb->ki_filp;
 	struct block_device *bdev = I_BDEV(bdev_file_inode(file));
-	struct bio_vec inline_vecs[DIO_INLINE_BIO_VECS], *vecs, *bvec;
+	struct bio_vec inline_vecs[DIO_INLINE_BIO_VECS], *vecs;
 	loff_t pos = iocb->ki_pos;
 	bool should_dirty = false;
 	struct bio bio;
 	ssize_t ret;
 	blk_qc_t qc;
-	struct bvec_iter_all iter_all;
 
 	if ((pos | iov_iter_alignment(iter)) &
 	    (bdev_logical_block_size(bdev) - 1))
@@ -259,13 +258,7 @@ __blkdev_direct_IO_simple(struct kiocb *iocb, struct iov_iter *iter,
 	}
 	__set_current_state(TASK_RUNNING);
 
-	bio_for_each_segment_all(bvec, &bio, iter_all) {
-		if (should_dirty && !PageCompound(bvec->bv_page))
-			set_page_dirty_lock(bvec->bv_page);
-		if (!bio_flagged(&bio, BIO_NO_PAGE_REF))
-			put_page(bvec->bv_page);
-	}
-
+	bio_release_pages(&bio, should_dirty);
 	if (unlikely(bio.bi_status))
 		ret = blk_status_to_errno(bio.bi_status);
 
@@ -335,13 +328,7 @@ static void blkdev_bio_end_io(struct bio *bio)
 	if (should_dirty) {
 		bio_check_pages_dirty(bio);
 	} else {
-		if (!bio_flagged(bio, BIO_NO_PAGE_REF)) {
-			struct bvec_iter_all iter_all;
-			struct bio_vec *bvec;
-
-			bio_for_each_segment_all(bvec, bio, iter_all)
-				put_page(bvec->bv_page);
-		}
+		bio_release_pages(bio, false);
 		bio_put(bio);
 	}
 }
@@ -1406,20 +1393,27 @@ void check_disk_size_change(struct gendisk *disk, struct block_device *bdev,
  */
 int revalidate_disk(struct gendisk *disk)
 {
-	struct block_device *bdev;
 	int ret = 0;
 
 	if (disk->fops->revalidate_disk)
 		ret = disk->fops->revalidate_disk(disk);
-	bdev = bdget_disk(disk, 0);
-	if (!bdev)
-		return ret;
 
-	mutex_lock(&bdev->bd_mutex);
-	check_disk_size_change(disk, bdev, ret == 0);
-	bdev->bd_invalidated = 0;
-	mutex_unlock(&bdev->bd_mutex);
-	bdput(bdev);
+	/*
+	 * Hidden disks don't have associated bdev so there's no point in
+	 * revalidating it.
+	 */
+	if (!(disk->flags & GENHD_FL_HIDDEN)) {
+		struct block_device *bdev = bdget_disk(disk, 0);
+
+		if (!bdev)
+			return ret;
+
+		mutex_lock(&bdev->bd_mutex);
+		check_disk_size_change(disk, bdev, ret == 0);
+		bdev->bd_invalidated = 0;
+		mutex_unlock(&bdev->bd_mutex);
+		bdput(bdev);
+	}
 	return ret;
 }
 EXPORT_SYMBOL(revalidate_disk);

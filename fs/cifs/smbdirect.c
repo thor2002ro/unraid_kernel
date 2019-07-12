@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *   Copyright (C) 2017, Microsoft Corporation.
  *
  *   Author(s): Long Li <longli@microsoft.com>
- *
- *   This program is free software;  you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY;  without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
- *   the GNU General Public License for more details.
  */
 #include <linux/module.h>
 #include <linux/highmem.h>
@@ -903,7 +894,7 @@ static int smbd_create_header(struct smbd_connection *info,
 	request->sge[0].addr = ib_dma_map_single(info->id->device,
 						 (void *)packet,
 						 header_length,
-						 DMA_BIDIRECTIONAL);
+						 DMA_TO_DEVICE);
 	if (ib_dma_mapping_error(info->id->device, request->sge[0].addr)) {
 		mempool_free(request, info->request_mempool);
 		rc = -EIO;
@@ -1005,7 +996,7 @@ static int smbd_post_send_sgl(struct smbd_connection *info,
 	for_each_sg(sgl, sg, num_sgs, i) {
 		request->sge[i+1].addr =
 			ib_dma_map_page(info->id->device, sg_page(sg),
-			       sg->offset, sg->length, DMA_BIDIRECTIONAL);
+			       sg->offset, sg->length, DMA_TO_DEVICE);
 		if (ib_dma_mapping_error(
 				info->id->device, request->sge[i+1].addr)) {
 			rc = -EIO;
@@ -2110,8 +2101,10 @@ int smbd_send(struct TCP_Server_Info *server,
 		goto done;
 	}
 
-	rqst_idx = 0;
+	log_write(INFO, "num_rqst=%d total length=%u\n",
+			num_rqst, remaining_data_length);
 
+	rqst_idx = 0;
 next_rqst:
 	rqst = &rqst_array[rqst_idx];
 	iov = rqst->rq_iov;

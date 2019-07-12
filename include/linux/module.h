@@ -21,6 +21,7 @@
 #include <linux/rbtree_latch.h>
 #include <linux/error-injection.h>
 #include <linux/tracepoint-defs.h>
+#include <linux/srcu.h>
 
 #include <linux/percpu.h>
 #include <asm/module.h>
@@ -332,6 +333,7 @@ struct mod_kallsyms {
 	Elf_Sym *symtab;
 	unsigned int num_symtab;
 	char *strtab;
+	char *typetab;
 };
 
 #ifdef CONFIG_LIVEPATCH
@@ -448,6 +450,10 @@ struct module {
 #ifdef CONFIG_TRACEPOINTS
 	unsigned int num_tracepoints;
 	tracepoint_ptr_t *tracepoints_ptrs;
+#endif
+#ifdef CONFIG_TREE_SRCU
+	unsigned int num_srcu_structs;
+	struct srcu_struct **srcu_struct_ptrs;
 #endif
 #ifdef CONFIG_BPF_EVENTS
 	unsigned int num_bpf_raw_events;
@@ -713,6 +719,17 @@ static inline bool is_module_text_address(unsigned long addr)
 
 static inline bool within_module_core(unsigned long addr,
 				      const struct module *mod)
+{
+	return false;
+}
+
+static inline bool within_module_init(unsigned long addr,
+				      const struct module *mod)
+{
+	return false;
+}
+
+static inline bool within_module(unsigned long addr, const struct module *mod)
 {
 	return false;
 }

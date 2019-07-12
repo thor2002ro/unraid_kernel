@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/drivers/block/floppy.c
  *
@@ -3899,7 +3900,7 @@ static void __init config_types(void)
 	if (!UDP->cmos)
 		UDP->cmos = FLOPPY0_TYPE;
 	drive = 1;
-	if (!UDP->cmos && FLOPPY1_TYPE)
+	if (!UDP->cmos)
 		UDP->cmos = FLOPPY1_TYPE;
 
 	/* FIXME: additional physical CMOS drive detection should go here */

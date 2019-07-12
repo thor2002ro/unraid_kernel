@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * common.c - C code for kernel entry and exit
  * Copyright (c) 2015 Andrew Lutomirski
- * GPL v2
  *
  * Based on asm and ptrace code by many authors.  The code here originated
  * in ptrace.c and signal.c.
@@ -32,6 +32,7 @@
 #include <asm/vdso.h>
 #include <asm/cpufeature.h>
 #include <asm/fpu/api.h>
+#include <asm/nospec-branch.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/syscalls.h>
@@ -71,23 +72,18 @@ static long syscall_trace_enter(struct pt_regs *regs)
 
 	struct thread_info *ti = current_thread_info();
 	unsigned long ret = 0;
-	bool emulated = false;
 	u32 work;
 
 	if (IS_ENABLED(CONFIG_DEBUG_ENTRY))
 		BUG_ON(regs != task_pt_regs(current));
 
-	work = READ_ONCE(ti->flags) & _TIF_WORK_SYSCALL_ENTRY;
+	work = READ_ONCE(ti->flags);
 
-	if (unlikely(work & _TIF_SYSCALL_EMU))
-		emulated = true;
-
-	if ((emulated || (work & _TIF_SYSCALL_TRACE)) &&
-	    tracehook_report_syscall_entry(regs))
-		return -1L;
-
-	if (emulated)
-		return -1L;
+	if (work & (_TIF_SYSCALL_TRACE | _TIF_SYSCALL_EMU)) {
+		ret = tracehook_report_syscall_entry(regs);
+		if (ret || (work & _TIF_SYSCALL_EMU))
+			return -1L;
+	}
 
 #ifdef CONFIG_SECCOMP
 	/*
@@ -220,6 +216,8 @@ __visible inline void prepare_exit_to_usermode(struct pt_regs *regs)
 #endif
 
 	user_enter_irqoff();
+
+	mds_user_clear_cpu_buffers();
 }
 
 #define SYSCALL_EXIT_WORK_FLAGS				\

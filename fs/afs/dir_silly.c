@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* AFS silly rename handling
  *
  * Copyright (C) 2019 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
  * - Derived from NFS's sillyrename.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public Licence
- * as published by the Free Software Foundation; either version
- * 2 of the Licence, or (at your option) any later version.
  */
 
 #include <linux/kernel.h>
@@ -24,21 +20,28 @@ static int afs_do_silly_rename(struct afs_vnode *dvnode, struct afs_vnode *vnode
 			       struct key *key)
 {
 	struct afs_fs_cursor fc;
-	u64 dir_data_version = dvnode->status.data_version;
+	struct afs_status_cb *scb;
 	int ret = -ERESTARTSYS;
 
 	_enter("%pd,%pd", old, new);
 
+	scb = kzalloc(sizeof(struct afs_status_cb), GFP_KERNEL);
+	if (!scb)
+		return -ENOMEM;
+
 	trace_afs_silly_rename(vnode, false);
-	if (afs_begin_vnode_operation(&fc, dvnode, key)) {
+	if (afs_begin_vnode_operation(&fc, dvnode, key, true)) {
+		afs_dataversion_t dir_data_version = dvnode->status.data_version + 1;
+
 		while (afs_select_fileserver(&fc)) {
 			fc.cb_break = afs_calc_vnode_cb_break(dvnode);
 			afs_fs_rename(&fc, old->d_name.name,
 				      dvnode, new->d_name.name,
-				      dir_data_version, dir_data_version);
+				      scb, scb);
 		}
 
-		afs_vnode_commit_status(&fc, dvnode, fc.cb_break);
+		afs_vnode_commit_status(&fc, dvnode, fc.cb_break,
+					&dir_data_version, scb);
 		ret = afs_end_vnode_operation(&fc);
 	}
 
@@ -64,6 +67,7 @@ static int afs_do_silly_rename(struct afs_vnode *dvnode, struct afs_vnode *vnode
 		fsnotify_nameremove(old, 0);
 	}
 
+	kfree(scb);
 	_leave(" = %d", ret);
 	return ret;
 }
@@ -143,31 +147,37 @@ static int afs_do_silly_unlink(struct afs_vnode *dvnode, struct afs_vnode *vnode
 			       struct dentry *dentry, struct key *key)
 {
 	struct afs_fs_cursor fc;
-	u64 dir_data_version = dvnode->status.data_version;
+	struct afs_status_cb *scb;
 	int ret = -ERESTARTSYS;
 
 	_enter("");
 
+	scb = kcalloc(2, sizeof(struct afs_status_cb), GFP_KERNEL);
+	if (!scb)
+		return -ENOMEM;
+
 	trace_afs_silly_rename(vnode, true);
-	if (afs_begin_vnode_operation(&fc, dvnode, key)) {
+	if (afs_begin_vnode_operation(&fc, dvnode, key, false)) {
+		afs_dataversion_t dir_data_version = dvnode->status.data_version + 1;
+
 		while (afs_select_fileserver(&fc)) {
 			fc.cb_break = afs_calc_vnode_cb_break(dvnode);
 
 			if (test_bit(AFS_SERVER_FL_IS_YFS, &fc.cbi->server->flags) &&
 			    !test_bit(AFS_SERVER_FL_NO_RM2, &fc.cbi->server->flags)) {
 				yfs_fs_remove_file2(&fc, vnode, dentry->d_name.name,
-						    dir_data_version);
+						    &scb[0], &scb[1]);
 				if (fc.ac.error != -ECONNABORTED ||
 				    fc.ac.abort_code != RXGEN_OPCODE)
 					continue;
 				set_bit(AFS_SERVER_FL_NO_RM2, &fc.cbi->server->flags);
 			}
 
-			afs_fs_remove(&fc, vnode, dentry->d_name.name, false,
-				      dir_data_version);
+			afs_fs_remove(&fc, vnode, dentry->d_name.name, false, &scb[0]);
 		}
 
-		afs_vnode_commit_status(&fc, dvnode, fc.cb_break);
+		afs_vnode_commit_status(&fc, dvnode, fc.cb_break,
+					&dir_data_version, &scb[0]);
 		ret = afs_end_vnode_operation(&fc);
 		if (ret == 0) {
 			drop_nlink(&vnode->vfs_inode);
@@ -182,6 +192,7 @@ static int afs_do_silly_unlink(struct afs_vnode *dvnode, struct afs_vnode *vnode
 					    afs_edit_dir_for_unlink);
 	}
 
+	kfree(scb);
 	_leave(" = %d", ret);
 	return ret;
 }

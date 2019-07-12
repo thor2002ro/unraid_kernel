@@ -177,6 +177,15 @@ cgroup v2 currently supports the following mount options.
 	ignored on non-init namespace mounts.  Please refer to the
 	Delegation section for details.
 
+  memory_localevents
+
+        Only populate memory.events with data for the current cgroup,
+        and not any subtrees. This is legacy behaviour, the default
+        behaviour without this option is to include subtree counts.
+        This option is system wide and can only be set on mount or
+        modified through remount from the init namespace. The mount
+        option is ignored on non-init namespace mounts.
+
 
 Organizing Processes and Threads
 --------------------------------
@@ -695,6 +704,12 @@ Conventions
   shouldn't have resource control interface files.  Also,
   informational files on the root cgroup which end up showing global
   information available elsewhere shouldn't exist.
+
+- The default time unit is microseconds.  If a different unit is ever
+  used, an explicit unit suffix must be present.
+
+- A parts-per quantity should use a percentage decimal with at least
+  two digit fractional part - e.g. 13.40.
 
 - If a controller implements weight based resource distribution, its
   interface file should be named "weight" and have the range [1,

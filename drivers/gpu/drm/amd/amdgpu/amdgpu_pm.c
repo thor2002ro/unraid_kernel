@@ -342,6 +342,16 @@ static ssize_t amdgpu_set_dpm_forced_performance_level(struct device *dev,
 	if (current_level == level)
 		return count;
 
+	/* profile_exit setting is valid only when current mode is in profile mode */
+	if (!(current_level & (AMD_DPM_FORCED_LEVEL_PROFILE_STANDARD |
+	    AMD_DPM_FORCED_LEVEL_PROFILE_MIN_SCLK |
+	    AMD_DPM_FORCED_LEVEL_PROFILE_MIN_MCLK |
+	    AMD_DPM_FORCED_LEVEL_PROFILE_PEAK)) &&
+	    (level == AMD_DPM_FORCED_LEVEL_PROFILE_EXIT)) {
+		pr_err("Currently not in any profile mode!\n");
+		return -EINVAL;
+	}
+
 	if (is_support_sw_smu(adev)) {
 		mutex_lock(&adev->pm.mutex);
 		if (adev->pm.dpm.thermal_active) {
@@ -2478,6 +2488,21 @@ void amdgpu_pm_print_power_states(struct amdgpu_device *adev)
 	for (i = 0; i < adev->pm.dpm.num_ps; i++)
 		amdgpu_dpm_print_power_state(adev, &adev->pm.dpm.ps[i]);
 
+}
+
+int amdgpu_pm_load_smu_firmware(struct amdgpu_device *adev, uint32_t *smu_version)
+{
+	int r;
+
+	if (adev->powerplay.pp_funcs && adev->powerplay.pp_funcs->load_firmware) {
+		r = adev->powerplay.pp_funcs->load_firmware(adev->powerplay.pp_handle);
+		if (r) {
+			pr_err("smu firmware loading failed\n");
+			return r;
+		}
+		*smu_version = adev->pm.fw_version;
+	}
+	return 0;
 }
 
 int amdgpu_pm_sysfs_init(struct amdgpu_device *adev)

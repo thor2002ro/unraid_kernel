@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/kernel.h>
 #include <linux/skbuff.h>
 #include <linux/export.h>
@@ -734,7 +735,9 @@ bool bpf_flow_dissect(struct bpf_prog *prog, struct bpf_flow_dissector *ctx,
 	flow_keys->nhoff = nhoff;
 	flow_keys->thoff = flow_keys->nhoff;
 
+	preempt_disable();
 	result = BPF_PROG_RUN(prog, ctx);
+	preempt_enable();
 
 	flow_keys->nhoff = clamp_t(u16, flow_keys->nhoff, nhoff, hlen);
 	flow_keys->thoff = clamp_t(u16, flow_keys->thoff,

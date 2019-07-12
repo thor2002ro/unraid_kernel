@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 
 #include <linux/ceph/ceph_debug.h>
 #include <linux/backing-dev.h>
@@ -305,7 +306,7 @@ static int get_secret(struct ceph_crypto_key *dst, const char *name) {
 	int err = 0;
 	struct ceph_crypto_key *ckey;
 
-	ukey = request_key(&key_type_ceph, name, NULL);
+	ukey = request_key(&key_type_ceph, name, NULL, NULL);
 	if (IS_ERR(ukey)) {
 		/* request_key errors don't map nicely to mount(2)
 		   errors; don't even try, but still printk */

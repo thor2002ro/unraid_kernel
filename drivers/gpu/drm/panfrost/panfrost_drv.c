@@ -63,7 +63,7 @@ static int panfrost_ioctl_create_bo(struct drm_device *dev, void *data,
 	return 0;
 
 err_free:
-	drm_gem_object_put_unlocked(&shmem->base);
+	drm_gem_handle_delete(file, args->handle);
 	return ret;
 }
 
@@ -219,7 +219,8 @@ static int panfrost_ioctl_submit(struct drm_device *dev, void *data,
 fail_job:
 	panfrost_job_put(job);
 fail_out_sync:
-	drm_syncobj_put(sync_out);
+	if (sync_out)
+		drm_syncobj_put(sync_out);
 
 	return ret;
 }

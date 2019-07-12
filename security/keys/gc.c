@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Key garbage collector
  *
  * Copyright (C) 2009-2011 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public Licence
- * as published by the Free Software Foundation; either version
- * 2 of the Licence, or (at your option) any later version.
  */
 
 #include <linux/slab.h>
@@ -154,7 +150,8 @@ static noinline void key_gc_unused_keys(struct list_head *keys)
 			atomic_dec(&key->user->nikeys);
 
 		key_user_put(key->user);
-
+		key_put_tag(key->domain_tag);
+		key_put_acl(rcu_access_pointer(key->acl));
 		kfree(key->description);
 
 		memzero_explicit(key, sizeof(*key));
@@ -224,7 +221,6 @@ continue_scanning:
 			if (key->type == key_gc_dead_keytype) {
 				gc_state |= KEY_GC_FOUND_DEAD_KEY;
 				set_bit(KEY_FLAG_DEAD, &key->flags);
-				key->perm = 0;
 				goto skip_dead_key;
 			} else if (key->type == &key_type_keyring &&
 				   key->restrict_link) {

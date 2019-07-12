@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * include/linux/clk/at91_pmc.h
  *
@@ -6,11 +7,6 @@
  *
  * Power Management Controller (PMC) - System peripherals registers.
  * Based on AT91RM9200 datasheet revision E.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef AT91_PMC_H
@@ -161,6 +157,7 @@
 
 #define AT91_PMC_FSMR		0x70		/* Fast Startup Mode Register */
 #define AT91_PMC_FSTT(n)	BIT(n)
+#define AT91_PMC_RTTAL		BIT(16)
 #define AT91_PMC_RTCAL		BIT(17)		/* RTC Alarm Enable */
 #define AT91_PMC_USBAL		BIT(18)		/* USB Resume Enable */
 #define AT91_PMC_SDMMC_CD	BIT(19)		/* SDMMC Card Detect Enable */

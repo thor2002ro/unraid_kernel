@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 menu "Core Netfilter Configuration"
 	depends on NET && INET && NETFILTER
 
@@ -905,7 +906,7 @@ config NETFILTER_XT_TARGET_LED
 	    echo netfilter-ssh > /sys/class/leds/<ledname>/trigger
 
 	  For more information on the LEDs available on your system, see
-	  Documentation/leds/leds-class.txt
+	  Documentation/leds/leds-class.rst
 
 config NETFILTER_XT_TARGET_LOG
 	tristate "LOG target support"

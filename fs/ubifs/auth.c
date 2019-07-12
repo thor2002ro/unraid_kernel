@@ -76,7 +76,6 @@ static int ubifs_hash_calc_hmac(const struct ubifs_info *c, const u8 *hash,
 int ubifs_prepare_auth_node(struct ubifs_info *c, void *node,
 			     struct shash_desc *inhash)
 {
-	SHASH_DESC_ON_STACK(hash_desc, c->hash_tfm);
 	struct ubifs_auth_node *auth = node;
 	u8 *hash;
 	int err;
@@ -85,12 +84,16 @@ int ubifs_prepare_auth_node(struct ubifs_info *c, void *node,
 	if (!hash)
 		return -ENOMEM;
 
-	hash_desc->tfm = c->hash_tfm;
-	ubifs_shash_copy_state(c, inhash, hash_desc);
+	{
+		SHASH_DESC_ON_STACK(hash_desc, c->hash_tfm);
 
-	err = crypto_shash_final(hash_desc, hash);
-	if (err)
-		goto out;
+		hash_desc->tfm = c->hash_tfm;
+		ubifs_shash_copy_state(c, inhash, hash_desc);
+
+		err = crypto_shash_final(hash_desc, hash);
+		if (err)
+			goto out;
+	}
 
 	err = ubifs_hash_calc_hmac(c, hash, auth->hmac);
 	if (err)
@@ -140,24 +143,6 @@ static struct shash_desc *ubifs_get_desc(const struct ubifs_info *c,
 struct shash_desc *__ubifs_hash_get_desc(const struct ubifs_info *c)
 {
 	return ubifs_get_desc(c, c->hash_tfm);
-}
-
-/**
- * __ubifs_shash_final - finalize shash
- * @c: UBIFS file-system description object
- * @desc: the descriptor
- * @out: the output hash
- *
- * Simple wrapper around crypto_shash_final(), safe to be called with
- * disabled authentication.
- */
-int __ubifs_shash_final(const struct ubifs_info *c, struct shash_desc *desc,
-			u8 *out)
-{
-	if (ubifs_authenticated(c))
-		return crypto_shash_final(desc, out);
-
-	return 0;
 }
 
 /**
@@ -242,7 +227,7 @@ int ubifs_init_authentication(struct ubifs_info *c)
 	snprintf(hmac_name, CRYPTO_MAX_ALG_NAME, "hmac(%s)",
 		 c->auth_hash_name);
 
-	keyring_key = request_key(&key_type_logon, c->auth_key_name, NULL);
+	keyring_key = request_key(&key_type_logon, c->auth_key_name, NULL, NULL);
 
 	if (IS_ERR(keyring_key)) {
 		ubifs_err(c, "Failed to request key: %ld",

@@ -1644,39 +1644,47 @@ EXPORT_SYMBOL_GPL(gpiochip_irqchip_irq_valid);
 
 /**
  * gpiochip_set_cascaded_irqchip() - connects a cascaded irqchip to a gpiochip
- * @gpiochip: the gpiochip to set the irqchip chain to
+ * @gc: the gpiochip to set the irqchip chain to
  * @parent_irq: the irq number corresponding to the parent IRQ for this
  * chained irqchip
  * @parent_handler: the parent interrupt handler for the accumulated IRQ
  * coming out of the gpiochip. If the interrupt is nested rather than
  * cascaded, pass NULL in this handler argument
  */
-static void gpiochip_set_cascaded_irqchip(struct gpio_chip *gpiochip,
+static void gpiochip_set_cascaded_irqchip(struct gpio_chip *gc,
 					  unsigned int parent_irq,
 					  irq_flow_handler_t parent_handler)
 {
-	if (!gpiochip->irq.domain) {
-		chip_err(gpiochip, "called %s before setting up irqchip\n",
+	struct gpio_irq_chip *girq = &gc->irq;
+	struct device *dev = &gc->gpiodev->dev;
+
+	if (!girq->domain) {
+		chip_err(gc, "called %s before setting up irqchip\n",
 			 __func__);
 		return;
 	}
 
 	if (parent_handler) {
-		if (gpiochip->can_sleep) {
-			chip_err(gpiochip,
+		if (gc->can_sleep) {
+			chip_err(gc,
 				 "you cannot have chained interrupts on a chip that may sleep\n");
 			return;
 		}
+		girq->parents = devm_kcalloc(dev, 1,
+					     sizeof(*girq->parents),
+					     GFP_KERNEL);
+		if (!girq->parents) {
+			chip_err(gc, "out of memory allocating parent IRQ\n");
+			return;
+		}
+		girq->parents[0] = parent_irq;
+		girq->num_parents = 1;
 		/*
 		 * The parent irqchip is already using the chip_data for this
 		 * irqchip, so our callbacks simply use the handler_data.
 		 */
 		irq_set_chained_handler_and_data(parent_irq, parent_handler,
-						 gpiochip);
-
-		gpiochip->irq.parent_irq = parent_irq;
-		gpiochip->irq.parents = &gpiochip->irq.parent_irq;
-		gpiochip->irq.num_parents = 1;
+						 gc);
 	}
 }
 
@@ -2503,7 +2511,11 @@ EXPORT_SYMBOL_GPL(gpiochip_is_requested);
  * @chip: GPIO chip
  * @hwnum: hardware number of the GPIO for which to request the descriptor
  * @label: label for the GPIO
- * @flags: flags for this GPIO or 0 if default
+ * @lflags: lookup flags for this GPIO or 0 if default, this can be used to
+ * specify things like line inversion semantics with the machine flags
+ * such as GPIO_OUT_LOW
+ * @dflags: descriptor request flags for this GPIO or 0 if default, this
+ * can be used to specify consumer semantics such as open drain
  *
  * Function allows GPIO chip drivers to request and use their own GPIO
  * descriptors via gpiolib API. Difference to gpiod_request() is that this
@@ -2517,7 +2529,8 @@ EXPORT_SYMBOL_GPL(gpiochip_is_requested);
  */
 struct gpio_desc *gpiochip_request_own_desc(struct gpio_chip *chip, u16 hwnum,
 					    const char *label,
-					    enum gpiod_flags flags)
+					    enum gpio_lookup_flags lflags,
+					    enum gpiod_flags dflags)
 {
 	struct gpio_desc *desc = gpiochip_get_desc(chip, hwnum);
 	int err;
@@ -2531,7 +2544,7 @@ struct gpio_desc *gpiochip_request_own_desc(struct gpio_chip *chip, u16 hwnum,
 	if (err < 0)
 		return ERR_PTR(err);
 
-	err = gpiod_configure_flags(desc, label, 0, flags);
+	err = gpiod_configure_flags(desc, label, lflags, dflags);
 	if (err) {
 		chip_err(chip, "setup of own GPIO %s failed\n", label);
 		gpiod_free_commit(desc);
@@ -2569,8 +2582,20 @@ EXPORT_SYMBOL_GPL(gpiochip_free_own_desc);
 static int gpio_set_config(struct gpio_chip *gc, unsigned offset,
 			   enum pin_config_param mode)
 {
-	unsigned long config = { PIN_CONF_PACKED(mode, 0) };
+	unsigned long config;
+	unsigned arg;
 
+	switch (mode) {
+	case PIN_CONFIG_BIAS_PULL_DOWN:
+	case PIN_CONFIG_BIAS_PULL_UP:
+		arg = 1;
+		break;
+
+	default:
+		arg = 0;
+	}
+
+	config = PIN_CONF_PACKED(mode, arg);
 	return gc->set_config ? gc->set_config(gc, offset, config) : -ENOTSUPP;
 }
 
@@ -3006,13 +3031,13 @@ int gpiod_get_array_value_complex(bool raw, bool can_sleep,
  * Return the GPIO's raw value, i.e. the value of the physical line disregarding
  * its ACTIVE_LOW status, or negative errno on failure.
  *
- * This function should be called from contexts where we cannot sleep, and will
+ * This function can be called from contexts where we cannot sleep, and will
  * complain if the GPIO chip functions potentially sleep.
  */
 int gpiod_get_raw_value(const struct gpio_desc *desc)
 {
 	VALIDATE_DESC(desc);
-	/* Should be using gpio_get_value_cansleep() */
+	/* Should be using gpiod_get_raw_value_cansleep() */
 	WARN_ON(desc->gdev->chip->can_sleep);
 	return gpiod_get_raw_value_commit(desc);
 }
@@ -3025,7 +3050,7 @@ EXPORT_SYMBOL_GPL(gpiod_get_raw_value);
  * Return the GPIO's logical value, i.e. taking the ACTIVE_LOW status into
  * account, or negative errno on failure.
  *
- * This function should be called from contexts where we cannot sleep, and will
+ * This function can be called from contexts where we cannot sleep, and will
  * complain if the GPIO chip functions potentially sleep.
  */
 int gpiod_get_value(const struct gpio_desc *desc)
@@ -3033,7 +3058,7 @@ int gpiod_get_value(const struct gpio_desc *desc)
 	int value;
 
 	VALIDATE_DESC(desc);
-	/* Should be using gpio_get_value_cansleep() */
+	/* Should be using gpiod_get_value_cansleep() */
 	WARN_ON(desc->gdev->chip->can_sleep);
 
 	value = gpiod_get_raw_value_commit(desc);
@@ -3058,7 +3083,7 @@ EXPORT_SYMBOL_GPL(gpiod_get_value);
  * without regard for their ACTIVE_LOW status.  Return 0 in case of success,
  * else an error code.
  *
- * This function should be called from contexts where we cannot sleep,
+ * This function can be called from contexts where we cannot sleep,
  * and it will complain if the GPIO chip functions potentially sleep.
  */
 int gpiod_get_raw_array_value(unsigned int array_size,
@@ -3084,7 +3109,7 @@ EXPORT_SYMBOL_GPL(gpiod_get_raw_array_value);
  * Read the logical values of the GPIOs, i.e. taking their ACTIVE_LOW status
  * into account.  Return 0 in case of success, else an error code.
  *
- * This function should be called from contexts where we cannot sleep,
+ * This function can be called from contexts where we cannot sleep,
  * and it will complain if the GPIO chip functions potentially sleep.
  */
 int gpiod_get_array_value(unsigned int array_size,
@@ -3298,13 +3323,13 @@ int gpiod_set_array_value_complex(bool raw, bool can_sleep,
  * Set the raw value of the GPIO, i.e. the value of its physical line without
  * regard for its ACTIVE_LOW status.
  *
- * This function should be called from contexts where we cannot sleep, and will
+ * This function can be called from contexts where we cannot sleep, and will
  * complain if the GPIO chip functions potentially sleep.
  */
 void gpiod_set_raw_value(struct gpio_desc *desc, int value)
 {
 	VALIDATE_DESC_VOID(desc);
-	/* Should be using gpiod_set_value_cansleep() */
+	/* Should be using gpiod_set_raw_value_cansleep() */
 	WARN_ON(desc->gdev->chip->can_sleep);
 	gpiod_set_raw_value_commit(desc, value);
 }
@@ -3339,12 +3364,13 @@ static void gpiod_set_value_nocheck(struct gpio_desc *desc, int value)
  * Set the logical value of the GPIO, i.e. taking its ACTIVE_LOW,
  * OPEN_DRAIN and OPEN_SOURCE flags into account.
  *
- * This function should be called from contexts where we cannot sleep, and will
+ * This function can be called from contexts where we cannot sleep, and will
  * complain if the GPIO chip functions potentially sleep.
  */
 void gpiod_set_value(struct gpio_desc *desc, int value)
 {
 	VALIDATE_DESC_VOID(desc);
+	/* Should be using gpiod_set_value_cansleep() */
 	WARN_ON(desc->gdev->chip->can_sleep);
 	gpiod_set_value_nocheck(desc, value);
 }
@@ -3360,7 +3386,7 @@ EXPORT_SYMBOL_GPL(gpiod_set_value);
  * Set the raw values of the GPIOs, i.e. the values of the physical lines
  * without regard for their ACTIVE_LOW status.
  *
- * This function should be called from contexts where we cannot sleep, and will
+ * This function can be called from contexts where we cannot sleep, and will
  * complain if the GPIO chip functions potentially sleep.
  */
 int gpiod_set_raw_array_value(unsigned int array_size,
@@ -3385,7 +3411,7 @@ EXPORT_SYMBOL_GPL(gpiod_set_raw_array_value);
  * Set the logical values of the GPIOs, i.e. taking their ACTIVE_LOW status
  * into account.
  *
- * This function should be called from contexts where we cannot sleep, and will
+ * This function can be called from contexts where we cannot sleep, and will
  * complain if the GPIO chip functions potentially sleep.
  */
 int gpiod_set_array_value(unsigned int array_size,
@@ -3915,8 +3941,7 @@ found:
 }
 
 static struct gpio_desc *gpiod_find(struct device *dev, const char *con_id,
-				    unsigned int idx,
-				    enum gpio_lookup_flags *flags)
+				    unsigned int idx, unsigned long *flags)
 {
 	struct gpio_desc *desc = ERR_PTR(-ENOENT);
 	struct gpiod_lookup_table *table;
@@ -4072,8 +4097,8 @@ EXPORT_SYMBOL_GPL(gpiod_get_optional);
  * gpiod_configure_flags - helper function to configure a given GPIO
  * @desc:	gpio whose value will be assigned
  * @con_id:	function within the GPIO consumer
- * @lflags:	gpio_lookup_flags - returned from of_find_gpio() or
- *		of_get_gpio_hog()
+ * @lflags:	bitmask of gpio_lookup_flags GPIO_* values - returned from
+ *		of_find_gpio() or of_get_gpio_hog()
  * @dflags:	gpiod_flags - optional GPIO initialization flags
  *
  * Return 0 on success, -ENOENT if no GPIO has been assigned to the
@@ -4155,9 +4180,9 @@ struct gpio_desc *__must_check gpiod_get_index(struct device *dev,
 					       unsigned int idx,
 					       enum gpiod_flags flags)
 {
+	unsigned long lookupflags = GPIO_LOOKUP_FLAGS_DEFAULT;
 	struct gpio_desc *desc = NULL;
 	int status;
-	enum gpio_lookup_flags lookupflags = 0;
 	/* Maybe we have a device name, maybe not */
 	const char *devname = dev ? dev_name(dev) : "?";
 
@@ -4232,8 +4257,7 @@ EXPORT_SYMBOL_GPL(gpiod_get_index);
  *
  * Returns:
  * On successful request the GPIO pin is configured in accordance with
- * provided @dflags. If the node does not have the requested GPIO
- * property, NULL is returned.
+ * provided @dflags.
  *
  * In case of error an ERR_PTR() is returned.
  */
@@ -4242,8 +4266,8 @@ struct gpio_desc *gpiod_get_from_of_node(struct device_node *node,
 					 enum gpiod_flags dflags,
 					 const char *label)
 {
+	unsigned long lflags = GPIO_LOOKUP_FLAGS_DEFAULT;
 	struct gpio_desc *desc;
-	unsigned long lflags = 0;
 	enum of_gpio_flags flags;
 	bool active_low = false;
 	bool single_ended = false;
@@ -4255,9 +4279,6 @@ struct gpio_desc *gpiod_get_from_of_node(struct device_node *node,
 					index, &flags);
 
 	if (!desc || IS_ERR(desc)) {
-		/* If it is not there, just return NULL */
-		if (PTR_ERR(desc) == -ENOENT)
-			return NULL;
 		return desc;
 	}
 
@@ -4321,8 +4342,8 @@ struct gpio_desc *fwnode_get_named_gpiod(struct fwnode_handle *fwnode,
 					 enum gpiod_flags dflags,
 					 const char *label)
 {
+	unsigned long lflags = GPIO_LOOKUP_FLAGS_DEFAULT;
 	struct gpio_desc *desc = ERR_PTR(-ENODEV);
-	unsigned long lflags = 0;
 	int ret;
 
 	if (!fwnode)
@@ -4342,9 +4363,7 @@ struct gpio_desc *fwnode_get_named_gpiod(struct fwnode_handle *fwnode,
 			return desc;
 
 		acpi_gpio_update_gpiod_flags(&dflags, &info);
-
-		if (info.polarity == GPIO_ACTIVE_LOW)
-			lflags |= GPIO_ACTIVE_LOW;
+		acpi_gpio_update_gpiod_lookup_flags(&lflags, &info);
 	}
 
 	/* Currently only ACPI takes this path */
@@ -4395,8 +4414,8 @@ EXPORT_SYMBOL_GPL(gpiod_get_index_optional);
  * gpiod_hog - Hog the specified GPIO desc given the provided flags
  * @desc:	gpio whose value will be assigned
  * @name:	gpio line name
- * @lflags:	gpio_lookup_flags - returned from of_find_gpio() or
- *		of_get_gpio_hog()
+ * @lflags:	bitmask of gpio_lookup_flags GPIO_* values - returned from
+ *		of_find_gpio() or of_get_gpio_hog()
  * @dflags:	gpiod_flags - optional GPIO initialization flags
  */
 int gpiod_hog(struct gpio_desc *desc, const char *name,
@@ -4410,27 +4429,12 @@ int gpiod_hog(struct gpio_desc *desc, const char *name,
 	chip = gpiod_to_chip(desc);
 	hwnum = gpio_chip_hwgpio(desc);
 
-	/*
-	 * FIXME: not very elegant that we call gpiod_configure_flags()
-	 * twice here (once inside gpiochip_request_own_desc() and
-	 * again here), but the gpiochip_request_own_desc() is external
-	 * and cannot really pass the lflags so this is the lesser evil
-	 * at the moment. Pass zero as dflags on this first call so we
-	 * don't screw anything up.
-	 */
-	local_desc = gpiochip_request_own_desc(chip, hwnum, name, 0);
+	local_desc = gpiochip_request_own_desc(chip, hwnum, name,
+					       lflags, dflags);
 	if (IS_ERR(local_desc)) {
 		status = PTR_ERR(local_desc);
 		pr_err("requesting hog GPIO %s (chip %s, offset %d) failed, %d\n",
 		       name, chip->label, hwnum, status);
-		return status;
-	}
-
-	status = gpiod_configure_flags(desc, name, lflags, dflags);
-	if (status < 0) {
-		pr_err("setup of hog GPIO %s (chip %s, offset %d) failed, %d\n",
-		       name, chip->label, hwnum, status);
-		gpiochip_free_own_desc(desc);
 		return status;
 	}
 
@@ -4449,8 +4453,6 @@ int gpiod_hog(struct gpio_desc *desc, const char *name,
 /**
  * gpiochip_free_hogs - Scan gpio-controller chip and release GPIO hog
  * @chip:	gpio chip to act on
- *
- * This is only used by of_gpiochip_remove to free hogged gpios
  */
 static void gpiochip_free_hogs(struct gpio_chip *chip)
 {
@@ -4620,7 +4622,8 @@ EXPORT_SYMBOL_GPL(gpiod_get_array_optional);
  */
 void gpiod_put(struct gpio_desc *desc)
 {
-	gpiod_free(desc);
+	if (desc)
+		gpiod_free(desc);
 }
 EXPORT_SYMBOL_GPL(gpiod_put);
 
@@ -4796,8 +4799,8 @@ static const struct file_operations gpiolib_operations = {
 static int __init gpiolib_debugfs_init(void)
 {
 	/* /sys/kernel/debug/gpio */
-	(void) debugfs_create_file("gpio", S_IFREG | S_IRUGO,
-				NULL, NULL, &gpiolib_operations);
+	debugfs_create_file("gpio", S_IFREG | S_IRUGO, NULL, NULL,
+			    &gpiolib_operations);
 	return 0;
 }
 subsys_initcall(gpiolib_debugfs_init);

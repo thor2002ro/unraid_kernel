@@ -1,11 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Tracing hooks
  *
  * Copyright (C) 2008-2009 Red Hat, Inc.  All rights reserved.
- *
- * This copyrighted material is made available to anyone wishing to use,
- * modify, copy, or redistribute it subject to the terms and conditions
- * of the GNU General Public License v.2.
  *
  * This file defines hook entry points called by core code where
  * user tracing/debugging support might need to do something.  These
@@ -186,6 +183,13 @@ static inline void tracehook_notify_resume(struct pt_regs *regs)
 	smp_mb__after_atomic();
 	if (unlikely(current->task_works))
 		task_work_run();
+
+#ifdef CONFIG_KEYS_REQUEST_CACHE
+	if (unlikely(current->cached_requested_key)) {
+		key_put(current->cached_requested_key);
+		current->cached_requested_key = NULL;
+	}
+#endif
 
 	mem_cgroup_handle_over_high();
 	blkcg_maybe_throttle_current();

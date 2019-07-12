@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * drivers.c
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  *
  * Copyright (c) 1999 The Puffin Group
  * Copyright (c) 2001 Matthew Wilcox for Hewlett Packard
@@ -41,7 +37,7 @@
 #include <asm/ropes.h>
 
 /* See comments in include/asm-parisc/pci.h */
-const struct dma_map_ops *hppa_dma_ops __read_mostly;
+const struct dma_map_ops *hppa_dma_ops __ro_after_init;
 EXPORT_SYMBOL(hppa_dma_ops);
 
 static struct device root = {

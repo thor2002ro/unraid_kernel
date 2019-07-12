@@ -199,20 +199,8 @@ Extended error information
 
   For some error conditions encountered when invoking a hist trigger
   command, extended error information is available via the
-  corresponding event's 'hist' file.  Reading the hist file after an
-  error will display more detailed information about what went wrong,
-  if information is available.  This extended error information will
-  be available until the next hist trigger command for that event.
-
-  If available for a given error condition, the extended error
-  information and usage takes the following form::
-
-    # echo xxx > /sys/kernel/debug/tracing/events/sched/sched_wakeup/trigger
-    echo: write error: Invalid argument
-
-    # cat /sys/kernel/debug/tracing/events/sched/sched_wakeup/hist
-    ERROR: Couldn't yyy: zzz
-      Last command: xxx
+  tracing/error_log file.  See Error Conditions in
+  :file:`Documentation/trace/ftrace.rst` for details.
 
 6.2 'hist' trigger examples
 ---------------------------
@@ -1915,7 +1903,10 @@ The following commonly-used handler.action pairs are available:
 
     The 'matching.event' specification is simply the fully qualified
     event name of the event that matches the target event for the
-    onmatch() functionality, in the form 'system.event_name'.
+    onmatch() functionality, in the form 'system.event_name'. Histogram
+    keys of both events are compared to find if events match. In case
+    multiple histogram keys are used, they all must match in the specified
+    order.
 
     Finally, the number and type of variables/fields in the 'param
     list' must match the number and types of the fields in the
@@ -1978,9 +1969,9 @@ The following commonly-used handler.action pairs are available:
 	      /sys/kernel/debug/tracing/events/sched/sched_waking/trigger
 
     Then, when the corresponding thread is actually scheduled onto the
-    CPU by a sched_switch event, calculate the latency and use that
-    along with another variable and an event field to generate a
-    wakeup_latency synthetic event::
+    CPU by a sched_switch event (saved_pid matches next_pid), calculate
+    the latency and use that along with another variable and an event field
+    to generate a wakeup_latency synthetic event::
 
       # echo 'hist:keys=next_pid:wakeup_lat=common_timestamp.usecs-$ts0:\
               onmatch(sched.sched_waking).wakeup_latency($wakeup_lat,\

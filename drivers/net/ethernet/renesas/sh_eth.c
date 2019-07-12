@@ -1594,6 +1594,10 @@ static void sh_eth_dev_exit(struct net_device *ndev)
 	sh_eth_get_stats(ndev);
 	mdp->cd->soft_reset(ndev);
 
+	/* Set the RMII mode again if required */
+	if (mdp->cd->rmiimode)
+		sh_eth_write(ndev, 0x1, RMIIMODE);
+
 	/* Set MAC address again */
 	update_mac_address(ndev);
 }
@@ -3193,7 +3197,7 @@ static struct sh_eth_plat_data *sh_eth_parse_dt(struct device *dev)
 
 	mac_addr = of_get_mac_address(np);
 	if (!IS_ERR(mac_addr))
-		memcpy(pdata->mac_addr, mac_addr, ETH_ALEN);
+		ether_addr_copy(pdata->mac_addr, mac_addr);
 
 	pdata->no_ether_link =
 		of_property_read_bool(np, "renesas,no-ether-link");

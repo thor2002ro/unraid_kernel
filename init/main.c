@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/init/main.c
  *
@@ -1073,6 +1074,11 @@ static inline void mark_readonly(void)
 	pr_warn("This architecture does not have kernel memory protection.\n");
 }
 #endif
+
+void __weak free_initmem(void)
+{
+	free_initmem_default(POISON_FREE_INITMEM);
+}
 
 static int __ref kernel_init(void *unused)
 {

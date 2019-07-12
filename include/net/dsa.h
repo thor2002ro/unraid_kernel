@@ -1,11 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * include/net/dsa.h - Driver for Distributed Switch Architecture switch chips
  * Copyright (c) 2008-2009 Marvell Semiconductor
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef __LINUX_NET_DSA_H
@@ -99,23 +95,8 @@ struct __dsa_skb_cb {
 
 #define DSA_SKB_CB(skb) ((struct dsa_skb_cb *)((skb)->cb))
 
-#define DSA_SKB_CB_COPY(nskb, skb)		\
-	{ *__DSA_SKB_CB(nskb) = *__DSA_SKB_CB(skb); }
-
-#define DSA_SKB_CB_ZERO(skb)			\
-	{ *__DSA_SKB_CB(skb) = (struct __dsa_skb_cb) {0}; }
-
 #define DSA_SKB_CB_PRIV(skb)			\
 	((void *)(skb)->cb + offsetof(struct __dsa_skb_cb, priv))
-
-#define DSA_SKB_CB_CLONE(_clone, _skb)		\
-	{					\
-		struct sk_buff *clone = _clone;	\
-		struct sk_buff *skb = _skb;	\
-						\
-		DSA_SKB_CB_COPY(clone, skb);	\
-		DSA_SKB_CB(skb)->clone = clone; \
-	}
 
 struct dsa_switch_tree {
 	struct list_head	list;

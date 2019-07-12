@@ -1,14 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2009-2010 IBM Corporation
  *
  * Authors:
  * Mimi Zohar <zohar@us.ibm.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation, version 2 of the
- * License.
- *
  */
 
 #include <linux/types.h>
@@ -16,6 +11,8 @@
 #include <crypto/sha.h>
 #include <linux/key.h>
 #include <linux/audit.h>
+
+struct key_acl;
 
 /* iint action cache flags */
 #define IMA_MEASURE		0x00000001
@@ -79,6 +76,12 @@ enum evm_ima_xattr_type {
 
 struct evm_ima_xattr_data {
 	u8 type;
+	u8 data[];
+} __packed;
+
+/* Only used in the EVM HMAC code. */
+struct evm_xattr {
+	struct evm_ima_xattr_data data;
 	u8 digest[SHA1_DIGEST_SIZE];
 } __packed;
 
@@ -154,7 +157,7 @@ int integrity_digsig_verify(const unsigned int id, const char *sig, int siglen,
 int __init integrity_init_keyring(const unsigned int id);
 int __init integrity_load_x509(const unsigned int id, const char *path);
 int __init integrity_load_cert(const unsigned int id, const char *source,
-			       const void *data, size_t len, key_perm_t perm);
+			       const void *data, size_t len, struct key_acl *acl);
 #else
 
 static inline int integrity_digsig_verify(const unsigned int id,
@@ -172,7 +175,7 @@ static inline int integrity_init_keyring(const unsigned int id)
 static inline int __init integrity_load_cert(const unsigned int id,
 					     const char *source,
 					     const void *data, size_t len,
-					     key_perm_t perm)
+					     struct key_acl *acl)
 {
 	return 0;
 }

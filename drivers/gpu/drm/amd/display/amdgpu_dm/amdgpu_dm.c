@@ -29,6 +29,7 @@
 #include "dm_services_types.h"
 #include "dc.h"
 #include "dc/inc/core_types.h"
+#include "dal_asic_id.h"
 
 #include "vid.h"
 #include "amdgpu.h"
@@ -640,7 +641,7 @@ static void amdgpu_dm_fini(struct amdgpu_device *adev)
 
 static int load_dmcu_fw(struct amdgpu_device *adev)
 {
-	const char *fw_name_dmcu;
+	const char *fw_name_dmcu = NULL;
 	int r;
 	const struct dmcu_firmware_header_v1_0 *hdr;
 
@@ -663,7 +664,14 @@ static int load_dmcu_fw(struct amdgpu_device *adev)
 	case CHIP_VEGA20:
 		return 0;
 	case CHIP_RAVEN:
-		fw_name_dmcu = FIRMWARE_RAVEN_DMCU;
+#if defined(CONFIG_DRM_AMD_DC_DCN1_01)
+		if (ASICREV_IS_PICASSO(adev->external_rev_id))
+			fw_name_dmcu = FIRMWARE_RAVEN_DMCU;
+		else if (ASICREV_IS_RAVEN2(adev->external_rev_id))
+			fw_name_dmcu = FIRMWARE_RAVEN_DMCU;
+		else
+#endif
+			return 0;
 		break;
 	default:
 		DRM_ERROR("Unsupported ASIC type: 0x%X\n", adev->asic_type);
@@ -4224,8 +4232,7 @@ static void dm_plane_atomic_async_update(struct drm_plane *plane,
 	struct drm_plane_state *old_state =
 		drm_atomic_get_old_plane_state(new_state->state, plane);
 
-	if (plane->state->fb != new_state->fb)
-		drm_atomic_set_fb_for_plane(plane->state, new_state->fb);
+	swap(plane->state->fb, new_state->fb);
 
 	plane->state->src_x = new_state->src_x;
 	plane->state->src_y = new_state->src_y;
@@ -5242,7 +5249,7 @@ static void amdgpu_dm_commit_planes(struct drm_atomic_state *state,
 				    struct drm_crtc *pcrtc,
 				    bool wait_for_vblank)
 {
-	uint32_t i, r;
+	uint32_t i;
 	uint64_t timestamp_ns;
 	struct drm_plane *plane;
 	struct drm_plane_state *old_plane_state, *new_plane_state;
@@ -5253,6 +5260,7 @@ static void amdgpu_dm_commit_planes(struct drm_atomic_state *state,
 	struct dm_crtc_state *dm_old_crtc_state =
 			to_dm_crtc_state(drm_atomic_get_old_crtc_state(state, pcrtc));
 	int planes_count = 0, vpos, hpos;
+	long r;
 	unsigned long flags;
 	struct amdgpu_bo *abo;
 	uint64_t tiling_flags;

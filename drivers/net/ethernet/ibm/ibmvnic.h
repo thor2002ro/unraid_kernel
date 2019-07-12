@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /**************************************************************************/
 /*                                                                        */
 /*  IBM System i and System p Virtual NIC Device Driver                   */
@@ -6,18 +7,6 @@
 /*  Thomas Falcon (tlfalcon@linux.vnet.ibm.com)                           */
 /*  John Allen (jallen@linux.vnet.ibm.com)                                */
 /*                                                                        */
-/*  This program is free software; you can redistribute it and/or modify  */
-/*  it under the terms of the GNU General Public License as published by  */
-/*  the Free Software Foundation; either version 2 of the License, or     */
-/*  (at your option) any later version.                                   */
-/*                                                                        */
-/*  This program is distributed in the hope that it will be useful,       */
-/*  but WITHOUT ANY WARRANTY; without even the implied warranty of        */
-/*  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         */
-/*  GNU General Public License for more details.                          */
-/*                                                                        */
-/*  You should have received a copy of the GNU General Public License     */
-/*  along with this program.                                              */
 /*                                                                        */
 /* This module contains the implementation of a virtual ethernet device   */
 /* for use with IBM i/pSeries LPAR Linux.  It utilizes the logical LAN    */
@@ -969,7 +958,6 @@ struct ibmvnic_tunables {
 	u64 rx_entries;
 	u64 tx_entries;
 	u64 mtu;
-	struct sockaddr mac;
 };
 
 struct ibmvnic_adapter {
@@ -1091,7 +1079,6 @@ struct ibmvnic_adapter {
 	bool resetting;
 	bool napi_enabled, from_passive_init;
 
-	bool mac_change_pending;
 	bool failover_pending;
 	bool force_reset_recovery;
 

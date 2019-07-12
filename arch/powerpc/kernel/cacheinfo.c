@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Processor cache information made available to userspace via sysfs;
  * intended to be compatible with x86 intel_cacheinfo implementation.
  *
  * Copyright 2008 IBM Corporation
  * Author: Nathan Lynch
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
  */
 
 #include <linux/cpu.h>
@@ -353,8 +350,6 @@ static int cache_is_unified_d(const struct device_node *np)
 		CACHE_TYPE_UNIFIED_D : CACHE_TYPE_UNIFIED;
 }
 
-/*
- */
 static struct cache *cache_do_one_devnode_unified(struct device_node *node, int level)
 {
 	pr_debug("creating L%d ucache for %pOF\n", level, node);
@@ -767,7 +762,6 @@ static void cacheinfo_create_index_dir(struct cache *cache, int index,
 				  cache_dir->kobj, "index%d", index);
 	if (rc) {
 		kobject_put(&index_dir->kobj);
-		kfree(index_dir);
 		return;
 	}
 

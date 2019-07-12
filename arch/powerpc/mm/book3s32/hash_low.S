@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *  PowerPC version
  *    Copyright (C) 1995-1996 Gary Thomas (gdt@linuxppc.org)
@@ -11,12 +12,6 @@
  *  This file contains low-level assembler routines for managing
  *  the PowerPC MMU hash table.  (PPC 8xx processors don't use a
  *  hash table, so this file is not used on them.)
- *
- *  This program is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version
- *  2 of the License, or (at your option) any later version.
- *
  */
 
 #include <asm/reg.h>
@@ -539,7 +534,8 @@ _GLOBAL(flush_hash_pages)
 #ifdef CONFIG_SMP
 	lis	r9, (mmu_hash_lock - PAGE_OFFSET)@ha
 	addi	r9, r9, (mmu_hash_lock - PAGE_OFFSET)@l
-	lwz	r8,TASK_CPU(r2)
+	tophys	(r8, r2)
+	lwz	r8, TASK_CPU(r8)
 	oris	r8,r8,9
 10:	lwarx	r0,0,r9
 	cmpi	0,r0,0

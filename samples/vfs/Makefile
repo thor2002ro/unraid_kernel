@@ -1,5 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # List of programs to build
-hostprogs-$(CONFIG_SAMPLE_VFS) := \
+hostprogs-y := \
 	test-fsmount \
 	test-statx
 

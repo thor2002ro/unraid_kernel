@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* AFS file locking support
  *
  * Copyright (C) 2007 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #include "internal.h"
@@ -41,9 +37,6 @@ void afs_lock_may_be_available(struct afs_vnode *vnode)
 {
 	_enter("{%llx:%llu}", vnode->fid.vid, vnode->fid.vnode);
 
-	if (vnode->lock_state != AFS_VNODE_LOCK_WAITING_FOR_CB)
-		return;
-
 	spin_lock(&vnode->lock);
 	if (vnode->lock_state == AFS_VNODE_LOCK_WAITING_FOR_CB)
 		afs_next_locker(vnode, 0);
@@ -77,7 +70,7 @@ static void afs_schedule_lock_extension(struct afs_vnode *vnode)
  */
 void afs_lock_op_done(struct afs_call *call)
 {
-	struct afs_vnode *vnode = call->reply[0];
+	struct afs_vnode *vnode = call->lvnode;
 
 	if (call->error == 0) {
 		spin_lock(&vnode->lock);
@@ -185,6 +178,7 @@ static void afs_kill_lockers_enoent(struct afs_vnode *vnode)
 static int afs_set_lock(struct afs_vnode *vnode, struct key *key,
 			afs_lock_type_t type)
 {
+	struct afs_status_cb *scb;
 	struct afs_fs_cursor fc;
 	int ret;
 
@@ -195,18 +189,23 @@ static int afs_set_lock(struct afs_vnode *vnode, struct key *key,
 	       vnode->fid.unique,
 	       key_serial(key), type);
 
+	scb = kzalloc(sizeof(struct afs_status_cb), GFP_KERNEL);
+	if (!scb)
+		return -ENOMEM;
+
 	ret = -ERESTARTSYS;
-	if (afs_begin_vnode_operation(&fc, vnode, key)) {
+	if (afs_begin_vnode_operation(&fc, vnode, key, true)) {
 		while (afs_select_fileserver(&fc)) {
 			fc.cb_break = afs_calc_vnode_cb_break(vnode);
-			afs_fs_set_lock(&fc, type);
+			afs_fs_set_lock(&fc, type, scb);
 		}
 
-		afs_check_for_remote_deletion(&fc, fc.vnode);
-		afs_vnode_commit_status(&fc, vnode, fc.cb_break);
+		afs_check_for_remote_deletion(&fc, vnode);
+		afs_vnode_commit_status(&fc, vnode, fc.cb_break, NULL, scb);
 		ret = afs_end_vnode_operation(&fc);
 	}
 
+	kfree(scb);
 	_leave(" = %d", ret);
 	return ret;
 }
@@ -216,6 +215,7 @@ static int afs_set_lock(struct afs_vnode *vnode, struct key *key,
  */
 static int afs_extend_lock(struct afs_vnode *vnode, struct key *key)
 {
+	struct afs_status_cb *scb;
 	struct afs_fs_cursor fc;
 	int ret;
 
@@ -226,18 +226,23 @@ static int afs_extend_lock(struct afs_vnode *vnode, struct key *key)
 	       vnode->fid.unique,
 	       key_serial(key));
 
+	scb = kzalloc(sizeof(struct afs_status_cb), GFP_KERNEL);
+	if (!scb)
+		return -ENOMEM;
+
 	ret = -ERESTARTSYS;
-	if (afs_begin_vnode_operation(&fc, vnode, key)) {
+	if (afs_begin_vnode_operation(&fc, vnode, key, false)) {
 		while (afs_select_current_fileserver(&fc)) {
 			fc.cb_break = afs_calc_vnode_cb_break(vnode);
-			afs_fs_extend_lock(&fc);
+			afs_fs_extend_lock(&fc, scb);
 		}
 
-		afs_check_for_remote_deletion(&fc, fc.vnode);
-		afs_vnode_commit_status(&fc, vnode, fc.cb_break);
+		afs_check_for_remote_deletion(&fc, vnode);
+		afs_vnode_commit_status(&fc, vnode, fc.cb_break, NULL, scb);
 		ret = afs_end_vnode_operation(&fc);
 	}
 
+	kfree(scb);
 	_leave(" = %d", ret);
 	return ret;
 }
@@ -247,6 +252,7 @@ static int afs_extend_lock(struct afs_vnode *vnode, struct key *key)
  */
 static int afs_release_lock(struct afs_vnode *vnode, struct key *key)
 {
+	struct afs_status_cb *scb;
 	struct afs_fs_cursor fc;
 	int ret;
 
@@ -257,18 +263,23 @@ static int afs_release_lock(struct afs_vnode *vnode, struct key *key)
 	       vnode->fid.unique,
 	       key_serial(key));
 
+	scb = kzalloc(sizeof(struct afs_status_cb), GFP_KERNEL);
+	if (!scb)
+		return -ENOMEM;
+
 	ret = -ERESTARTSYS;
-	if (afs_begin_vnode_operation(&fc, vnode, key)) {
+	if (afs_begin_vnode_operation(&fc, vnode, key, false)) {
 		while (afs_select_current_fileserver(&fc)) {
 			fc.cb_break = afs_calc_vnode_cb_break(vnode);
-			afs_fs_release_lock(&fc);
+			afs_fs_release_lock(&fc, scb);
 		}
 
-		afs_check_for_remote_deletion(&fc, fc.vnode);
-		afs_vnode_commit_status(&fc, vnode, fc.cb_break);
+		afs_check_for_remote_deletion(&fc, vnode);
+		afs_vnode_commit_status(&fc, vnode, fc.cb_break, NULL, scb);
 		ret = afs_end_vnode_operation(&fc);
 	}
 
+	kfree(scb);
 	_leave(" = %d", ret);
 	return ret;
 }
@@ -736,7 +747,7 @@ static int afs_do_getlk(struct file *file, struct file_lock *fl)
 	posix_test_lock(file, fl);
 	if (fl->fl_type == F_UNLCK) {
 		/* no local locks; consult the server */
-		ret = afs_fetch_status(vnode, key, false);
+		ret = afs_fetch_status(vnode, key, false, NULL);
 		if (ret < 0)
 			goto error;
 

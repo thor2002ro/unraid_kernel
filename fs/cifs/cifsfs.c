@@ -303,6 +303,7 @@ cifs_alloc_inode(struct super_block *sb)
 	cifs_inode->uniqueid = 0;
 	cifs_inode->createtime = 0;
 	cifs_inode->epoch = 0;
+	spin_lock_init(&cifs_inode->open_file_lock);
 	generate_random_uuid(cifs_inode->lease_key);
 
 	/*
@@ -878,6 +879,9 @@ out:
 
 static loff_t cifs_llseek(struct file *file, loff_t offset, int whence)
 {
+	struct cifsFileInfo *cfile = file->private_data;
+	struct cifs_tcon *tcon;
+
 	/*
 	 * whence == SEEK_END || SEEK_DATA || SEEK_HOLE => we must revalidate
 	 * the cached file length
@@ -908,6 +912,12 @@ static loff_t cifs_llseek(struct file *file, loff_t offset, int whence)
 		rc = cifs_revalidate_file_attr(file);
 		if (rc < 0)
 			return (loff_t)rc;
+	}
+	if (cfile && cfile->tlink) {
+		tcon = tlink_tcon(cfile->tlink);
+		if (tcon->ses->server->ops->llseek)
+			return tcon->ses->server->ops->llseek(file, tcon,
+							      offset, whence);
 	}
 	return generic_file_llseek(file, offset, whence);
 }
@@ -1069,11 +1079,6 @@ ssize_t cifs_file_copychunk_range(unsigned int xid,
 	ssize_t rc;
 
 	cifs_dbg(FYI, "copychunk range\n");
-
-	if (src_inode == target_inode) {
-		rc = -EINVAL;
-		goto out;
-	}
 
 	if (!src_file->private_data || !dst_file->private_data) {
 		rc = -EBADF;
@@ -1586,7 +1591,6 @@ MODULE_DESCRIPTION
 	("VFS to access SMB3 servers e.g. Samba, Macs, Azure and Windows (and "
 	"also older servers complying with the SNIA CIFS Specification)");
 MODULE_VERSION(CIFS_VERSION);
-MODULE_SOFTDEP("pre: arc4");
 MODULE_SOFTDEP("pre: des");
 MODULE_SOFTDEP("pre: ecb");
 MODULE_SOFTDEP("pre: hmac");

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2010 IBM Corporation
  * Copyright (C) 2010 Politecnico di Torino, Italy
@@ -6,10 +7,6 @@
  * Authors:
  * Mimi Zohar <zohar@us.ibm.com>
  * Roberto Sassu <roberto.sassu@polito.it>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, version 2 of the License.
  *
  * See Documentation/security/keys/trusted-encrypted.rst
  */
@@ -307,7 +304,7 @@ static struct key *request_user_key(const char *master_desc, const u8 **master_k
 	const struct user_key_payload *upayload;
 	struct key *ukey;
 
-	ukey = request_key(&key_type_user, master_desc, NULL);
+	ukey = request_key(&key_type_user, master_desc, NULL, NULL);
 	if (IS_ERR(ukey))
 		goto error;
 
