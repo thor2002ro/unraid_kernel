@@ -131,6 +131,8 @@ void cgroup_free(struct task_struct *p);
 int cgroup_init_early(void);
 int cgroup_init(void);
 
+int cgroup_parse_float(const char *input, unsigned dec_shift, s64 *v);
+
 /*
  * Iteration helpers and macros.
  */
@@ -933,5 +935,23 @@ static inline bool cgroup_task_frozen(struct task_struct *task)
 }
 
 #endif /* !CONFIG_CGROUPS */
+
+#ifdef CONFIG_CGROUP_BPF
+static inline void cgroup_bpf_get(struct cgroup *cgrp)
+{
+	percpu_ref_get(&cgrp->bpf.refcnt);
+}
+
+static inline void cgroup_bpf_put(struct cgroup *cgrp)
+{
+	percpu_ref_put(&cgrp->bpf.refcnt);
+}
+
+#else /* CONFIG_CGROUP_BPF */
+
+static inline void cgroup_bpf_get(struct cgroup *cgrp) {}
+static inline void cgroup_bpf_put(struct cgroup *cgrp) {}
+
+#endif /* CONFIG_CGROUP_BPF */
 
 #endif /* _LINUX_CGROUP_H */
