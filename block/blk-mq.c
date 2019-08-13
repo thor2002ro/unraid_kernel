@@ -669,8 +669,6 @@ void blk_mq_start_request(struct request *rq)
 {
 	struct request_queue *q = rq->q;
 
-	blk_mq_sched_started_request(rq);
-
 	trace_block_rq_issue(q, rq);
 
 	if (test_bit(QUEUE_FLAG_STATS, &q->queue_flags)) {
@@ -1960,9 +1958,13 @@ static blk_qc_t blk_mq_make_request(struct request_queue *q, struct bio *bio)
 	rq = blk_mq_get_request(q, bio, &data);
 	if (unlikely(!rq)) {
 		rq_qos_cleanup(q, bio);
-		if (bio->bi_opf & REQ_NOWAIT)
+
+		cookie = BLK_QC_T_NONE;
+		if (bio->bi_opf & REQ_NOWAIT_INLINE)
+			cookie = BLK_QC_T_EAGAIN;
+		else if (bio->bi_opf & REQ_NOWAIT)
 			bio_wouldblock_error(bio);
-		return BLK_QC_T_NONE;
+		return cookie;
 	}
 
 	trace_block_getrq(q, bio, bio->bi_opf);
@@ -1973,7 +1975,7 @@ static blk_qc_t blk_mq_make_request(struct request_queue *q, struct bio *bio)
 
 	blk_mq_bio_to_request(rq, bio, nr_segs);
 
-	plug = current->plug;
+	plug = blk_mq_plug(q, bio);
 	if (unlikely(is_flush_fua)) {
 		/* bypass scheduler for flush rq */
 		blk_insert_flush(rq);
