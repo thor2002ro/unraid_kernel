@@ -21,6 +21,7 @@ Required properties:
 Optional properties:
 - power-domains: a power domain consumer specifier according to
   Documentation/devicetree/bindings/power/power_domain.txt
+- #cooling-cells: : If used as a cooling device, must be <2>
 
 example:
 
