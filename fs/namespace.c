@@ -1463,7 +1463,6 @@ static void umount_tree(struct mount *mnt, enum umount_tree_flags how)
 			p->mnt.mnt_flags |= MNT_SYNC_UMOUNT;
 
 		disconnect = disconnect_mount(p, how);
-
 		if (mnt_has_parent(p)) {
 			mnt_add_count(p->mnt_parent, -1);
 			if (!disconnect) {
@@ -1471,10 +1470,11 @@ static void umount_tree(struct mount *mnt, enum umount_tree_flags how)
 				list_add_tail(&p->mnt_child, &p->mnt_parent->mnt_mounts);
 			} else {
 				umount_mnt(p);
-				hlist_add_head(&p->mnt_umount, &unmounted);
 			}
 		}
 		change_mnt_propagation(p, MS_PRIVATE);
+		if (disconnect)
+			hlist_add_head(&p->mnt_umount, &unmounted);
 	}
 }
 
@@ -1674,8 +1674,6 @@ int ksys_umount(char __user *name, int flags)
 
 	if (!(flags & UMOUNT_NOFOLLOW))
 		lookup_flags |= LOOKUP_FOLLOW;
-
-	lookup_flags |= LOOKUP_NO_EVAL;
 
 	retval = user_path_mountpoint_at(AT_FDCWD, name, lookup_flags, &path);
 	if (retval)
@@ -3046,7 +3044,7 @@ long do_mount(const char *dev_name, const char __user *dir_name,
 		return -EINVAL;
 
 	/* ... and get the mountpoint */
-	retval = user_path(dir_name, &path);
+	retval = user_path_at(AT_FDCWD, dir_name, LOOKUP_FOLLOW, &path);
 	if (retval)
 		return retval;
 
@@ -3593,11 +3591,13 @@ SYSCALL_DEFINE2(pivot_root, const char __user *, new_root,
 	if (!may_mount())
 		return -EPERM;
 
-	error = user_path_dir(new_root, &new);
+	error = user_path_at(AT_FDCWD, new_root,
+			     LOOKUP_FOLLOW | LOOKUP_DIRECTORY, &new);
 	if (error)
 		goto out0;
 
-	error = user_path_dir(put_old, &old);
+	error = user_path_at(AT_FDCWD, put_old,
+			     LOOKUP_FOLLOW | LOOKUP_DIRECTORY, &old);
 	if (error)
 		goto out1;
 
