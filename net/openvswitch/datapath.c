@@ -2449,7 +2449,7 @@ static int __init dp_init(void)
 {
 	int err;
 
-	BUILD_BUG_ON(sizeof(struct ovs_skb_cb) > FIELD_SIZEOF(struct sk_buff, cb));
+	BUILD_BUG_ON(sizeof(struct ovs_skb_cb) > sizeof_member(struct sk_buff, cb));
 
 	pr_info("Open vSwitch switching datapath\n");
 

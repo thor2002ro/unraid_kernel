@@ -215,7 +215,7 @@ static void virtio_fs_free_devs(struct virtio_fs *fs)
 /* Read filesystem name from virtio config into fs->tag (must kfree()). */
 static int virtio_fs_read_tag(struct virtio_device *vdev, struct virtio_fs *fs)
 {
-	char tag_buf[sizeof_field(struct virtio_fs_config, tag)];
+	char tag_buf[sizeof_member(struct virtio_fs_config, tag)];
 	char *end;
 	size_t len;
 
