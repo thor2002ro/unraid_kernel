@@ -1,0 +1,14 @@
+arm/soc
+
+arm/dt
+
+arm/drivers
+
+arm/defconfig
+
+arm/late
+
+arm/fixes
+	patch
+		arm64/ARM: configs: Change CONFIG_REMOTEPROC from m to y
+
