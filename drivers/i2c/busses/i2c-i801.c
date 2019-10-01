@@ -77,7 +77,7 @@
  * SMBus Host Notify			yes
  * Interrupt processing			yes
  *
- * See the file Documentation/i2c/busses/i2c-i801 for details.
+ * See the file Documentation/i2c/busses/i2c-i801.rst for details.
  */
 
 #include <linux/interrupt.h>
@@ -1194,19 +1194,28 @@ static acpi_status check_acpi_smo88xx_device(acpi_handle obj_handle,
 	int i;
 
 	status = acpi_get_object_info(obj_handle, &info);
-	if (!ACPI_SUCCESS(status) || !(info->valid & ACPI_VALID_HID))
+	if (ACPI_FAILURE(status))
 		return AE_OK;
+
+	if (!(info->valid & ACPI_VALID_HID))
+		goto smo88xx_not_found;
 
 	hid = info->hardware_id.string;
 	if (!hid)
-		return AE_OK;
+		goto smo88xx_not_found;
 
 	i = match_string(acpi_smo8800_ids, ARRAY_SIZE(acpi_smo8800_ids), hid);
 	if (i < 0)
-		return AE_OK;
+		goto smo88xx_not_found;
+
+	kfree(info);
 
 	*((bool *)return_value) = true;
 	return AE_CTRL_TERMINATE;
+
+smo88xx_not_found:
+	kfree(info);
+	return AE_OK;
 }
 
 static bool is_dell_system_with_lis3lv02d(void)

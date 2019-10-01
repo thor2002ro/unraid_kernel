@@ -1485,7 +1485,7 @@ static netdev_tx_t ibmvnic_xmit(struct sk_buff *skb, struct net_device *netdev)
 
 			memcpy(dst + cur,
 			       page_address(skb_frag_page(frag)) +
-			       frag->page_offset, skb_frag_size(frag));
+			       skb_frag_off(frag), skb_frag_size(frag));
 			cur += skb_frag_size(frag);
 		}
 	} else {
@@ -1983,6 +1983,13 @@ static void __ibmvnic_reset(struct work_struct *work)
 
 	rwi = get_next_rwi(adapter);
 	while (rwi) {
+		if (adapter->state == VNIC_REMOVING ||
+		    adapter->state == VNIC_REMOVED) {
+			kfree(rwi);
+			rc = EBUSY;
+			break;
+		}
+
 		if (adapter->force_reset_recovery) {
 			adapter->force_reset_recovery = false;
 			rc = do_hard_reset(adapter, rwi, reset_state);

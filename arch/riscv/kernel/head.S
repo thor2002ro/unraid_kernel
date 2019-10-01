@@ -39,9 +39,9 @@ ENTRY(_start)
 	.word RISCV_HEADER_VERSION
 	.word 0
 	.dword 0
-	.asciz RISCV_IMAGE_MAGIC
-	.word 0
+	.ascii RISCV_IMAGE_MAGIC
 	.balign 4
+	.ascii RISCV_IMAGE_MAGIC2
 	.word 0
 
 .global _start_kernel
@@ -61,7 +61,7 @@ _start_kernel:
 	 * floating point in kernel space
 	 */
 	li t0, SR_FS
-	csrc sstatus, t0
+	csrc CSR_SSTATUS, t0
 
 	/* Pick one hart to run the main boot sequence */
 	la a3, hart_lottery
