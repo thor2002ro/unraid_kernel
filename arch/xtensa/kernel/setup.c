@@ -308,10 +308,6 @@ extern char _Level6InterruptVector_text_end;
 extern char _SecondaryResetVector_text_start;
 extern char _SecondaryResetVector_text_end;
 #endif
-#ifdef CONFIG_XIP_KERNEL
-extern char _xip_start[];
-extern char _xip_end[];
-#endif
 
 static inline int __init_memblock mem_reserve(unsigned long start,
 					      unsigned long end)
@@ -343,9 +339,6 @@ void __init setup_arch(char **cmdline_p)
 #endif
 
 	mem_reserve(__pa(_stext), __pa(_end));
-#ifdef CONFIG_XIP_KERNEL
-	mem_reserve(__pa(_xip_start), __pa(_xip_end));
-#endif
 
 #ifdef CONFIG_VECTORS_OFFSET
 	mem_reserve(__pa(&_WindowVectors_text_start),
