@@ -72,7 +72,7 @@
 	};
 
 	soc: soc {
-		sysram: sysram@2020000 {
+		sysram: sram@2020000 {
 			compatible = "mmio-sram";
 			reg = <0x02020000 0x20000>;
 			#address-cells = <1>;
@@ -90,7 +90,7 @@
 			};
 		};
 
-		pd_lcd1: lcd1-power-domain@10023ca0 {
+		pd_lcd1: power-domain@10023ca0 {
 			compatible = "samsung,exynos4210-pd";
 			reg = <0x10023CA0 0x20>;
 			#power-domain-cells = <0>;
