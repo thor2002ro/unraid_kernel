@@ -5,6 +5,19 @@
 
 menu "Misc devices"
 
+config WATCH_QUEUE
+	bool "Mappable notification queue"
+	default n
+	depends on MMU
+	help
+	  This is a general notification queue for the kernel to pass events to
+	  userspace through a mmap()'able ring buffer.  It can be used in
+	  conjunction with watches for key/keyring change notifications and device
+	  notifications.
+
+	  Note that in theory this should work fine with NOMMU, but I'm not
+	  sure how to make that work.
+
 config SENSORS_LIS3LV02D
 	tristate
 	depends on INPUT
