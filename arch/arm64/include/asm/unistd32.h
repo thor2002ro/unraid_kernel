@@ -879,6 +879,8 @@ __SYSCALL(__NR_fspick, sys_fspick)
 __SYSCALL(__NR_pidfd_open, sys_pidfd_open)
 #define __NR_clone3 435
 __SYSCALL(__NR_clone3, sys_clone3)
+#define __NR_watch_devices 436
+__SYSCALL(__NR_watch_devices, sys_watch_devices)
 
 /*
  * Please add new compat syscalls above this comment and update
