@@ -3353,23 +3353,3 @@ void kmsg_dump_rewind(struct kmsg_dumper *dumper)
 EXPORT_SYMBOL_GPL(kmsg_dump_rewind);
 
 #endif
-
-#ifdef CONFIG_DEBUG_AID_FOR_SYZBOT
-static int initial_loglevel;
-static void check_loglevel(struct timer_list *timer)
-{
-	if (console_loglevel < initial_loglevel)
-		panic("Console loglevel changed (%d->%d)!", initial_loglevel,
-		      console_loglevel);
-	mod_timer(timer, jiffies + HZ);
-}
-static int __init loglevelcheck_init(void)
-{
-	static DEFINE_TIMER(timer, check_loglevel);
-
-	initial_loglevel = console_loglevel;
-	mod_timer(&timer, jiffies + HZ);
-	return 0;
-}
-late_initcall(loglevelcheck_init);
-#endif
