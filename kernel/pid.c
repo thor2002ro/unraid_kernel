@@ -299,7 +299,7 @@ static void __change_pid(struct task_struct *task, enum pid_type type,
 	*pid_ptr = new;
 
 	for (tmp = PIDTYPE_MAX; --tmp >= 0; )
-		if (!hlist_empty(&pid->tasks[tmp]))
+		if (pid_has_task(pid, tmp))
 			return;
 
 	free_pid(pid);
@@ -497,7 +497,7 @@ static int pidfd_create(struct pid *pid)
  */
 SYSCALL_DEFINE2(pidfd_open, pid_t, pid, unsigned int, flags)
 {
-	int fd, ret;
+	int fd;
 	struct pid *p;
 
 	if (flags)
@@ -510,13 +510,11 @@ SYSCALL_DEFINE2(pidfd_open, pid_t, pid, unsigned int, flags)
 	if (!p)
 		return -ESRCH;
 
-	ret = 0;
-	rcu_read_lock();
-	if (!pid_task(p, PIDTYPE_TGID))
-		ret = -EINVAL;
-	rcu_read_unlock();
+	if (pid_has_task(p, PIDTYPE_TGID))
+		fd = pidfd_create(p);
+	else
+		fd = -EINVAL;
 
-	fd = ret ?: pidfd_create(p);
 	put_pid(p);
 	return fd;
 }
