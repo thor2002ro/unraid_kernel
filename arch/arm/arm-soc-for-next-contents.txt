@@ -1,4 +1,6 @@
 arm/soc
+	mmp/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/lkundrak/linux-mmp tags/mmp-soc-for-v5.5-2
 
 arm/dt
 	renesas/dt
@@ -17,12 +19,17 @@ arm/dt
 		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-dt64-5.5
 	samsung/dt-dmc
 		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-dt-dmc-5.5
+	mmp/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/lkundrak/linux-mmp tags/mmp-dt-for-v5.5
 
 arm/drivers
 	renesas/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-drivers-for-v5.5-tag1
 	samsung/dmc
 		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-drivers-dmc-5.5
+	mmp/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/lkundrak/linux-mmp tags/mmp-drivers-for-v5.5
+		contains mmp/soc
 
 arm/defconfig
 	patch
@@ -31,6 +38,8 @@ arm/defconfig
 		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm64-defconfig-for-v5.5-tag1
 	samsung/defconfig
 		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-defconfig-5.5
+	patch
+		ARM: multi_v7_defconfig: enable MMP platforms
 
 arm/late
 
