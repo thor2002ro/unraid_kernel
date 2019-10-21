@@ -1,14 +1,54 @@
 arm/soc
 
 arm/dt
+	renesas/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-dt-for-v5.5-tag1
+	renesas/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm64-dt-for-v5.5-tag1
+	renesas/dt-bindings
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-dt-bindings-for-v5.5-tag1
+	rockchip/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.5-rockchip-dts32-1
+	rockchip/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.5-rockchip-dts64-1
+	samsung/dt
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-dt-5.5
+	samsung/dt64
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-dt64-5.5
+	samsung/dt-dmc
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-dt-dmc-5.5
 
 arm/drivers
+	renesas/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-drivers-for-v5.5-tag1
+	samsung/dmc
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-drivers-dmc-5.5
 
 arm/defconfig
+	patch
+		arm64: configs: Enable Actions Semi platform in defconfig
+	renesas/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm64-defconfig-for-v5.5-tag1
+	samsung/defconfig
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-defconfig-5.5
 
 arm/late
 
 arm/fixes
-	patch
-		arm64/ARM: configs: Change CONFIG_REMOTEPROC from m to y
+	<no branch> (187c195ac57fbb84a84ca07e93c6f16fd8edfbe4)
+		git://git.infradead.org/linux-mvebu tags/mvebu-fixes-5.4-1
+	<no branch> (965f6603e3335a953f4f876792074cb36bf65f7f)
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.4/devicetree-arm64-fixes
+	<no branch> (17a9e5bbbfe5a5a6356e47cdc1c1656e1e5e1f62)
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.4/fixes-rc3-signed
+	<no branch> (95993238b29b3f0f9a5eb9db84e0e38e5bfe76d8)
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-5.4
+	<no branch> (a9082575f8d09a3a55f300d04f46ef5243e99688)
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.4-rockchip-dtsfixes1
+	<no branch> (7b21483ccbef1b274a238c0653a03d778b21fbd7)
+		git://git.kernel.org/pub/scm/linux/kernel/git/nsekhar/linux-davinci tags/davinci-fixes-for-v5.4
+	<no branch> (9786340acaa33b3722925125e2df358d14b8ee12)
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.4/devicetree-fixes
+	<no branch> (626c45d223e22090511acbfb481e0ece1de1356d)
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.4/devicetree-fixes-part2
 
