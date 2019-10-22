@@ -21,6 +21,10 @@ arm/dt
 		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-dt-dmc-5.5
 	mmp/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/lkundrak/linux-mmp tags/mmp-dt-for-v5.5
+	actions/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/mani/linux-actions tags/actions-arm64-dt-for-v5.5
+	patch
+		ARM: dts: mmp3: add Dell Wyse 3020 machine
 
 arm/drivers
 	renesas/drivers
