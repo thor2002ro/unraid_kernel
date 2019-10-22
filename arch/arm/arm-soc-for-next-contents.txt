@@ -30,6 +30,8 @@ arm/drivers
 	mmp/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/lkundrak/linux-mmp tags/mmp-drivers-for-v5.5
 		contains mmp/soc
+	patch
+		soc: mmp: guard include of asm/cputype.h with CONFIG_ARM{,64}
 
 arm/defconfig
 	patch
