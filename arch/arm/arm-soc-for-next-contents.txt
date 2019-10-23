@@ -36,6 +36,8 @@ arm/drivers
 		contains mmp/soc
 	patch
 		soc: mmp: guard include of asm/cputype.h with CONFIG_ARM{,64}
+	omap/ti-sysc
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/ti-sysc-signed
 
 arm/defconfig
 	patch
@@ -46,6 +48,10 @@ arm/defconfig
 		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-defconfig-5.5
 	patch
 		ARM: multi_v7_defconfig: enable MMP platforms
+	omap/fixes-rc3
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.4/fixes-rc3-signed
+	omap/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/defconfig-signed
 
 arm/late
 
@@ -54,7 +60,7 @@ arm/fixes
 		git://git.infradead.org/linux-mvebu tags/mvebu-fixes-5.4-1
 	<no branch> (965f6603e3335a953f4f876792074cb36bf65f7f)
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.4/devicetree-arm64-fixes
-	<no branch> (17a9e5bbbfe5a5a6356e47cdc1c1656e1e5e1f62)
+	omap/fixes-rc3
 		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.4/fixes-rc3-signed
 	<no branch> (95993238b29b3f0f9a5eb9db84e0e38e5bfe76d8)
 		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-5.4
@@ -66,4 +72,8 @@ arm/fixes
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.4/devicetree-fixes
 	<no branch> (626c45d223e22090511acbfb481e0ece1de1356d)
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.4/devicetree-fixes-part2
+	<no branch> (cf03c691eb959f438c16d58ffd11f150b1a95b1e)
+		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-fixes-for-5.4-1
+	<no branch> (6aed5a0e0f56213cc5e4bff674fb42e997f30df7)
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.4/fixes-rc4-signed
 
