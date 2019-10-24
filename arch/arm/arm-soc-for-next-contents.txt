@@ -1,6 +1,8 @@
 arm/soc
 	mmp/soc
 		git://git.kernel.org/pub/scm/linux/kernel/git/lkundrak/linux-mmp tags/mmp-soc-for-v5.5-2
+	brcm/soc
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.5/soc
 
 arm/dt
 	renesas/dt
@@ -25,6 +27,8 @@ arm/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/mani/linux-actions tags/actions-arm64-dt-for-v5.5
 	patch
 		ARM: dts: mmp3: add Dell Wyse 3020 machine
+	brcm/dt
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.5/devicetree
 
 arm/drivers
 	renesas/drivers
@@ -38,6 +42,8 @@ arm/drivers
 		soc: mmp: guard include of asm/cputype.h with CONFIG_ARM{,64}
 	omap/ti-sysc
 		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/ti-sysc-signed
+	brcm/drivers
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.5/drivers
 
 arm/defconfig
 	patch
@@ -76,4 +82,8 @@ arm/fixes
 		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-fixes-for-5.4-1
 	<no branch> (6aed5a0e0f56213cc5e4bff674fb42e997f30df7)
 		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.4/fixes-rc4-signed
+	patch
+		MAINTAINERS: Update the Spreadtrum SoC maintainer
+	<no branch> (0d660ffbca1a5f16f6db8f6ccbea5c207ec7e361)
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.5/maintainers
 
