@@ -3,6 +3,9 @@ arm/soc
 		git://git.kernel.org/pub/scm/linux/kernel/git/lkundrak/linux-mmp tags/mmp-soc-for-v5.5-2
 	brcm/soc
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.5/soc
+	omap/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/soc-signed
+		contains omap/fixes-rc3
 
 arm/dt
 	renesas/dt
@@ -29,6 +32,11 @@ arm/dt
 		ARM: dts: mmp3: add Dell Wyse 3020 machine
 	brcm/dt
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.5/devicetree
+	omap/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/dt-signed
+	omap/ti-sysc-drop-pdata
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/ti-sysc-drop-pdata-v2-signed-take2
+		contains omap/ti-sysc
 
 arm/drivers
 	renesas/drivers
