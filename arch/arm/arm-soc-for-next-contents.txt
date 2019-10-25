@@ -66,6 +66,8 @@ arm/defconfig
 		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.4/fixes-rc3-signed
 	omap/defconfig
 		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/defconfig-signed
+	patch
+		ARM: multi_v7_defconfig: Enable audio support for stm32mp157
 
 arm/late
 
@@ -94,4 +96,6 @@ arm/fixes
 		MAINTAINERS: Update the Spreadtrum SoC maintainer
 	<no branch> (0d660ffbca1a5f16f6db8f6ccbea5c207ec7e361)
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.5/maintainers
+	patch
+		ARM: dts: stm32: relax qspi pins slew-rate for stm32mp157
 
