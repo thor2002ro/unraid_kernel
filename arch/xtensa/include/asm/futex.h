@@ -61,7 +61,7 @@
 	"	.long 1b, 5b, 2b, 5b\n"			\
 	"	.previous\n"				\
 	: [oldval] "=&r" (old), [newval] "=&r" (ret),	\
-	  [mem] "+m" (uaddr)				\
+	  [mem] "+m" (*(uaddr))				\
 	: [oparg] "r" (arg), [fault] "I" (-EFAULT)	\
 	: "memory")
 #endif
