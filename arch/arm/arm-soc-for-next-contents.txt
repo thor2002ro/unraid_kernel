@@ -37,6 +37,10 @@ arm/dt
 	omap/ti-sysc-drop-pdata
 		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/ti-sysc-drop-pdata-v2-signed-take2
 		contains omap/ti-sysc
+	juno/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/juno-update-5.5
+	stm32/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/atorgue/stm32 tags/stm32-dt-for-v5.5-1
 
 arm/drivers
 	renesas/drivers
@@ -52,6 +56,8 @@ arm/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/ti-sysc-signed
 	brcm/drivers
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.5/drivers
+	drivers/reset
+		git://git.pengutronix.de/git/pza/linux tags/reset-for-v5.5
 
 arm/defconfig
 	patch
@@ -72,30 +78,6 @@ arm/defconfig
 arm/late
 
 arm/fixes
-	<no branch> (187c195ac57fbb84a84ca07e93c6f16fd8edfbe4)
-		git://git.infradead.org/linux-mvebu tags/mvebu-fixes-5.4-1
-	<no branch> (965f6603e3335a953f4f876792074cb36bf65f7f)
-		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.4/devicetree-arm64-fixes
-	omap/fixes-rc3
-		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.4/fixes-rc3-signed
-	<no branch> (95993238b29b3f0f9a5eb9db84e0e38e5bfe76d8)
-		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-5.4
-	<no branch> (a9082575f8d09a3a55f300d04f46ef5243e99688)
-		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.4-rockchip-dtsfixes1
-	<no branch> (7b21483ccbef1b274a238c0653a03d778b21fbd7)
-		git://git.kernel.org/pub/scm/linux/kernel/git/nsekhar/linux-davinci tags/davinci-fixes-for-v5.4
-	<no branch> (9786340acaa33b3722925125e2df358d14b8ee12)
-		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.4/devicetree-fixes
-	<no branch> (626c45d223e22090511acbfb481e0ece1de1356d)
-		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.4/devicetree-fixes-part2
-	<no branch> (cf03c691eb959f438c16d58ffd11f150b1a95b1e)
-		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-fixes-for-5.4-1
-	<no branch> (6aed5a0e0f56213cc5e4bff674fb42e997f30df7)
-		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.4/fixes-rc4-signed
-	patch
-		MAINTAINERS: Update the Spreadtrum SoC maintainer
-	<no branch> (0d660ffbca1a5f16f6db8f6ccbea5c207ec7e361)
-		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.5/maintainers
-	patch
-		ARM: dts: stm32: relax qspi pins slew-rate for stm32mp157
+	<no branch> (f430c7ed8bc22992ed528b518da465b060b9223f)
+		git://git.pengutronix.de/git/pza/linux tags/reset-fixes-for-v5.5
 
