@@ -6,6 +6,14 @@ arm/soc
 	omap/soc
 		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/soc-signed
 		contains omap/fixes-rc3
+	realtek/arm64
+		git://git.kernel.org/pub/scm/linux/kernel/git/afaerber/linux-realtek tags/realtek-arm64-soc-for-5.5
+	hisi/soc
+		git://github.com/hisilicon/linux-hisi tags/hisi-armv7-soc-for-5.5
+	patch
+		ARM: ASPEED: update default ARCH_NR_GPIO for ARCH_ASPEED
+	renesas/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-soc-for-v5.5-tag1
 
 arm/dt
 	renesas/dt
@@ -41,6 +49,32 @@ arm/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/juno-update-5.5
 	stm32/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/atorgue/stm32 tags/stm32-dt-for-v5.5-1
+	socfpga/dts
+		git://git.kernel.org/pub/scm/linux/kernel/git/dinguyen/linux tags/socfpga_dts_updates_for_v5.5
+	ti/keystone-dts
+		git://git.kernel.org/pub/scm/linux/kernel/git/ssantosh/linux-keystone for_5.5/keystone-dts
+	realtek/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/afaerber/linux-realtek tags/realtek-arm64-dt-for-5.5
+	hisi/dt64
+		git://github.com/hisilicon/linux-hisi tags/hisi-arm64-dt-for-5.5
+	patch
+		ARM: dts: Add RDA8810PL GPIO controllers
+		ARM: dts: mmp3: Add a name to /clocks node
+		ARM: dts: mmp3: Fix /soc/watchdog node name
+		ARM: dts: mmp3-dell-ariel: Add a name to /memory node
+		ARM: dts: mmp3-dell-ariel: Add a serial point alias
+	omap/prm-dts
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/prm-signed
+	renesas/dt64-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm64-dt-for-v5.5-tag2
+	renesas/dt-bindings-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-dt-bindings-for-v5.5-tag2
+	patch
+		arm64: dts: lg1312: DT fix s/#interrupts-cells/#interrupt-cells/
+		arm64: dts: lg1313: DT fix s/#interrupts-cells/#interrupt-cells/
+		ARM: dts: atlas7: Fix "debounce-interval" property misspelling
+	sunxi/dt
+		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-dt-for-5.5-1
 
 arm/drivers
 	renesas/drivers
@@ -58,6 +92,10 @@ arm/drivers
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.5/drivers
 	drivers/reset
 		git://git.pengutronix.de/git/pza/linux tags/reset-for-v5.5
+	ti/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/ssantosh/linux-keystone for_5.5/driver-soc
+	renesas/drivers-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-drivers-for-v5.5-tag2
 
 arm/defconfig
 	patch
@@ -74,10 +112,26 @@ arm/defconfig
 		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/defconfig-signed
 	patch
 		ARM: multi_v7_defconfig: Enable audio support for stm32mp157
+	socfpga/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/dinguyen/linux tags/arm64_defconfig_for_v5.5
+	hisi/defconfig
+		git://github.com/hisilicon/linux-hisi tags/hisi-arm64-defconfig-for-5.5
+	renesas/defconfigrefresh
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-defconfig-for-v5.5-tag1
+	renesas/defconfig64
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm64-defconfig-for-v5.5-tag2
+	sunxi/defconfig
+		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-config-for-5.5-2
+	sunxi/defconfig64
+		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-config64-for-5.5-1
 
 arm/late
 
 arm/fixes
 	<no branch> (f430c7ed8bc22992ed528b518da465b060b9223f)
 		git://git.pengutronix.de/git/pza/linux tags/reset-fixes-for-v5.5
+	<no branch> (958c6014c64ef51e5f647d2de527c53e773c8a84)
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-5.4-2
+	<no branch> (e690053e97e7a9c968df9a97cef9089dfa8e6a44)
+		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-fixes-for-5.4-2
 
