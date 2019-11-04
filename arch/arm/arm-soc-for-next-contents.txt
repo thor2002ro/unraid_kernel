@@ -14,6 +14,8 @@ arm/soc
 		ARM: ASPEED: update default ARCH_NR_GPIO for ARCH_ASPEED
 	renesas/soc
 		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-soc-for-v5.5-tag1
+	tegra/soc-fixes
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-arm-core
 
 arm/dt
 	renesas/dt
@@ -75,6 +77,16 @@ arm/dt
 		ARM: dts: atlas7: Fix "debounce-interval" property misspelling
 	sunxi/dt
 		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-dt-for-5.5-1
+	tegra/dt-bindings
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-dt-bindings
+	tegra/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-arm-dt
+	tegra/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-arm64-dt
+	mvebu/dt
+		git://git.infradead.org/linux-mvebu tags/mvebu-dt-5.5-1
+	mvebu/dt64
+		git://git.infradead.org/linux-mvebu tags/mvebu-dt64-5.5-1
 
 arm/drivers
 	renesas/drivers
@@ -96,6 +108,10 @@ arm/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/ssantosh/linux-keystone for_5.5/driver-soc
 	renesas/drivers-2
 		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-drivers-for-v5.5-tag2
+	tegra/firmware
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-firmware
+	tegra/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-soc
 
 arm/defconfig
 	patch
@@ -124,6 +140,8 @@ arm/defconfig
 		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-config-for-5.5-2
 	sunxi/defconfig64
 		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-config64-for-5.5-1
+	tegra/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-arm-defconfig
 
 arm/late
 
