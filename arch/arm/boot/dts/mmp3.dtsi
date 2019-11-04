@@ -486,7 +486,7 @@
 			cache-level = <2>;
 		};
 
-		soc_clocks: clocks {
+		soc_clocks: clocks@d4050000 {
 			compatible = "marvell,mmp2-clock";
 			reg = <0xd4050000 0x1000>,
 			      <0xd4282800 0x400>,
@@ -517,7 +517,7 @@
 			reg = <0xe0000600 0x20>;
 		};
 
-		watchdog@2c000620 {
+		watchdog@e0000620 {
 			compatible = "arm,arm11mp-twd-wdt";
 			reg = <0xe0000620 0x20>;
 			interrupts = <GIC_PPI 14 (GIC_CPU_MASK_SIMPLE(2) |
