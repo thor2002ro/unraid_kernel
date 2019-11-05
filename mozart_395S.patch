@@ -1,0 +1,43 @@
+From: Morgan Jones <me@numin.it>
+Date: Sun, 13 Mar 2016 00:56:04 +0000
+Subject: [PATCH] Add quirks for Yuan Yuan Enterprises capture cards
+
+---
+ drivers/pci/quirks.c    | 7 +++++++
+ include/linux/pci_ids.h | 4 ++++
+ 2 files changed, 11 insertions(+)
+
+diff --git a/drivers/pci/quirks.c b/drivers/pci/quirks.c
+index 7e32730..77d48d9 100644
+--- a/drivers/pci/quirks.c
++++ b/drivers/pci/quirks.c
+@@ -3391,6 +3391,13 @@ static void quirk_no_bus_reset(struct pci_dev *dev)
+  */
+ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_CAVIUM, 0xa100, quirk_no_bus_reset);
+ 
++/*
++ * Yuan Yuan Enterprises PCI capture cards based on the Mozart 395S
++ * completely break on bus reset.
++ */
++DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_YYE, PCI_DEVICE_ID_YYE_MOZART_395S,
++			 quirk_no_bus_reset);
++
+ static void quirk_no_pm_reset(struct pci_dev *dev)
+ {
+ 	/*
+diff --git a/include/linux/pci_ids.h b/include/linux/pci_ids.h
+index d9ba49c..46e5c63 100644
+--- a/include/linux/pci_ids.h
++++ b/include/linux/pci_ids.h
+@@ -1784,6 +1784,10 @@
+ /* formerly Platform Tech */
+ #define PCI_DEVICE_ID_ESS_ESS0100	0x0100
+ 
++/* Yuan Yuan Enterprise Co. Ltd (e.g. Elgato HD60 Pro capture cards) */
++#define PCI_VENDOR_ID_YYE		0x12ab
++#define PCI_DEVICE_ID_YYE_MOZART_395S	0x0380	/* Elgato HD60 Pro */
++
+ #define PCI_VENDOR_ID_ALTEON		0x12ae
+ 
+ #define PCI_SUBVENDOR_ID_CONNECT_TECH			0x12c4
+-- 
