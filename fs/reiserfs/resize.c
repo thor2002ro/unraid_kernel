@@ -39,7 +39,8 @@ int reiserfs_resize(struct super_block *s, unsigned long block_count_new)
 	sb = SB_DISK_SUPER_BLOCK(s);
 
 	if (SB_BLOCK_COUNT(s) >= block_count_new) {
-		printk("can\'t shrink filesystem on-line\n");
+                if (SB_BLOCK_COUNT(s) > block_count_new)
+                        printk("can\'t shrink filesystem on-line\n");
 		return -EINVAL;
 	}
 
