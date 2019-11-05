@@ -108,7 +108,12 @@ static void flush_old_commits(struct work_struct *work)
 		sbi->work_queued = 0;
 	spin_unlock(&sbi->old_work_lock);
 
-	reiserfs_sync_fs(s, 1);
+        // lime-tech: avoid needless spin-ups
+	//reiserfs_sync_fs(s, 1);
+        reiserfs_write_lock(s);
+        reiserfs_flush_old_commits(s);
+        reiserfs_write_unlock(s);
+        //
 	up_read(&s->s_umount);
 }
 
