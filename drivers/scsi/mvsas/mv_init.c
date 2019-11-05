@@ -652,6 +652,7 @@ static struct pci_device_id mvs_pci_table[] = {
 	{ PCI_VDEVICE(TTI, 0x2740), chip_9480 },
 	{ PCI_VDEVICE(TTI, 0x2744), chip_9480 },
 	{ PCI_VDEVICE(TTI, 0x2760), chip_9480 },
+	{ PCI_VDEVICE(TTI, 0x2782), chip_9480 },
 	{
 		.vendor		= PCI_VENDOR_ID_MARVELL_EXT,
 		.device		= 0x9480,
