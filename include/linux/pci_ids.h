@@ -1798,6 +1798,10 @@
 /* formerly Platform Tech */
 #define PCI_DEVICE_ID_ESS_ESS0100	0x0100
 
+/* Yuan Yuan Enterprise Co. Ltd (e.g. Elgato HD60 Pro capture cards) */
+#define PCI_VENDOR_ID_YYE		0x12ab
+#define PCI_DEVICE_ID_YYE_MOZART_395S	0x0380	/* Elgato HD60 Pro */
+
 #define PCI_VENDOR_ID_ALTEON		0x12ae
 
 #define PCI_SUBVENDOR_ID_CONNECT_TECH			0x12c4
