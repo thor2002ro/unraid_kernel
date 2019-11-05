@@ -1,0 +1,11 @@
+--- a/include/linux/blkdev.h	2019-09-20 22:18:51.000000000 -0700
++++ b/include/linux/blkdev.h	2019-10-04 11:31:07.990829955 -0700
+@@ -1324,7 +1324,7 @@
+	struct list_head mq_list; /* blk-mq requests */
+	struct list_head cb_list; /* md requires an unplug callback */
+ };
+-#define BLK_MAX_REQUEST_COUNT 16
++#define BLK_MAX_REQUEST_COUNT 32
+ #define BLK_PLUG_FLUSH_SIZE (128 * 1024)
+ 
+ struct blk_plug_cb;
