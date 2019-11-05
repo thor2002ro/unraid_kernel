@@ -14,185 +14,11 @@ menuconfig MD
 if MD
 
 config BLK_DEV_MD
-	tristate "RAID support"
+	tristate "Unraid support"
+	depends on MD
+	select XOR_BLOCKS
 	---help---
-	  This driver lets you combine several hard disk partitions into one
-	  logical block device. This can be used to simply append one
-	  partition to another one or to combine several redundant hard disks
-	  into a RAID1/4/5 device so as to provide protection against hard
-	  disk failures. This is called "Software RAID" since the combining of
-	  the partitions is done by the kernel. "Hardware RAID" means that the
-	  combining is done by a dedicated controller; if you have such a
-	  controller, you do not need to say Y here.
-
-	  More information about Software RAID on Linux is contained in the
-	  Software RAID mini-HOWTO, available from
-	  <http://www.tldp.org/docs.html#howto>. There you will also learn
-	  where to get the supporting user space utilities raidtools.
-
-	  If unsure, say N.
-
-config MD_AUTODETECT
-	bool "Autodetect RAID arrays during kernel boot"
-	depends on BLK_DEV_MD=y
-	default y
-	---help---
-	  If you say Y here, then the kernel will try to autodetect raid
-	  arrays as part of its boot process. 
-
-	  If you don't use raid and say Y, this autodetection can cause 
-	  a several-second delay in the boot time due to various
-	  synchronisation steps that are part of this step.
-
-	  If unsure, say Y.
-
-config MD_LINEAR
-	tristate "Linear (append) mode"
-	depends on BLK_DEV_MD
-	---help---
-	  If you say Y here, then your multiple devices driver will be able to
-	  use the so-called linear mode, i.e. it will combine the hard disk
-	  partitions by simply appending one to the other.
-
-	  To compile this as a module, choose M here: the module
-	  will be called linear.
-
-	  If unsure, say Y.
-
-config MD_RAID0
-	tristate "RAID-0 (striping) mode"
-	depends on BLK_DEV_MD
-	---help---
-	  If you say Y here, then your multiple devices driver will be able to
-	  use the so-called raid0 mode, i.e. it will combine the hard disk
-	  partitions into one logical device in such a fashion as to fill them
-	  up evenly, one chunk here and one chunk there. This will increase
-	  the throughput rate if the partitions reside on distinct disks.
-
-	  Information about Software RAID on Linux is contained in the
-	  Software-RAID mini-HOWTO, available from
-	  <http://www.tldp.org/docs.html#howto>. There you will also
-	  learn where to get the supporting user space utilities raidtools.
-
-	  To compile this as a module, choose M here: the module
-	  will be called raid0.
-
-	  If unsure, say Y.
-
-config MD_RAID1
-	tristate "RAID-1 (mirroring) mode"
-	depends on BLK_DEV_MD
-	---help---
-	  A RAID-1 set consists of several disk drives which are exact copies
-	  of each other.  In the event of a mirror failure, the RAID driver
-	  will continue to use the operational mirrors in the set, providing
-	  an error free MD (multiple device) to the higher levels of the
-	  kernel.  In a set with N drives, the available space is the capacity
-	  of a single drive, and the set protects against a failure of (N - 1)
-	  drives.
-
-	  Information about Software RAID on Linux is contained in the
-	  Software-RAID mini-HOWTO, available from
-	  <http://www.tldp.org/docs.html#howto>.  There you will also
-	  learn where to get the supporting user space utilities raidtools.
-
-	  If you want to use such a RAID-1 set, say Y.  To compile this code
-	  as a module, choose M here: the module will be called raid1.
-
-	  If unsure, say Y.
-
-config MD_RAID10
-	tristate "RAID-10 (mirrored striping) mode"
-	depends on BLK_DEV_MD
-	---help---
-	  RAID-10 provides a combination of striping (RAID-0) and
-	  mirroring (RAID-1) with easier configuration and more flexible
-	  layout.
-	  Unlike RAID-0, but like RAID-1, RAID-10 requires all devices to
-	  be the same size (or at least, only as much as the smallest device
-	  will be used).
-	  RAID-10 provides a variety of layouts that provide different levels
-	  of redundancy and performance.
-
-	  RAID-10 requires mdadm-1.7.0 or later, available at:
-
-	  https://www.kernel.org/pub/linux/utils/raid/mdadm/
-
-	  If unsure, say Y.
-
-config MD_RAID456
-	tristate "RAID-4/RAID-5/RAID-6 mode"
-	depends on BLK_DEV_MD
-	select RAID6_PQ
-	select LIBCRC32C
-	select ASYNC_MEMCPY
-	select ASYNC_XOR
-	select ASYNC_PQ
-	select ASYNC_RAID6_RECOV
-	---help---
-	  A RAID-5 set of N drives with a capacity of C MB per drive provides
-	  the capacity of C * (N - 1) MB, and protects against a failure
-	  of a single drive. For a given sector (row) number, (N - 1) drives
-	  contain data sectors, and one drive contains the parity protection.
-	  For a RAID-4 set, the parity blocks are present on a single drive,
-	  while a RAID-5 set distributes the parity across the drives in one
-	  of the available parity distribution methods.
-
-	  A RAID-6 set of N drives with a capacity of C MB per drive
-	  provides the capacity of C * (N - 2) MB, and protects
-	  against a failure of any two drives. For a given sector
-	  (row) number, (N - 2) drives contain data sectors, and two
-	  drives contains two independent redundancy syndromes.  Like
-	  RAID-5, RAID-6 distributes the syndromes across the drives
-	  in one of the available parity distribution methods.
-
-	  Information about Software RAID on Linux is contained in the
-	  Software-RAID mini-HOWTO, available from
-	  <http://www.tldp.org/docs.html#howto>. There you will also
-	  learn where to get the supporting user space utilities raidtools.
-
-	  If you want to use such a RAID-4/RAID-5/RAID-6 set, say Y.  To
-	  compile this code as a module, choose M here: the module
-	  will be called raid456.
-
-	  If unsure, say Y.
-
-config MD_MULTIPATH
-	tristate "Multipath I/O support"
-	depends on BLK_DEV_MD
-	help
-	  MD_MULTIPATH provides a simple multi-path personality for use
-	  the MD framework.  It is not under active development.  New
-	  projects should consider using DM_MULTIPATH which has more
-	  features and more testing.
-
-	  If unsure, say N.
-
-config MD_FAULTY
-	tristate "Faulty test module for MD"
-	depends on BLK_DEV_MD
-	help
-	  The "faulty" module allows for a block device that occasionally returns
-	  read or write errors.  It is useful for testing.
-
-	  In unsure, say N.
-
-
-config MD_CLUSTER
-	tristate "Cluster Support for MD"
-	depends on BLK_DEV_MD
-	depends on DLM
-	default n
-	---help---
-	Clustering support for MD devices. This enables locking and
-	synchronization across multiple systems on the cluster, so all
-	nodes in the cluster can access the MD devices simultaneously.
-
-	This brings the redundancy (and uptime) of RAID levels across the
-	nodes of the cluster. Currently, it can work with raid1 and raid10
-	(limited support).
-
-	If unsure, say N.
+	Lime Technology Unraid driver.
 
 source "drivers/md/bcache/Kconfig"
 
@@ -271,7 +97,6 @@ config DM_CRYPT
 	depends on BLK_DEV_DM
 	select CRYPTO
 	select CRYPTO_CBC
-	select CRYPTO_ESSIV
 	---help---
 	  This device-mapper target allows you to create a device that
 	  transparently encrypts the data on it. You'll need to activate
@@ -346,20 +171,6 @@ config DM_ERA
          dm-era tracks which parts of a block device are written to
          over time.  Useful for maintaining cache coherency when using
          vendor snapshots.
-
-config DM_CLONE
-       tristate "Clone target (EXPERIMENTAL)"
-       depends on BLK_DEV_DM
-       default n
-       select DM_PERSISTENT_DATA
-       ---help---
-         dm-clone produces a one-to-one copy of an existing, read-only source
-         device into a writable destination device. The cloned device is
-         visible/mountable immediately and the copy of the source device to the
-         destination device happens in the background, in parallel with user
-         I/O.
-
-         If unsure, say N.
 
 config DM_MIRROR
        tristate "Mirror target"
@@ -502,18 +313,6 @@ config DM_VERITY
 
 	  To compile this code as a module, choose M here: the module will
 	  be called dm-verity.
-
-	  If unsure, say N.
-
-config DM_VERITY_VERIFY_ROOTHASH_SIG
-	def_bool n
-	bool "Verity data device root hash signature verification support"
-	depends on DM_VERITY
-	select SYSTEM_DATA_VERIFICATION
-	  help
-	  Add ability for dm-verity device to be validated if the
-	  pre-generated tree of cryptographic checksums passed has a pkcs#7
-	  signature file that can validate the roothash of the tree.
 
 	  If unsure, say N.
 
