@@ -1,0 +1,12 @@
+--- a/fs/reiserfs/resize.c	2015-10-03 04:49:38.000000000 -0700
++++ b/fs/reiserfs/resize.c	2015-09-20 12:03:27.000000000 -0700
+@@ -39,7 +39,8 @@
+ 	sb = SB_DISK_SUPER_BLOCK(s);
+ 
+ 	if (SB_BLOCK_COUNT(s) >= block_count_new) {
+-		printk("can\'t shrink filesystem on-line\n");
++                if (SB_BLOCK_COUNT(s) > block_count_new)
++                        printk("can\'t shrink filesystem on-line\n");
+ 		return -EINVAL;
+ 	}
+ 
