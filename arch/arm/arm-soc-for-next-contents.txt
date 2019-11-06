@@ -103,6 +103,10 @@ arm/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-dt64-5.5
 	imx/dt64-tmu
 		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-dt64-tmu-5.5
+	qcom/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-for-5.5
+	qcom/dt32
+		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-dts-for-5.5
 
 arm/drivers
 	renesas/drivers
@@ -132,6 +136,8 @@ arm/drivers
 		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-drivers-5.5
 	imx/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-drivers-5.5
+	qcom/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-drivers-for-5.5
 
 arm/defconfig
 	patch
@@ -164,6 +170,8 @@ arm/defconfig
 		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-arm-defconfig
 	imx/defconfig
 		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-defconfig-5.5
+	qcom/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-defconfig-for-5.5
 
 arm/late
 
