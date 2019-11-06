@@ -16,6 +16,10 @@ arm/soc
 		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-soc-for-v5.5-tag1
 	tegra/soc-fixes
 		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-arm-core
+	samsung/soc
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-soc-5.5
+	imx/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-soc-5.5
 
 arm/dt
 	renesas/dt
@@ -87,6 +91,18 @@ arm/dt
 		git://git.infradead.org/linux-mvebu tags/mvebu-dt-5.5-1
 	mvebu/dt64
 		git://git.infradead.org/linux-mvebu tags/mvebu-dt64-5.5-1
+	sunxi/pmu-enable
+		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-fixes-for-5.4-3
+	sunxi/dt2
+		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-dt-for-5.5-2
+	imx/dt-bindings
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-bindings-5.5
+	imx/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-dt-5.5
+	imx/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-dt64-5.5
+	imx/dt64-tmu
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-dt64-tmu-5.5
 
 arm/drivers
 	renesas/drivers
@@ -112,6 +128,10 @@ arm/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-firmware
 	tegra/soc
 		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-soc
+	samsung/drivers
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-drivers-5.5
+	imx/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-drivers-5.5
 
 arm/defconfig
 	patch
@@ -142,6 +162,8 @@ arm/defconfig
 		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-config64-for-5.5-1
 	tegra/defconfig
 		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-arm-defconfig
+	imx/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-defconfig-5.5
 
 arm/late
 
@@ -152,4 +174,10 @@ arm/fixes
 		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-5.4-2
 	<no branch> (e690053e97e7a9c968df9a97cef9089dfa8e6a44)
 		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-fixes-for-5.4-2
+	<no branch> (f852497c9a07ec9913bb3f3db5f096a8e2ab7e03)
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-5.4-3
+	<no branch> (f4d6e0f79bcde7810890563bac8e0f3479fe6d03)
+		git://git.kernel.org/pub/scm/linux/kernel/git/atorgue/stm32 tags/stm32-dt-for-v5.4-fixes-2
+	patch
+		MAINTAINERS: update Cavium ThunderX2 maintainers
 
