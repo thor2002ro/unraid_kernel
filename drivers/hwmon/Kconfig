@@ -1922,6 +1922,11 @@ config SENSORS_XGENE
 	  If you say yes here you get support for the temperature
 	  and power sensors for APM X-Gene SoC.
 
+config SENSORS_ZENPOWER
+	tristate "AMD ZENPOWER 0.1.5"
+	depends on X86 && PCI && AMD_NB
+	default m
+
 if ACPI
 
 comment "ACPI drivers"
