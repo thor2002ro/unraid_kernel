@@ -115,6 +115,12 @@ arm/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-5.5-dt
 	ti/k3-dts
 		git://git.kernel.org/pub/scm/linux/kernel/git/kristo/linux tags/ti-k3-soc-for-v5.5
+	rockchip/dt-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.5-rockchip-dts32-2
+	rockchip/dt64-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.5-rockchip-dts64-2
+	amlogic/dt64
+		https://git.kernel.org/pub/scm/linux/kernel/git/khilman/linux-amlogic tags/amlogic-dt64
 
 arm/drivers
 	renesas/drivers
@@ -150,6 +156,8 @@ arm/drivers
 		https://github.com/Xilinx/linux-xlnx tags/zynqmp-soc-for-v5.5
 	at91/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-5.5-drivers
+	amlogic/drivers
+		https://git.kernel.org/pub/scm/linux/kernel/git/khilman/linux-amlogic tags/amlogic-drivers
 
 arm/defconfig
 	patch
@@ -190,16 +198,4 @@ arm/defconfig
 arm/late
 
 arm/fixes
-	<no branch> (f430c7ed8bc22992ed528b518da465b060b9223f)
-		git://git.pengutronix.de/git/pza/linux tags/reset-fixes-for-v5.5
-	<no branch> (958c6014c64ef51e5f647d2de527c53e773c8a84)
-		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-5.4-2
-	<no branch> (e690053e97e7a9c968df9a97cef9089dfa8e6a44)
-		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-fixes-for-5.4-2
-	<no branch> (f852497c9a07ec9913bb3f3db5f096a8e2ab7e03)
-		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-5.4-3
-	<no branch> (f4d6e0f79bcde7810890563bac8e0f3479fe6d03)
-		git://git.kernel.org/pub/scm/linux/kernel/git/atorgue/stm32 tags/stm32-dt-for-v5.4-fixes-2
-	patch
-		MAINTAINERS: update Cavium ThunderX2 maintainers
 
