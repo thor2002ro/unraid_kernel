@@ -121,6 +121,10 @@ arm/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.5-rockchip-dts64-2
 	amlogic/dt64
 		https://git.kernel.org/pub/scm/linux/kernel/git/khilman/linux-amlogic tags/amlogic-dt64
+	mediatek/dt
+		https://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.4-next-dts
+	mediatek/dt64
+		https://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.4-next-dts64
 
 arm/drivers
 	renesas/drivers
@@ -158,6 +162,12 @@ arm/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-5.5-drivers
 	amlogic/drivers
 		https://git.kernel.org/pub/scm/linux/kernel/git/khilman/linux-amlogic tags/amlogic-drivers
+	mediatek/soc
+		https://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.4-next-soc
+	hisi/drivers
+		git://github.com/hisilicon/linux-hisi tags/hisi-drivers-for-5.5
+	tegra/memory
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-memory-v2
 
 arm/defconfig
 	patch
