@@ -493,7 +493,9 @@ void show_trace(struct task_struct *task, unsigned long *sp)
 	walk_stackframe(sp, show_trace_cb, NULL);
 }
 
-static int kstack_depth_to_print = CONFIG_PRINT_STACK_DEPTH;
+#define STACK_DUMP_ENTRY_SIZE 4
+#define STACK_DUMP_LINE_SIZE 32
+static size_t kstack_depth_to_print = CONFIG_PRINT_STACK_DEPTH;
 
 void show_stack(struct task_struct *task, unsigned long *sp)
 {
@@ -502,11 +504,12 @@ void show_stack(struct task_struct *task, unsigned long *sp)
 	if (!sp)
 		sp = stack_pointer(task);
 
-	len = min((-(unsigned long)sp) & (THREAD_SIZE - 4),
-		  kstack_depth_to_print * 4ul);
+	len = min((-(size_t)sp) & (THREAD_SIZE - STACK_DUMP_ENTRY_SIZE),
+		  kstack_depth_to_print * STACK_DUMP_ENTRY_SIZE);
 
 	pr_info("Stack:\n");
-	print_hex_dump(KERN_INFO, " ", DUMP_PREFIX_NONE, 32, 4,
+	print_hex_dump(KERN_INFO, " ", DUMP_PREFIX_NONE,
+		       STACK_DUMP_LINE_SIZE, STACK_DUMP_ENTRY_SIZE,
 		       sp, len, false);
 	show_trace(task, sp);
 }
