@@ -20,6 +20,10 @@ arm/soc
 		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-soc-5.5
 	imx/soc
 		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-soc-5.5
+	omap/soc-late
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/soc-late-signed
+	omap/maintainers
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/maintainers-signed
 
 arm/dt
 	renesas/dt
@@ -125,6 +129,8 @@ arm/dt
 		https://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.4-next-dts
 	mediatek/dt64
 		https://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.4-next-dts64
+	omsp/dt-late
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/dt-late-signed
 
 arm/drivers
 	renesas/drivers
@@ -168,6 +174,8 @@ arm/drivers
 		git://github.com/hisilicon/linux-hisi tags/hisi-drivers-for-5.5
 	tegra/memory
 		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-memory-v2
+	fsl/soc-drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/leo/linux tags/soc-fsl-next-v5.5
 
 arm/defconfig
 	patch
