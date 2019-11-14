@@ -1938,8 +1938,8 @@ int ufshcd_copy_query_response(struct ufs_hba *hba, struct ufshcd_lrb *lrbp)
 			memcpy(hba->dev_cmd.query.descriptor, descp, resp_len);
 		} else {
 			dev_warn(hba->dev,
-				"%s: Response size is bigger than buffer",
-				__func__);
+				 "%s: rsp size %d is bigger than buffer size %d",
+				 __func__, resp_len, buf_len);
 			return -EINVAL;
 		}
 	}
@@ -2989,10 +2989,10 @@ static int __ufshcd_query_descriptor(struct ufs_hba *hba,
 		goto out_unlock;
 	}
 
-	hba->dev_cmd.query.descriptor = NULL;
 	*buf_len = be16_to_cpu(response->upiu_res.length);
 
 out_unlock:
+	hba->dev_cmd.query.descriptor = NULL;
 	mutex_unlock(&hba->dev_cmd.lock);
 out:
 	ufshcd_release(hba);
@@ -5864,7 +5864,9 @@ static int ufshcd_issue_devman_upiu_cmd(struct ufs_hba *hba,
 			memcpy(desc_buff, descp, resp_len);
 			*buff_len = resp_len;
 		} else {
-			dev_warn(hba->dev, "rsp size is bigger than buffer");
+			dev_warn(hba->dev,
+				 "%s: rsp size %d is bigger than buffer size %d",
+				 __func__, resp_len, *buff_len);
 			*buff_len = 0;
 			err = -EINVAL;
 		}
