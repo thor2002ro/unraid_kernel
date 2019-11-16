@@ -562,6 +562,7 @@
 			resets = <&ccu RST_BUS_OHCI1>,
 				 <&ccu RST_BUS_EHCI1>;
 			phys = <&usbphy 1>;
+			phy-names = "usb";
 			status = "disabled";
 		};
 
@@ -573,6 +574,7 @@
 				 <&ccu CLK_USB_OHCI1>;
 			resets = <&ccu RST_BUS_OHCI1>;
 			phys = <&usbphy 1>;
+			phy-names = "usb";
 			status = "disabled";
 		};
 

@@ -282,6 +282,7 @@
 			clocks = <&ccu CLK_BUS_EHCI1>;
 			resets = <&ccu RST_BUS_EHCI1>;
 			phys = <&usbphy 1>;
+			phy-names = "usb";
 			status = "disabled";
 		};
 
@@ -293,6 +294,7 @@
 				 <&ccu CLK_USB_OHCI1>;
 			resets = <&ccu RST_BUS_OHCI1>;
 			phys = <&usbphy 1>;
+			phy-names = "usb";
 			status = "disabled";
 		};
 
@@ -303,6 +305,7 @@
 			clocks = <&ccu CLK_BUS_EHCI2>;
 			resets = <&ccu RST_BUS_EHCI2>;
 			phys = <&usbphy 2>;
+			phy-names = "usb";
 			status = "disabled";
 		};
 
@@ -314,6 +317,7 @@
 				 <&ccu CLK_USB_OHCI2>;
 			resets = <&ccu RST_BUS_OHCI2>;
 			phys = <&usbphy 2>;
+			phy-names = "usb";
 			status = "disabled";
 		};
 
