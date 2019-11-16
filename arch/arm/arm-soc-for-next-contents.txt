@@ -176,6 +176,8 @@ arm/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-memory-v2
 	fsl/soc-drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/leo/linux tags/soc-fsl-next-v5.5
+	drivers/scmi-fix-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/scmi-fix-5.5
 
 arm/defconfig
 	patch
