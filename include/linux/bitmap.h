@@ -520,7 +520,7 @@ static inline void bitmap_set_value8(unsigned long *map, unsigned long value,
 	const size_t index = BIT_WORD(start);
 	const unsigned long offset = start % BITS_PER_LONG;
 
-	map[index] &= ~(0xFF << offset);
+	map[index] &= ~(0xFFULL << offset);
 	map[index] |= value << offset;
 }
 
