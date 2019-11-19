@@ -2165,6 +2165,12 @@ config IO_STRICT_DEVMEM
 
 	  If in doubt, say Y.
 
+config DEBUG_AID_FOR_SYZBOT
+       bool "Additional debug code for syzbot"
+       default n
+       help
+         This option is intended for testing by syzbot.
+
 source "arch/$(SRCARCH)/Kconfig.debug"
 
 endmenu # Kernel hacking
