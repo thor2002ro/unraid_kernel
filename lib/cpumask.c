@@ -6,6 +6,7 @@
 #include <linux/export.h>
 #include <linux/memblock.h>
 #include <linux/numa.h>
+#include <linux/spinlock.h>
 
 /**
  * cpumask_next - get the next cpu in a cpumask
@@ -253,6 +254,7 @@ static unsigned int __cpumask_local_spread(unsigned int i, int node)
 	BUG();
 }
 
+static DEFINE_SPINLOCK(spread_lock);
 /**
  * cpumask_local_spread - select the i'th cpu with local numa cpu's first
  * @i: index number
@@ -266,8 +268,9 @@ static unsigned int __cpumask_local_spread(unsigned int i, int node)
  */
 unsigned int cpumask_local_spread(unsigned int i, int node)
 {
-	int node_dist[MAX_NUMNODES] = {0};
-	bool used[MAX_NUMNODES] = {0};
+	static int node_dist[MAX_NUMNODES];
+	static bool used[MAX_NUMNODES];
+	unsigned long flags;
 	int cpu, j, id;
 
 	/* Wrap: we always want a cpu. */
@@ -281,6 +284,8 @@ unsigned int cpumask_local_spread(unsigned int i, int node)
 		if (nr_node_ids > MAX_NUMNODES)
 			return __cpumask_local_spread(i, node);
 
+		spin_lock_irqsave(&spread_lock, flags);
+		memset(used, 0, nr_node_ids * sizeof(bool));
 		calc_node_distance(node_dist, node);
 		for (j = 0; j < nr_node_ids; j++) {
 			id = find_nearest_node(node_dist, used);
@@ -289,10 +294,14 @@ unsigned int cpumask_local_spread(unsigned int i, int node)
 
 			for_each_cpu_and(cpu, cpumask_of_node(id),
 					 cpu_online_mask)
-				if (i-- == 0)
+				if (i-- == 0) {
+					spin_unlock_irqrestore(&spread_lock,
+							       flags);
 					return cpu;
+				}
 			used[id] = 1;
 		}
+		spin_unlock_irqrestore(&spread_lock, flags);
 
 		for_each_cpu(cpu, cpu_online_mask)
 			if (i-- == 0)
