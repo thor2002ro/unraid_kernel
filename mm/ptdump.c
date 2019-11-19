@@ -120,7 +120,7 @@ static int ptdump_hole(unsigned long addr, unsigned long next,
 	return 0;
 }
 
-const static struct mm_walk_ops ptdump_ops = {
+static const struct mm_walk_ops ptdump_ops = {
 	.pgd_entry	= ptdump_pgd_entry,
 	.p4d_entry	= ptdump_p4d_entry,
 	.pud_entry	= ptdump_pud_entry,
