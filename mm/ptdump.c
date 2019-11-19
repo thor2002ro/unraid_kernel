@@ -140,7 +140,8 @@ void ptdump_walk_pgd(struct ptdump_state *st, struct mm_struct *mm)
 
 	down_read(&mm->mmap_sem);
 	while (range->start != range->end) {
-		walk_page_range(mm, range->start, range->end, &ptdump_ops, st);
+		walk_page_range_novma(mm, range->start, range->end,
+				      &ptdump_ops, st);
 		range++;
 	}
 	up_read(&mm->mmap_sem);
