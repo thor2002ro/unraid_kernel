@@ -254,7 +254,6 @@ static unsigned int __cpumask_local_spread(unsigned int i, int node)
 	BUG();
 }
 
-static DEFINE_SPINLOCK(spread_lock);
 /**
  * cpumask_local_spread - select the i'th cpu with local numa cpu's first
  * @i: index number
@@ -270,6 +269,7 @@ unsigned int cpumask_local_spread(unsigned int i, int node)
 {
 	static int node_dist[MAX_NUMNODES];
 	static bool used[MAX_NUMNODES];
+	static DEFINE_SPINLOCK(spread_lock);
 	unsigned long flags;
 	int cpu, j, id;
 
