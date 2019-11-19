@@ -2166,7 +2166,11 @@ config DEBUG_AID_FOR_SYZBOT
        help
          This option is intended for testing by syzbot.
 
+menu "$(SRCARCH) Debugging"
+
 source "arch/$(SRCARCH)/Kconfig.debug"
+
+endmenu
 
 config HYPERV_TESTING
 	bool "Microsoft Hyper-V driver testing"
