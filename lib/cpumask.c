@@ -192,18 +192,39 @@ void __init free_bootmem_cpumask_var(cpumask_var_t mask)
 }
 #endif
 
-/**
- * cpumask_local_spread - select the i'th cpu with local numa cpu's first
- * @i: index number
- * @node: local numa_node
- *
- * This function selects an online CPU according to a numa aware policy;
- * local cpus are returned first, followed by non-local ones, then it
- * wraps around.
- *
- * It's not very efficient, but useful for setup.
- */
-unsigned int cpumask_local_spread(unsigned int i, int node)
+static void calc_node_distance(int *node_dist, int node)
+{
+	int i;
+
+	for (i = 0; i < nr_node_ids; i++)
+		node_dist[i] = node_distance(node, i);
+}
+
+static int find_nearest_node(int *node_dist, bool *used)
+{
+	int i, min_dist = node_dist[0], node_id = -1;
+
+	/* Choose the first unused node to compare */
+	for (i = 0; i < nr_node_ids; i++) {
+		if (used[i] == 0) {
+			min_dist = node_dist[i];
+			node_id = i;
+			break;
+		}
+	}
+
+	/* Compare and return the nearest node */
+	for (i = 0; i < nr_node_ids; i++) {
+		if (node_dist[i] < min_dist && used[i] == 0) {
+			min_dist = node_dist[i];
+			node_id = i;
+		}
+	}
+
+	return node_id;
+}
+
+static unsigned int __cpumask_local_spread(unsigned int i, int node)
 {
 	int cpu;
 
@@ -228,6 +249,54 @@ unsigned int cpumask_local_spread(unsigned int i, int node)
 			if (i-- == 0)
 				return cpu;
 		}
+	}
+	BUG();
+}
+
+/**
+ * cpumask_local_spread - select the i'th cpu with local numa cpu's first
+ * @i: index number
+ * @node: local numa_node
+ *
+ * This function selects an online CPU according to a numa aware policy;
+ * local cpus are returned first, followed by the nearest non-local ones,
+ * then it wraps around.
+ *
+ * It's not very efficient, but useful for setup.
+ */
+unsigned int cpumask_local_spread(unsigned int i, int node)
+{
+	int node_dist[MAX_NUMNODES] = {0};
+	bool used[MAX_NUMNODES] = {0};
+	int cpu, j, id;
+
+	/* Wrap: we always want a cpu. */
+	i %= num_online_cpus();
+
+	if (node == NUMA_NO_NODE) {
+		for_each_cpu(cpu, cpu_online_mask)
+			if (i-- == 0)
+				return cpu;
+	} else {
+		if (nr_node_ids > MAX_NUMNODES)
+			return __cpumask_local_spread(i, node);
+
+		calc_node_distance(node_dist, node);
+		for (j = 0; j < nr_node_ids; j++) {
+			id = find_nearest_node(node_dist, used);
+			if (id < 0)
+				break;
+
+			for_each_cpu_and(cpu, cpumask_of_node(id),
+					 cpu_online_mask)
+				if (i-- == 0)
+					return cpu;
+			used[id] = 1;
+		}
+
+		for_each_cpu(cpu, cpu_online_mask)
+			if (i-- == 0)
+				return cpu;
 	}
 	BUG();
 }
