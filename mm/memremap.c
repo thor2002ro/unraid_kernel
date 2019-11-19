@@ -55,8 +55,16 @@ static void pgmap_array_delete(struct resource *res)
 
 static unsigned long pfn_first(struct dev_pagemap *pgmap)
 {
-	return PHYS_PFN(pgmap->res.start) +
-		vmem_altmap_offset(pgmap_altmap(pgmap));
+	const struct resource *res = &pgmap->res;
+	struct vmem_altmap *altmap = pgmap_altmap(pgmap);
+	unsigned long pfn;
+
+	if (altmap) {
+		pfn = altmap->base_pfn + vmem_altmap_offset(altmap);
+	} else
+		pfn = PHYS_PFN(res->start);
+
+	return pfn;
 }
 
 static unsigned long pfn_end(struct dev_pagemap *pgmap)
