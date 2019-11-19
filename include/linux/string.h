@@ -35,6 +35,51 @@ ssize_t strscpy(char *, const char *, size_t);
 /* Wraps calls to strscpy()/memset(), no arch specific code required */
 ssize_t strscpy_pad(char *dest, const char *src, size_t count);
 
+/**
+ * stracpy - Copy a C-string into an array of char/u8/s8 or equivalent
+ * @dest: Where to copy the string, must be an array of char and not a pointer
+ * @src: String to copy, may be a pointer or const char array
+ *
+ * Helper for strscpy().
+ * Copies a maximum of sizeof(@dest) bytes of @src with %NUL termination.
+ *
+ * Returns:
+ * * The number of characters copied (not including the trailing %NUL)
+ * * -E2BIG if @dest is a zero size array or @src was truncated.
+ */
+#define stracpy(dest, src)						\
+({									\
+	size_t count = ARRAY_SIZE(dest);				\
+	BUILD_BUG_ON(!(__same_type(dest, char[]) ||			\
+		       __same_type(dest, unsigned char[]) ||		\
+		       __same_type(dest, signed char[])));		\
+									\
+	strscpy(dest, src, count);					\
+})
+
+/**
+ * stracpy_pad - Copy a C-string into an array of char/u8/s8 with %NUL padding
+ * @dest: Where to copy the string, must be an array of char and not a pointer
+ * @src: String to copy, may be a pointer or const char array
+ *
+ * Helper for strscpy_pad().
+ * Copies a maximum of sizeof(@dest) bytes of @src with %NUL termination
+ * and zero-pads the remaining size of @dest
+ *
+ * Returns:
+ * * The number of characters copied (not including the trailing %NUL)
+ * * -E2BIG if @dest is a zero size array or @src was truncated.
+ */
+#define stracpy_pad(dest, src)						\
+({									\
+	size_t count = ARRAY_SIZE(dest);				\
+	BUILD_BUG_ON(!(__same_type(dest, char[]) ||			\
+		       __same_type(dest, unsigned char[]) ||		\
+		       __same_type(dest, signed char[])));		\
+									\
+	strscpy_pad(dest, src, count);					\
+})
+
 #ifndef __HAVE_ARCH_STRCAT
 extern char * strcat(char *, const char *);
 #endif
