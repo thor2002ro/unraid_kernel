@@ -126,6 +126,9 @@ static int tomoyo_bprm_check_security(struct linux_binprm *bprm)
  */
 static int tomoyo_inode_getattr(const struct path *path)
 {
+	/* It is not safe to call tomoyo_get_socket_name(). */
+	if (S_ISSOCK(d_inode(path->dentry)->i_mode))
+		return 0;
 	return tomoyo_path_perm(TOMOYO_TYPE_GETATTR, path, NULL);
 }
 
@@ -315,6 +318,9 @@ static int tomoyo_file_open(struct file *f)
 {
 	/* Don't check read permission here if called from do_execve(). */
 	if (current->in_execve)
+		return 0;
+	/* Sockets can't be opened by open(). */
+	if (S_ISSOCK(file_inode(f)->i_mode))
 		return 0;
 	return tomoyo_check_open_permission(tomoyo_domain(), &f->f_path,
 					    f->f_flags);
