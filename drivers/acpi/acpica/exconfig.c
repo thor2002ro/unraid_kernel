@@ -176,7 +176,9 @@ acpi_ex_load_table_op(struct acpi_walk_state *walk_state,
 
 	/* Complete the initialization/resolution of new objects */
 
+	acpi_ex_exit_interpreter();
 	acpi_ns_initialize_objects();
+	acpi_ex_enter_interpreter();
 
 	/* Parameter Data (optional) */
 

@@ -26,7 +26,7 @@
 #define AARCH64_INSN_N_BIT	BIT(22)
 #define AARCH64_INSN_LSL_12	BIT(22)
 
-static int aarch64_insn_encoding_class[] = {
+static const int aarch64_insn_encoding_class[] = {
 	AARCH64_INSN_CLS_UNKNOWN,
 	AARCH64_INSN_CLS_UNKNOWN,
 	AARCH64_INSN_CLS_UNKNOWN,
@@ -1266,6 +1266,19 @@ u32 aarch64_insn_gen_logical_shifted_reg(enum aarch64_insn_register dst,
 	insn = aarch64_insn_encode_register(AARCH64_INSN_REGTYPE_RM, insn, reg);
 
 	return aarch64_insn_encode_immediate(AARCH64_INSN_IMM_6, insn, shift);
+}
+
+/*
+ * MOV (register) is architecturally an alias of ORR (shifted register) where
+ * MOV <*d>, <*m> is equivalent to ORR <*d>, <*ZR>, <*m>
+ */
+u32 aarch64_insn_gen_move_reg(enum aarch64_insn_register dst,
+			      enum aarch64_insn_register src,
+			      enum aarch64_insn_variant variant)
+{
+	return aarch64_insn_gen_logical_shifted_reg(dst, AARCH64_INSN_REG_ZR,
+						    src, 0, variant,
+						    AARCH64_INSN_LOGIC_ORR);
 }
 
 u32 aarch64_insn_gen_adr(unsigned long pc, unsigned long addr,

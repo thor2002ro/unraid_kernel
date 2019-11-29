@@ -8,11 +8,15 @@
 #include <linux/irqflags.h>
 
 #include <asm/arch_gicv3.h>
+#include <asm/barrier.h>
 #include <asm/cpufeature.h>
+#include <asm/ptrace.h>
 
 #define DAIF_PROCCTX		0
 #define DAIF_PROCCTX_NOIRQ	PSR_I_BIT
 #define DAIF_ERRCTX		(PSR_I_BIT | PSR_A_BIT)
+#define DAIF_MASK		(PSR_D_BIT | PSR_A_BIT | PSR_I_BIT | PSR_F_BIT)
+
 
 /* mask/save/unmask/restore all exceptions, including interrupts. */
 static inline void local_daif_mask(void)
@@ -63,7 +67,7 @@ static inline void local_daif_restore(unsigned long flags)
 
 		if (system_uses_irq_prio_masking()) {
 			gic_write_pmr(GIC_PRIO_IRQON);
-			dsb(sy);
+			pmr_sync();
 		}
 	} else if (system_uses_irq_prio_masking()) {
 		u64 pmr;
@@ -107,4 +111,19 @@ static inline void local_daif_restore(unsigned long flags)
 		trace_hardirqs_off();
 }
 
+/*
+ * Called by synchronous exception handlers to restore the DAIF bits that were
+ * modified by taking an exception.
+ */
+static inline void local_daif_inherit(struct pt_regs *regs)
+{
+	unsigned long flags = regs->pstate & DAIF_MASK;
+
+	/*
+	 * We can't use local_daif_restore(regs->pstate) here as
+	 * system_has_prio_mask_debugging() won't restore the I bit if it can
+	 * use the pmr instead.
+	 */
+	write_sysreg(flags, daif);
+}
 #endif

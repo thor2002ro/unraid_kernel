@@ -73,6 +73,7 @@
 #include <linux/module.h>
 #include <linux/highmem.h>
 #include <linux/mount.h>
+#include <linux/pseudo_fs.h>
 #include <linux/security.h>
 #include <linux/syscalls.h>
 #include <linux/compat.h>
@@ -102,13 +103,6 @@
 #include <linux/sockios.h>
 #include <net/busy_poll.h>
 #include <linux/errqueue.h>
-
-/* proto_ops for ipv4 and ipv6 use the same {recv,send}msg function */
-#if IS_ENABLED(CONFIG_INET)
-#define INDIRECT_CALL_INET4(f, f1, ...) INDIRECT_CALL_1(f, f1, __VA_ARGS__)
-#else
-#define INDIRECT_CALL_INET4(f, f1, ...) f(__VA_ARGS__)
-#endif
 
 #ifdef CONFIG_NET_RX_BUSY_POLL
 unsigned int sysctl_net_busy_read __read_mostly;
@@ -241,20 +235,13 @@ static struct kmem_cache *sock_inode_cachep __ro_after_init;
 static struct inode *sock_alloc_inode(struct super_block *sb)
 {
 	struct socket_alloc *ei;
-	struct socket_wq *wq;
 
 	ei = kmem_cache_alloc(sock_inode_cachep, GFP_KERNEL);
 	if (!ei)
 		return NULL;
-	wq = kmalloc(sizeof(*wq), GFP_KERNEL);
-	if (!wq) {
-		kmem_cache_free(sock_inode_cachep, ei);
-		return NULL;
-	}
-	init_waitqueue_head(&wq->wait);
-	wq->fasync_list = NULL;
-	wq->flags = 0;
-	ei->socket.wq = wq;
+	init_waitqueue_head(&ei->socket.wq.wait);
+	ei->socket.wq.fasync_list = NULL;
+	ei->socket.wq.flags = 0;
 
 	ei->socket.state = SS_UNCONNECTED;
 	ei->socket.flags = 0;
@@ -265,12 +252,11 @@ static struct inode *sock_alloc_inode(struct super_block *sb)
 	return &ei->vfs_inode;
 }
 
-static void sock_destroy_inode(struct inode *inode)
+static void sock_free_inode(struct inode *inode)
 {
 	struct socket_alloc *ei;
 
 	ei = container_of(inode, struct socket_alloc, vfs_inode);
-	kfree_rcu(ei->socket.wq, rcu);
 	kmem_cache_free(sock_inode_cachep, ei);
 }
 
@@ -295,7 +281,7 @@ static void init_inodecache(void)
 
 static const struct super_operations sockfs_ops = {
 	.alloc_inode	= sock_alloc_inode,
-	.destroy_inode	= sock_destroy_inode,
+	.free_inode	= sock_free_inode,
 	.statfs		= simple_statfs,
 };
 
@@ -353,19 +339,22 @@ static const struct xattr_handler *sockfs_xattr_handlers[] = {
 	NULL
 };
 
-static struct dentry *sockfs_mount(struct file_system_type *fs_type,
-			 int flags, const char *dev_name, void *data)
+static int sockfs_init_fs_context(struct fs_context *fc)
 {
-	return mount_pseudo_xattr(fs_type, "socket:", &sockfs_ops,
-				  sockfs_xattr_handlers,
-				  &sockfs_dentry_operations, SOCKFS_MAGIC);
+	struct pseudo_fs_context *ctx = init_pseudo(fc, SOCKFS_MAGIC);
+	if (!ctx)
+		return -ENOMEM;
+	ctx->ops = &sockfs_ops;
+	ctx->dops = &sockfs_dentry_operations;
+	ctx->xattr = sockfs_xattr_handlers;
+	return 0;
 }
 
 static struct vfsmount *sock_mnt __read_mostly;
 
 static struct file_system_type sock_fs_type = {
 	.name =		"sockfs",
-	.mount =	sockfs_mount,
+	.init_fs_context = sockfs_init_fs_context,
 	.kill_sb =	kill_anon_super,
 };
 
@@ -415,6 +404,7 @@ struct file *sock_alloc_file(struct socket *sock, int flags, const char *dname)
 
 	sock->file = file;
 	file->private_data = sock;
+	stream_open(SOCK_INODE(sock), file);
 	return file;
 }
 EXPORT_SYMBOL(sock_alloc_file);
@@ -429,7 +419,7 @@ static int sock_map_fd(struct socket *sock, int flags)
 	}
 
 	newfile = sock_alloc_file(sock, flags, NULL);
-	if (likely(!IS_ERR(newfile))) {
+	if (!IS_ERR(newfile)) {
 		fd_install(fd, newfile);
 		return fd;
 	}
@@ -606,7 +596,7 @@ static void __sock_release(struct socket *sock, struct inode *inode)
 		module_put(owner);
 	}
 
-	if (sock->wq->fasync_list)
+	if (sock->wq.fasync_list)
 		pr_err("%s: fasync list not empty!\n", __func__);
 
 	if (!sock->file) {
@@ -641,10 +631,13 @@ EXPORT_SYMBOL(__sock_tx_timestamp);
 
 INDIRECT_CALLABLE_DECLARE(int inet_sendmsg(struct socket *, struct msghdr *,
 					   size_t));
+INDIRECT_CALLABLE_DECLARE(int inet6_sendmsg(struct socket *, struct msghdr *,
+					    size_t));
 static inline int sock_sendmsg_nosec(struct socket *sock, struct msghdr *msg)
 {
-	int ret = INDIRECT_CALL_INET4(sock->ops->sendmsg, inet_sendmsg, sock,
-				      msg, msg_data_left(msg));
+	int ret = INDIRECT_CALL_INET(sock->ops->sendmsg, inet6_sendmsg,
+				     inet_sendmsg, sock, msg,
+				     msg_data_left(msg));
 	BUG_ON(ret == -EIOCBQUEUED);
 	return ret;
 }
@@ -870,12 +863,15 @@ void __sock_recv_ts_and_drops(struct msghdr *msg, struct sock *sk,
 EXPORT_SYMBOL_GPL(__sock_recv_ts_and_drops);
 
 INDIRECT_CALLABLE_DECLARE(int inet_recvmsg(struct socket *, struct msghdr *,
-					   size_t , int ));
+					   size_t, int));
+INDIRECT_CALLABLE_DECLARE(int inet6_recvmsg(struct socket *, struct msghdr *,
+					    size_t, int));
 static inline int sock_recvmsg_nosec(struct socket *sock, struct msghdr *msg,
 				     int flags)
 {
-	return INDIRECT_CALL_INET4(sock->ops->recvmsg, inet_recvmsg, sock, msg,
-				   msg_data_left(msg), flags);
+	return INDIRECT_CALL_INET(sock->ops->recvmsg, inet6_recvmsg,
+				  inet_recvmsg, sock, msg, msg_data_left(msg),
+				  flags);
 }
 
 /**
@@ -1289,13 +1285,12 @@ static int sock_fasync(int fd, struct file *filp, int on)
 {
 	struct socket *sock = filp->private_data;
 	struct sock *sk = sock->sk;
-	struct socket_wq *wq;
+	struct socket_wq *wq = &sock->wq;
 
 	if (sk == NULL)
 		return -EINVAL;
 
 	lock_sock(sk);
-	wq = sock->wq;
 	fasync_helper(fd, filp, on, &wq->fasync_list);
 
 	if (!wq->fasync_list)
@@ -1696,24 +1691,13 @@ SYSCALL_DEFINE2(listen, int, fd, int, backlog)
 	return __sys_listen(fd, backlog);
 }
 
-/*
- *	For accept, we attempt to create a new socket, set up the link
- *	with the client, wake up the client, then return the new
- *	connected fd. We collect the address of the connector in kernel
- *	space and move it to user at the very end. This is unclean because
- *	we open the socket then return an error.
- *
- *	1003.1g adds the ability to recvmsg() to query connection pending
- *	status to recvmsg. We need to add that support in a way thats
- *	clean when we restructure accept also.
- */
-
-int __sys_accept4(int fd, struct sockaddr __user *upeer_sockaddr,
-		  int __user *upeer_addrlen, int flags)
+int __sys_accept4_file(struct file *file, unsigned file_flags,
+		       struct sockaddr __user *upeer_sockaddr,
+		       int __user *upeer_addrlen, int flags)
 {
 	struct socket *sock, *newsock;
 	struct file *newfile;
-	int err, len, newfd, fput_needed;
+	int err, len, newfd;
 	struct sockaddr_storage address;
 
 	if (flags & ~(SOCK_CLOEXEC | SOCK_NONBLOCK))
@@ -1722,14 +1706,14 @@ int __sys_accept4(int fd, struct sockaddr __user *upeer_sockaddr,
 	if (SOCK_NONBLOCK != O_NONBLOCK && (flags & SOCK_NONBLOCK))
 		flags = (flags & ~SOCK_NONBLOCK) | O_NONBLOCK;
 
-	sock = sockfd_lookup_light(fd, &err, &fput_needed);
+	sock = sock_from_file(file, &err);
 	if (!sock)
 		goto out;
 
 	err = -ENFILE;
 	newsock = sock_alloc();
 	if (!newsock)
-		goto out_put;
+		goto out;
 
 	newsock->type = sock->type;
 	newsock->ops = sock->ops;
@@ -1744,20 +1728,21 @@ int __sys_accept4(int fd, struct sockaddr __user *upeer_sockaddr,
 	if (unlikely(newfd < 0)) {
 		err = newfd;
 		sock_release(newsock);
-		goto out_put;
+		goto out;
 	}
 	newfile = sock_alloc_file(newsock, flags, sock->sk->sk_prot_creator->name);
 	if (IS_ERR(newfile)) {
 		err = PTR_ERR(newfile);
 		put_unused_fd(newfd);
-		goto out_put;
+		goto out;
 	}
 
 	err = security_socket_accept(sock, newsock);
 	if (err)
 		goto out_fd;
 
-	err = sock->ops->accept(sock, newsock, sock->file->f_flags, false);
+	err = sock->ops->accept(sock, newsock, sock->file->f_flags | file_flags,
+					false);
 	if (err < 0)
 		goto out_fd;
 
@@ -1778,15 +1763,42 @@ int __sys_accept4(int fd, struct sockaddr __user *upeer_sockaddr,
 
 	fd_install(newfd, newfile);
 	err = newfd;
-
-out_put:
-	fput_light(sock->file, fput_needed);
 out:
 	return err;
 out_fd:
 	fput(newfile);
 	put_unused_fd(newfd);
-	goto out_put;
+	goto out;
+
+}
+
+/*
+ *	For accept, we attempt to create a new socket, set up the link
+ *	with the client, wake up the client, then return the new
+ *	connected fd. We collect the address of the connector in kernel
+ *	space and move it to user at the very end. This is unclean because
+ *	we open the socket then return an error.
+ *
+ *	1003.1g adds the ability to recvmsg() to query connection pending
+ *	status to recvmsg. We need to add that support in a way thats
+ *	clean when we restructure accept also.
+ */
+
+int __sys_accept4(int fd, struct sockaddr __user *upeer_sockaddr,
+		  int __user *upeer_addrlen, int flags)
+{
+	int ret = -EBADF;
+	struct fd f;
+
+	f = fdget(fd);
+	if (f.file) {
+		ret = __sys_accept4_file(f.file, 0, upeer_sockaddr,
+						upeer_addrlen, flags);
+		if (f.flags)
+			fput(f.file);
+	}
+
+	return ret;
 }
 
 SYSCALL_DEFINE4(accept4, int, fd, struct sockaddr __user *, upeer_sockaddr,
@@ -2051,6 +2063,8 @@ SYSCALL_DEFINE4(recv, int, fd, void __user *, ubuf, size_t, size,
 static int __sys_setsockopt(int fd, int level, int optname,
 			    char __user *optval, int optlen)
 {
+	mm_segment_t oldfs = get_fs();
+	char *kernel_optval = NULL;
 	int err, fput_needed;
 	struct socket *sock;
 
@@ -2063,6 +2077,22 @@ static int __sys_setsockopt(int fd, int level, int optname,
 		if (err)
 			goto out_put;
 
+		err = BPF_CGROUP_RUN_PROG_SETSOCKOPT(sock->sk, &level,
+						     &optname, optval, &optlen,
+						     &kernel_optval);
+
+		if (err < 0) {
+			goto out_put;
+		} else if (err > 0) {
+			err = 0;
+			goto out_put;
+		}
+
+		if (kernel_optval) {
+			set_fs(KERNEL_DS);
+			optval = (char __user __force *)kernel_optval;
+		}
+
 		if (level == SOL_SOCKET)
 			err =
 			    sock_setsockopt(sock, level, optname, optval,
@@ -2071,6 +2101,11 @@ static int __sys_setsockopt(int fd, int level, int optname,
 			err =
 			    sock->ops->setsockopt(sock, level, optname, optval,
 						  optlen);
+
+		if (kernel_optval) {
+			set_fs(oldfs);
+			kfree(kernel_optval);
+		}
 out_put:
 		fput_light(sock->file, fput_needed);
 	}
@@ -2093,12 +2128,15 @@ static int __sys_getsockopt(int fd, int level, int optname,
 {
 	int err, fput_needed;
 	struct socket *sock;
+	int max_optlen;
 
 	sock = sockfd_lookup_light(fd, &err, &fput_needed);
 	if (sock != NULL) {
 		err = security_socket_getsockopt(sock, level, optname);
 		if (err)
 			goto out_put;
+
+		max_optlen = BPF_CGROUP_GETSOCKOPT_MAX_OPTLEN(optlen);
 
 		if (level == SOL_SOCKET)
 			err =
@@ -2108,6 +2146,10 @@ static int __sys_getsockopt(int fd, int level, int optname,
 			err =
 			    sock->ops->getsockopt(sock, level, optname, optval,
 						  optlen);
+
+		err = BPF_CGROUP_RUN_PROG_GETSOCKOPT(sock->sk, level, optname,
+						     optval, optlen,
+						     max_optlen, err);
 out_put:
 		fput_light(sock->file, fput_needed);
 	}
@@ -2202,9 +2244,10 @@ static int copy_msghdr_from_user(struct msghdr *kmsg,
 
 	kmsg->msg_iocb = NULL;
 
-	return import_iovec(save_addr ? READ : WRITE,
+	err = import_iovec(save_addr ? READ : WRITE,
 			    msg.msg_iov, msg.msg_iovlen,
 			    UIO_FASTIOV, iov, &kmsg->msg_iter);
+	return err < 0 ? err : 0;
 }
 
 static int ___sys_sendmsg(struct socket *sock, struct user_msghdr __user *msg,
@@ -2306,6 +2349,13 @@ out_freeiov:
 /*
  *	BSD sendmsg interface
  */
+long __sys_sendmsg_sock(struct socket *sock, struct user_msghdr __user *msg,
+			unsigned int flags)
+{
+	struct msghdr msg_sys;
+
+	return ___sys_sendmsg(sock, msg, &msg_sys, flags, NULL, 0);
+}
 
 long __sys_sendmsg(int fd, struct user_msghdr __user *msg, unsigned int flags,
 		   bool forbid_cmsg_compat)
@@ -2479,6 +2529,14 @@ out_freeiov:
 /*
  *	BSD recvmsg interface
  */
+
+long __sys_recvmsg_sock(struct socket *sock, struct user_msghdr __user *msg,
+			unsigned int flags)
+{
+	struct msghdr msg_sys;
+
+	return ___sys_recvmsg(sock, msg, &msg_sys, flags, 0);
+}
 
 long __sys_recvmsg(int fd, struct user_msghdr __user *msg, unsigned int flags,
 		   bool forbid_cmsg_compat)

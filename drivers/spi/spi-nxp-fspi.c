@@ -1007,10 +1007,8 @@ static int nxp_fspi_probe(struct platform_device *pdev)
 
 	/* find the irq */
 	ret = platform_get_irq(pdev, 0);
-	if (ret < 0) {
-		dev_err(dev, "failed to get the irq: %d\n", ret);
+	if (ret < 0)
 		goto err_disable_clk;
-	}
 
 	ret = devm_request_irq(dev, ret,
 			nxp_fspi_irq_handler, 0, pdev->name, f);
@@ -1029,7 +1027,7 @@ static int nxp_fspi_probe(struct platform_device *pdev)
 
 	ctlr->dev.of_node = np;
 
-	ret = spi_register_controller(ctlr);
+	ret = devm_spi_register_controller(&pdev->dev, ctlr);
 	if (ret)
 		goto err_destroy_mutex;
 

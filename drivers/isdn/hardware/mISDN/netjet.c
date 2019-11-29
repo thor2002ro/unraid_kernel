@@ -16,7 +16,7 @@
 #include "ipac.h"
 #include "iohelper.h"
 #include "netjet.h"
-#include <linux/isdn/hdlc.h>
+#include "isdnhdlc.h"
 
 #define NETJET_REV	"2.0"
 
@@ -605,8 +605,7 @@ bc_next_frame(struct tiger_ch *bc)
 	if (bc->bch.tx_skb && bc->bch.tx_idx < bc->bch.tx_skb->len) {
 		fill_dma(bc);
 	} else {
-		if (bc->bch.tx_skb)
-			dev_kfree_skb(bc->bch.tx_skb);
+		dev_kfree_skb(bc->bch.tx_skb);
 		if (get_next_bframe(&bc->bch)) {
 			fill_dma(bc);
 			test_and_clear_bit(FLG_TX_EMPTY, &bc->bch.Flags);

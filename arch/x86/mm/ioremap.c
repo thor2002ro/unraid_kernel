@@ -19,6 +19,7 @@
 
 #include <asm/set_memory.h>
 #include <asm/e820/api.h>
+#include <asm/efi.h>
 #include <asm/fixmap.h>
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>
@@ -459,6 +460,11 @@ void iounmap(volatile void __iomem *addr)
 }
 EXPORT_SYMBOL(iounmap);
 
+int __init arch_ioremap_p4d_supported(void)
+{
+	return 0;
+}
+
 int __init arch_ioremap_pud_supported(void)
 {
 #ifdef CONFIG_X86_64
@@ -619,6 +625,17 @@ static bool memremap_is_setup_data(resource_size_t phys_addr,
 
 		paddr_next = data->next;
 		len = data->len;
+
+		if ((phys_addr > paddr) && (phys_addr < (paddr + len))) {
+			memunmap(data);
+			return true;
+		}
+
+		if (data->type == SETUP_INDIRECT &&
+		    ((struct setup_indirect *)data->data)->type != SETUP_INDIRECT) {
+			paddr = ((struct setup_indirect *)data->data)->addr;
+			len = ((struct setup_indirect *)data->data)->len;
+		}
 
 		memunmap(data);
 

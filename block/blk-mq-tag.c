@@ -10,17 +10,10 @@
 #include <linux/module.h>
 
 #include <linux/blk-mq.h>
+#include <linux/delay.h>
 #include "blk.h"
 #include "blk-mq.h"
 #include "blk-mq-tag.h"
-
-bool blk_mq_has_free_tags(struct blk_mq_tags *tags)
-{
-	if (!tags)
-		return true;
-
-	return sbitmap_any_bit_clear(&tags->bitmap_tags.sb);
-}
 
 /*
  * If a previously inactive queue goes active, bump the active user count.
@@ -353,6 +346,37 @@ void blk_mq_tagset_busy_iter(struct blk_mq_tag_set *tagset,
 	}
 }
 EXPORT_SYMBOL(blk_mq_tagset_busy_iter);
+
+static bool blk_mq_tagset_count_completed_rqs(struct request *rq,
+		void *data, bool reserved)
+{
+	unsigned *count = data;
+
+	if (blk_mq_request_completed(rq))
+		(*count)++;
+	return true;
+}
+
+/**
+ * blk_mq_tagset_wait_completed_request - wait until all completed req's
+ * complete funtion is run
+ * @tagset:	Tag set to drain completed request
+ *
+ * Note: This function has to be run after all IO queues are shutdown
+ */
+void blk_mq_tagset_wait_completed_request(struct blk_mq_tag_set *tagset)
+{
+	while (true) {
+		unsigned count = 0;
+
+		blk_mq_tagset_busy_iter(tagset,
+				blk_mq_tagset_count_completed_rqs, &count);
+		if (!count)
+			break;
+		msleep(5);
+	}
+}
+EXPORT_SYMBOL(blk_mq_tagset_wait_completed_request);
 
 /**
  * blk_mq_queue_tag_busy_iter - iterate over all requests with a driver tag

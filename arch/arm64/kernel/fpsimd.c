@@ -406,6 +406,18 @@ static __uint128_t arm64_cpu_to_le128(__uint128_t x)
 
 #define arm64_le128_to_cpu(x) arm64_cpu_to_le128(x)
 
+static void __fpsimd_to_sve(void *sst, struct user_fpsimd_state const *fst,
+			    unsigned int vq)
+{
+	unsigned int i;
+	__uint128_t *p;
+
+	for (i = 0; i < SVE_NUM_ZREGS; ++i) {
+		p = (__uint128_t *)ZREG(sst, vq, i);
+		*p = arm64_cpu_to_le128(fst->vregs[i]);
+	}
+}
+
 /*
  * Transfer the FPSIMD state in task->thread.uw.fpsimd_state to
  * task->thread.sve_state.
@@ -423,17 +435,12 @@ static void fpsimd_to_sve(struct task_struct *task)
 	unsigned int vq;
 	void *sst = task->thread.sve_state;
 	struct user_fpsimd_state const *fst = &task->thread.uw.fpsimd_state;
-	unsigned int i;
-	__uint128_t *p;
 
 	if (!system_supports_sve())
 		return;
 
 	vq = sve_vq_from_vl(task->thread.sve_vl);
-	for (i = 0; i < 32; ++i) {
-		p = (__uint128_t *)ZREG(sst, vq, i);
-		*p = arm64_cpu_to_le128(fst->vregs[i]);
-	}
+	__fpsimd_to_sve(sst, fst, vq);
 }
 
 /*
@@ -459,7 +466,7 @@ static void sve_to_fpsimd(struct task_struct *task)
 		return;
 
 	vq = sve_vq_from_vl(task->thread.sve_vl);
-	for (i = 0; i < 32; ++i) {
+	for (i = 0; i < SVE_NUM_ZREGS; ++i) {
 		p = (__uint128_t const *)ZREG(sst, vq, i);
 		fst->vregs[i] = arm64_le128_to_cpu(*p);
 	}
@@ -550,8 +557,6 @@ void sve_sync_from_fpsimd_zeropad(struct task_struct *task)
 	unsigned int vq;
 	void *sst = task->thread.sve_state;
 	struct user_fpsimd_state const *fst = &task->thread.uw.fpsimd_state;
-	unsigned int i;
-	__uint128_t *p;
 
 	if (!test_tsk_thread_flag(task, TIF_SVE))
 		return;
@@ -559,11 +564,7 @@ void sve_sync_from_fpsimd_zeropad(struct task_struct *task)
 	vq = sve_vq_from_vl(task->thread.sve_vl);
 
 	memset(sst, 0, SVE_SIG_REGS_SIZE(vq));
-
-	for (i = 0; i < 32; ++i) {
-		p = (__uint128_t *)ZREG(sst, vq, i);
-		*p = arm64_cpu_to_le128(fst->vregs[i]);
-	}
+	__fpsimd_to_sve(sst, fst, vq);
 }
 
 int sve_set_vector_length(struct task_struct *task,
@@ -919,7 +920,7 @@ void fpsimd_release_task(struct task_struct *dead_task)
  * would have disabled the SVE access trap for userspace during
  * ret_to_user, making an SVE access trap impossible in that case.
  */
-asmlinkage void do_sve_acc(unsigned int esr, struct pt_regs *regs)
+void do_sve_acc(unsigned int esr, struct pt_regs *regs)
 {
 	/* Even if we chose not to use SVE, the hardware could still trap: */
 	if (unlikely(!system_supports_sve()) || WARN_ON(is_compat_task())) {
@@ -946,7 +947,7 @@ asmlinkage void do_sve_acc(unsigned int esr, struct pt_regs *regs)
 /*
  * Trapped FP/ASIMD access.
  */
-asmlinkage void do_fpsimd_acc(unsigned int esr, struct pt_regs *regs)
+void do_fpsimd_acc(unsigned int esr, struct pt_regs *regs)
 {
 	/* TODO: implement lazy context saving/restoring */
 	WARN_ON(1);
@@ -955,7 +956,7 @@ asmlinkage void do_fpsimd_acc(unsigned int esr, struct pt_regs *regs)
 /*
  * Raise a SIGFPE for the current process.
  */
-asmlinkage void do_fpsimd_exc(unsigned int esr, struct pt_regs *regs)
+void do_fpsimd_exc(unsigned int esr, struct pt_regs *regs)
 {
 	unsigned int si_code = FPE_FLTUNK;
 

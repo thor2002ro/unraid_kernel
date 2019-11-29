@@ -742,6 +742,9 @@ static int enum_fmt(struct v4l2_fmtdesc *f, struct vicodec_ctx *ctx,
 			return -EINVAL;
 		f->pixelformat = ctx->is_stateless ?
 			V4L2_PIX_FMT_FWHT_STATELESS : V4L2_PIX_FMT_FWHT;
+		if (!ctx->is_enc && !ctx->is_stateless)
+			f->flags = V4L2_FMT_FLAG_DYN_RESOLUTION |
+				   V4L2_FMT_FLAG_CONTINUOUS_BYTESTREAM;
 	}
 	return 0;
 }
@@ -1661,19 +1664,22 @@ static int vicodec_start_streaming(struct vb2_queue *q,
 	kvfree(state->compressed_frame);
 	state->compressed_frame = new_comp_frame;
 
-	if (info->components_num >= 3) {
-		state->ref_frame.cb = state->ref_frame.luma + size;
-		state->ref_frame.cr = state->ref_frame.cb + size / chroma_div;
-	} else {
+	if (info->components_num < 3) {
 		state->ref_frame.cb = NULL;
 		state->ref_frame.cr = NULL;
+		state->ref_frame.alpha = NULL;
+		return 0;
 	}
+
+	state->ref_frame.cb = state->ref_frame.luma + size;
+	state->ref_frame.cr = state->ref_frame.cb + size / chroma_div;
 
 	if (info->components_num == 4)
 		state->ref_frame.alpha =
 			state->ref_frame.cr + size / chroma_div;
 	else
 		state->ref_frame.alpha = NULL;
+
 	return 0;
 }
 
@@ -2133,6 +2139,9 @@ static void vicodec_v4l2_dev_release(struct v4l2_device *v4l2_dev)
 	v4l2_m2m_release(dev->stateful_enc.m2m_dev);
 	v4l2_m2m_release(dev->stateful_dec.m2m_dev);
 	v4l2_m2m_release(dev->stateless_dec.m2m_dev);
+#ifdef CONFIG_MEDIA_CONTROLLER
+	media_device_cleanup(&dev->mdev);
+#endif
 	kfree(dev);
 }
 
@@ -2244,7 +2253,6 @@ static int vicodec_remove(struct platform_device *pdev)
 	v4l2_m2m_unregister_media_controller(dev->stateful_enc.m2m_dev);
 	v4l2_m2m_unregister_media_controller(dev->stateful_dec.m2m_dev);
 	v4l2_m2m_unregister_media_controller(dev->stateless_dec.m2m_dev);
-	media_device_cleanup(&dev->mdev);
 #endif
 
 	video_unregister_device(&dev->stateful_enc.vfd);

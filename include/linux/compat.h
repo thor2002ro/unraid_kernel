@@ -138,8 +138,7 @@ typedef struct {
 	compat_sigset_word	sig[_COMPAT_NSIG_WORDS];
 } compat_sigset_t;
 
-int set_compat_user_sigmask(const compat_sigset_t __user *usigmask,
-			    sigset_t *set, sigset_t *oldset,
+int set_compat_user_sigmask(const compat_sigset_t __user *umask,
 			    size_t sigsetsize);
 
 struct compat_sigaction {
@@ -410,8 +409,6 @@ struct compat_sysctl_args;
 struct compat_kexec_segment;
 struct compat_mq_attr;
 struct compat_msgbuf;
-
-extern void compat_exit_robust_list(struct task_struct *curr);
 
 #define BITS_PER_COMPAT_LONG    (8*sizeof(compat_long_t))
 

@@ -28,6 +28,8 @@
 #include <linux/bug.h>
 #include <linux/interrupt.h>
 
+#include <drm/drm_drv.h>
+
 struct drm_i915_private;
 
 #ifdef CONFIG_DRM_I915_DEBUG_GEM
@@ -75,8 +77,11 @@ struct drm_i915_private;
 
 #define I915_GEM_IDLE_TIMEOUT (HZ / 5)
 
-void i915_gem_park(struct drm_i915_private *i915);
-void i915_gem_unpark(struct drm_i915_private *i915);
+static inline void tasklet_lock(struct tasklet_struct *t)
+{
+	while (!tasklet_trylock(t))
+		cpu_relax();
+}
 
 static inline void __tasklet_disable_sync_once(struct tasklet_struct *t)
 {
@@ -92,6 +97,11 @@ static inline bool __tasklet_is_enabled(const struct tasklet_struct *t)
 static inline bool __tasklet_enable(struct tasklet_struct *t)
 {
 	return atomic_dec_and_test(&t->count);
+}
+
+static inline bool __tasklet_is_scheduled(struct tasklet_struct *t)
+{
+	return test_bit(TASKLET_STATE_SCHED, &t->state);
 }
 
 #endif /* __I915_GEM_H__ */

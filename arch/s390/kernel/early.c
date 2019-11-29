@@ -30,8 +30,23 @@
 #include <asm/sclp.h>
 #include <asm/facility.h>
 #include <asm/boot_data.h>
-#include <asm/pci_insn.h>
+#include <asm/switch_to.h>
 #include "entry.h"
+
+static void __init reset_tod_clock(void)
+{
+	u64 time;
+
+	if (store_tod_clock(&time) == 0)
+		return;
+	/* TOD clock not running. Set the clock to Unix Epoch. */
+	if (set_tod_clock(TOD_UNIX_EPOCH) != 0 || store_tod_clock(&time) != 0)
+		disabled_wait();
+
+	memset(tod_clock_base, 0, 16);
+	*(__u64 *) &tod_clock_base[1] = TOD_UNIX_EPOCH;
+	S390_lowcore.last_update_clock = TOD_UNIX_EPOCH;
+}
 
 /*
  * Initialize storage key for kernel pages
@@ -224,7 +239,7 @@ static __init void detect_machine_facilities(void)
 		S390_lowcore.machine_flags |= MACHINE_FLAG_VX;
 		__ctl_set_bit(0, 17);
 	}
-	if (test_facility(130)) {
+	if (test_facility(130) && !noexec_disabled) {
 		S390_lowcore.machine_flags |= MACHINE_FLAG_NX;
 		__ctl_set_bit(0, 20);
 	}
@@ -236,7 +251,6 @@ static __init void detect_machine_facilities(void)
 		clock_comparator_max = -1ULL >> 1;
 		__ctl_set_bit(0, 53);
 	}
-	enable_mio_ctl();
 }
 
 static inline void save_vector_registers(void)
@@ -247,6 +261,24 @@ static inline void save_vector_registers(void)
 #endif
 }
 
+static inline void setup_control_registers(void)
+{
+	unsigned long reg;
+
+	__ctl_store(reg, 0, 0);
+	reg |= CR0_LOW_ADDRESS_PROTECTION;
+	reg |= CR0_EMERGENCY_SIGNAL_SUBMASK;
+	reg |= CR0_EXTERNAL_CALL_SUBMASK;
+	__ctl_load(reg, 0, 0);
+}
+
+static inline void setup_access_registers(void)
+{
+	unsigned int acrs[NUM_ACRS] = { 0 };
+
+	restore_access_regs(acrs);
+}
+
 static int __init disable_vector_extension(char *str)
 {
 	S390_lowcore.machine_flags &= ~MACHINE_FLAG_VX;
@@ -254,21 +286,6 @@ static int __init disable_vector_extension(char *str)
 	return 0;
 }
 early_param("novx", disable_vector_extension);
-
-static int __init noexec_setup(char *str)
-{
-	bool enabled;
-	int rc;
-
-	rc = kstrtobool(str, &enabled);
-	if (!rc && !enabled) {
-		/* Disable no-execute support */
-		S390_lowcore.machine_flags &= ~MACHINE_FLAG_NX;
-		__ctl_clear_bit(0, 20);
-	}
-	return rc;
-}
-early_param("noexec", noexec_setup);
 
 static int __init cad_setup(char *str)
 {
@@ -303,6 +320,7 @@ static void __init check_image_bootable(void)
 
 void __init startup_init(void)
 {
+	reset_tod_clock();
 	check_image_bootable();
 	time_early_init();
 	init_kernel_storage_key();
@@ -318,5 +336,7 @@ void __init startup_init(void)
 	save_vector_registers();
 	setup_topology();
 	sclp_early_detect();
+	setup_control_registers();
+	setup_access_registers();
 	lockdep_on();
 }

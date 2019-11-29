@@ -31,11 +31,12 @@
 #include <linux/compiler.h>
 #include <linux/time64.h>
 
-#include "../../perf.h"
+#include "../build-id.h"
+#include "../counts.h"
 #include "../debug.h"
+#include "../dso.h"
 #include "../callchain.h"
 #include "../evsel.h"
-#include "../util.h"
 #include "../event.h"
 #include "../thread.h"
 #include "../comm.h"
@@ -47,7 +48,6 @@
 #include "map.h"
 #include "symbol.h"
 #include "thread_map.h"
-#include "cpumap.h"
 #include "print_binary.h"
 #include "stat.h"
 #include "mem-events.h"
@@ -113,6 +113,7 @@ struct tables {
 	PyObject		*call_path_handler;
 	PyObject		*call_return_handler;
 	PyObject		*synth_handler;
+	PyObject		*context_switch_handler;
 	bool			db_export_mode;
 };
 
@@ -391,7 +392,7 @@ static const char *get_dsoname(struct map *map)
 }
 
 static PyObject *python_process_callchain(struct perf_sample *sample,
-					 struct perf_evsel *evsel,
+					 struct evsel *evsel,
 					 struct addr_location *al)
 {
 	PyObject *pylist;
@@ -427,24 +428,24 @@ static PyObject *python_process_callchain(struct perf_sample *sample,
 		pydict_set_item_string_decref(pyelem, "ip",
 				PyLong_FromUnsignedLongLong(node->ip));
 
-		if (node->sym) {
+		if (node->ms.sym) {
 			PyObject *pysym  = PyDict_New();
 			if (!pysym)
 				Py_FatalError("couldn't create Python dictionary");
 			pydict_set_item_string_decref(pysym, "start",
-					PyLong_FromUnsignedLongLong(node->sym->start));
+					PyLong_FromUnsignedLongLong(node->ms.sym->start));
 			pydict_set_item_string_decref(pysym, "end",
-					PyLong_FromUnsignedLongLong(node->sym->end));
+					PyLong_FromUnsignedLongLong(node->ms.sym->end));
 			pydict_set_item_string_decref(pysym, "binding",
-					_PyLong_FromLong(node->sym->binding));
+					_PyLong_FromLong(node->ms.sym->binding));
 			pydict_set_item_string_decref(pysym, "name",
-					_PyUnicode_FromStringAndSize(node->sym->name,
-							node->sym->namelen));
+					_PyUnicode_FromStringAndSize(node->ms.sym->name,
+							node->ms.sym->namelen));
 			pydict_set_item_string_decref(pyelem, "sym", pysym);
 		}
 
-		if (node->map) {
-			const char *dsoname = get_dsoname(node->map);
+		if (node->ms.map) {
+			const char *dsoname = get_dsoname(node->ms.map);
 
 			pydict_set_item_string_decref(pyelem, "dso",
 					_PyUnicode_FromString(dsoname));
@@ -633,9 +634,9 @@ static PyObject *get_sample_value_as_tuple(struct sample_read_value *value)
 
 static void set_sample_read_in_dict(PyObject *dict_sample,
 					 struct perf_sample *sample,
-					 struct perf_evsel *evsel)
+					 struct evsel *evsel)
 {
-	u64 read_format = evsel->attr.read_format;
+	u64 read_format = evsel->core.attr.read_format;
 	PyObject *values;
 	unsigned int i;
 
@@ -704,9 +705,9 @@ static int regs_map(struct regs_dump *regs, uint64_t mask, char *bf, int size)
 
 static void set_regs_in_dict(PyObject *dict,
 			     struct perf_sample *sample,
-			     struct perf_evsel *evsel)
+			     struct evsel *evsel)
 {
-	struct perf_event_attr *attr = &evsel->attr;
+	struct perf_event_attr *attr = &evsel->core.attr;
 	char bf[512];
 
 	regs_map(&sample->intr_regs, attr->sample_regs_intr, bf, sizeof(bf));
@@ -721,7 +722,7 @@ static void set_regs_in_dict(PyObject *dict,
 }
 
 static PyObject *get_perf_sample_dict(struct perf_sample *sample,
-					 struct perf_evsel *evsel,
+					 struct evsel *evsel,
 					 struct addr_location *al,
 					 PyObject *callchain)
 {
@@ -736,7 +737,7 @@ static PyObject *get_perf_sample_dict(struct perf_sample *sample,
 		Py_FatalError("couldn't create Python dictionary");
 
 	pydict_set_item_string_decref(dict, "ev_name", _PyUnicode_FromString(perf_evsel__name(evsel)));
-	pydict_set_item_string_decref(dict, "attr", _PyBytes_FromStringAndSize((const char *)&evsel->attr, sizeof(evsel->attr)));
+	pydict_set_item_string_decref(dict, "attr", _PyBytes_FromStringAndSize((const char *)&evsel->core.attr, sizeof(evsel->core.attr)));
 
 	pydict_set_item_string_decref(dict_sample, "pid",
 			_PyLong_FromLong(sample->pid));
@@ -789,7 +790,7 @@ static PyObject *get_perf_sample_dict(struct perf_sample *sample,
 }
 
 static void python_process_tracepoint(struct perf_sample *sample,
-				      struct perf_evsel *evsel,
+				      struct evsel *evsel,
 				      struct addr_location *al)
 {
 	struct tep_event *event = evsel->tp_format;
@@ -808,7 +809,7 @@ static void python_process_tracepoint(struct perf_sample *sample,
 
 	if (!event) {
 		snprintf(handler_name, sizeof(handler_name),
-			 "ug! no event found for type %" PRIu64, (u64)evsel->attr.config);
+			 "ug! no event found for type %" PRIu64, (u64)evsel->core.attr.config);
 		Py_FatalError(handler_name);
 	}
 
@@ -954,7 +955,7 @@ static int tuple_set_bytes(PyObject *t, unsigned int pos, void *bytes,
 	return PyTuple_SetItem(t, pos, _PyBytes_FromStringAndSize(bytes, sz));
 }
 
-static int python_export_evsel(struct db_export *dbe, struct perf_evsel *evsel)
+static int python_export_evsel(struct db_export *dbe, struct evsel *evsel)
 {
 	struct tables *tables = container_of(dbe, struct tables, dbe);
 	PyObject *t;
@@ -1011,15 +1012,19 @@ static int python_export_thread(struct db_export *dbe, struct thread *thread,
 	return 0;
 }
 
-static int python_export_comm(struct db_export *dbe, struct comm *comm)
+static int python_export_comm(struct db_export *dbe, struct comm *comm,
+			      struct thread *thread)
 {
 	struct tables *tables = container_of(dbe, struct tables, dbe);
 	PyObject *t;
 
-	t = tuple_new(2);
+	t = tuple_new(5);
 
 	tuple_set_u64(t, 0, comm->db_id);
 	tuple_set_string(t, 1, comm__str(comm));
+	tuple_set_u64(t, 2, thread->db_id);
+	tuple_set_u64(t, 3, comm->start);
+	tuple_set_s32(t, 4, comm->exec);
 
 	call_object(tables->comm_handler, t, "comm_table");
 
@@ -1122,7 +1127,7 @@ static void python_export_sample_table(struct db_export *dbe,
 
 	tuple_set_u64(t, 0, es->db_id);
 	tuple_set_u64(t, 1, es->evsel->db_id);
-	tuple_set_u64(t, 2, es->al->machine->db_id);
+	tuple_set_u64(t, 2, es->al->mg->machine->db_id);
 	tuple_set_u64(t, 3, es->al->thread->db_id);
 	tuple_set_u64(t, 4, es->comm_db_id);
 	tuple_set_u64(t, 5, es->dso_db_id);
@@ -1158,7 +1163,7 @@ static void python_export_synth(struct db_export *dbe, struct export_sample *es)
 	t = tuple_new(3);
 
 	tuple_set_u64(t, 0, es->db_id);
-	tuple_set_u64(t, 1, es->evsel->attr.config);
+	tuple_set_u64(t, 1, es->evsel->core.attr.config);
 	tuple_set_bytes(t, 2, es->sample->raw_data, es->sample->raw_size);
 
 	call_object(tables->synth_handler, t, "synth_data");
@@ -1173,7 +1178,7 @@ static int python_export_sample(struct db_export *dbe,
 
 	python_export_sample_table(dbe, es);
 
-	if (es->evsel->attr.type == PERF_TYPE_SYNTH && tables->synth_handler)
+	if (es->evsel->core.attr.type == PERF_TYPE_SYNTH && tables->synth_handler)
 		python_export_synth(dbe, es);
 
 	return 0;
@@ -1233,6 +1238,34 @@ static int python_export_call_return(struct db_export *dbe,
 	return 0;
 }
 
+static int python_export_context_switch(struct db_export *dbe, u64 db_id,
+					struct machine *machine,
+					struct perf_sample *sample,
+					u64 th_out_id, u64 comm_out_id,
+					u64 th_in_id, u64 comm_in_id, int flags)
+{
+	struct tables *tables = container_of(dbe, struct tables, dbe);
+	PyObject *t;
+
+	t = tuple_new(9);
+
+	tuple_set_u64(t, 0, db_id);
+	tuple_set_u64(t, 1, machine->db_id);
+	tuple_set_u64(t, 2, sample->time);
+	tuple_set_s32(t, 3, sample->cpu);
+	tuple_set_u64(t, 4, th_out_id);
+	tuple_set_u64(t, 5, comm_out_id);
+	tuple_set_u64(t, 6, th_in_id);
+	tuple_set_u64(t, 7, comm_in_id);
+	tuple_set_s32(t, 8, flags);
+
+	call_object(tables->context_switch_handler, t, "context_switch");
+
+	Py_DECREF(t);
+
+	return 0;
+}
+
 static int python_process_call_return(struct call_return *cr, u64 *parent_db_id,
 				      void *data)
 {
@@ -1242,7 +1275,7 @@ static int python_process_call_return(struct call_return *cr, u64 *parent_db_id,
 }
 
 static void python_process_general_event(struct perf_sample *sample,
-					 struct perf_evsel *evsel,
+					 struct evsel *evsel,
 					 struct addr_location *al)
 {
 	PyObject *handler, *t, *dict, *callchain;
@@ -1278,12 +1311,12 @@ static void python_process_general_event(struct perf_sample *sample,
 
 static void python_process_event(union perf_event *event,
 				 struct perf_sample *sample,
-				 struct perf_evsel *evsel,
+				 struct evsel *evsel,
 				 struct addr_location *al)
 {
 	struct tables *tables = &tables_global;
 
-	switch (evsel->attr.type) {
+	switch (evsel->core.attr.type) {
 	case PERF_TYPE_TRACEPOINT:
 		python_process_tracepoint(sample, evsel, al);
 		break;
@@ -1296,8 +1329,18 @@ static void python_process_event(union perf_event *event,
 	}
 }
 
+static void python_process_switch(union perf_event *event,
+				  struct perf_sample *sample,
+				  struct machine *machine)
+{
+	struct tables *tables = &tables_global;
+
+	if (tables->db_export_mode)
+		db_export__switch(&tables->dbe, event, sample, machine);
+}
+
 static void get_handler_name(char *str, size_t size,
-			     struct perf_evsel *evsel)
+			     struct evsel *evsel)
 {
 	char *p = str;
 
@@ -1310,7 +1353,7 @@ static void get_handler_name(char *str, size_t size,
 }
 
 static void
-process_stat(struct perf_evsel *counter, int cpu, int thread, u64 tstamp,
+process_stat(struct evsel *counter, int cpu, int thread, u64 tstamp,
 	     struct perf_counts_values *count)
 {
 	PyObject *handler, *t;
@@ -1347,10 +1390,10 @@ process_stat(struct perf_evsel *counter, int cpu, int thread, u64 tstamp,
 }
 
 static void python_process_stat(struct perf_stat_config *config,
-				struct perf_evsel *counter, u64 tstamp)
+				struct evsel *counter, u64 tstamp)
 {
-	struct thread_map *threads = counter->threads;
-	struct cpu_map *cpus = counter->cpus;
+	struct perf_thread_map *threads = counter->core.threads;
+	struct perf_cpu_map *cpus = counter->core.cpus;
 	int cpu, thread;
 
 	if (config->aggr_mode == AGGR_GLOBAL) {
@@ -1362,7 +1405,7 @@ static void python_process_stat(struct perf_stat_config *config,
 	for (thread = 0; thread < threads->nr; thread++) {
 		for (cpu = 0; cpu < cpus->nr; cpu++) {
 			process_stat(counter, cpus->map[cpu],
-				     thread_map__pid(threads, thread), tstamp,
+				     perf_thread_map__pid(threads, thread), tstamp,
 				     perf_counts(counter->counts, cpu, thread));
 		}
 	}
@@ -1511,6 +1554,7 @@ static void set_table_handlers(struct tables *tables)
 	SET_TABLE_HANDLER(sample);
 	SET_TABLE_HANDLER(call_path);
 	SET_TABLE_HANDLER(call_return);
+	SET_TABLE_HANDLER(context_switch);
 
 	/*
 	 * Synthesized events are samples but with architecture-specific data
@@ -1620,9 +1664,7 @@ error:
 
 static int python_flush_script(void)
 {
-	struct tables *tables = &tables_global;
-
-	return db_export__flush(&tables->dbe);
+	return 0;
 }
 
 /*
@@ -1645,10 +1687,11 @@ static int python_stop_script(void)
 
 static int python_generate_script(struct tep_handle *pevent, const char *outfile)
 {
+	int i, not_first, count, nr_events;
+	struct tep_event **all_events;
 	struct tep_event *event = NULL;
 	struct tep_format_field *f;
 	char fname[PATH_MAX];
-	int not_first, count;
 	FILE *ofp;
 
 	sprintf(fname, "%s.py", outfile);
@@ -1693,7 +1736,11 @@ static int python_generate_script(struct tep_handle *pevent, const char *outfile
 	fprintf(ofp, "def trace_end():\n");
 	fprintf(ofp, "\tprint(\"in trace_end\")\n\n");
 
-	while ((event = trace_find_next_event(pevent, event))) {
+	nr_events = tep_get_events_count(pevent);
+	all_events = tep_list_events(pevent, TEP_EVENT_SORT_ID);
+
+	for (i = 0; all_events && i < nr_events; i++) {
+		event = all_events[i];
 		fprintf(ofp, "def %s__%s(", event->system, event->name);
 		fprintf(ofp, "event_name, ");
 		fprintf(ofp, "context, ");
@@ -1831,6 +1878,7 @@ struct scripting_ops python_scripting_ops = {
 	.flush_script		= python_flush_script,
 	.stop_script		= python_stop_script,
 	.process_event		= python_process_event,
+	.process_switch		= python_process_switch,
 	.process_stat		= python_process_stat,
 	.process_stat_interval	= python_process_stat_interval,
 	.generate_script	= python_generate_script,

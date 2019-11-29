@@ -348,6 +348,11 @@ static int usb_parse_endpoint(struct device *ddev, int cfgno, int inum,
 
 	/* Validate the wMaxPacketSize field */
 	maxp = usb_endpoint_maxp(&endpoint->desc);
+	if (maxp == 0) {
+		dev_warn(ddev, "config %d interface %d altsetting %d endpoint 0x%X has wMaxPacketSize 0, skipping\n",
+		    cfgno, inum, asnum, d->bEndpointAddress);
+		goto skip_to_next_endpoint_or_interface_descriptor;
+	}
 
 	/* Find the highest legal maxpacket size for this endpoint */
 	i = 0;		/* additional transactions per microframe */
@@ -800,10 +805,10 @@ int usb_get_configuration(struct usb_device *dev)
 {
 	struct device *ddev = &dev->dev;
 	int ncfg = dev->descriptor.bNumConfigurations;
-	int result = -ENOMEM;
 	unsigned int cfgno, length;
 	unsigned char *bigbuffer;
 	struct usb_config_descriptor *desc;
+	int result;
 
 	if (ncfg > USB_MAXCONFIG) {
 		dev_warn(ddev, "too many configurations: %d, "
@@ -819,16 +824,16 @@ int usb_get_configuration(struct usb_device *dev)
 	length = ncfg * sizeof(struct usb_host_config);
 	dev->config = kzalloc(length, GFP_KERNEL);
 	if (!dev->config)
-		goto err2;
+		return -ENOMEM;
 
 	length = ncfg * sizeof(char *);
 	dev->rawdescriptors = kzalloc(length, GFP_KERNEL);
 	if (!dev->rawdescriptors)
-		goto err2;
+		return -ENOMEM;
 
 	desc = kmalloc(USB_DT_CONFIG_SIZE, GFP_KERNEL);
 	if (!desc)
-		goto err2;
+		return -ENOMEM;
 
 	for (cfgno = 0; cfgno < ncfg; cfgno++) {
 		/* We grab just the first descriptor so we know how long
@@ -890,9 +895,7 @@ int usb_get_configuration(struct usb_device *dev)
 err:
 	kfree(desc);
 	dev->descriptor.bNumConfigurations = cfgno;
-err2:
-	if (result == -ENOMEM)
-		dev_err(ddev, "out of memory\n");
+
 	return result;
 }
 
@@ -921,7 +924,7 @@ int usb_get_bos_descriptor(struct usb_device *dev)
 	struct usb_bos_descriptor *bos;
 	struct usb_dev_cap_header *cap;
 	struct usb_ssp_cap_descriptor *ssp_cap;
-	unsigned char *buffer;
+	unsigned char *buffer, *buffer0;
 	int length, total_len, num, i, ssac;
 	__u8 cap_type;
 	int ret;
@@ -966,10 +969,12 @@ int usb_get_bos_descriptor(struct usb_device *dev)
 			ret = -ENOMSG;
 		goto err;
 	}
+
+	buffer0 = buffer;
 	total_len -= length;
+	buffer += length;
 
 	for (i = 0; i < num; i++) {
-		buffer += length;
 		cap = (struct usb_dev_cap_header *)buffer;
 
 		if (total_len < sizeof(*cap) || total_len < cap->bLength) {
@@ -982,8 +987,6 @@ int usb_get_bos_descriptor(struct usb_device *dev)
 			dev->bos->desc->bNumDeviceCaps = i;
 			break;
 		}
-
-		total_len -= length;
 
 		if (cap->bDescriptorType != USB_DT_DEVICE_CAPABILITY) {
 			dev_warn(ddev, "descriptor type invalid, skip\n");
@@ -1019,7 +1022,11 @@ int usb_get_bos_descriptor(struct usb_device *dev)
 		default:
 			break;
 		}
+
+		total_len -= length;
+		buffer += length;
 	}
+	dev->bos->desc->wTotalLength = cpu_to_le16(buffer - buffer0);
 
 	return 0;
 

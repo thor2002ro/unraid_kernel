@@ -21,6 +21,7 @@
 #include "../../codecs/da7219.h"
 #include "../../codecs/da7219-aad.h"
 #include "../common/soc-intel-quirks.h"
+#include "hda_dsp_common.h"
 
 #define BXT_DIALOG_CODEC_DAI	"da7219-hifi"
 #define BXT_MAXIM_CODEC_DAI	"HiFi"
@@ -38,6 +39,7 @@ struct bxt_hdmi_pcm {
 
 struct bxt_card_private {
 	struct list_head hdmi_pcm_list;
+	bool common_hdmi_codec_drv;
 };
 
 enum {
@@ -179,10 +181,17 @@ static int broxton_da7219_codec_init(struct snd_soc_pcm_runtime *rtd)
 	int ret;
 	struct snd_soc_dai *codec_dai = rtd->codec_dai;
 	struct snd_soc_component *component = rtd->codec_dai->component;
+	int clk_freq;
 
 	/* Configure sysclk for codec */
-	ret = snd_soc_dai_set_sysclk(codec_dai, DA7219_CLKSRC_MCLK, 19200000,
+	if (soc_intel_is_cml())
+		clk_freq = 24000000;
+	else
+		clk_freq = 19200000;
+
+	ret = snd_soc_dai_set_sysclk(codec_dai, DA7219_CLKSRC_MCLK, clk_freq,
 				     SND_SOC_CLOCK_IN);
+
 	if (ret) {
 		dev_err(rtd->dev, "can't set codec sysclk configuration\n");
 		return ret;
@@ -608,6 +617,13 @@ static int bxt_card_late_probe(struct snd_soc_card *card)
 		snd_soc_dapm_add_routes(&card->dapm, broxton_map,
 					ARRAY_SIZE(broxton_map));
 
+	pcm = list_first_entry(&ctx->hdmi_pcm_list, struct bxt_hdmi_pcm,
+			       head);
+	component = pcm->codec_dai->component;
+
+	if (ctx->common_hdmi_codec_drv)
+		return hda_dsp_hdmi_build_controls(card, component);
+
 	list_for_each_entry(pcm, &ctx->hdmi_pcm_list, head) {
 		component = pcm->codec_dai->component;
 		snprintf(jack_name, sizeof(jack_name),
@@ -683,6 +699,25 @@ static int broxton_audio_probe(struct platform_device *pdev)
 				broxton_dais[i].cpus->dai_name = "SSP2 Pin";
 			}
 		}
+	} else if (soc_intel_is_cml()) {
+		unsigned int i;
+
+		broxton_audio_card.name = "cmlda7219max";
+
+		for (i = 0; i < ARRAY_SIZE(broxton_dais); i++) {
+			/* MAXIM_CODEC is connected to SSP1. */
+			if (!strcmp(broxton_dais[i].codecs->dai_name,
+					BXT_MAXIM_CODEC_DAI)) {
+				broxton_dais[i].name = "SSP1-Codec";
+				broxton_dais[i].cpus->dai_name = "SSP1 Pin";
+			}
+			/* DIALOG_CODEC is connected to SSP0 */
+			else if (!strcmp(broxton_dais[i].codecs->dai_name,
+					BXT_DIALOG_CODEC_DAI)) {
+				broxton_dais[i].name = "SSP0-Codec";
+				broxton_dais[i].cpus->dai_name = "SSP0 Pin";
+			}
+		}
 	}
 
 	/* override plaform name, if required */
@@ -694,12 +729,15 @@ static int broxton_audio_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
+	ctx->common_hdmi_codec_drv = mach->mach_params.common_hdmi_codec_drv;
+
 	return devm_snd_soc_register_card(&pdev->dev, &broxton_audio_card);
 }
 
 static const struct platform_device_id bxt_board_ids[] = {
 	{ .name = "bxt_da7219_max98357a" },
 	{ .name = "glk_da7219_max98357a" },
+	{ .name = "cml_da7219_max98357a" },
 	{ }
 };
 
@@ -720,6 +758,8 @@ MODULE_AUTHOR("Rohit Ainapure <rohit.m.ainapure@intel.com>");
 MODULE_AUTHOR("Harsha Priya <harshapriya.n@intel.com>");
 MODULE_AUTHOR("Conrad Cooke <conrad.cooke@intel.com>");
 MODULE_AUTHOR("Naveen Manohar <naveen.m@intel.com>");
+MODULE_AUTHOR("Mac Chiang <mac.chiang@intel.com>");
 MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("platform:bxt_da7219_max98357a");
 MODULE_ALIAS("platform:glk_da7219_max98357a");
+MODULE_ALIAS("platform:cml_da7219_max98357a");

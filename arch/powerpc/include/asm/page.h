@@ -215,9 +215,19 @@ static inline bool pfn_valid(unsigned long pfn)
 /*
  * gcc miscompiles (unsigned long)(&static_var) - PAGE_OFFSET
  * with -mcmodel=medium, so we use & and | instead of - and + on 64-bit.
+ * This also results in better code generation.
  */
-#define __va(x) ((void *)(unsigned long)((phys_addr_t)(x) | PAGE_OFFSET))
-#define __pa(x) ((unsigned long)(x) & 0x0fffffffffffffffUL)
+#define __va(x)								\
+({									\
+	VIRTUAL_BUG_ON((unsigned long)(x) >= PAGE_OFFSET);		\
+	(void *)(unsigned long)((phys_addr_t)(x) | PAGE_OFFSET);	\
+})
+
+#define __pa(x)								\
+({									\
+	VIRTUAL_BUG_ON((unsigned long)(x) < PAGE_OFFSET);		\
+	(unsigned long)(x) & 0x0fffffffffffffffUL;			\
+})
 
 #else /* 32-bit, non book E */
 #define __va(x) ((void *)(unsigned long)((phys_addr_t)(x) + PAGE_OFFSET - MEMORY_START))
@@ -318,14 +328,5 @@ struct vm_area_struct;
 #include <asm-generic/memory_model.h>
 #endif /* __ASSEMBLY__ */
 #include <asm/slice.h>
-
-/*
- * Allow 30-bit DMA for very limited Broadcom wifi chips on many powerbooks.
- */
-#ifdef CONFIG_PPC32
-#define ARCH_ZONE_DMA_BITS 30
-#else
-#define ARCH_ZONE_DMA_BITS 31
-#endif
 
 #endif /* _ASM_POWERPC_PAGE_H */

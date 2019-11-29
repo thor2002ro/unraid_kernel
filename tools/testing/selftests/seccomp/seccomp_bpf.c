@@ -199,6 +199,11 @@ struct seccomp_notif_sizes {
 };
 #endif
 
+#ifndef PTRACE_EVENTMSG_SYSCALL_ENTRY
+#define PTRACE_EVENTMSG_SYSCALL_ENTRY	1
+#define PTRACE_EVENTMSG_SYSCALL_EXIT	2
+#endif
+
 #ifndef seccomp
 int seccomp(unsigned int op, unsigned int flags, void *args)
 {
@@ -1775,13 +1780,18 @@ void tracer_ptrace(struct __test_metadata *_metadata, pid_t tracee,
 	unsigned long msg;
 	static bool entry;
 
-	/* Make sure we got an empty message. */
+	/*
+	 * The traditional way to tell PTRACE_SYSCALL entry/exit
+	 * is by counting.
+	 */
+	entry = !entry;
+
+	/* Make sure we got an appropriate message. */
 	ret = ptrace(PTRACE_GETEVENTMSG, tracee, NULL, &msg);
 	EXPECT_EQ(0, ret);
-	EXPECT_EQ(0, msg);
+	EXPECT_EQ(entry ? PTRACE_EVENTMSG_SYSCALL_ENTRY
+			: PTRACE_EVENTMSG_SYSCALL_EXIT, msg);
 
-	/* The only way to tell PTRACE_SYSCALL entry/exit is by counting. */
-	entry = !entry;
 	if (!entry)
 		return;
 

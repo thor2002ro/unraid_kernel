@@ -272,6 +272,8 @@ static struct bpf_map *cgroup_storage_map_alloc(union bpf_attr *attr)
 {
 	int numa_node = bpf_map_attr_numa_node(attr);
 	struct bpf_cgroup_storage_map *map;
+	struct bpf_map_memory mem;
+	int ret;
 
 	if (attr->key_size != sizeof(struct bpf_cgroup_storage_key))
 		return ERR_PTR(-EINVAL);
@@ -290,13 +292,18 @@ static struct bpf_map *cgroup_storage_map_alloc(union bpf_attr *attr)
 		/* max_entries is not used and enforced to be 0 */
 		return ERR_PTR(-EINVAL);
 
+	ret = bpf_map_charge_init(&mem, sizeof(struct bpf_cgroup_storage_map));
+	if (ret < 0)
+		return ERR_PTR(ret);
+
 	map = kmalloc_node(sizeof(struct bpf_cgroup_storage_map),
 			   __GFP_ZERO | GFP_USER, numa_node);
-	if (!map)
+	if (!map) {
+		bpf_map_charge_finish(&mem);
 		return ERR_PTR(-ENOMEM);
+	}
 
-	map->map.pages = round_up(sizeof(struct bpf_cgroup_storage_map),
-				  PAGE_SIZE) >> PAGE_SHIFT;
+	bpf_map_charge_move(&map->map.memory, &mem);
 
 	/* copy mandatory map attributes */
 	bpf_map_init_from_attr(&map->map, attr);
@@ -562,7 +569,7 @@ void bpf_cgroup_storage_link(struct bpf_cgroup_storage *storage,
 		return;
 
 	storage->key.attach_type = type;
-	storage->key.cgroup_inode_id = cgroup->kn->id.id;
+	storage->key.cgroup_inode_id = cgroup_id(cgroup);
 
 	map = storage->map;
 

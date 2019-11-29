@@ -569,6 +569,9 @@ int jbd2_journal_start_reserved(handle_t *handle, unsigned int type,
 	}
 	handle->h_type = type;
 	handle->h_line_no = line_no;
+	trace_jbd2_handle_start(journal->j_fs_dev->bd_dev,
+				handle->h_transaction->t_tid, type,
+				line_no, handle->h_buffer_credits);
 	return 0;
 }
 EXPORT_SYMBOL(jbd2_journal_start_reserved);
@@ -710,7 +713,7 @@ int jbd2__journal_restart(handle_t *handle, int nblocks, gfp_t gfp_mask)
 	if (need_to_start)
 		jbd2_log_start_commit(journal, tid);
 
-	rwsem_release(&journal->j_trans_commit_map, 1, _THIS_IP_);
+	rwsem_release(&journal->j_trans_commit_map, _THIS_IP_);
 	handle->h_buffer_credits = nblocks;
 	/*
 	 * Restore the original nofs context because the journal restart
@@ -1845,7 +1848,7 @@ int jbd2_journal_stop(handle_t *handle)
 			wake_up(&journal->j_wait_transaction_locked);
 	}
 
-	rwsem_release(&journal->j_trans_commit_map, 1, _THIS_IP_);
+	rwsem_release(&journal->j_trans_commit_map, _THIS_IP_);
 
 	if (wait_for_commit)
 		err = jbd2_log_wait_commit(journal, tid);
@@ -2565,7 +2568,7 @@ void jbd2_journal_refile_buffer(journal_t *journal, struct journal_head *jh)
  * File inode in the inode list of the handle's transaction
  */
 static int jbd2_journal_file_inode(handle_t *handle, struct jbd2_inode *jinode,
-				   unsigned long flags)
+		unsigned long flags, loff_t start_byte, loff_t end_byte)
 {
 	transaction_t *transaction = handle->h_transaction;
 	journal_t *journal;
@@ -2577,26 +2580,17 @@ static int jbd2_journal_file_inode(handle_t *handle, struct jbd2_inode *jinode,
 	jbd_debug(4, "Adding inode %lu, tid:%d\n", jinode->i_vfs_inode->i_ino,
 			transaction->t_tid);
 
-	/*
-	 * First check whether inode isn't already on the transaction's
-	 * lists without taking the lock. Note that this check is safe
-	 * without the lock as we cannot race with somebody removing inode
-	 * from the transaction. The reason is that we remove inode from the
-	 * transaction only in journal_release_jbd_inode() and when we commit
-	 * the transaction. We are guarded from the first case by holding
-	 * a reference to the inode. We are safe against the second case
-	 * because if jinode->i_transaction == transaction, commit code
-	 * cannot touch the transaction because we hold reference to it,
-	 * and if jinode->i_next_transaction == transaction, commit code
-	 * will only file the inode where we want it.
-	 */
-	if ((jinode->i_transaction == transaction ||
-	    jinode->i_next_transaction == transaction) &&
-	    (jinode->i_flags & flags) == flags)
-		return 0;
-
 	spin_lock(&journal->j_list_lock);
 	jinode->i_flags |= flags;
+
+	if (jinode->i_dirty_end) {
+		jinode->i_dirty_start = min(jinode->i_dirty_start, start_byte);
+		jinode->i_dirty_end = max(jinode->i_dirty_end, end_byte);
+	} else {
+		jinode->i_dirty_start = start_byte;
+		jinode->i_dirty_end = end_byte;
+	}
+
 	/* Is inode already attached where we need it? */
 	if (jinode->i_transaction == transaction ||
 	    jinode->i_next_transaction == transaction)
@@ -2628,15 +2622,19 @@ done:
 	return 0;
 }
 
-int jbd2_journal_inode_add_write(handle_t *handle, struct jbd2_inode *jinode)
+int jbd2_journal_inode_ranged_write(handle_t *handle,
+		struct jbd2_inode *jinode, loff_t start_byte, loff_t length)
 {
 	return jbd2_journal_file_inode(handle, jinode,
-				       JI_WRITE_DATA | JI_WAIT_DATA);
+			JI_WRITE_DATA | JI_WAIT_DATA, start_byte,
+			start_byte + length - 1);
 }
 
-int jbd2_journal_inode_add_wait(handle_t *handle, struct jbd2_inode *jinode)
+int jbd2_journal_inode_ranged_wait(handle_t *handle, struct jbd2_inode *jinode,
+		loff_t start_byte, loff_t length)
 {
-	return jbd2_journal_file_inode(handle, jinode, JI_WAIT_DATA);
+	return jbd2_journal_file_inode(handle, jinode, JI_WAIT_DATA,
+			start_byte, start_byte + length - 1);
 }
 
 /*

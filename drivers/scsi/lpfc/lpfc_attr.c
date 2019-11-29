@@ -841,7 +841,8 @@ lpfc_hdw_show(struct device *dev, struct device_attribute *attr, char *buf)
 	lpfc_vpd_t *vp = &phba->vpd;
 
 	lpfc_jedec_to_ascii(vp->rev.biuRev, hdw);
-	return scnprintf(buf, PAGE_SIZE, "%s\n", hdw);
+	return scnprintf(buf, PAGE_SIZE, "%s %08x %08x\n", hdw,
+			 vp->rev.smRev, vp->rev.smFwRev);
 }
 
 /**
@@ -3682,8 +3683,8 @@ lpfc_update_rport_devloss_tmo(struct lpfc_vport *vport)
 		if (rport)
 			remoteport = rport->remoteport;
 		spin_unlock(&vport->phba->hbalock);
-		if (remoteport)
-			nvme_fc_set_remoteport_devloss(rport->remoteport,
+		if (rport && remoteport)
+			nvme_fc_set_remoteport_devloss(remoteport,
 						       vport->cfg_devloss_tmo);
 #endif
 	}
@@ -4097,9 +4098,9 @@ lpfc_topology_store(struct device *dev, struct device_attribute *attr,
 		}
 		if ((phba->pcidev->device == PCI_DEVICE_ID_LANCER_G6_FC ||
 		     phba->pcidev->device == PCI_DEVICE_ID_LANCER_G7_FC) &&
-		    val != FLAGS_TOPOLOGY_MODE_PT_PT) {
+		    val == 4) {
 			lpfc_printf_vlog(vport, KERN_ERR, LOG_INIT,
-				"3114 Only non-FC-AL mode is supported\n");
+				"3114 Loop mode not supported\n");
 			return -EINVAL;
 		}
 		phba->cfg_topology = val;
@@ -5180,7 +5181,8 @@ lpfc_cq_max_proc_limit_store(struct device *dev, struct device_attribute *attr,
 
 	/* set the values on the cq's */
 	for (i = 0; i < phba->cfg_irq_chann; i++) {
-		eq = phba->sli4_hba.hdwq[i].hba_eq;
+		/* Get the EQ corresponding to the IRQ vector */
+		eq = phba->sli4_hba.hba_eq_hdl[i].eq;
 		if (!eq)
 			continue;
 
@@ -5301,35 +5303,44 @@ lpfc_fcp_cpu_map_show(struct device *dev, struct device_attribute *attr,
 				len += scnprintf(
 					buf + len, PAGE_SIZE - len,
 					"CPU %02d hdwq None "
-					"physid %d coreid %d ht %d\n",
+					"physid %d coreid %d ht %d ua %d\n",
 					phba->sli4_hba.curr_disp_cpu,
-					cpup->phys_id,
-					cpup->core_id, cpup->hyper);
+					cpup->phys_id, cpup->core_id,
+					(cpup->flag & LPFC_CPU_MAP_HYPER),
+					(cpup->flag & LPFC_CPU_MAP_UNASSIGN));
 			else
 				len += scnprintf(
 					buf + len, PAGE_SIZE - len,
 					"CPU %02d EQ %04d hdwq %04d "
-					"physid %d coreid %d ht %d\n",
+					"physid %d coreid %d ht %d ua %d\n",
 					phba->sli4_hba.curr_disp_cpu,
 					cpup->eq, cpup->hdwq, cpup->phys_id,
-					cpup->core_id, cpup->hyper);
+					cpup->core_id,
+					(cpup->flag & LPFC_CPU_MAP_HYPER),
+					(cpup->flag & LPFC_CPU_MAP_UNASSIGN));
 		} else {
 			if (cpup->hdwq == LPFC_VECTOR_MAP_EMPTY)
 				len += scnprintf(
 					buf + len, PAGE_SIZE - len,
 					"CPU %02d hdwq None "
-					"physid %d coreid %d ht %d IRQ %d\n",
+					"physid %d coreid %d ht %d ua %d IRQ %d\n",
 					phba->sli4_hba.curr_disp_cpu,
 					cpup->phys_id,
-					cpup->core_id, cpup->hyper, cpup->irq);
+					cpup->core_id,
+					(cpup->flag & LPFC_CPU_MAP_HYPER),
+					(cpup->flag & LPFC_CPU_MAP_UNASSIGN),
+					cpup->irq);
 			else
 				len += scnprintf(
 					buf + len, PAGE_SIZE - len,
 					"CPU %02d EQ %04d hdwq %04d "
-					"physid %d coreid %d ht %d IRQ %d\n",
+					"physid %d coreid %d ht %d ua %d IRQ %d\n",
 					phba->sli4_hba.curr_disp_cpu,
 					cpup->eq, cpup->hdwq, cpup->phys_id,
-					cpup->core_id, cpup->hyper, cpup->irq);
+					cpup->core_id,
+					(cpup->flag & LPFC_CPU_MAP_HYPER),
+					(cpup->flag & LPFC_CPU_MAP_UNASSIGN),
+					cpup->irq);
 		}
 
 		phba->sli4_hba.curr_disp_cpu++;
@@ -5457,15 +5468,12 @@ LPFC_ATTR_RW(nvmet_fb_size, 0, 0, 65536,
  * lpfc_nvme_enable_fb: Enable NVME first burst on I and T functions.
  * For the Initiator (I), enabling this parameter means that an NVMET
  * PRLI response with FBA enabled and an FB_SIZE set to a nonzero value will be
- * processed by the initiator for subsequent NVME FCP IO. For the target
- * function (T), enabling this parameter qualifies the lpfc_nvmet_fb_size
- * driver parameter as the target function's first burst size returned to the
- * initiator in the target's NVME PRLI response. Parameter supported on physical
- * port only - no NPIV support.
+ * processed by the initiator for subsequent NVME FCP IO.
+ * Currently, this feature is not supported on the NVME target
  * Value range is [0,1]. Default value is 0 (disabled).
  */
 LPFC_ATTR_RW(nvme_enable_fb, 0, 0, 1,
-	     "Enable First Burst feature on I and T functions.");
+	     "Enable First Burst feature for NVME Initiator.");
 
 /*
 # lpfc_max_scsicmpl_time: Use scsi command completion time to control I/O queue
@@ -5699,6 +5707,19 @@ LPFC_ATTR_RW(nvme_embed_cmd, 1, 0, 2,
 	     "Embed NVME Command in WQE");
 
 /*
+ * lpfc_fcp_mq_threshold: Set the maximum number of Hardware Queues
+ * the driver will advertise it supports to the SCSI layer.
+ *
+ *      0    = Set nr_hw_queues by the number of CPUs or HW queues.
+ *      1,128 = Manually specify the maximum nr_hw_queue value to be set,
+ *
+ * Value range is [0,256]. Default value is 8.
+ */
+LPFC_ATTR_R(fcp_mq_threshold, LPFC_FCP_MQ_THRESHOLD_DEF,
+	    LPFC_FCP_MQ_THRESHOLD_MIN, LPFC_FCP_MQ_THRESHOLD_MAX,
+	    "Set the number of SCSI Queues advertised");
+
+/*
  * lpfc_hdw_queue: Set the number of Hardware Queues the driver
  * will advertise it supports to the NVME and  SCSI layers. This also
  * will map to the number of CQ/WQ pairs the driver will create.
@@ -5904,7 +5925,7 @@ lpfc_sg_seg_cnt_init(struct lpfc_hba *phba, int val)
  *       1  = MDS Diagnostics enabled
  * Value range is [0,1]. Default value is 0.
  */
-LPFC_ATTR_R(enable_mds_diags, 0, 0, 1, "Enable MDS Diagnostics");
+LPFC_ATTR_RW(enable_mds_diags, 0, 0, 1, "Enable MDS Diagnostics");
 
 /*
  * lpfc_ras_fwlog_buffsize: Firmware logging host buffer size
@@ -6020,6 +6041,7 @@ struct device_attribute *lpfc_hba_attrs[] = {
 	&dev_attr_lpfc_cq_poll_threshold,
 	&dev_attr_lpfc_cq_max_proc_limit,
 	&dev_attr_lpfc_fcp_cpu_map,
+	&dev_attr_lpfc_fcp_mq_threshold,
 	&dev_attr_lpfc_hdw_queue,
 	&dev_attr_lpfc_irq_chann,
 	&dev_attr_lpfc_suppress_rsp,
@@ -6835,10 +6857,31 @@ lpfc_get_starget_port_name(struct scsi_target *starget)
 static void
 lpfc_set_rport_loss_tmo(struct fc_rport *rport, uint32_t timeout)
 {
+	struct lpfc_rport_data *rdata = rport->dd_data;
+	struct lpfc_nodelist *ndlp = rdata->pnode;
+#if (IS_ENABLED(CONFIG_NVME_FC))
+	struct lpfc_nvme_rport *nrport = NULL;
+#endif
+
 	if (timeout)
 		rport->dev_loss_tmo = timeout;
 	else
 		rport->dev_loss_tmo = 1;
+
+	if (!ndlp || !NLP_CHK_NODE_ACT(ndlp)) {
+		dev_info(&rport->dev, "Cannot find remote node to "
+				      "set rport dev loss tmo, port_id x%x\n",
+				      rport->port_id);
+		return;
+	}
+
+#if (IS_ENABLED(CONFIG_NVME_FC))
+	nrport = lpfc_ndlp_get_nrport(ndlp);
+
+	if (nrport && nrport->remoteport)
+		nvme_fc_set_remoteport_devloss(nrport->remoteport,
+					       rport->dev_loss_tmo);
+#endif
 }
 
 /**
@@ -7035,6 +7078,21 @@ struct fc_function_template lpfc_vport_transport_functions = {
 };
 
 /**
+ * lpfc_get_hba_function_mode - Used to determine the HBA function in FCoE
+ * Mode
+ * @phba: lpfc_hba pointer.
+ **/
+static void
+lpfc_get_hba_function_mode(struct lpfc_hba *phba)
+{
+	/* If it's a SkyHawk FCoE adapter */
+	if (phba->pcidev->device == PCI_DEVICE_ID_SKYHAWK)
+		phba->hba_flag |= HBA_FCOE_MODE;
+	else
+		phba->hba_flag &= ~HBA_FCOE_MODE;
+}
+
+/**
  * lpfc_get_cfgparam - Used during probe_one to init the adapter structure
  * @phba: lpfc_hba pointer.
  **/
@@ -7090,8 +7148,18 @@ lpfc_get_cfgparam(struct lpfc_hba *phba)
 	else
 		phba->cfg_poll = lpfc_poll;
 
-	if (phba->cfg_enable_bg)
+	/* Get the function mode */
+	lpfc_get_hba_function_mode(phba);
+
+	/* BlockGuard allowed for FC only. */
+	if (phba->cfg_enable_bg && phba->hba_flag & HBA_FCOE_MODE) {
+		lpfc_printf_log(phba, KERN_INFO, LOG_INIT,
+				"0581 BlockGuard feature not supported\n");
+		/* If set, clear the BlockGuard support param */
+		phba->cfg_enable_bg = 0;
+	} else if (phba->cfg_enable_bg) {
 		phba->sli3_options |= LPFC_SLI3_BG_ENABLED;
+	}
 
 	lpfc_suppress_rsp_init(phba, lpfc_suppress_rsp);
 
@@ -7102,6 +7170,7 @@ lpfc_get_cfgparam(struct lpfc_hba *phba)
 	/* Initialize first burst. Target vs Initiator are different. */
 	lpfc_nvme_enable_fb_init(phba, lpfc_nvme_enable_fb);
 	lpfc_nvmet_fb_size_init(phba, lpfc_nvmet_fb_size);
+	lpfc_fcp_mq_threshold_init(phba, lpfc_fcp_mq_threshold);
 	lpfc_hdw_queue_init(phba, lpfc_hdw_queue);
 	lpfc_irq_chann_init(phba, lpfc_irq_chann);
 	lpfc_enable_bbcr_init(phba, lpfc_enable_bbcr);
@@ -7149,16 +7218,6 @@ lpfc_get_cfgparam(struct lpfc_hba *phba)
 	lpfc_ras_fwlog_buffsize_init(phba, lpfc_ras_fwlog_buffsize);
 	lpfc_ras_fwlog_level_init(phba, lpfc_ras_fwlog_level);
 	lpfc_ras_fwlog_func_init(phba, lpfc_ras_fwlog_func);
-
-
-	/* If the NVME FC4 type is enabled, scale the sg_seg_cnt to
-	 * accommodate 512K and 1M IOs in a single nvme buf and supply
-	 * enough NVME LS iocb buffers for larger connectivity counts.
-	 */
-	if (phba->cfg_enable_fc4_type & LPFC_ENABLE_NVME) {
-		phba->cfg_sg_seg_cnt = LPFC_MAX_NVME_SEG_CNT;
-		phba->cfg_iocb_cnt = 5;
-	}
 
 	return;
 }

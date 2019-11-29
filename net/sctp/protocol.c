@@ -81,7 +81,7 @@ static void sctp_v4_copy_addrlist(struct list_head *addrlist,
 		return;
 	}
 
-	for (ifa = in_dev->ifa_list; ifa; ifa = ifa->ifa_next) {
+	in_dev_for_each_ifa_rcu(ifa, in_dev) {
 		/* Add the address to the local list.  */
 		addr = kzalloc(sizeof(*addr), GFP_ATOMIC);
 		if (addr) {
@@ -1217,8 +1217,14 @@ static int __net_init sctp_defaults_init(struct net *net)
 	/* Max.Burst		    - 4 */
 	net->sctp.max_burst			= SCTP_DEFAULT_MAX_BURST;
 
+	/* Disable of Primary Path Switchover by default */
+	net->sctp.ps_retrans = SCTP_PS_RETRANS_MAX;
+
 	/* Enable pf state by default */
 	net->sctp.pf_enable = 1;
+
+	/* Ignore pf exposure feature by default */
+	net->sctp.pf_expose = SCTP_PF_EXPOSE_UNSET;
 
 	/* Association.Max.Retrans  - 10 attempts
 	 * Path.Max.Retrans         - 5  attempts (per destination address)
@@ -1253,6 +1259,9 @@ static int __net_init sctp_defaults_init(struct net *net)
 
 	/* Disable AUTH by default. */
 	net->sctp.auth_enable = 0;
+
+	/* Enable ECN by default. */
+	net->sctp.ecn_enable = 1;
 
 	/* Set SCOPE policy to enabled */
 	net->sctp.scope_policy = SCTP_SCOPE_POLICY_ENABLE;
@@ -1336,7 +1345,7 @@ static int __net_init sctp_ctrlsock_init(struct net *net)
 	return status;
 }
 
-static void __net_init sctp_ctrlsock_exit(struct net *net)
+static void __net_exit sctp_ctrlsock_exit(struct net *net)
 {
 	/* Free the control endpoint.  */
 	inet_ctl_sock_destroy(net->sctp.ctl_sock);

@@ -29,6 +29,7 @@
 #include <asm/timer.h>
 #include <asm/reboot.h>
 #include <asm/nmi.h>
+#include <clocksource/hyperv_timer.h>
 
 struct ms_hyperv_info ms_hyperv;
 EXPORT_SYMBOL_GPL(ms_hyperv);
@@ -215,6 +216,10 @@ static void __init ms_hyperv_init_platform(void)
 	int hv_host_info_ecx;
 	int hv_host_info_edx;
 
+#ifdef CONFIG_PARAVIRT
+	pv_info.name = "Hyper-V";
+#endif
+
 	/*
 	 * Extract the features and hints
 	 */
@@ -285,7 +290,12 @@ static void __init ms_hyperv_init_platform(void)
 	machine_ops.shutdown = hv_machine_shutdown;
 	machine_ops.crash_shutdown = hv_machine_crash_shutdown;
 #endif
-	mark_tsc_unstable("running on Hyper-V");
+	if (ms_hyperv.features & HV_X64_ACCESS_TSC_INVARIANT) {
+		wrmsrl(HV_X64_MSR_TSC_INVARIANT_CONTROL, 0x1);
+		setup_force_cpu_cap(X86_FEATURE_TSC_RELIABLE);
+	} else {
+		mark_tsc_unstable("running on Hyper-V");
+	}
 
 	/*
 	 * Generation 2 instances don't support reading the NMI status from
@@ -338,6 +348,15 @@ static void __init ms_hyperv_init_platform(void)
 		x2apic_phys = 1;
 # endif
 
+	/* Register Hyper-V specific clocksource */
+	hv_init_clocksource();
+#endif
+}
+
+void hv_setup_sched_clock(void *sched_clock)
+{
+#ifdef CONFIG_PARAVIRT
+	pv_ops.time.sched_clock = sched_clock;
 #endif
 }
 

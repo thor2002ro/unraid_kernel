@@ -10,14 +10,11 @@
 #include "xfs_log_format.h"
 #include "xfs_trans_resv.h"
 #include "xfs_mount.h"
-#include "xfs_da_format.h"
-#include "xfs_da_btree.h"
 #include "xfs_inode.h"
 #include "xfs_trans.h"
 #include "xfs_inode_item.h"
 #include "xfs_bmap.h"
 #include "xfs_bmap_util.h"
-#include "xfs_error.h"
 #include "xfs_dir2.h"
 #include "xfs_dir2_priv.h"
 #include "xfs_ioctl.h"
@@ -28,11 +25,10 @@
 #include "xfs_iomap.h"
 #include "xfs_reflink.h"
 
-#include <linux/dcache.h>
 #include <linux/falloc.h>
-#include <linux/pagevec.h>
 #include <linux/backing-dev.h>
 #include <linux/mman.h>
+#include <linux/fadvise.h>
 
 static const struct vm_operations_struct xfs_file_vm_ops;
 
@@ -367,40 +363,30 @@ restart:
 	 * lock above.  Eventually we should look into a way to avoid
 	 * the pointless lock roundtrip.
 	 */
-	if (likely(!(file->f_mode & FMODE_NOCMTIME))) {
-		error = file_update_time(file);
-		if (error)
-			return error;
-	}
-
-	/*
-	 * If we're writing the file then make sure to clear the setuid and
-	 * setgid bits if the process is not being run by root.  This keeps
-	 * people from modifying setuid and setgid binaries.
-	 */
-	if (!IS_NOSEC(inode))
-		return file_remove_privs(file);
-	return 0;
+	return file_modified(file);
 }
 
 static int
 xfs_dio_write_end_io(
 	struct kiocb		*iocb,
 	ssize_t			size,
+	int			error,
 	unsigned		flags)
 {
 	struct inode		*inode = file_inode(iocb->ki_filp);
 	struct xfs_inode	*ip = XFS_I(inode);
 	loff_t			offset = iocb->ki_pos;
-	int			error = 0;
+	unsigned int		nofs_flag;
 
 	trace_xfs_end_io_direct_write(ip, offset, size);
 
 	if (XFS_FORCED_SHUTDOWN(ip->i_mount))
 		return -EIO;
 
-	if (size <= 0)
-		return size;
+	if (error)
+		return error;
+	if (!size)
+		return 0;
 
 	/*
 	 * Capture amount written on completion as we can't reliably account
@@ -408,10 +394,17 @@ xfs_dio_write_end_io(
 	 */
 	XFS_STATS_ADD(ip->i_mount, xs_write_bytes, size);
 
+	/*
+	 * We can allocate memory here while doing writeback on behalf of
+	 * memory reclaim.  To avoid memory allocation deadlocks set the
+	 * task-wide nofs context for the following operations.
+	 */
+	nofs_flag = memalloc_nofs_save();
+
 	if (flags & IOMAP_DIO_COW) {
 		error = xfs_reflink_end_cow(ip, offset, size);
 		if (error)
-			return error;
+			goto out;
 	}
 
 	/*
@@ -420,8 +413,10 @@ xfs_dio_write_end_io(
 	 * earlier allows a racing dio read to find unwritten extents before
 	 * they are converted.
 	 */
-	if (flags & IOMAP_DIO_UNWRITTEN)
-		return xfs_iomap_write_unwritten(ip, offset, size, true);
+	if (flags & IOMAP_DIO_UNWRITTEN) {
+		error = xfs_iomap_write_unwritten(ip, offset, size, true);
+		goto out;
+	}
 
 	/*
 	 * We need to update the in-core inode size here so that we don't end up
@@ -443,8 +438,14 @@ xfs_dio_write_end_io(
 		spin_unlock(&ip->i_flags_lock);
 	}
 
+out:
+	memalloc_nofs_restore(nofs_flag);
 	return error;
 }
+
+static const struct iomap_dio_ops xfs_dio_write_ops = {
+	.end_io		= xfs_dio_write_end_io,
+};
 
 /*
  * xfs_file_dio_aio_write - handle direct IO writes
@@ -546,7 +547,7 @@ xfs_file_dio_aio_write(
 	}
 
 	trace_xfs_file_direct_write(ip, count, iocb->ki_pos);
-	ret = iomap_dio_rw(iocb, from, &xfs_iomap_ops, xfs_dio_write_end_io);
+	ret = iomap_dio_rw(iocb, from, &xfs_iomap_ops, &xfs_dio_write_ops);
 
 	/*
 	 * If unaligned, this is the only IO in-flight. If it has not yet
@@ -939,6 +940,30 @@ out_unlock:
 	return error;
 }
 
+STATIC int
+xfs_file_fadvise(
+	struct file	*file,
+	loff_t		start,
+	loff_t		end,
+	int		advice)
+{
+	struct xfs_inode *ip = XFS_I(file_inode(file));
+	int ret;
+	int lockflags = 0;
+
+	/*
+	 * Operations creating pages in page cache need protection from hole
+	 * punching and similar ops
+	 */
+	if (advice == POSIX_FADV_WILLNEED) {
+		lockflags = XFS_IOLOCK_SHARED;
+		xfs_ilock(ip, lockflags);
+	}
+	ret = generic_fadvise(file, start, end, advice);
+	if (lockflags)
+		xfs_iunlock(ip, lockflags);
+	return ret;
+}
 
 STATIC loff_t
 xfs_file_remap_range(
@@ -1203,11 +1228,14 @@ xfs_file_mmap(
 	struct file	*filp,
 	struct vm_area_struct *vma)
 {
+	struct dax_device 	*dax_dev;
+
+	dax_dev = xfs_find_daxdev_for_inode(file_inode(filp));
 	/*
-	 * We don't support synchronous mappings for non-DAX files. At least
-	 * until someone comes with a sensible use case.
+	 * We don't support synchronous mappings for non-DAX files and
+	 * for DAX files if underneath dax_device is not synchronous.
 	 */
-	if (!IS_DAX(file_inode(filp)) && (vma->vm_flags & VM_SYNC))
+	if (!daxdev_mapping_supported(vma, dax_dev))
 		return -EOPNOTSUPP;
 
 	file_accessed(filp);
@@ -1235,6 +1263,7 @@ const struct file_operations xfs_file_operations = {
 	.fsync		= xfs_file_fsync,
 	.get_unmapped_area = thp_get_unmapped_area,
 	.fallocate	= xfs_file_fallocate,
+	.fadvise	= xfs_file_fadvise,
 	.remap_file_range = xfs_file_remap_range,
 };
 
