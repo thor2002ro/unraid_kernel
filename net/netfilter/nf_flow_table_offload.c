@@ -28,6 +28,7 @@ struct nf_flow_key {
 	struct flow_dissector_key_basic			basic;
 	union {
 		struct flow_dissector_key_ipv4_addrs	ipv4;
+		struct flow_dissector_key_ipv6_addrs	ipv6;
 	};
 	struct flow_dissector_key_tcp			tcp;
 	struct flow_dissector_key_ports			tp;
@@ -57,6 +58,7 @@ static int nf_flow_rule_match(struct nf_flow_match *match,
 	NF_FLOW_DISSECTOR(match, FLOW_DISSECTOR_KEY_CONTROL, control);
 	NF_FLOW_DISSECTOR(match, FLOW_DISSECTOR_KEY_BASIC, basic);
 	NF_FLOW_DISSECTOR(match, FLOW_DISSECTOR_KEY_IPV4_ADDRS, ipv4);
+	NF_FLOW_DISSECTOR(match, FLOW_DISSECTOR_KEY_IPV6_ADDRS, ipv6);
 	NF_FLOW_DISSECTOR(match, FLOW_DISSECTOR_KEY_TCP, tcp);
 	NF_FLOW_DISSECTOR(match, FLOW_DISSECTOR_KEY_PORTS, tp);
 
@@ -69,9 +71,18 @@ static int nf_flow_rule_match(struct nf_flow_match *match,
 		key->ipv4.dst = tuple->dst_v4.s_addr;
 		mask->ipv4.dst = 0xffffffff;
 		break;
+       case AF_INET6:
+		key->control.addr_type = FLOW_DISSECTOR_KEY_IPV6_ADDRS;
+		key->basic.n_proto = htons(ETH_P_IPV6);
+		key->ipv6.src = tuple->src_v6;
+		memset(&mask->ipv6.src, 0xff, sizeof(mask->ipv6.src));
+		key->ipv6.dst = tuple->dst_v6;
+		memset(&mask->ipv6.dst, 0xff, sizeof(mask->ipv6.dst));
+		break;
 	default:
 		return -EOPNOTSUPP;
 	}
+	match->dissector.used_keys |= BIT(key->control.addr_type);
 	mask->basic.n_proto = 0xffff;
 
 	switch (tuple->l4proto) {
@@ -96,7 +107,6 @@ static int nf_flow_rule_match(struct nf_flow_match *match,
 
 	match->dissector.used_keys |= BIT(FLOW_DISSECTOR_KEY_CONTROL) |
 				      BIT(FLOW_DISSECTOR_KEY_BASIC) |
-				      BIT(FLOW_DISSECTOR_KEY_IPV4_ADDRS) |
 				      BIT(FLOW_DISSECTOR_KEY_PORTS);
 	return 0;
 }
@@ -340,7 +350,7 @@ static void flow_offload_port_snat(struct net *net,
 		offset = 0; /* offsetof(struct tcphdr, dest); */
 		break;
 	default:
-		break;
+		return;
 	}
 
 	flow_offload_mangle(entry, flow_offload_l4proto(flow), offset,
@@ -367,7 +377,7 @@ static void flow_offload_port_dnat(struct net *net,
 		offset = 0; /* offsetof(struct tcphdr, dest); */
 		break;
 	default:
-		break;
+		return;
 	}
 
 	flow_offload_mangle(entry, flow_offload_l4proto(flow), offset,
@@ -574,7 +584,7 @@ static int flow_offload_tuple_add(struct flow_offload_work *offload,
 	cls_flow.rule = flow_rule->rule;
 
 	list_for_each_entry(block_cb, &flowtable->flow_block.cb_list, list) {
-		err = block_cb->cb(TC_SETUP_FT, &cls_flow,
+		err = block_cb->cb(TC_SETUP_CLSFLOWER, &cls_flow,
 				   block_cb->cb_priv);
 		if (err < 0)
 			continue;
@@ -599,7 +609,7 @@ static void flow_offload_tuple_del(struct flow_offload_work *offload,
 			     &offload->flow->tuplehash[dir].tuple, &extack);
 
 	list_for_each_entry(block_cb, &flowtable->flow_block.cb_list, list)
-		block_cb->cb(TC_SETUP_FT, &cls_flow, block_cb->cb_priv);
+		block_cb->cb(TC_SETUP_CLSFLOWER, &cls_flow, block_cb->cb_priv);
 
 	offload->flow->flags |= FLOW_OFFLOAD_HW_DEAD;
 }
@@ -656,7 +666,7 @@ static void flow_offload_tuple_stats(struct flow_offload_work *offload,
 			     &offload->flow->tuplehash[dir].tuple, &extack);
 
 	list_for_each_entry(block_cb, &flowtable->flow_block.cb_list, list)
-		block_cb->cb(TC_SETUP_FT, &cls_flow, block_cb->cb_priv);
+		block_cb->cb(TC_SETUP_CLSFLOWER, &cls_flow, block_cb->cb_priv);
 	memcpy(stats, &cls_flow.stats, sizeof(*stats));
 }
 
@@ -822,7 +832,7 @@ int nf_flow_table_offload_setup(struct nf_flowtable *flowtable,
 	bo.extack	= &extack;
 	INIT_LIST_HEAD(&bo.cb_list);
 
-	err = dev->netdev_ops->ndo_setup_tc(dev, TC_SETUP_BLOCK, &bo);
+	err = dev->netdev_ops->ndo_setup_tc(dev, TC_SETUP_FT, &bo);
 	if (err < 0)
 		return err;
 
