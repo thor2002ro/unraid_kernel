@@ -80,6 +80,7 @@ static u64 current_sessionid = 1;
 static bool check_for_locks(struct nfs4_file *fp, struct nfs4_lockowner *lowner);
 static void nfs4_free_ol_stateid(struct nfs4_stid *stid);
 void nfsd4_end_grace(struct nfsd_net *nn);
+static void _free_cpntf_state_locked(struct nfsd_net *nn, struct nfs4_cpntf_state *cps);
 
 /* Locking: */
 
@@ -722,6 +723,7 @@ struct nfs4_stid *nfs4_alloc_stid(struct nfs4_client *cl, struct kmem_cache *sla
 	/* Will be incremented before return to client: */
 	refcount_set(&stid->sc_count, 1);
 	spin_lock_init(&stid->sc_lock);
+	INIT_LIST_HEAD(&stid->sc_cp_list);
 
 	/*
 	 * It shouldn't be a problem to reuse an opaque stateid value.
@@ -741,30 +743,76 @@ out_free:
 /*
  * Create a unique stateid_t to represent each COPY.
  */
-int nfs4_init_cp_state(struct nfsd_net *nn, struct nfsd4_copy *copy)
+static int nfs4_init_cp_state(struct nfsd_net *nn, copy_stateid_t *stid,
+			      unsigned char sc_type)
 {
 	int new_id;
 
+	stid->stid.si_opaque.so_clid.cl_boot = nn->boot_time;
+	stid->stid.si_opaque.so_clid.cl_id = nn->s2s_cp_cl_id;
+	stid->sc_type = sc_type;
+
 	idr_preload(GFP_KERNEL);
 	spin_lock(&nn->s2s_cp_lock);
-	new_id = idr_alloc_cyclic(&nn->s2s_cp_stateids, copy, 0, 0, GFP_NOWAIT);
+	new_id = idr_alloc_cyclic(&nn->s2s_cp_stateids, stid, 0, 0, GFP_NOWAIT);
+	stid->stid.si_opaque.so_id = new_id;
 	spin_unlock(&nn->s2s_cp_lock);
 	idr_preload_end();
 	if (new_id < 0)
 		return 0;
-	copy->cp_stateid.si_opaque.so_id = new_id;
-	copy->cp_stateid.si_opaque.so_clid.cl_boot = nn->boot_time;
-	copy->cp_stateid.si_opaque.so_clid.cl_id = nn->s2s_cp_cl_id;
 	return 1;
 }
 
-void nfs4_free_cp_state(struct nfsd4_copy *copy)
+int nfs4_init_copy_state(struct nfsd_net *nn, struct nfsd4_copy *copy)
+{
+	return nfs4_init_cp_state(nn, &copy->cp_stateid, NFS4_COPY_STID);
+}
+
+struct nfs4_cpntf_state *nfs4_alloc_init_cpntf_state(struct nfsd_net *nn,
+						     struct nfs4_stid *p_stid)
+{
+	struct nfs4_cpntf_state *cps;
+
+	cps = kzalloc(sizeof(struct nfs4_cpntf_state), GFP_KERNEL);
+	if (!cps)
+		return NULL;
+	cps->cpntf_time = get_seconds();
+	refcount_set(&cps->cp_stateid.sc_count, 1);
+	if (!nfs4_init_cp_state(nn, &cps->cp_stateid, NFS4_COPYNOTIFY_STID))
+		goto out_free;
+	spin_lock(&nn->s2s_cp_lock);
+	list_add(&cps->cp_list, &p_stid->sc_cp_list);
+	spin_unlock(&nn->s2s_cp_lock);
+	return cps;
+out_free:
+	kfree(cps);
+	return NULL;
+}
+
+void nfs4_free_copy_state(struct nfsd4_copy *copy)
 {
 	struct nfsd_net *nn;
 
+	WARN_ON_ONCE(copy->cp_stateid.sc_type != NFS4_COPY_STID);
 	nn = net_generic(copy->cp_clp->net, nfsd_net_id);
 	spin_lock(&nn->s2s_cp_lock);
-	idr_remove(&nn->s2s_cp_stateids, copy->cp_stateid.si_opaque.so_id);
+	idr_remove(&nn->s2s_cp_stateids,
+		   copy->cp_stateid.stid.si_opaque.so_id);
+	spin_unlock(&nn->s2s_cp_lock);
+}
+
+static void nfs4_free_cpntf_statelist(struct net *net, struct nfs4_stid *stid)
+{
+	struct nfs4_cpntf_state *cps;
+	struct nfsd_net *nn;
+
+	nn = net_generic(net, nfsd_net_id);
+	spin_lock(&nn->s2s_cp_lock);
+	while (!list_empty(&stid->sc_cp_list)) {
+		cps = list_first_entry(&stid->sc_cp_list,
+				       struct nfs4_cpntf_state, cp_list);
+		_free_cpntf_state_locked(nn, cps);
+	}
 	spin_unlock(&nn->s2s_cp_lock);
 }
 
@@ -915,6 +963,7 @@ nfs4_put_stid(struct nfs4_stid *s)
 		return;
 	}
 	idr_remove(&clp->cl_stateids, s->sc_stateid.si_opaque.so_id);
+	nfs4_free_cpntf_statelist(clp->net, s);
 	spin_unlock(&clp->cl_lock);
 	s->sc_free(s);
 	if (fp)
@@ -2382,10 +2431,10 @@ static int nfs4_show_open(struct seq_file *s, struct nfs4_stid *st)
 	access = bmap_to_share_mode(ols->st_access_bmap);
 	deny   = bmap_to_share_mode(ols->st_deny_bmap);
 
-	seq_printf(s, "access: \%s\%s, ",
+	seq_printf(s, "access: %s%s, ",
 		access & NFS4_SHARE_ACCESS_READ ? "r" : "-",
 		access & NFS4_SHARE_ACCESS_WRITE ? "w" : "-");
-	seq_printf(s, "deny: \%s\%s, ",
+	seq_printf(s, "deny: %s%s, ",
 		deny & NFS4_SHARE_ACCESS_READ ? "r" : "-",
 		deny & NFS4_SHARE_ACCESS_WRITE ? "w" : "-");
 
@@ -3548,12 +3597,17 @@ static bool replay_matches_cache(struct svc_rqst *rqstp,
 	    (bool)seq->cachethis)
 		return false;
 	/*
-	 * If there's an error than the reply can have fewer ops than
-	 * the call.  But if we cached a reply with *more* ops than the
-	 * call you're sending us now, then this new call is clearly not
-	 * really a replay of the old one:
+	 * If there's an error then the reply can have fewer ops than
+	 * the call.
 	 */
-	if (slot->sl_opcnt < argp->opcnt)
+	if (slot->sl_opcnt < argp->opcnt && !slot->sl_status)
+		return false;
+	/*
+	 * But if we cached a reply with *more* ops than the call you're
+	 * sending us now, then this new call is clearly not really a
+	 * replay of the old one:
+	 */
+	if (slot->sl_opcnt > argp->opcnt)
 		return false;
 	/* This is the only check explicitly called by spec: */
 	if (!same_creds(&rqstp->rq_cred, &slot->sl_cred))
@@ -4485,7 +4539,8 @@ static __be32 nfsd4_check_seqid(struct nfsd4_compound_state *cstate, struct nfs4
 
 static __be32 lookup_clientid(clientid_t *clid,
 		struct nfsd4_compound_state *cstate,
-		struct nfsd_net *nn)
+		struct nfsd_net *nn,
+		bool sessions)
 {
 	struct nfs4_client *found;
 
@@ -4506,7 +4561,7 @@ static __be32 lookup_clientid(clientid_t *clid,
 	 */
 	WARN_ON_ONCE(cstate->session);
 	spin_lock(&nn->client_lock);
-	found = find_confirmed_client(clid, false, nn);
+	found = find_confirmed_client(clid, sessions, nn);
 	if (!found) {
 		spin_unlock(&nn->client_lock);
 		return nfserr_expired;
@@ -4539,7 +4594,7 @@ nfsd4_process_open1(struct nfsd4_compound_state *cstate,
 	if (open->op_file == NULL)
 		return nfserr_jukebox;
 
-	status = lookup_clientid(clientid, cstate, nn);
+	status = lookup_clientid(clientid, cstate, nn, false);
 	if (status)
 		return status;
 	clp = cstate->clp;
@@ -5128,7 +5183,7 @@ nfsd4_renew(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 
 	dprintk("process_renew(%08x/%08x): starting\n", 
 			clid->cl_boot, clid->cl_id);
-	status = lookup_clientid(clid, cstate, nn);
+	status = lookup_clientid(clid, cstate, nn, false);
 	if (status)
 		goto out;
 	clp = cstate->clp;
@@ -5210,6 +5265,9 @@ nfs4_laundromat(struct nfsd_net *nn)
 	struct list_head *pos, *next, reaplist;
 	time_t cutoff = get_seconds() - nn->nfsd4_lease;
 	time_t t, new_timeo = nn->nfsd4_lease;
+	struct nfs4_cpntf_state *cps;
+	copy_stateid_t *cps_t;
+	int i;
 
 	dprintk("NFSD: laundromat service - starting\n");
 
@@ -5220,6 +5278,17 @@ nfs4_laundromat(struct nfsd_net *nn)
 	dprintk("NFSD: end of grace period\n");
 	nfsd4_end_grace(nn);
 	INIT_LIST_HEAD(&reaplist);
+
+	spin_lock(&nn->s2s_cp_lock);
+	idr_for_each_entry(&nn->s2s_cp_stateids, cps_t, i) {
+		cps = container_of(cps_t, struct nfs4_cpntf_state, cp_stateid);
+		if (cps->cp_stateid.sc_type == NFS4_COPYNOTIFY_STID &&
+				!time_after((unsigned long)cps->cpntf_time,
+				(unsigned long)cutoff))
+			_free_cpntf_state_locked(nn, cps);
+	}
+	spin_unlock(&nn->s2s_cp_lock);
+
 	spin_lock(&nn->client_lock);
 	list_for_each_safe(pos, next, &nn->client_lru) {
 		clp = list_entry(pos, struct nfs4_client, cl_lru);
@@ -5516,7 +5585,8 @@ nfsd4_lookup_stateid(struct nfsd4_compound_state *cstate,
 	if (ZERO_STATEID(stateid) || ONE_STATEID(stateid) ||
 		CLOSE_STATEID(stateid))
 		return nfserr_bad_stateid;
-	status = lookup_clientid(&stateid->si_opaque.so_clid, cstate, nn);
+	status = lookup_clientid(&stateid->si_opaque.so_clid, cstate, nn,
+				 false);
 	if (status == nfserr_stale_clientid) {
 		if (cstate->session)
 			return nfserr_bad_stateid;
@@ -5595,6 +5665,82 @@ nfs4_check_file(struct svc_rqst *rqstp, struct svc_fh *fhp, struct nfs4_stid *s,
 out:
 	return status;
 }
+static void
+_free_cpntf_state_locked(struct nfsd_net *nn, struct nfs4_cpntf_state *cps)
+{
+	WARN_ON_ONCE(cps->cp_stateid.sc_type != NFS4_COPYNOTIFY_STID);
+	if (!refcount_dec_and_test(&cps->cp_stateid.sc_count))
+		return;
+	list_del(&cps->cp_list);
+	idr_remove(&nn->s2s_cp_stateids,
+		   cps->cp_stateid.stid.si_opaque.so_id);
+	kfree(cps);
+}
+/*
+ * A READ from an inter server to server COPY will have a
+ * copy stateid. Look up the copy notify stateid from the
+ * idr structure and take a reference on it.
+ */
+__be32 manage_cpntf_state(struct nfsd_net *nn, stateid_t *st,
+			  struct nfs4_client *clp,
+			  struct nfs4_cpntf_state **cps)
+{
+	copy_stateid_t *cps_t;
+	struct nfs4_cpntf_state *state = NULL;
+
+	if (st->si_opaque.so_clid.cl_id != nn->s2s_cp_cl_id)
+		return nfserr_bad_stateid;
+	spin_lock(&nn->s2s_cp_lock);
+	cps_t = idr_find(&nn->s2s_cp_stateids, st->si_opaque.so_id);
+	if (cps_t) {
+		state = container_of(cps_t, struct nfs4_cpntf_state,
+				     cp_stateid);
+		if (state->cp_stateid.sc_type != NFS4_COPYNOTIFY_STID)
+			return nfserr_bad_stateid;
+		if (!clp)
+			refcount_inc(&state->cp_stateid.sc_count);
+		else
+			_free_cpntf_state_locked(nn, state);
+	}
+	spin_unlock(&nn->s2s_cp_lock);
+	if (!state)
+		return nfserr_bad_stateid;
+	if (!clp && state)
+		*cps = state;
+	return 0;
+}
+
+static __be32 find_cpntf_state(struct nfsd_net *nn, stateid_t *st,
+			       struct nfs4_stid **stid)
+{
+	__be32 status;
+	struct nfs4_cpntf_state *cps = NULL;
+	struct nfsd4_compound_state cstate;
+
+	status = manage_cpntf_state(nn, st, NULL, &cps);
+	if (status)
+		return status;
+
+	cps->cpntf_time = get_seconds();
+	memset(&cstate, 0, sizeof(cstate));
+	status = lookup_clientid(&cps->cp_p_clid, &cstate, nn, true);
+	if (status)
+		goto out;
+	status = nfsd4_lookup_stateid(&cstate, &cps->cp_p_stateid,
+				NFS4_DELEG_STID|NFS4_OPEN_STID|NFS4_LOCK_STID,
+				stid, nn);
+	put_client_renew(cstate.clp);
+out:
+	nfs4_put_cpntf_state(nn, cps);
+	return status;
+}
+
+void nfs4_put_cpntf_state(struct nfsd_net *nn, struct nfs4_cpntf_state *cps)
+{
+	spin_lock(&nn->s2s_cp_lock);
+	_free_cpntf_state_locked(nn, cps);
+	spin_unlock(&nn->s2s_cp_lock);
+}
 
 /*
  * Checks for stateid operations
@@ -5602,7 +5748,8 @@ out:
 __be32
 nfs4_preprocess_stateid_op(struct svc_rqst *rqstp,
 		struct nfsd4_compound_state *cstate, struct svc_fh *fhp,
-		stateid_t *stateid, int flags, struct nfsd_file **nfp)
+		stateid_t *stateid, int flags, struct nfsd_file **nfp,
+		struct nfs4_stid **cstid)
 {
 	struct inode *ino = d_inode(fhp->fh_dentry);
 	struct net *net = SVC_NET(rqstp);
@@ -5624,6 +5771,8 @@ nfs4_preprocess_stateid_op(struct svc_rqst *rqstp,
 	status = nfsd4_lookup_stateid(cstate, stateid,
 				NFS4_DELEG_STID|NFS4_OPEN_STID|NFS4_LOCK_STID,
 				&s, nn);
+	if (status == nfserr_bad_stateid)
+		status = find_cpntf_state(nn, stateid, &s);
 	if (status)
 		return status;
 	status = nfsd4_stid_check_stateid_generation(stateid, s,
@@ -5651,8 +5800,12 @@ done:
 	if (status == nfs_ok && nfp)
 		status = nfs4_check_file(rqstp, fhp, s, nfp, flags);
 out:
-	if (s)
-		nfs4_put_stid(s);
+	if (s) {
+		if (!status && cstid)
+			*cstid = s;
+		else
+			nfs4_put_stid(s);
+	}
 	return status;
 }
 
@@ -6652,7 +6805,8 @@ nfsd4_lockt(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 		 return nfserr_inval;
 
 	if (!nfsd4_has_session(cstate)) {
-		status = lookup_clientid(&lockt->lt_clientid, cstate, nn);
+		status = lookup_clientid(&lockt->lt_clientid, cstate, nn,
+					 false);
 		if (status)
 			goto out;
 	}
@@ -6836,7 +6990,7 @@ nfsd4_release_lockowner(struct svc_rqst *rqstp,
 	dprintk("nfsd4_release_lockowner clientid: (%08x/%08x):\n",
 		clid->cl_boot, clid->cl_id);
 
-	status = lookup_clientid(clid, cstate, nn);
+	status = lookup_clientid(clid, cstate, nn, false);
 	if (status)
 		return status;
 
@@ -6983,7 +7137,7 @@ nfs4_check_open_reclaim(clientid_t *clid,
 	__be32 status;
 
 	/* find clientid in conf_id_hashtbl */
-	status = lookup_clientid(clid, cstate, nn);
+	status = lookup_clientid(clid, cstate, nn, false);
 	if (status)
 		return nfserr_reclaim_bad;
 
@@ -7781,7 +7935,8 @@ nfs4_state_shutdown(void)
 static void
 get_stateid(struct nfsd4_compound_state *cstate, stateid_t *stateid)
 {
-	if (HAS_STATE_ID(cstate, CURRENT_STATE_ID_FLAG) && CURRENT_STATEID(stateid))
+	if (HAS_CSTATE_FLAG(cstate, CURRENT_STATE_ID_FLAG) &&
+	    CURRENT_STATEID(stateid))
 		memcpy(stateid, &cstate->current_stateid, sizeof(stateid_t));
 }
 
@@ -7790,14 +7945,14 @@ put_stateid(struct nfsd4_compound_state *cstate, stateid_t *stateid)
 {
 	if (cstate->minorversion) {
 		memcpy(&cstate->current_stateid, stateid, sizeof(stateid_t));
-		SET_STATE_ID(cstate, CURRENT_STATE_ID_FLAG);
+		SET_CSTATE_FLAG(cstate, CURRENT_STATE_ID_FLAG);
 	}
 }
 
 void
 clear_current_stateid(struct nfsd4_compound_state *cstate)
 {
-	CLEAR_STATE_ID(cstate, CURRENT_STATE_ID_FLAG);
+	CLEAR_CSTATE_FLAG(cstate, CURRENT_STATE_ID_FLAG);
 }
 
 /*
