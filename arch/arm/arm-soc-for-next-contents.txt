@@ -1,0 +1,225 @@
+arm/soc
+	mmp/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/lkundrak/linux-mmp tags/mmp-soc-for-v5.5-2
+	brcm/soc
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.5/soc
+	omap/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/soc-signed
+		contains omap/fixes-rc3
+	realtek/arm64
+		git://git.kernel.org/pub/scm/linux/kernel/git/afaerber/linux-realtek tags/realtek-arm64-soc-for-5.5
+	hisi/soc
+		git://github.com/hisilicon/linux-hisi tags/hisi-armv7-soc-for-5.5
+	patch
+		ARM: ASPEED: update default ARCH_NR_GPIO for ARCH_ASPEED
+	renesas/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-soc-for-v5.5-tag1
+	tegra/soc-fixes
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-arm-core
+	samsung/soc
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-soc-5.5
+	imx/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-soc-5.5
+	omap/soc-late
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/soc-late-signed
+	omap/maintainers
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/maintainers-signed
+
+arm/dt
+	renesas/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-dt-for-v5.5-tag1
+	renesas/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm64-dt-for-v5.5-tag1
+	renesas/dt-bindings
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-dt-bindings-for-v5.5-tag1
+	rockchip/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.5-rockchip-dts32-1
+	rockchip/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.5-rockchip-dts64-1
+	samsung/dt
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-dt-5.5
+	samsung/dt64
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-dt64-5.5
+	samsung/dt-dmc
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-dt-dmc-5.5
+	mmp/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/lkundrak/linux-mmp tags/mmp-dt-for-v5.5
+	actions/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/mani/linux-actions tags/actions-arm64-dt-for-v5.5
+	patch
+		ARM: dts: mmp3: add Dell Wyse 3020 machine
+	brcm/dt
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.5/devicetree
+	omap/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/dt-signed
+	omap/ti-sysc-drop-pdata
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/ti-sysc-drop-pdata-v2-signed-take2
+		contains omap/ti-sysc
+	juno/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/juno-update-5.5
+	stm32/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/atorgue/stm32 tags/stm32-dt-for-v5.5-1
+	socfpga/dts
+		git://git.kernel.org/pub/scm/linux/kernel/git/dinguyen/linux tags/socfpga_dts_updates_for_v5.5
+	ti/keystone-dts
+		git://git.kernel.org/pub/scm/linux/kernel/git/ssantosh/linux-keystone for_5.5/keystone-dts
+	realtek/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/afaerber/linux-realtek tags/realtek-arm64-dt-for-5.5
+	hisi/dt64
+		git://github.com/hisilicon/linux-hisi tags/hisi-arm64-dt-for-5.5
+	patch
+		ARM: dts: Add RDA8810PL GPIO controllers
+		ARM: dts: mmp3: Add a name to /clocks node
+		ARM: dts: mmp3: Fix /soc/watchdog node name
+		ARM: dts: mmp3-dell-ariel: Add a name to /memory node
+		ARM: dts: mmp3-dell-ariel: Add a serial point alias
+	omap/prm-dts
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/prm-signed
+	renesas/dt64-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm64-dt-for-v5.5-tag2
+	renesas/dt-bindings-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-dt-bindings-for-v5.5-tag2
+	patch
+		arm64: dts: lg1312: DT fix s/#interrupts-cells/#interrupt-cells/
+		arm64: dts: lg1313: DT fix s/#interrupts-cells/#interrupt-cells/
+		ARM: dts: atlas7: Fix "debounce-interval" property misspelling
+	sunxi/dt
+		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-dt-for-5.5-1
+	tegra/dt-bindings
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-dt-bindings
+	tegra/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-arm-dt
+	tegra/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-arm64-dt
+	mvebu/dt
+		git://git.infradead.org/linux-mvebu tags/mvebu-dt-5.5-1
+	mvebu/dt64
+		git://git.infradead.org/linux-mvebu tags/mvebu-dt64-5.5-1
+	sunxi/pmu-enable
+		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-fixes-for-5.4-3
+	sunxi/dt2
+		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-dt-for-5.5-2
+	imx/dt-bindings
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-bindings-5.5
+	imx/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-dt-5.5
+	imx/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-dt64-5.5
+	imx/dt64-tmu
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-dt64-tmu-5.5
+	qcom/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-for-5.5
+	qcom/dt32
+		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-dts-for-5.5
+	xilinx/dt
+		https://github.com/Xilinx/linux-xlnx tags/zynqmp-dt-for-v5.5
+	aspeed/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/joel/aspeed tags/aspeed-5.5-devicetree
+	at91/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-5.5-dt
+	ti/k3-dts
+		git://git.kernel.org/pub/scm/linux/kernel/git/kristo/linux tags/ti-k3-soc-for-v5.5
+	rockchip/dt-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.5-rockchip-dts32-2
+	rockchip/dt64-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.5-rockchip-dts64-2
+	amlogic/dt64
+		https://git.kernel.org/pub/scm/linux/kernel/git/khilman/linux-amlogic tags/amlogic-dt64
+	mediatek/dt
+		https://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.4-next-dts
+	mediatek/dt64
+		https://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.4-next-dts64
+	omsp/dt-late
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/dt-late-signed
+
+arm/drivers
+	renesas/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-drivers-for-v5.5-tag1
+	samsung/dmc
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-drivers-dmc-5.5
+	mmp/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/lkundrak/linux-mmp tags/mmp-drivers-for-v5.5
+		contains mmp/soc
+	patch
+		soc: mmp: guard include of asm/cputype.h with CONFIG_ARM{,64}
+	omap/ti-sysc
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/ti-sysc-signed
+	brcm/drivers
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.5/drivers
+	drivers/reset
+		git://git.pengutronix.de/git/pza/linux tags/reset-for-v5.5
+	ti/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/ssantosh/linux-keystone for_5.5/driver-soc
+	renesas/drivers-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-drivers-for-v5.5-tag2
+	tegra/firmware
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-firmware
+	tegra/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-soc
+	samsung/drivers
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-drivers-5.5
+	imx/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-drivers-5.5
+	qcom/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-drivers-for-5.5
+	xilinx/soc
+		https://github.com/Xilinx/linux-xlnx tags/zynqmp-soc-for-v5.5
+	at91/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-5.5-drivers
+	amlogic/drivers
+		https://git.kernel.org/pub/scm/linux/kernel/git/khilman/linux-amlogic tags/amlogic-drivers
+	mediatek/soc
+		https://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.4-next-soc
+	hisi/drivers
+		git://github.com/hisilicon/linux-hisi tags/hisi-drivers-for-5.5
+	tegra/memory
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-memory-v2
+	fsl/soc-drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/leo/linux tags/soc-fsl-next-v5.5
+	drivers/scmi-fix-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/scmi-fix-5.5
+
+arm/defconfig
+	patch
+		arm64: configs: Enable Actions Semi platform in defconfig
+	renesas/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm64-defconfig-for-v5.5-tag1
+	samsung/defconfig
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-defconfig-5.5
+	patch
+		ARM: multi_v7_defconfig: enable MMP platforms
+	omap/fixes-rc3
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.4/fixes-rc3-signed
+	omap/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/defconfig-signed
+	patch
+		ARM: multi_v7_defconfig: Enable audio support for stm32mp157
+	socfpga/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/dinguyen/linux tags/arm64_defconfig_for_v5.5
+	hisi/defconfig
+		git://github.com/hisilicon/linux-hisi tags/hisi-arm64-defconfig-for-5.5
+	renesas/defconfigrefresh
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-defconfig-for-v5.5-tag1
+	renesas/defconfig64
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm64-defconfig-for-v5.5-tag2
+	sunxi/defconfig
+		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-config-for-5.5-2
+	sunxi/defconfig64
+		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-config64-for-5.5-1
+	tegra/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-arm-defconfig
+	imx/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-defconfig-5.5
+	qcom/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-defconfig-for-5.5
+	at91/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-5.5-defconfig
+	aspeed/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/joel/aspeed tags/aspeed-5.5-defconfig
+
+arm/late
+
+arm/fixes
+	<no branch> (03212e347f9443e524d6383c6806ac08295c1fb0)
+		git://git.linaro.org/people/jens.wiklander/linux-tee tags/tee-fixes-for-v5.4
+
