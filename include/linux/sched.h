@@ -31,6 +31,7 @@
 #include <linux/task_io_accounting.h>
 #include <linux/posix-timers.h>
 #include <linux/rseq.h>
+#include <linux/kcsan.h>
 
 /* task_struct member predeclarations (sorted alphabetically): */
 struct audit_context;
@@ -862,7 +863,7 @@ struct task_struct {
 	u64				start_time;
 
 	/* Boot based time in nsecs: */
-	u64				real_start_time;
+	u64				start_boottime;
 
 	/* MM fault and swap info: this can arguably be seen as either mm-specific or thread-specific: */
 	unsigned long			min_flt;
@@ -1178,6 +1179,9 @@ struct task_struct {
 
 #ifdef CONFIG_KASAN
 	unsigned int			kasan_depth;
+#endif
+#ifdef CONFIG_KCSAN
+	struct kcsan_ctx		kcsan_ctx;
 #endif
 
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER

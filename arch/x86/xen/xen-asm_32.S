@@ -10,7 +10,6 @@
 #include <asm/processor-flags.h>
 #include <asm/segment.h>
 #include <asm/asm.h>
-
 #include <xen/interface/xen.h>
 
 #include <linux/linkage.h>

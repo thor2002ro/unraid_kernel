@@ -1378,7 +1378,6 @@ SYM_CODE_START(spurious_interrupt_bug)
 SYM_CODE_END(spurious_interrupt_bug)
 
 #ifdef CONFIG_XEN_PV
-SYM_FUNC_START(xen_hypervisor_callback)
 	/*
 	 * Check to see if we got the event in the critical
 	 * region in xen_iret_direct, after we've reenabled
@@ -1392,6 +1391,7 @@ SYM_FUNC_START(xen_hypervisor_callback)
 	jae	1f
 	call	xen_iret_crit_fixup
 1:
+SYM_FUNC_START(xen_hypervisor_callback)
 	pushl	$-1				/* orig_ax = -1 => not a system call */
 	SAVE_ALL
 	ENCODE_FRAME_POINTER
