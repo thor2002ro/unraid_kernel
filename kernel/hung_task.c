@@ -49,6 +49,7 @@ unsigned long __read_mostly sysctl_hung_task_timeout_secs = CONFIG_DEFAULT_HUNG_
 unsigned long __read_mostly sysctl_hung_task_check_interval_secs;
 
 int __read_mostly sysctl_hung_task_warnings = 10;
+int __read_mostly sysctl_hung_task_interval_warnings;
 
 static int __read_mostly did_panic;
 static bool hung_task_show_lock;
@@ -85,6 +86,34 @@ static struct notifier_block panic_block = {
 	.notifier_call = hung_task_panic,
 };
 
+static void hung_task_warning(struct task_struct *t, bool timeout)
+{
+	const char *loglevel = timeout ? KERN_ERR : KERN_INFO;
+	const char *path;
+	int *warnings;
+
+	if (timeout) {
+		warnings = &sysctl_hung_task_warnings;
+		path = "hung_task_timeout_secs";
+	} else {
+		warnings = &sysctl_hung_task_interval_warnings;
+		path = "hung_task_interval_secs";
+	}
+
+	if (*warnings > 0)
+		--*warnings;
+
+	printk("%sINFO: task %s:%d blocked for more than %ld seconds.\n",
+	       loglevel, t->comm, t->pid, (jiffies - t->last_switch_time) / HZ);
+	printk("%s      %s %s %.*s\n",
+		loglevel, print_tainted(), init_utsname()->release,
+		(int)strcspn(init_utsname()->version, " "),
+		init_utsname()->version);
+	printk("%s\"echo 0 > /proc/sys/kernel/%s\" disables this message.\n",
+		loglevel, path);
+	sched_show_task(t);
+}
+
 static void check_hung_task(struct task_struct *t, unsigned long timeout)
 {
 	unsigned long switch_count = t->nvcsw + t->nivcsw;
@@ -109,6 +138,9 @@ static void check_hung_task(struct task_struct *t, unsigned long timeout)
 		t->last_switch_time = jiffies;
 		return;
 	}
+	if (sysctl_hung_task_interval_warnings)
+		hung_task_warning(t, false);
+
 	if (time_is_after_jiffies(t->last_switch_time + timeout * HZ))
 		return;
 
@@ -120,25 +152,54 @@ static void check_hung_task(struct task_struct *t, unsigned long timeout)
 		hung_task_call_panic = true;
 	}
 
-	/*
-	 * Ok, the task did not get scheduled for more than 2 minutes,
-	 * complain:
-	 */
 	if (sysctl_hung_task_warnings) {
-		if (sysctl_hung_task_warnings > 0)
-			sysctl_hung_task_warnings--;
-		pr_err("INFO: task %s:%d blocked for more than %ld seconds.\n",
-		       t->comm, t->pid, (jiffies - t->last_switch_time) / HZ);
-		pr_err("      %s %s %.*s\n",
-			print_tainted(), init_utsname()->release,
-			(int)strcspn(init_utsname()->version, " "),
-			init_utsname()->version);
-		pr_err("\"echo 0 > /proc/sys/kernel/hung_task_timeout_secs\""
-			" disables this message.\n");
-		sched_show_task(t);
+		/* Don't print warings twice */
+		if (!sysctl_hung_task_interval_warnings)
+			hung_task_warning(t, true);
 		hung_task_show_lock = true;
 	}
 
+	touch_nmi_watchdog();
+}
+
+static void check_killed_task(struct task_struct *t, unsigned long timeout)
+{
+	unsigned long stamp = t->killed_time;
+
+	/*
+	 * Ensure the task is not frozen.
+	 * Also, skip vfork and any other user process that freezer should skip.
+	 */
+	if (unlikely(t->flags & (PF_FROZEN | PF_FREEZER_SKIP)))
+		return;
+	/*
+	 * Skip threads which are already inside do_exit(), for exit_mm() etc.
+	 * might take many seconds.
+	 */
+	if (t->flags & PF_EXITING)
+		return;
+	if (!stamp) {
+		stamp = jiffies;
+		if (!stamp)
+			stamp++;
+		t->killed_time = stamp;
+		return;
+	}
+	if (time_is_after_jiffies(stamp + timeout * HZ))
+		return;
+	trace_sched_process_hang(t);
+	if (sysctl_hung_task_panic) {
+		console_verbose();
+		hung_task_call_panic = true;
+	}
+	/*
+	 * This thread failed to terminate for more than
+	 * sysctl_hung_task_timeout_secs seconds, complain:
+	 */
+	pr_err("INFO: task %s:%d can't die for more than %ld seconds.\n",
+	       t->comm, t->pid, (jiffies - stamp) / HZ);
+	sched_show_task(t);
+	hung_task_show_lock = true;
 	touch_nmi_watchdog();
 }
 
@@ -193,6 +254,9 @@ static void check_hung_uninterruptible_tasks(unsigned long timeout)
 				goto unlock;
 			last_break = jiffies;
 		}
+		/* Check threads which are about to terminate. */
+		if (unlikely(fatal_signal_pending(t)))
+			check_killed_task(t, timeout);
 		/* use "==" to skip the TASK_KILLABLE tasks waiting on NFS */
 		if (t->state == TASK_UNINTERRUPTIBLE)
 			check_hung_task(t, timeout);

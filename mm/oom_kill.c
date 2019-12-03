@@ -377,36 +377,13 @@ static void select_bad_process(struct oom_control *oc)
 	}
 }
 
-static int dump_task(struct task_struct *p, void *arg)
+
+static int add_candidate_task(struct task_struct *p, void *arg)
 {
-	struct oom_control *oc = arg;
-	struct task_struct *task;
-
-	if (oom_unkillable_task(p))
-		return 0;
-
-	/* p may not have freeable memory in nodemask */
-	if (!is_memcg_oom(oc) && !oom_cpuset_eligible(p, oc))
-		return 0;
-
-	task = find_lock_task_mm(p);
-	if (!task) {
-		/*
-		 * This is a kthread or all of p's threads have already
-		 * detached their mm's.  There's no need to report
-		 * them; they can't be oom killed anyway.
-		 */
-		return 0;
+	if (!oom_unkillable_task(p)) {
+		get_task_struct(p);
+		list_add_tail(&p->oom_victim_list, (struct list_head *) arg);
 	}
-
-	pr_info("[%7d] %5d %5d %8lu %8lu %8ld %8lu         %5hd %s\n",
-		task->pid, from_kuid(&init_user_ns, task_uid(task)),
-		task->tgid, task->mm->total_vm, get_mm_rss(task->mm),
-		mm_pgtables_bytes(task->mm),
-		get_mm_counter(task->mm, MM_SWAPENTS),
-		task->signal->oom_score_adj, task->comm);
-	task_unlock(task);
-
 	return 0;
 }
 
@@ -422,18 +399,40 @@ static int dump_task(struct task_struct *p, void *arg)
  */
 static void dump_tasks(struct oom_control *oc)
 {
-	pr_info("Tasks state (memory values in pages):\n");
-	pr_info("[  pid  ]   uid  tgid total_vm      rss pgtables_bytes swapents oom_score_adj name\n");
+	LIST_HEAD(list);
+	struct task_struct *p;
+	struct task_struct *t;
 
 	if (is_memcg_oom(oc))
-		mem_cgroup_scan_tasks(oc->memcg, dump_task, oc);
+		mem_cgroup_scan_tasks(oc->memcg, add_candidate_task, &list);
 	else {
-		struct task_struct *p;
-
 		rcu_read_lock();
 		for_each_process(p)
-			dump_task(p, oc);
+			add_candidate_task(p, &list);
 		rcu_read_unlock();
+	}
+	pr_info("Tasks state (memory values in pages):\n");
+	pr_info("[  pid  ]   uid  tgid total_vm      rss pgtables_bytes swapents oom_score_adj name\n");
+	list_for_each_entry(p, &list, oom_victim_list) {
+		cond_resched();
+		/* p may not have freeable memory in nodemask */
+		if (!is_memcg_oom(oc) && !oom_cpuset_eligible(p, oc))
+			continue;
+		/* All of p's threads might have already detached their mm's. */
+		t = find_lock_task_mm(p);
+		if (!t)
+			continue;
+		pr_info("[%7d] %5d %5d %8lu %8lu %8ld %8lu         %5hd %s\n",
+			t->pid, from_kuid(&init_user_ns, task_uid(t)),
+			t->tgid, t->mm->total_vm, get_mm_rss(t->mm),
+			mm_pgtables_bytes(t->mm),
+			get_mm_counter(t->mm, MM_SWAPENTS),
+			t->signal->oom_score_adj, t->comm);
+		task_unlock(t);
+	}
+	list_for_each_entry_safe(p, t, &list, oom_victim_list) {
+		list_del(&p->oom_victim_list);
+		put_task_struct(p);
 	}
 }
 

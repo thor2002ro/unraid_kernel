@@ -45,6 +45,7 @@ show up in /proc/sys/kernel:
 - hung_task_timeout_secs
 - hung_task_check_interval_secs
 - hung_task_warnings
+- hung_task_interval_warnings
 - hyperv_record_panic_msg
 - kexec_load_disabled
 - kptr_restrict
@@ -383,12 +384,27 @@ Possible values to set are in range {0..LONG_MAX/HZ}.
 hung_task_warnings:
 ===================
 
-The maximum number of warnings to report. During a check interval
-if a hung task is detected, this value is decreased by 1.
+The maximum number of warnings to report. If after timeout a hung
+task is present, this value is decreased by 1 every check interval,
+producing a warning.
 When this value reaches 0, no more warnings will be reported.
 This file shows up if CONFIG_DETECT_HUNG_TASK is enabled.
 
 -1: report an infinite number of warnings.
+
+
+hung_task_interval_warnings:
+===================
+
+The same as hung_task_warnings, but set the number of interval
+warnings to be issued about detected hung tasks during check
+interval. That will produce warnings *before* the timeout happens.
+If a hung task is detected during check interval, this value is
+decreased by 1. When this value reaches 0, only timeout warnings
+will be reported.
+This file shows up if CONFIG_DETECT_HUNG_TASK is enabled.
+
+-1: report an infinite number of check interval warnings.
 
 
 hyperv_record_panic_msg:
