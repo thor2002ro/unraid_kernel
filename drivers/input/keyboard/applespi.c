@@ -1127,7 +1127,7 @@ applespi_handle_keyboard_event(struct applespi_data *applespi,
 	int i;
 
 	compiletime_assert(ARRAY_SIZE(applespi_controlcodes) ==
-			   sizeof_field(struct keyboard_protocol, modifiers) * 8,
+			   sizeof_member(struct keyboard_protocol, modifiers) * 8,
 			   "applespi_controlcodes has wrong number of entries");
 
 	/* check for rollover overflow, which is signalled by all keys == 1 */

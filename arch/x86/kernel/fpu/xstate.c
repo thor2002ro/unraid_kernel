@@ -259,8 +259,8 @@ static void __init setup_xstate_features(void)
 						   xmm_space);
 
 	xstate_offsets[XFEATURE_SSE]	= xstate_sizes[XFEATURE_FP];
-	xstate_sizes[XFEATURE_SSE]	= FIELD_SIZEOF(struct fxregs_state,
-						       xmm_space);
+	xstate_sizes[XFEATURE_SSE]	= sizeof_member(struct fxregs_state,
+							xmm_space);
 
 	for (i = FIRST_EXTENDED_XFEATURE; i < XFEATURE_MAX; i++) {
 		if (!xfeature_enabled(i))

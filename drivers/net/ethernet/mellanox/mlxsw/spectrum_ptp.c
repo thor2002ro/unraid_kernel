@@ -53,7 +53,7 @@ struct mlxsw_sp1_ptp_unmatched {
 };
 
 static const struct rhashtable_params mlxsw_sp1_ptp_unmatched_ht_params = {
-	.key_len = sizeof_field(struct mlxsw_sp1_ptp_unmatched, key),
+	.key_len = sizeof_member(struct mlxsw_sp1_ptp_unmatched, key),
 	.key_offset = offsetof(struct mlxsw_sp1_ptp_unmatched, key),
 	.head_offset = offsetof(struct mlxsw_sp1_ptp_unmatched, ht_node),
 };

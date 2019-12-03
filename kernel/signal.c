@@ -4548,11 +4548,11 @@ static inline void siginfo_buildtime_checks(void)
 	BUILD_BUG_ON(offsetof(struct siginfo, si_pid) !=
 		     offsetof(struct siginfo, si_addr));
 	if (sizeof(int) == sizeof(void __user *)) {
-		BUILD_BUG_ON(sizeof_field(struct siginfo, si_pid) !=
+		BUILD_BUG_ON(sizeof_member(struct siginfo, si_pid) !=
 			     sizeof(void __user *));
 	} else {
-		BUILD_BUG_ON((sizeof_field(struct siginfo, si_pid) +
-			      sizeof_field(struct siginfo, si_uid)) !=
+		BUILD_BUG_ON((sizeof_member(struct siginfo, si_pid) +
+			      sizeof_member(struct siginfo, si_uid)) !=
 			     sizeof(void __user *));
 		BUILD_BUG_ON(offsetofend(struct siginfo, si_pid) !=
 			     offsetof(struct siginfo, si_uid));
@@ -4560,10 +4560,10 @@ static inline void siginfo_buildtime_checks(void)
 #ifdef CONFIG_COMPAT
 	BUILD_BUG_ON(offsetof(struct compat_siginfo, si_pid) !=
 		     offsetof(struct compat_siginfo, si_addr));
-	BUILD_BUG_ON(sizeof_field(struct compat_siginfo, si_pid) !=
+	BUILD_BUG_ON(sizeof_member(struct compat_siginfo, si_pid) !=
 		     sizeof(compat_uptr_t));
-	BUILD_BUG_ON(sizeof_field(struct compat_siginfo, si_pid) !=
-		     sizeof_field(struct siginfo, si_pid));
+	BUILD_BUG_ON(sizeof_member(struct compat_siginfo, si_pid) !=
+		     sizeof_member(struct siginfo, si_pid));
 #endif
 }
 

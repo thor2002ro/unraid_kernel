@@ -1269,7 +1269,7 @@ int intel_vgpu_setup_submission(struct intel_vgpu *vgpu)
 						  sizeof(struct intel_vgpu_workload), 0,
 						  SLAB_HWCACHE_ALIGN,
 						  offsetof(struct intel_vgpu_workload, rb_tail),
-						  sizeof_field(struct intel_vgpu_workload, rb_tail),
+						  sizeof_member(struct intel_vgpu_workload, rb_tail),
 						  NULL);
 
 	if (!s->workloads) {

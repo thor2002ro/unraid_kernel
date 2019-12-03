@@ -154,13 +154,13 @@ static inline void arch_thread_struct_whitelist(unsigned long *offset,
 						unsigned long *size)
 {
 	/* Verify that there is no padding among the whitelisted fields: */
-	BUILD_BUG_ON(sizeof_field(struct thread_struct, uw) !=
-		     sizeof_field(struct thread_struct, uw.tp_value) +
-		     sizeof_field(struct thread_struct, uw.tp2_value) +
-		     sizeof_field(struct thread_struct, uw.fpsimd_state));
+	BUILD_BUG_ON(sizeof_member(struct thread_struct, uw) !=
+		     sizeof_member(struct thread_struct, uw.tp_value) +
+		     sizeof_member(struct thread_struct, uw.tp2_value) +
+		     sizeof_member(struct thread_struct, uw.fpsimd_state));
 
 	*offset = offsetof(struct thread_struct, uw);
-	*size = sizeof_field(struct thread_struct, uw);
+	*size = sizeof_member(struct thread_struct, uw);
 }
 
 #ifdef CONFIG_COMPAT

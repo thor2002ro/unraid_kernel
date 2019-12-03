@@ -179,7 +179,7 @@ void memcg_deactivate_kmem_caches(struct mem_cgroup *, struct mem_cgroup *);
 			sizeof(struct __struct),			\
 			__alignof__(struct __struct), (__flags),	\
 			offsetof(struct __struct, __field),		\
-			sizeof_field(struct __struct, __field), NULL)
+			sizeof_member(struct __struct, __field), NULL)
 
 /*
  * Common kmalloc functions provided by all allocators
