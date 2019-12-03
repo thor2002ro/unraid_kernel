@@ -112,6 +112,7 @@ struct _vcs_dpi_soc_bounding_box_st {
 	bool do_urgent_latency_adjustment;
 	double urgent_latency_adjustment_fabric_clock_component_us;
 	double urgent_latency_adjustment_fabric_clock_reference_mhz;
+	bool disable_dram_clock_change_vactive_support;
 };
 
 struct _vcs_dpi_ip_params_st {
@@ -145,7 +146,6 @@ struct _vcs_dpi_ip_params_st {
 	unsigned int writeback_interface_buffer_size_kbytes;
 	unsigned int writeback_line_buffer_buffer_size;
 
-#ifdef CONFIG_DRM_AMD_DC_DCN2_0
 	unsigned int writeback_10bpc420_supported;
 	double writeback_max_hscl_ratio;
 	double writeback_max_vscl_ratio;
@@ -155,7 +155,6 @@ struct _vcs_dpi_ip_params_st {
 	unsigned int writeback_max_vscl_taps;
 	unsigned int writeback_line_buffer_luma_buffer_size;
 	unsigned int writeback_line_buffer_chroma_buffer_size;
-#endif
 
 	unsigned int max_page_table_levels;
 	unsigned int max_num_dpp;

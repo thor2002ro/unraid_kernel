@@ -46,15 +46,11 @@
 #include "dce100/dce100_resource.h"
 #include "dce110/dce110_resource.h"
 #include "dce112/dce112_resource.h"
-#if defined(CONFIG_DRM_AMD_DC_DCN1_0)
+#if defined(CONFIG_DRM_AMD_DC_DCN)
 #include "dcn10/dcn10_resource.h"
 #endif
-#if defined(CONFIG_DRM_AMD_DC_DCN2_0)
 #include "dcn20/dcn20_resource.h"
-#endif
-#if defined(CONFIG_DRM_AMD_DC_DCN2_1)
 #include "dcn21/dcn21_resource.h"
-#endif
 #include "dce120/dce120_resource.h"
 
 #define DC_LOGGER_INIT(logger)
@@ -99,23 +95,19 @@ enum dce_version resource_parse_asic_id(struct hw_asic_id asic_id)
 		else
 			dc_version = DCE_VERSION_12_0;
 		break;
-#if defined(CONFIG_DRM_AMD_DC_DCN1_0)
+#if defined(CONFIG_DRM_AMD_DC_DCN)
 	case FAMILY_RV:
 		dc_version = DCN_VERSION_1_0;
 		if (ASICREV_IS_RAVEN2(asic_id.hw_internal_rev))
 			dc_version = DCN_VERSION_1_01;
-#if defined(CONFIG_DRM_AMD_DC_DCN2_1)
 		if (ASICREV_IS_RENOIR(asic_id.hw_internal_rev))
 			dc_version = DCN_VERSION_2_1;
-#endif
 		break;
 #endif
 
-#if defined(CONFIG_DRM_AMD_DC_DCN2_0)
 	case FAMILY_NV:
 		dc_version = DCN_VERSION_2_0;
 		break;
-#endif
 	default:
 		dc_version = DCE_VERSION_UNKNOWN;
 		break;
@@ -162,20 +154,16 @@ struct resource_pool *dc_create_resource_pool(struct dc  *dc,
 				init_data->num_virtual_links, dc);
 		break;
 
-#if defined(CONFIG_DRM_AMD_DC_DCN1_0)
+#if defined(CONFIG_DRM_AMD_DC_DCN)
 	case DCN_VERSION_1_0:
 	case DCN_VERSION_1_01:
 		res_pool = dcn10_create_resource_pool(init_data, dc);
 		break;
-#endif
 
 
-#if defined(CONFIG_DRM_AMD_DC_DCN2_0)
 	case DCN_VERSION_2_0:
 		res_pool = dcn20_create_resource_pool(init_data, dc);
 		break;
-#endif
-#if defined(CONFIG_DRM_AMD_DC_DCN2_1)
 	case DCN_VERSION_2_1:
 		res_pool = dcn21_create_resource_pool(init_data, dc);
 		break;
@@ -951,25 +939,14 @@ static void calculate_inits_and_adj_vp(struct pipe_ctx *pipe_ctx)
 	data->inits.v_c_bot = dc_fixpt_add(data->inits.v_c, data->ratios.vert_c);
 
 }
-static bool are_rects_integer_multiples(struct rect src, struct rect dest)
-{
-	if (dest.width  >= src.width  && dest.width  % src.width  == 0 &&
-		dest.height >= src.height && dest.height % src.height == 0)
-		return true;
-
-	return false;
-}
 
 static void calculate_integer_scaling(struct pipe_ctx *pipe_ctx)
 {
-	if (!pipe_ctx->plane_state->scaling_quality.integer_scaling)
-		return;
+	unsigned int integer_multiple = 1;
 
-	//for Centered Mode
-	if (pipe_ctx->stream->dst.width  == pipe_ctx->stream->src.width &&
-		pipe_ctx->stream->dst.height == pipe_ctx->stream->src.height) {
+	if (pipe_ctx->plane_state->scaling_quality.integer_scaling) {
 		// calculate maximum # of replication of src onto addressable
-		unsigned int integer_multiple = min(
+		integer_multiple = min(
 				pipe_ctx->stream->timing.h_addressable / pipe_ctx->stream->src.width,
 				pipe_ctx->stream->timing.v_addressable  / pipe_ctx->stream->src.height);
 
@@ -980,10 +957,8 @@ static void calculate_integer_scaling(struct pipe_ctx *pipe_ctx)
 		//center dst onto addressable
 		pipe_ctx->stream->dst.x = (pipe_ctx->stream->timing.h_addressable - pipe_ctx->stream->dst.width)/2;
 		pipe_ctx->stream->dst.y = (pipe_ctx->stream->timing.v_addressable - pipe_ctx->stream->dst.height)/2;
-	}
 
-	//disable taps if src & dst are integer ratio
-	if (are_rects_integer_multiples(pipe_ctx->stream->src, pipe_ctx->stream->dst)) {
+		//We are guaranteed that we are scaling in integer ratio
 		pipe_ctx->plane_state->scaling_quality.v_taps = 1;
 		pipe_ctx->plane_state->scaling_quality.h_taps = 1;
 		pipe_ctx->plane_state->scaling_quality.v_taps_c = 1;
@@ -1217,7 +1192,7 @@ static struct pipe_ctx *acquire_free_pipe_for_head(
 	return pool->funcs->acquire_idle_pipe_for_layer(context, pool, head_pipe->stream);
 }
 
-#if defined(CONFIG_DRM_AMD_DC_DCN1_0)
+#if defined(CONFIG_DRM_AMD_DC_DCN)
 static int acquire_first_split_pipe(
 		struct resource_context *res_ctx,
 		const struct resource_pool *pool,
@@ -1298,7 +1273,7 @@ bool dc_add_plane_to_context(
 
 		free_pipe = acquire_free_pipe_for_head(context, pool, head_pipe);
 
-	#if defined(CONFIG_DRM_AMD_DC_DCN1_0)
+	#if defined(CONFIG_DRM_AMD_DC_DCN)
 		if (!free_pipe) {
 			int pipe_idx = acquire_first_split_pipe(&context->res_ctx, pool, stream);
 			if (pipe_idx >= 0)
@@ -1972,7 +1947,7 @@ enum dc_status resource_map_pool_resources(
 		/* acquire new resources */
 		pipe_idx = acquire_first_free_pipe(&context->res_ctx, pool, stream);
 
-#ifdef CONFIG_DRM_AMD_DC_DCN1_0
+#ifdef CONFIG_DRM_AMD_DC_DCN
 	if (pipe_idx < 0)
 		pipe_idx = acquire_first_split_pipe(&context->res_ctx, pool, stream);
 #endif

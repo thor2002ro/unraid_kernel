@@ -1,4 +1,3 @@
-#ifdef CONFIG_DRM_AMD_DC_DSC_SUPPORT
 #ifndef DC_DSC_H_
 #define DC_DSC_H_
 /*
@@ -42,10 +41,8 @@ struct dc_dsc_bw_range {
 
 struct display_stream_compressor {
 	const struct dsc_funcs *funcs;
-#ifndef AMD_EDID_UTILITY
 	struct dc_context *ctx;
 	int inst;
-#endif
 };
 
 bool dc_dsc_parse_dsc_dpcd(const uint8_t *dpcd_dsc_basic_data,
@@ -68,5 +65,4 @@ bool dc_dsc_compute_config(
 		uint32_t target_bandwidth_kbps,
 		const struct dc_crtc_timing *timing,
 		struct dc_dsc_config *dsc_cfg);
-#endif
 #endif

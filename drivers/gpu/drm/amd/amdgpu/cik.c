@@ -1310,6 +1310,23 @@ static int cik_asic_pci_config_reset(struct amdgpu_device *adev)
 	return r;
 }
 
+static bool cik_asic_supports_baco(struct amdgpu_device *adev)
+{
+	bool baco_support;
+
+	switch (adev->asic_type) {
+	case CHIP_BONAIRE:
+	case CHIP_HAWAII:
+		smu7_asic_get_baco_capability(adev, &baco_support);
+		break;
+	default:
+		baco_support = false;
+		break;
+	}
+
+	return baco_support;
+}
+
 static enum amd_reset_method
 cik_asic_reset_method(struct amdgpu_device *adev)
 {
@@ -1346,10 +1363,13 @@ static int cik_asic_reset(struct amdgpu_device *adev)
 {
 	int r;
 
-	if (cik_asic_reset_method(adev) == AMD_RESET_METHOD_BACO)
+	if (cik_asic_reset_method(adev) == AMD_RESET_METHOD_BACO) {
+		if (!adev->in_suspend)
+			amdgpu_inc_vram_lost(adev);
 		r = smu7_asic_baco_reset(adev);
-	else
+	} else {
 		r = cik_asic_pci_config_reset(adev);
+	}
 
 	return r;
 }
@@ -1924,6 +1944,7 @@ static const struct amdgpu_asic_funcs cik_asic_funcs =
 	.get_pcie_usage = &cik_get_pcie_usage,
 	.need_reset_on_init = &cik_need_reset_on_init,
 	.get_pcie_replay_count = &cik_get_pcie_replay_count,
+	.supports_baco = &cik_asic_supports_baco,
 };
 
 static int cik_common_early_init(void *handle)

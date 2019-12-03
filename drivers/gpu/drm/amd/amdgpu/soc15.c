@@ -67,7 +67,9 @@
 #include "vce_v4_0.h"
 #include "vcn_v1_0.h"
 #include "vcn_v2_0.h"
+#include "jpeg_v2_0.h"
 #include "vcn_v2_5.h"
+#include "jpeg_v2_5.h"
 #include "dce_virtual.h"
 #include "mxgpu_ai.h"
 #include "amdgpu_smu.h"
@@ -509,9 +511,15 @@ static int soc15_asic_baco_reset(struct amdgpu_device *adev)
 
 	if (is_support_sw_smu(adev)) {
 		struct smu_context *smu = &adev->smu;
+		int ret;
 
-		if (smu_baco_reset(smu))
-			return -EIO;
+		ret = smu_baco_enter(smu);
+		if (ret)
+			return ret;
+
+		ret = smu_baco_exit(smu);
+		if (ret)
+			return ret;
 	} else {
 		void *pp_handle = adev->powerplay.pp_handle;
 		const struct amd_pm_funcs *pp_funcs = adev->powerplay.pp_funcs;
@@ -557,6 +565,7 @@ soc15_asic_reset_method(struct amdgpu_device *adev)
 		return AMD_RESET_METHOD_MODE2;
 	case CHIP_VEGA10:
 	case CHIP_VEGA12:
+	case CHIP_ARCTURUS:
 		soc15_asic_get_baco_capability(adev, &baco_reset);
 		break;
 	case CHIP_VEGA20:
@@ -597,6 +606,28 @@ static int soc15_asic_reset(struct amdgpu_device *adev)
 				amdgpu_inc_vram_lost(adev);
 			return soc15_asic_mode1_reset(adev);
 	}
+}
+
+static bool soc15_supports_baco(struct amdgpu_device *adev)
+{
+	bool baco_support;
+
+	switch (adev->asic_type) {
+	case CHIP_VEGA10:
+	case CHIP_VEGA12:
+		soc15_asic_get_baco_capability(adev, &baco_support);
+		break;
+	case CHIP_VEGA20:
+		if (adev->psp.sos_fw_version >= 0x80067)
+			soc15_asic_get_baco_capability(adev, &baco_support);
+		else
+			baco_support = false;
+		break;
+	default:
+		return false;
+	}
+
+	return baco_support;
 }
 
 /*static int soc15_set_uvd_clock(struct amdgpu_device *adev, u32 clock,
@@ -803,6 +834,8 @@ int soc15_set_ip_blocks(struct amdgpu_device *adev)
 
 		if (unlikely(adev->firmware.load_type == AMDGPU_FW_LOAD_DIRECT))
 			amdgpu_device_ip_block_add(adev, &vcn_v2_5_ip_block);
+		if (!amdgpu_sriov_vf(adev))
+			amdgpu_device_ip_block_add(adev, &jpeg_v2_5_ip_block);
 		break;
 	case CHIP_RENOIR:
 		amdgpu_device_ip_block_add(adev, &vega10_common_ip_block);
@@ -821,6 +854,7 @@ int soc15_set_ip_blocks(struct amdgpu_device *adev)
                         amdgpu_device_ip_block_add(adev, &dm_ip_block);
 #endif
 		amdgpu_device_ip_block_add(adev, &vcn_v2_0_ip_block);
+		amdgpu_device_ip_block_add(adev, &jpeg_v2_0_ip_block);
 		break;
 	default:
 		return -EINVAL;
@@ -999,6 +1033,7 @@ static const struct amdgpu_asic_funcs soc15_asic_funcs =
 	.get_pcie_usage = &soc15_get_pcie_usage,
 	.need_reset_on_init = &soc15_need_reset_on_init,
 	.get_pcie_replay_count = &soc15_get_pcie_replay_count,
+	.supports_baco = &soc15_supports_baco,
 };
 
 static const struct amdgpu_asic_funcs vega20_asic_funcs =
@@ -1007,6 +1042,7 @@ static const struct amdgpu_asic_funcs vega20_asic_funcs =
 	.read_bios_from_rom = &soc15_read_bios_from_rom,
 	.read_register = &soc15_read_register,
 	.reset = &soc15_asic_reset,
+	.reset_method = &soc15_asic_reset_method,
 	.set_vga_state = &soc15_vga_set_state,
 	.get_xclk = &soc15_get_xclk,
 	.set_uvd_clocks = &soc15_set_uvd_clocks,
@@ -1019,7 +1055,7 @@ static const struct amdgpu_asic_funcs vega20_asic_funcs =
 	.get_pcie_usage = &vega20_get_pcie_usage,
 	.need_reset_on_init = &soc15_need_reset_on_init,
 	.get_pcie_replay_count = &soc15_get_pcie_replay_count,
-	.reset_method = &soc15_asic_reset_method
+	.supports_baco = &soc15_supports_baco,
 };
 
 static int soc15_common_early_init(void *handle)
@@ -1208,7 +1244,9 @@ static int soc15_common_early_init(void *handle)
 			AMD_CG_SUPPORT_SDMA_LS |
 			AMD_CG_SUPPORT_MC_MGCG |
 			AMD_CG_SUPPORT_MC_LS |
-			AMD_CG_SUPPORT_IH_CG;
+			AMD_CG_SUPPORT_IH_CG |
+			AMD_CG_SUPPORT_VCN_MGCG |
+			AMD_CG_SUPPORT_JPEG_MGCG;
 		adev->pg_flags = 0;
 		adev->external_rev_id = adev->rev_id + 0x32;
 		break;
@@ -1229,12 +1267,14 @@ static int soc15_common_early_init(void *handle)
 				 AMD_CG_SUPPORT_HDP_LS |
 				 AMD_CG_SUPPORT_ROM_MGCG |
 				 AMD_CG_SUPPORT_VCN_MGCG |
+				 AMD_CG_SUPPORT_JPEG_MGCG |
 				 AMD_CG_SUPPORT_IH_CG |
 				 AMD_CG_SUPPORT_ATHUB_LS |
 				 AMD_CG_SUPPORT_ATHUB_MGCG |
 				 AMD_CG_SUPPORT_DF_MGCG;
 		adev->pg_flags = AMD_PG_SUPPORT_SDMA |
 				 AMD_PG_SUPPORT_VCN |
+				 AMD_PG_SUPPORT_JPEG |
 				 AMD_PG_SUPPORT_VCN_DPG;
 		adev->external_rev_id = adev->rev_id + 0x91;
 		break;

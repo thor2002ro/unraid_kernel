@@ -203,6 +203,17 @@ int smu_v12_0_powergate_vcn(struct smu_context *smu, bool gate)
 		return smu_send_smc_msg(smu, SMU_MSG_PowerUpVcn);
 }
 
+int smu_v12_0_powergate_jpeg(struct smu_context *smu, bool gate)
+{
+	if (!(smu->adev->flags & AMD_IS_APU))
+		return 0;
+
+	if (gate)
+		return smu_send_smc_msg_with_param(smu, SMU_MSG_PowerDownJpeg, 0);
+	else
+		return smu_send_smc_msg_with_param(smu, SMU_MSG_PowerUpJpeg, 0);
+}
+
 int smu_v12_0_set_gfx_cgpg(struct smu_context *smu, bool enable)
 {
 	if (!(smu->adev->pg_flags & AMD_PG_SUPPORT_GFX_PG))
@@ -210,6 +221,39 @@ int smu_v12_0_set_gfx_cgpg(struct smu_context *smu, bool enable)
 
 	return smu_v12_0_send_msg_with_param(smu,
 		SMU_MSG_SetGfxCGPG, enable ? 1 : 0);
+}
+
+int smu_v12_0_read_sensor(struct smu_context *smu,
+				 enum amd_pp_sensors sensor,
+				 void *data, uint32_t *size)
+{
+	int ret = 0;
+
+	if(!data || !size)
+		return -EINVAL;
+
+	switch (sensor) {
+	case AMDGPU_PP_SENSOR_GFX_MCLK:
+		ret = smu_get_current_clk_freq(smu, SMU_UCLK, (uint32_t *)data);
+		*size = 4;
+		break;
+	case AMDGPU_PP_SENSOR_GFX_SCLK:
+		ret = smu_get_current_clk_freq(smu, SMU_GFXCLK, (uint32_t *)data);
+		*size = 4;
+		break;
+	case AMDGPU_PP_SENSOR_MIN_FAN_RPM:
+		*(uint32_t *)data = 0;
+		*size = 4;
+		break;
+	default:
+		ret = smu_common_read_sensor(smu, sensor, data, size);
+		break;
+	}
+
+	if (ret)
+		*size = 0;
+
+	return ret;
 }
 
 /**

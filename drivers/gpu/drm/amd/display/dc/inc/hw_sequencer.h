@@ -66,19 +66,15 @@ struct dce_hwseq {
 
 struct pipe_ctx;
 struct dc_state;
-#if defined(CONFIG_DRM_AMD_DC_DCN2_0)
 struct dc_stream_status;
 struct dc_writeback_info;
-#endif
 struct dchub_init_data;
 struct dc_static_screen_events;
 struct resource_pool;
 struct resource_context;
 struct stream_resource;
-#ifdef CONFIG_DRM_AMD_DC_DCN2_0
 struct dc_phy_addr_space_config;
 struct dc_virtual_addr_space_config;
-#endif
 struct hubp;
 struct dpp;
 
@@ -113,7 +109,6 @@ struct hw_sequencer_funcs {
 			uint16_t *matrix,
 			int opp_id);
 
-#if defined(CONFIG_DRM_AMD_DC_DCN2_0)
 	void (*program_front_end_for_ctx)(
 			struct dc *dc,
 			struct dc_state *context);
@@ -124,7 +119,6 @@ struct hw_sequencer_funcs {
 	void (*set_flip_control_gsl)(
 		struct pipe_ctx *pipe_ctx,
 		bool flip_immediate);
-#endif
 
 	void (*update_plane_addr)(
 		const struct dc *dc,
@@ -138,7 +132,6 @@ struct hw_sequencer_funcs {
 		struct dce_hwseq *hws,
 		struct dchub_init_data *dh_data);
 
-#ifdef CONFIG_DRM_AMD_DC_DCN2_0
 	int (*init_sys_ctx)(
 			struct dce_hwseq *hws,
 			struct dc *dc,
@@ -148,7 +141,6 @@ struct hw_sequencer_funcs {
 			struct dc *dc,
 			struct dc_virtual_addr_space_config *va_config,
 			int vmid);
-#endif
 	void (*update_mpcc)(
 		struct dc *dc,
 		struct pipe_ctx *pipe_ctx);
@@ -156,11 +148,11 @@ struct hw_sequencer_funcs {
 	void (*update_pending_status)(
 			struct pipe_ctx *pipe_ctx);
 
-	bool (*set_input_transfer_func)(
+	bool (*set_input_transfer_func)(struct dc *dc,
 				struct pipe_ctx *pipe_ctx,
 				const struct dc_plane_state *plane_state);
 
-	bool (*set_output_transfer_func)(
+	bool (*set_output_transfer_func)(struct dc *dc,
 				struct pipe_ctx *pipe_ctx,
 				const struct dc_stream_state *stream);
 
@@ -239,13 +231,11 @@ struct hw_sequencer_funcs {
 			const struct dc *dc,
 			struct dc_state *context);
 
-#if defined(CONFIG_DRM_AMD_DC_DCN2_0)
 	bool (*update_bandwidth)(
 			struct dc *dc,
 			struct dc_state *context);
 	void (*program_dmdata_engine)(struct pipe_ctx *pipe_ctx);
 	bool (*dmdata_status_done)(struct pipe_ctx *pipe_ctx);
-#endif
 
 	void (*set_drr)(struct pipe_ctx **pipe_ctx, int num_pipes,
 			unsigned int vmin, unsigned int vmax,
@@ -289,8 +279,10 @@ struct hw_sequencer_funcs {
 	void (*set_cursor_attribute)(struct pipe_ctx *pipe);
 	void (*set_cursor_sdr_white_level)(struct pipe_ctx *pipe);
 
-	void (*setup_periodic_interrupt)(struct pipe_ctx *pipe_ctx, enum vline_select vline);
-	void (*setup_vupdate_interrupt)(struct pipe_ctx *pipe_ctx);
+	void (*setup_periodic_interrupt)(struct dc *dc,
+			struct pipe_ctx *pipe_ctx,
+			enum vline_select vline);
+	void (*setup_vupdate_interrupt)(struct dc *dc, struct pipe_ctx *pipe_ctx);
 	bool (*did_underflow_occur)(struct dc *dc, struct pipe_ctx *pipe_ctx);
 
 	void (*init_blank)(struct dc *dc, struct timing_generator *tg);
@@ -323,7 +315,6 @@ struct hw_sequencer_funcs {
 			bool power_on);
 
 
-#if defined(CONFIG_DRM_AMD_DC_DCN2_0)
 	void (*update_odm)(struct dc *dc, struct dc_state *context, struct pipe_ctx *pipe_ctx);
 	void (*program_all_writeback_pipes_in_tree)(
 			struct dc *dc,
@@ -339,7 +330,6 @@ struct hw_sequencer_funcs {
 			struct dc_state *context);
 	void (*disable_writeback)(struct dc *dc,
 			unsigned int dwb_pipe_inst);
-#endif
 	enum dc_status (*set_clock)(struct dc *dc,
 			enum dc_clock_type clock_type,
 			uint32_t clk_khz,
@@ -349,9 +339,37 @@ struct hw_sequencer_funcs {
 			enum dc_clock_type clock_type,
 			struct dc_clock_config *clock_cfg);
 
-#if defined(CONFIG_DRM_AMD_DC_DCN2_1)
 	bool (*s0i3_golden_init_wa)(struct dc *dc);
-#endif
+
+	void (*get_surface_visual_confirm_color)(
+			const struct pipe_ctx *pipe_ctx,
+			struct tg_color *color);
+
+	void (*get_hdr_visual_confirm_color)(
+			struct pipe_ctx *pipe_ctx,
+			struct tg_color *color);
+
+	void (*set_hdr_multiplier)(struct pipe_ctx *pipe_ctx);
+
+	void (*verify_allow_pstate_change_high)(struct dc *dc);
+
+	void (*program_pipe)(
+			struct dc *dc,
+			struct pipe_ctx *pipe_ctx,
+			struct dc_state *context);
+
+	bool (*wait_for_blank_complete)(
+			struct output_pixel_processor *opp);
+
+	void (*dccg_init)(struct dce_hwseq *hws);
+
+	bool (*set_blend_lut)(
+		struct pipe_ctx *pipe_ctx, const struct dc_plane_state *plane_state);
+
+	bool (*set_shaper_3dlut)(
+		struct pipe_ctx *pipe_ctx, const struct dc_plane_state *plane_state);
+
+	int (*get_vupdate_offset_from_vsync)(struct pipe_ctx *pipe_ctx);
 };
 
 void color_space_to_black_color(

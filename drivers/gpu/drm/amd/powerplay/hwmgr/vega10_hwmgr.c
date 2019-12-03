@@ -4360,14 +4360,13 @@ static int vega10_set_watermarks_for_clocks_ranges(struct pp_hwmgr *hwmgr,
 	struct vega10_hwmgr *data = hwmgr->backend;
 	struct dm_pp_wm_sets_with_clock_ranges_soc15 *wm_with_clock_ranges = clock_range;
 	Watermarks_t *table = &(data->smc_state_table.water_marks_table);
-	int result = 0;
 
 	if (!data->registry_data.disable_water_mark) {
 		smu_set_watermarks_for_clocks_ranges(table, wm_with_clock_ranges);
 		data->water_marks_bitmap = WaterMarksExist;
 	}
 
-	return result;
+	return 0;
 }
 
 static int vega10_get_ppfeature_status(struct pp_hwmgr *hwmgr, char *buf)
@@ -5252,13 +5251,11 @@ static int vega10_get_performance_level(struct pp_hwmgr *hwmgr, const struct pp_
 				PHM_PerformanceLevel *level)
 {
 	const struct vega10_power_state *ps;
-	struct vega10_hwmgr *data;
 	uint32_t i;
 
 	if (level == NULL || hwmgr == NULL || state == NULL)
 		return -EINVAL;
 
-	data = hwmgr->backend;
 	ps = cast_const_phw_vega10_power_state(state);
 
 	i = index > ps->performance_level_count - 1 ?

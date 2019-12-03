@@ -69,6 +69,7 @@
 #include "amdgpu_uvd.h"
 #include "amdgpu_vce.h"
 #include "amdgpu_vcn.h"
+#include "amdgpu_jpeg.h"
 #include "amdgpu_mn.h"
 #include "amdgpu_gmc.h"
 #include "amdgpu_gfx.h"
@@ -89,6 +90,7 @@
 #include "amdgpu_mes.h"
 #include "amdgpu_umc.h"
 #include "amdgpu_mmhub.h"
+#include "amdgpu_tmz.h"
 
 #define MAX_GPU_INSTANCE		16
 
@@ -174,6 +176,8 @@ extern int sched_policy;
 #else
 static const int sched_policy = KFD_SCHED_POLICY_HWS;
 #endif
+
+extern int amdgpu_tmz;
 
 #ifdef CONFIG_DRM_AMDGPU_SI
 extern int amdgpu_si_support;
@@ -588,6 +592,8 @@ struct amdgpu_asic_funcs {
 	bool (*need_reset_on_init)(struct amdgpu_device *adev);
 	/* PCIe replay counter */
 	uint64_t (*get_pcie_replay_count)(struct amdgpu_device *adev);
+	/* device supports BACO */
+	bool (*supports_baco)(struct amdgpu_device *adev);
 };
 
 /*
@@ -704,6 +710,7 @@ enum amd_hw_ip_block_type {
 	MP1_HWIP,
 	UVD_HWIP,
 	VCN_HWIP = UVD_HWIP,
+	JPEG_HWIP = VCN_HWIP,
 	VCE_HWIP,
 	DF_HWIP,
 	DCE_HWIP,
@@ -899,6 +906,9 @@ struct amdgpu_device {
 	/* vcn */
 	struct amdgpu_vcn		vcn;
 
+	/* jpeg */
+	struct amdgpu_jpeg		jpeg;
+
 	/* firmwares */
 	struct amdgpu_firmware		firmware;
 
@@ -924,6 +934,9 @@ struct amdgpu_device {
 	bool                            enable_mes;
 	struct amdgpu_mes               mes;
 
+	/* tmz */
+	struct amdgpu_tmz		tmz;
+
 	struct amdgpu_ip_block          ip_blocks[AMDGPU_MAX_IP_NUM];
 	int				num_ip_blocks;
 	struct mutex	mn_lock;
@@ -935,7 +948,7 @@ struct amdgpu_device {
 	atomic64_t gart_pin_size;
 
 	/* soc15 register offset based on ip, instance and  segment */
-	uint32_t 		*reg_offset[MAX_HWIP][HWIP_MAX_INSTANCE];
+	uint32_t		*reg_offset[MAX_HWIP][HWIP_MAX_INSTANCE];
 
 	const struct amdgpu_df_funcs	*df_funcs;
 
@@ -982,6 +995,11 @@ struct amdgpu_device {
 
 	/* device pstate */
 	int				pstate;
+	/* enable runtime pm on the device */
+	bool                            runpm;
+
+	bool                            pm_sysfs_en;
+	bool                            ucode_sysfs_en;
 };
 
 static inline struct amdgpu_device *amdgpu_ttm_adev(struct ttm_bo_device *bdev)
@@ -1117,6 +1135,8 @@ int emu_soc_asic_init(struct amdgpu_device *adev);
 #define amdgpu_asic_get_pcie_usage(adev, cnt0, cnt1) ((adev)->asic_funcs->get_pcie_usage((adev), (cnt0), (cnt1)))
 #define amdgpu_asic_need_reset_on_init(adev) (adev)->asic_funcs->need_reset_on_init((adev))
 #define amdgpu_asic_get_pcie_replay_count(adev) ((adev)->asic_funcs->get_pcie_replay_count((adev)))
+#define amdgpu_asic_supports_baco(adev) (adev)->asic_funcs->supports_baco((adev))
+
 #define amdgpu_inc_vram_lost(adev) atomic_inc(&((adev)->vram_lost_counter));
 
 /* Common functions */
@@ -1133,9 +1153,12 @@ void amdgpu_device_program_register_sequence(struct amdgpu_device *adev,
 					     const u32 *registers,
 					     const u32 array_size);
 
-bool amdgpu_device_is_px(struct drm_device *dev);
+bool amdgpu_device_supports_boco(struct drm_device *dev);
+bool amdgpu_device_supports_baco(struct drm_device *dev);
 bool amdgpu_device_is_peer_accessible(struct amdgpu_device *adev,
 				      struct amdgpu_device *peer_adev);
+int amdgpu_device_baco_enter(struct drm_device *dev);
+int amdgpu_device_baco_exit(struct drm_device *dev);
 
 /* atpx handler */
 #if defined(CONFIG_VGA_SWITCHEROO)
@@ -1173,8 +1196,8 @@ int amdgpu_driver_open_kms(struct drm_device *dev, struct drm_file *file_priv);
 void amdgpu_driver_postclose_kms(struct drm_device *dev,
 				 struct drm_file *file_priv);
 int amdgpu_device_ip_suspend(struct amdgpu_device *adev);
-int amdgpu_device_suspend(struct drm_device *dev, bool suspend, bool fbcon);
-int amdgpu_device_resume(struct drm_device *dev, bool resume, bool fbcon);
+int amdgpu_device_suspend(struct drm_device *dev, bool fbcon);
+int amdgpu_device_resume(struct drm_device *dev, bool fbcon);
 u32 amdgpu_get_vblank_counter_kms(struct drm_device *dev, unsigned int pipe);
 int amdgpu_enable_vblank_kms(struct drm_device *dev, unsigned int pipe);
 void amdgpu_disable_vblank_kms(struct drm_device *dev, unsigned int pipe);
