@@ -29,6 +29,7 @@
 #include <linux/random.h>
 #include <linux/pm_qos.h>
 #include <linux/kobject.h>
+#include <linux/watch_queue.h>
 
 #include <linux/uaccess.h>
 #include <asm/byteorder.h>
@@ -4604,6 +4605,9 @@ hub_port_init(struct usb_hub *hub, struct usb_device *udev, int port1,
 				"%s %s USB device number %d using %s\n",
 				(udev->config) ? "reset" : "new", speed,
 				devnum, driver_name);
+
+	if (udev->config)
+		post_usb_device_notification(udev, NOTIFY_USB_DEVICE_RESET, 0);
 
 	/* Set up TT records, if needed  */
 	if (hdev->tt) {

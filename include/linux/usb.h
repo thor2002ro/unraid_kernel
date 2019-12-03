@@ -26,6 +26,7 @@
 struct usb_device;
 struct usb_driver;
 struct wusb_dev;
+enum usb_notification_type;
 
 /*-------------------------------------------------------------------------*/
 
@@ -2013,6 +2014,23 @@ enum usb_led_event {
 extern void usb_led_activity(enum usb_led_event ev);
 #else
 static inline void usb_led_activity(enum usb_led_event ev) {}
+#endif
+
+/*
+ * Notification functions.
+ */
+#ifdef CONFIG_USB_NOTIFICATIONS
+extern void post_usb_device_notification(const struct usb_device *udev,
+					 enum usb_notification_type subtype,
+					 u32 error);
+extern void post_usb_bus_notification(const struct usb_bus *ubus,
+				      enum usb_notification_type subtype,
+				      u32 error);
+#else
+static inline void post_usb_device_notification(const struct usb_device *udev,
+						unsigned int subtype, u32 error) {}
+static inline void post_usb_bus_notification(const struct usb_bus *ubus,
+					     unsigned int subtype, u32 error) {}
 #endif
 
 #endif  /* __KERNEL__ */

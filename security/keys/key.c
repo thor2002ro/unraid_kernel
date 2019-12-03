@@ -443,6 +443,7 @@ static int __key_instantiate_and_link(struct key *key,
 			/* mark the key as being instantiated */
 			atomic_inc(&key->user->nikeys);
 			mark_key_instantiated(key, 0);
+			notify_key(key, NOTIFY_KEY_INSTANTIATED, 0);
 
 			if (test_and_clear_bit(KEY_FLAG_USER_CONSTRUCT, &key->flags))
 				awaken = 1;
@@ -452,7 +453,7 @@ static int __key_instantiate_and_link(struct key *key,
 				if (test_bit(KEY_FLAG_KEEP, &keyring->flags))
 					set_bit(KEY_FLAG_KEEP, &key->flags);
 
-				__key_link(key, _edit);
+				__key_link(keyring, key, _edit);
 			}
 
 			/* disable the authorisation key */
@@ -600,6 +601,7 @@ int key_reject_and_link(struct key *key,
 		/* mark the key as being negatively instantiated */
 		atomic_inc(&key->user->nikeys);
 		mark_key_instantiated(key, -error);
+		notify_key(key, NOTIFY_KEY_INSTANTIATED, -error);
 		key->expiry = ktime_get_real_seconds() + timeout;
 		key_schedule_gc(key->expiry + key_gc_delay);
 
@@ -610,7 +612,7 @@ int key_reject_and_link(struct key *key,
 
 		/* and link it into the destination keyring */
 		if (keyring && link_ret == 0)
-			__key_link(key, &edit);
+			__key_link(keyring, key, &edit);
 
 		/* disable the authorisation key */
 		if (authkey)
@@ -763,9 +765,11 @@ static inline key_ref_t __key_update(key_ref_t key_ref,
 	down_write(&key->sem);
 
 	ret = key->type->update(key, prep);
-	if (ret == 0)
+	if (ret == 0) {
 		/* Updating a negative key positively instantiates it */
 		mark_key_instantiated(key, 0);
+		notify_key(key, NOTIFY_KEY_UPDATED, 0);
+	}
 
 	up_write(&key->sem);
 
@@ -1013,9 +1017,11 @@ int key_update(key_ref_t key_ref, const void *payload, size_t plen)
 	down_write(&key->sem);
 
 	ret = key->type->update(key, &prep);
-	if (ret == 0)
+	if (ret == 0) {
 		/* Updating a negative key positively instantiates it */
 		mark_key_instantiated(key, 0);
+		notify_key(key, NOTIFY_KEY_UPDATED, 0);
+	}
 
 	up_write(&key->sem);
 
@@ -1047,15 +1053,17 @@ void key_revoke(struct key *key)
 	 *   instantiated
 	 */
 	down_write_nested(&key->sem, 1);
-	if (!test_and_set_bit(KEY_FLAG_REVOKED, &key->flags) &&
-	    key->type->revoke)
-		key->type->revoke(key);
+	if (!test_and_set_bit(KEY_FLAG_REVOKED, &key->flags)) {
+		notify_key(key, NOTIFY_KEY_REVOKED, 0);
+		if (key->type->revoke)
+			key->type->revoke(key);
 
-	/* set the death time to no more than the expiry time */
-	time = ktime_get_real_seconds();
-	if (key->revoked_at == 0 || key->revoked_at > time) {
-		key->revoked_at = time;
-		key_schedule_gc(key->revoked_at + key_gc_delay);
+		/* set the death time to no more than the expiry time */
+		time = ktime_get_real_seconds();
+		if (key->revoked_at == 0 || key->revoked_at > time) {
+			key->revoked_at = time;
+			key_schedule_gc(key->revoked_at + key_gc_delay);
+		}
 	}
 
 	up_write(&key->sem);
@@ -1077,8 +1085,10 @@ void key_invalidate(struct key *key)
 
 	if (!test_bit(KEY_FLAG_INVALIDATED, &key->flags)) {
 		down_write_nested(&key->sem, 1);
-		if (!test_and_set_bit(KEY_FLAG_INVALIDATED, &key->flags))
+		if (!test_and_set_bit(KEY_FLAG_INVALIDATED, &key->flags)) {
+			notify_key(key, NOTIFY_KEY_INVALIDATED, 0);
 			key_schedule_gc_links();
+		}
 		up_write(&key->sem);
 	}
 }
