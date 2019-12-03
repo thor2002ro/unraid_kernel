@@ -1349,7 +1349,7 @@ static int sci_dma_rx_submit(struct sci_port *s, bool port_lock_held)
 {
 	struct dma_chan *chan = s->chan_rx;
 	struct uart_port *port = &s->port;
-	unsigned long flags;
+	unsigned long uninitialized_var(flags);
 	int i;
 
 	for (i = 0; i < 2; i++) {

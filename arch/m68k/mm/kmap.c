@@ -159,6 +159,8 @@ void __iomem *__ioremap(unsigned long physaddr, unsigned long size, int cachefla
 	unsigned long virtaddr, retaddr;
 	long offset;
 	pgd_t *pgd_dir;
+	p4d_t *p4d_dir;
+	pud_t *pud_dir;
 	pmd_t *pmd_dir;
 	pte_t *pte_dir;
 
@@ -245,18 +247,23 @@ void __iomem *__ioremap(unsigned long physaddr, unsigned long size, int cachefla
 			printk ("\npa=%#lx va=%#lx ", physaddr, virtaddr);
 #endif
 		pgd_dir = pgd_offset_k(virtaddr);
-		pmd_dir = pmd_alloc(&init_mm, pgd_dir, virtaddr);
+		p4d_dir = p4d_offset(pgd_dir, virtaddr);
+		pud_dir = pud_offset(p4d_dir, virtaddr);
+		pmd_dir = pmd_alloc(&init_mm, pud_dir, virtaddr);
 		if (!pmd_dir) {
 			printk("ioremap: no mem for pmd_dir\n");
 			return NULL;
 		}
 
+#if CONFIG_PGTABLE_LEVELS == 3
 		if (CPU_IS_020_OR_030) {
 			pmd_dir->pmd[(virtaddr/PTRTREESIZE) & 15] = physaddr;
 			physaddr += PTRTREESIZE;
 			virtaddr += PTRTREESIZE;
 			size -= PTRTREESIZE;
-		} else {
+		} else
+#endif
+		{
 			pte_dir = pte_alloc_kernel(pmd_dir, virtaddr);
 			if (!pte_dir) {
 				printk("ioremap: no mem for pte_dir\n");
@@ -338,16 +345,20 @@ void kernel_set_cachemode(void *addr, unsigned long size, int cmode)
 			cmode = 0;
 		}
 	}
+#endif
 
 	while ((long)size > 0) {
 		pgd_dir = pgd_offset_k(virtaddr);
-		if (pgd_bad(*pgd_dir)) {
-			printk("iocachemode: bad pgd(%08lx)\n", pgd_val(*pgd_dir));
-			pgd_clear(pgd_dir);
+		p4d_dir = p4d_offset(pgd_dir, virtaddr);
+		pud_dir = pud_offset(p4d_dir, virtaddr);
+		if (pud_bad(*pud_dir)) {
+			printk("iocachemode: bad pud(%08lx)\n", pud_val(*pud_dir));
+			pud_clear(pud_dir);
 			return;
 		}
-		pmd_dir = pmd_offset(pgd_dir, virtaddr);
+		pmd_dir = pmd_offset(pud_dir, virtaddr);
 
+#if CONFIG_PGTABLE_LEVELS == 3
 		if (CPU_IS_020_OR_030) {
 			int pmd_off = (virtaddr/PTRTREESIZE) & 15;
 
@@ -359,6 +370,7 @@ void kernel_set_cachemode(void *addr, unsigned long size, int cmode)
 				continue;
 			}
 		}
+#endif
 
 		if (pmd_bad(*pmd_dir)) {
 			printk("iocachemode: bad pmd (%08lx)\n", pmd_val(*pmd_dir));
