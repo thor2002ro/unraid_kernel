@@ -143,7 +143,7 @@ EXPORT_STATIC_CALL_GPL(kvm_x86_cache_reg);
 static bool __read_mostly ignore_msrs = 0;
 module_param(ignore_msrs, bool, S_IRUGO | S_IWUSR);
 
-bool __read_mostly report_ignored_msrs = true;
+bool __read_mostly report_ignored_msrs = false;
 module_param(report_ignored_msrs, bool, S_IRUGO | S_IWUSR);
 EXPORT_SYMBOL_GPL(report_ignored_msrs);
 
