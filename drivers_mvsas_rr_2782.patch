@@ -1,0 +1,10 @@
+--- a/drivers/scsi/mvsas/mv_init.c	2016-01-12 11:23:24.000000000 -0800
++++ b/drivers/scsi/mvsas/mv_init.c	2016-01-12 11:23:50.000000000 -0800
+@@ -686,6 +686,7 @@
+ 	{ PCI_VDEVICE(TTI, 0x2740), chip_9480 },
+ 	{ PCI_VDEVICE(TTI, 0x2744), chip_9480 },
+ 	{ PCI_VDEVICE(TTI, 0x2760), chip_9480 },
++	{ PCI_VDEVICE(TTI, 0x2782), chip_9480 },
+ 	{
+ 		.vendor		= PCI_VENDOR_ID_MARVELL_EXT,
+ 		.device		= 0x9480,
