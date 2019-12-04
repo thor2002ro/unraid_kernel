@@ -340,6 +340,7 @@ static int dmar_map_gfx = 1;
 static int intel_iommu_superpage = 1;
 static int iommu_identity_mapping;
 static int iommu_skip_te_disable;
+static int intel_relaxable_rmrr = 0;
 
 #define IDENTMAP_GFX		2
 #define IDENTMAP_AZALIA		4
@@ -444,6 +445,9 @@ static int __init intel_iommu_setup(char *str)
 		} else if (!strncmp(str, "tboot_noforce", 13)) {
 			pr_info("Intel-IOMMU: not forcing on after tboot. This could expose security risk for tboot\n");
 			intel_iommu_tboot_noforce = 1;
+		} else if (!strncmp(str, "relax_rmrr", 10)) {
+			pr_info("Intel-IOMMU: assuming all RMRRs are relaxable. This can lead to instability or data loss\n");
+			intel_relaxable_rmrr = 1;
 		} else {
 			pr_notice("Unknown option - '%s'\n", str);
 		}
@@ -2946,7 +2950,7 @@ static bool device_rmrr_is_relaxable(struct device *dev)
 		return false;
 
 	pdev = to_pci_dev(dev);
-	if (IS_USB_DEVICE(pdev) || IS_GFX_DEVICE(pdev))
+	if (intel_relaxable_rmrr || IS_USB_DEVICE(pdev) || IS_GFX_DEVICE(pdev))
 		return true;
 	else
 		return false;
