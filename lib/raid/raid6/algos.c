@@ -155,12 +155,67 @@ EXPORT_SYMBOL_GPL(raid6_recov_datap);
 #define RAID6_TIME_JIFFIES_LG2	4
 #define RAID6_TEST_DISKS	8
 
+static const struct raid6_calls *raid6_choose_xor(
+		void *(*const dptrs)[RAID6_TEST_DISKS], const int disks)
+{
+	/* work on the second half of the disks */
+	int start = (disks >> 1) - 1, stop = disks - 3;
+	const struct raid6_calls *best = NULL;
+	unsigned long bestxorperf = 0;
+	unsigned int i;
+
+	for (i = 0; i < raid6_nr_algos; i++) {
+		const struct raid6_calls *algo = raid6_algos[i];
+		unsigned long perf = 0, j0, j1;
+
+		if (!algo->xor_syndrome)
+			continue;
+
+		if (!IS_ENABLED(CONFIG_RAID6_PQ_BENCHMARK) || !dptrs) {
+			best = algo;
+			continue;
+		}
+
+		preempt_disable();
+		j0 = jiffies;
+		while ((j1 = jiffies) == j0)
+			cpu_relax();
+		while (time_before(jiffies,
+				    j1 + (1 << RAID6_TIME_JIFFIES_LG2))) {
+			algo->xor_syndrome(disks, start, stop, PAGE_SIZE,
+					   *dptrs);
+			perf++;
+		}
+		preempt_enable();
+
+		if (perf > bestxorperf) {
+			bestxorperf = perf;
+			best = algo;
+		}
+		pr_info("raid6: %-8s xor() %5ld MB/s\n", algo->name,
+			(perf * HZ * (disks - 2)) >>
+			(20 - PAGE_SHIFT + RAID6_TIME_JIFFIES_LG2));
+	}
+
+	if (!best) {
+		pr_err("raid6: Yikes! No xor algorithm found!\n");
+		return NULL;
+	}
+
+	pr_info("raid6: using algorithm %s xor() %ld MB/s\n", best->name,
+		(bestxorperf * HZ * (disks - 2)) >>
+		(20 - PAGE_SHIFT + RAID6_TIME_JIFFIES_LG2));
+
+	return best;
+}
+
 static int raid6_choose_gen(void *(*const dptrs)[RAID6_TEST_DISKS],
 		const int disks)
 {
 	/* work on the second half of the disks */
 	int start = (disks >> 1) - 1, stop = disks - 3;
 	const struct raid6_calls *best = NULL;
+	const struct raid6_calls *xor_best;
 	unsigned long bestgenperf = 0;
 	unsigned int i;
 
@@ -194,7 +249,12 @@ static int raid6_choose_gen(void *(*const dptrs)[RAID6_TEST_DISKS],
 	}
 
 	static_call_update(raid6_gen_syndrome_impl, best->gen_syndrome);
-	static_call_update(raid6_xor_syndrome_impl, best->xor_syndrome);
+	xor_best = best;
+	if (!xor_best->xor_syndrome)
+		xor_best = raid6_choose_xor(dptrs, disks);
+	if (!xor_best)
+		return -EINVAL;
+	static_call_update(raid6_xor_syndrome_impl, xor_best->xor_syndrome);
 
 	pr_info("raid6: using algorithm %s gen() %ld MB/s\n",
 		best->name,
@@ -231,18 +291,23 @@ static int raid6_choose_gen(void *(*const dptrs)[RAID6_TEST_DISKS],
 static int __init raid6_select_algo(void)
 {
 	const int disks = RAID6_TEST_DISKS;
+	const struct raid6_calls *best;
 	char *disk_ptr, *p;
 	void *dptrs[RAID6_TEST_DISKS];
 	int i, cycle;
 	int error;
 
 	if (!IS_ENABLED(CONFIG_RAID6_PQ_BENCHMARK) || raid6_nr_algos == 1) {
+		best = raid6_algos[raid6_nr_algos - 1];
 		pr_info("raid6: skipped pq benchmark and selected %s\n",
-			raid6_algos[raid6_nr_algos - 1]->name);
+			best->name);
 		static_call_update(raid6_gen_syndrome_impl,
-				raid6_algos[raid6_nr_algos - 1]->gen_syndrome);
-		static_call_update(raid6_xor_syndrome_impl,
-				raid6_algos[raid6_nr_algos - 1]->xor_syndrome);
+				best->gen_syndrome);
+		if (!best->xor_syndrome)
+			best = raid6_choose_xor(NULL, disks);
+		if (!best)
+			return -EINVAL;
+		static_call_update(raid6_xor_syndrome_impl, best->xor_syndrome);
 		return 0;
 	}
 
