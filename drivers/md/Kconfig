@@ -193,6 +193,30 @@ config MD_CLUSTER
 	(limited support).
 
 	If unsure, say N.
+	
+config MD_UNRAID
+	bool "Unraid support"
+	depends on MD
+	depends on BLK_DEV_MD
+	depends on !MD_AUTODETECT
+	depends on !MD_LINEAR
+	depends on !MD_RAID0
+	depends on !MD_RAID1
+	depends on !MD_RAID10
+	depends on !MD_RAID456
+	depends on !MD_MULTIPATH
+	depends on !MD_FAULTY
+	depends on !MD_CLUSTER
+	select XOR_BLOCKS
+	help
+	  Lime Technology Unraid driver.
+	  
+config MD_UNRAID_PATCHLEVEL_VERSION
+	int "13 for unraid 6.8.x, 14 for unraid 6.9.x"
+	default 13
+	depends on MD_UNRAID
+	help
+	  Lime Technology Unraid driver.
 
 source "drivers/md/bcache/Kconfig"
 
