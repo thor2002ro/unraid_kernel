@@ -1,0 +1,53 @@
+--- a/drivers/ata/libata-core.c	2015-10-03 04:49:38.000000000 -0700
++++ b/drivers/ata/libata-core.c	2015-09-20 12:03:27.000000000 -0700
+@@ -2387,6 +2387,7 @@
+ 	char revbuf[7];		/* XYZ-99\0 */
+ 	char fwrevbuf[ATA_ID_FW_REV_LEN+1];
+ 	char modelbuf[ATA_ID_PROD_LEN+1];
++	char sernobuf[ATA_ID_SERNO_LEN+1];
+ 	int rc;
+
+ 	if (!ata_dev_enabled(dev) && ata_msg_info(ap)) {
+@@ -2476,6 +2477,9 @@
+ 	ata_id_c_string(dev->id, modelbuf, ATA_ID_PROD,
+ 			sizeof(modelbuf));
+
++	ata_id_c_string(dev->id, sernobuf, ATA_ID_SERNO,
++			sizeof(sernobuf));
++
+ 	/* ATA-specific feature tests */
+ 	if (dev->class == ATA_DEV_ATA || dev->class == ATA_DEV_ZAC) {
+ 		if (ata_id_is_cfa(id)) {
+@@ -2526,8 +2530,8 @@
+
+ 			/* print device info to dmesg */
+ 			if (ata_msg_drv(ap) && print_info) {
+-				ata_dev_info(dev, "%s: %s, %s, max %s\n",
+-					     revbuf, modelbuf, fwrevbuf,
++				ata_dev_info(dev, "%s: %s, %s, %s, max %s\n",
++					     revbuf, modelbuf, sernobuf, fwrevbuf,
+ 					     ata_mode_string(xfer_mask));
+ 				ata_dev_info(dev,
+ 					     "%llu sectors, multi %u: %s %s\n",
+@@ -2551,8 +2555,8 @@
+
+ 			/* print device info to dmesg */
+ 			if (ata_msg_drv(ap) && print_info) {
+-				ata_dev_info(dev, "%s: %s, %s, max %s\n",
+-					     revbuf,	modelbuf, fwrevbuf,
++				ata_dev_info(dev, "%s: %s, %s, %s, max %s\n",
++					     revbuf,	modelbuf, sernobuf, fwrevbuf,
+ 					     ata_mode_string(xfer_mask));
+ 				ata_dev_info(dev,
+ 					     "%llu sectors, multi %u, CHS %u/%u/%u\n",
+@@ -2646,8 +2650,8 @@
+ 		/* print device info to dmesg */
+ 		if (ata_msg_drv(ap) && print_info)
+ 			ata_dev_info(dev,
+-				     "ATAPI: %s, %s, max %s%s%s%s\n",
+-				     modelbuf, fwrevbuf,
++				     "ATAPI: %s, %s, %s, max %s%s%s%s\n",
++				     modelbuf, sernobuf, fwrevbuf,
+ 				     ata_mode_string(xfer_mask),
+ 				     cdb_intr_string, atapi_an_string,
+ 				     dma_dir_string);
