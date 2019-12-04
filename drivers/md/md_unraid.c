@@ -928,7 +928,7 @@ int md_write_error(mddev_t *mddev, int disk_number, sector_t sector)
         return update_sb;
 }
 
-static blk_qc_t md_submit_bio(struct bio *bi)
+static void md_submit_bio(struct bio *bi)
 {
         mddev_t *mddev = bi->bi_bdev->bd_disk->private_data;
         int unit = bi->bi_bdev->bd_disk->first_minor;
@@ -937,13 +937,13 @@ static blk_qc_t md_submit_bio(struct bio *bi)
         /* verify this unit is active */
         if (!disk_active(disk)) {
                 bio_io_error(bi);
-                return BLK_QC_T_NONE;
+                return;
         }
         
         blk_queue_split(&bi);
         bi->bi_opf &= ~REQ_NOMERGE;
 
-        return unraid_make_request(mddev, unit, bi);
+        unraid_make_request(mddev, unit, bi);
 }
 
 static int md_open(struct block_device *bdev, fmode_t mode)
