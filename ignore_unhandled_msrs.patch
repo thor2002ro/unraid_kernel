@@ -1,0 +1,11 @@
+--- a/arch/x86/kvm/x86.c	2021-07-04 08:56:41.547262369 -0700
++++ b/arch/x86/kvm/x86.c	2021-07-04 08:56:41.547262369 -0700
+@@ -141,7 +141,7 @@
+ static bool __read_mostly ignore_msrs = 0;
+ module_param(ignore_msrs, bool, S_IRUGO | S_IWUSR);
+
+-bool __read_mostly report_ignored_msrs = true;
++bool __read_mostly report_ignored_msrs = false;
+ module_param(report_ignored_msrs, bool, S_IRUGO | S_IWUSR);
+ EXPORT_SYMBOL_GPL(report_ignored_msrs);
+
