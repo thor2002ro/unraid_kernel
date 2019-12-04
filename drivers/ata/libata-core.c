@@ -2539,6 +2539,7 @@ int ata_dev_configure(struct ata_device *dev)
 	char revbuf[7];		/* XYZ-99\0 */
 	char fwrevbuf[ATA_ID_FW_REV_LEN+1];
 	char modelbuf[ATA_ID_PROD_LEN+1];
+	char sernobuf[ATA_ID_SERNO_LEN+1];
 	int rc;
 
 	if (!ata_dev_enabled(dev)) {
@@ -2626,6 +2627,9 @@ int ata_dev_configure(struct ata_device *dev)
 	ata_id_c_string(dev->id, modelbuf, ATA_ID_PROD,
 			sizeof(modelbuf));
 
+	ata_id_c_string(dev->id, sernobuf, ATA_ID_SERNO,
+			sizeof(sernobuf));
+
 	/* ATA-specific feature tests */
 	if (dev->class == ATA_DEV_ATA || dev->class == ATA_DEV_ZAC) {
 		if (ata_id_is_cfa(id)) {
@@ -2656,8 +2660,8 @@ int ata_dev_configure(struct ata_device *dev)
 
 		/* print device info to dmesg */
 		if (print_info)
-			ata_dev_info(dev, "%s: %s, %s, max %s\n",
-				     revbuf, modelbuf, fwrevbuf,
+			ata_dev_info(dev, "%s: %s, %s, %s, max %s\n",
+				     revbuf, modelbuf, sernobuf, fwrevbuf,
 				     ata_mode_string(xfer_mask));
 
 		if (ata_id_has_lba(id)) {
@@ -2734,8 +2738,8 @@ int ata_dev_configure(struct ata_device *dev)
 		/* print device info to dmesg */
 		if (print_info)
 			ata_dev_info(dev,
-				     "ATAPI: %s, %s, max %s%s%s%s\n",
-				     modelbuf, fwrevbuf,
+				     "ATAPI: %s, %s, %s, max %s%s%s%s\n",
+				     modelbuf, sernobuf, fwrevbuf,
 				     ata_mode_string(xfer_mask),
 				     cdb_intr_string, atapi_an_string,
 				     dma_dir_string);
