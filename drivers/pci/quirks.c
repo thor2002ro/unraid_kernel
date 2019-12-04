@@ -3857,6 +3857,13 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATHEROS, 0x003e, quirk_no_bus_reset);
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_CAVIUM, 0xa100, quirk_no_bus_reset);
 
 /*
+ * Yuan Yuan Enterprises PCI capture cards based on the Mozart 395S
+ * completely break on bus reset.
+ */
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_YYE, PCI_DEVICE_ID_YYE_MOZART_395S,
+			 quirk_no_bus_reset);
+
+/*
  * Some TI KeyStone C667X devices do not support bus/hot reset.  The PCIESS
  * automatically disables LTSSM when Secondary Bus Reset is received and
  * the device stops working.  Prevent bus reset for these devices.  With
