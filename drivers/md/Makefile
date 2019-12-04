@@ -21,7 +21,11 @@ dm-ebs-y	+= dm-ebs-target.o
 dm-era-y	+= dm-era-target.o
 dm-clone-y	+= dm-clone-target.o dm-clone-metadata.o
 dm-verity-y	+= dm-verity-target.o
+ifeq ($(CONFIG_MD_UNRAID),y)
+md-mod-y	+= md_unraid.o unraid.o
+else
 md-mod-y	+= md.o md-bitmap.o
+endif
 raid456-y	+= raid5.o raid5-cache.o raid5-ppl.o
 dm-zoned-y	+= dm-zoned-target.o dm-zoned-metadata.o dm-zoned-reclaim.o
 linear-y	+= md-linear.o
@@ -43,8 +47,10 @@ obj-$(CONFIG_MD_FAULTY)		+= faulty.o
 obj-$(CONFIG_MD_CLUSTER)	+= md-cluster.o
 obj-$(CONFIG_BCACHE)		+= bcache/
 obj-$(CONFIG_BLK_DEV_MD)	+= md-mod.o
+ifneq ($(CONFIG_MD_UNRAID),y)
 ifeq ($(CONFIG_BLK_DEV_MD),y)
 obj-y				+= md-autodetect.o
+endif
 endif
 obj-$(CONFIG_BLK_DEV_DM)	+= dm-mod.o
 obj-$(CONFIG_BLK_DEV_DM_BUILTIN) += dm-builtin.o
