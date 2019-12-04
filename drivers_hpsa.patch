@@ -1,0 +1,11 @@
+--- a/drivers/scsi/hpsa.c	2019-05-08 14:12:35.719825509 -0700
++++ b/drivers/scsi/hpsa.c	2019-05-08 14:12:53.486062919 -0700
+@@ -976,7 +976,7 @@
+ #endif
+ 	.sdev_attrs = hpsa_sdev_attrs,
+ 	.shost_attrs = hpsa_shost_attrs,
+-	.max_sectors = 2048,
++	.max_sectors = 1024,
+ 	.no_write_same = 1,
+ };
+ 
