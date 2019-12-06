@@ -1058,6 +1058,8 @@ patternProperties:
     description: Xillybus Ltd.
   "^xlnx,.*":
     description: Xilinx
+  "^xnano,.*":
+    description: Xnano
   "^xunlong,.*":
     description: Shenzhen Xunlong Software CO.,Limited
   "^yones-toptech,.*":
