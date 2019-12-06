@@ -315,6 +315,18 @@ config INGENIC_IRQ
 	depends on MACH_INGENIC
 	default y
 
+config INGENIC_TCU_IRQ
+	bool "Ingenic JZ47xx TCU interrupt controller"
+	default MACH_INGENIC
+	depends on MIPS || COMPILE_TEST
+	select MFD_SYSCON
+	select GENERIC_IRQ_CHIP
+	help
+	  Support for interrupts in the Timer/Counter Unit (TCU) of the Ingenic
+	  JZ47xx SoCs.
+
+	  If unsure, say N.
+
 config RENESAS_H8300H_INTC
         bool
 	select IRQ_DOMAIN
@@ -357,6 +369,10 @@ config MVEBU_PIC
 
 config MVEBU_SEI
         bool
+
+config LS_EXTIRQ
+	def_bool y if SOC_LS1021A || ARCH_LAYERSCAPE
+	select MFD_SYSCON
 
 config LS_SCFG_MSI
 	def_bool y if SOC_LS1021A || ARCH_LAYERSCAPE
@@ -471,8 +487,6 @@ config TI_SCI_INTA_IRQCHIP
 	  If you wish to use interrupt aggregator irq resources managed by the
 	  TI System Controller, say Y here. Otherwise, say N.
 
-endmenu
-
 config SIFIVE_PLIC
 	bool "SiFive Platform-Level Interrupt Controller"
 	depends on RISCV
@@ -484,3 +498,5 @@ config SIFIVE_PLIC
 	   interrupt sources are subordinate to the PLIC.
 
 	   If you don't know what to do here, say Y.
+
+endmenu

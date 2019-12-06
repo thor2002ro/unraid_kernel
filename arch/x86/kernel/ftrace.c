@@ -373,7 +373,7 @@ static int add_brk_on_nop(struct dyn_ftrace *rec)
 	return add_break(rec->ip, old);
 }
 
-static int add_breakpoints(struct dyn_ftrace *rec, int enable)
+static int add_breakpoints(struct dyn_ftrace *rec, bool enable)
 {
 	unsigned long ftrace_addr;
 	int ret;
@@ -481,7 +481,7 @@ static int add_update_nop(struct dyn_ftrace *rec)
 	return add_update_code(ip, new);
 }
 
-static int add_update(struct dyn_ftrace *rec, int enable)
+static int add_update(struct dyn_ftrace *rec, bool enable)
 {
 	unsigned long ftrace_addr;
 	int ret;
@@ -527,7 +527,7 @@ static int finish_update_nop(struct dyn_ftrace *rec)
 	return ftrace_write(ip, new, 1);
 }
 
-static int finish_update(struct dyn_ftrace *rec, int enable)
+static int finish_update(struct dyn_ftrace *rec, bool enable)
 {
 	unsigned long ftrace_addr;
 	int ret;
@@ -1041,6 +1041,20 @@ void prepare_ftrace_return(unsigned long self_addr, unsigned long *parent,
 
 	if (unlikely(atomic_read(&current->tracing_graph_pause)))
 		return;
+
+	/*
+	 * If the return location is actually pointing directly to
+	 * the start of a direct trampoline (if we trace the trampoline
+	 * it will still be offset by MCOUNT_INSN_SIZE), then the
+	 * return address is actually off by one word, and we
+	 * need to adjust for that.
+	 */
+	if (ftrace_direct_func_count) {
+		if (ftrace_find_direct_func(self_addr + MCOUNT_INSN_SIZE)) {
+			self_addr = *parent;
+			parent++;
+		}
+	}
 
 	/*
 	 * Protect against fault, even if it shouldn't

@@ -12,7 +12,6 @@
 #include <asm/nds32.h>
 #ifndef __ASSEMBLY__
 #include <asm/fixmap.h>
-#include <asm/io.h>
 #include <nds32_intrinsic.h>
 #endif
 
@@ -129,6 +128,9 @@ extern void __pgd_error(const char *file, int line, unsigned long val);
 #else
 #define _PAGE_CACHE		_PAGE_C_MEM_WB
 #endif
+
+#define _PAGE_IOREMAP \
+	(_PAGE_V | _PAGE_M_KRW | _PAGE_D | _PAGE_G | _PAGE_C_DEV)
 
 /*
  * + Level 1 descriptor (PMD)
@@ -402,8 +404,6 @@ extern pgd_t swapper_pg_dir[PTRS_PER_PGD];
  * remap a physical address `phys' of size `size' with page protection `prot'
  * into virtual address `from'
  */
-
-#define pgtable_cache_init()       do { } while (0)
 
 #endif /* !__ASSEMBLY__ */
 

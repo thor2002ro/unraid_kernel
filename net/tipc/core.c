@@ -34,8 +34,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include "core.h"
 #include "name_table.h"
 #include "subscr.h"
@@ -44,6 +42,7 @@
 #include "socket.h"
 #include "bcast.h"
 #include "node.h"
+#include "crypto.h"
 
 #include <linux/module.h>
 
@@ -68,6 +67,11 @@ static int __net_init tipc_init_net(struct net *net)
 	INIT_LIST_HEAD(&tn->node_list);
 	spin_lock_init(&tn->node_list_lock);
 
+#ifdef CONFIG_TIPC_CRYPTO
+	err = tipc_crypto_start(&tn->crypto_tx, net, NULL);
+	if (err)
+		goto out_crypto;
+#endif
 	err = tipc_sk_rht_init(net);
 	if (err)
 		goto out_sk_rht;
@@ -82,6 +86,10 @@ static int __net_init tipc_init_net(struct net *net)
 	if (err)
 		goto out_bclink;
 
+	err = tipc_attach_loopback(net);
+	if (err)
+		goto out_bclink;
+
 	return 0;
 
 out_bclink:
@@ -89,16 +97,34 @@ out_bclink:
 out_nametbl:
 	tipc_sk_rht_destroy(net);
 out_sk_rht:
+
+#ifdef CONFIG_TIPC_CRYPTO
+	tipc_crypto_stop(&tn->crypto_tx);
+out_crypto:
+#endif
 	return err;
 }
 
 static void __net_exit tipc_exit_net(struct net *net)
 {
+	tipc_detach_loopback(net);
 	tipc_net_stop(net);
 	tipc_bcast_stop(net);
 	tipc_nametbl_stop(net);
 	tipc_sk_rht_destroy(net);
+#ifdef CONFIG_TIPC_CRYPTO
+	tipc_crypto_stop(&tipc_net(net)->crypto_tx);
+#endif
 }
+
+static void __net_exit tipc_pernet_pre_exit(struct net *net)
+{
+	tipc_node_pre_cleanup_net(net);
+}
+
+static struct pernet_operations tipc_pernet_pre_exit_ops = {
+	.pre_exit = tipc_pernet_pre_exit,
+};
 
 static struct pernet_operations tipc_net_ops = {
 	.init = tipc_init_net,
@@ -146,6 +172,10 @@ static int __init tipc_init(void)
 	if (err)
 		goto out_pernet_topsrv;
 
+	err = register_pernet_subsys(&tipc_pernet_pre_exit_ops);
+	if (err)
+		goto out_register_pernet_subsys;
+
 	err = tipc_bearer_setup();
 	if (err)
 		goto out_bearer;
@@ -153,6 +183,8 @@ static int __init tipc_init(void)
 	pr_info("Started in single node mode\n");
 	return 0;
 out_bearer:
+	unregister_pernet_subsys(&tipc_pernet_pre_exit_ops);
+out_register_pernet_subsys:
 	unregister_pernet_device(&tipc_topsrv_net_ops);
 out_pernet_topsrv:
 	tipc_socket_stop();
@@ -172,6 +204,7 @@ out_netlink:
 static void __exit tipc_exit(void)
 {
 	tipc_bearer_cleanup();
+	unregister_pernet_subsys(&tipc_pernet_pre_exit_ops);
 	unregister_pernet_device(&tipc_topsrv_net_ops);
 	tipc_socket_stop();
 	unregister_pernet_device(&tipc_net_ops);

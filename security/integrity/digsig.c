@@ -39,46 +39,70 @@ static const char * const keyring_name[INTEGRITY_KEYRING_MAX] = {
 #define restrict_link_to_ima restrict_link_by_builtin_trusted
 #endif
 
-int integrity_digsig_verify(const unsigned int id, const char *sig, int siglen,
-			    const char *digest, int digestlen)
+static struct key *integrity_keyring_from_id(const unsigned int id)
 {
-	if (id >= INTEGRITY_KEYRING_MAX || siglen < 2)
-		return -EINVAL;
+	if (id >= INTEGRITY_KEYRING_MAX)
+		return ERR_PTR(-EINVAL);
 
 	if (!keyring[id]) {
 		keyring[id] =
-			request_key(&key_type_keyring, keyring_name[id],
-				    NULL, NULL);
+			request_key(&key_type_keyring, keyring_name[id], NULL);
 		if (IS_ERR(keyring[id])) {
 			int err = PTR_ERR(keyring[id]);
 			pr_err("no %s keyring: %d\n", keyring_name[id], err);
 			keyring[id] = NULL;
-			return err;
+			return ERR_PTR(err);
 		}
 	}
+
+	return keyring[id];
+}
+
+int integrity_digsig_verify(const unsigned int id, const char *sig, int siglen,
+			    const char *digest, int digestlen)
+{
+	struct key *keyring;
+
+	if (siglen < 2)
+		return -EINVAL;
+
+	keyring = integrity_keyring_from_id(id);
+	if (IS_ERR(keyring))
+		return PTR_ERR(keyring);
 
 	switch (sig[1]) {
 	case 1:
 		/* v1 API expect signature without xattr type */
-		return digsig_verify(keyring[id], sig + 1, siglen - 1,
-				     digest, digestlen);
+		return digsig_verify(keyring, sig + 1, siglen - 1, digest,
+				     digestlen);
 	case 2:
-		return asymmetric_verify(keyring[id], sig, siglen,
-					 digest, digestlen);
+		return asymmetric_verify(keyring, sig, siglen, digest,
+					 digestlen);
 	}
 
 	return -EOPNOTSUPP;
 }
 
+int integrity_modsig_verify(const unsigned int id, const struct modsig *modsig)
+{
+	struct key *keyring;
+
+	keyring = integrity_keyring_from_id(id);
+	if (IS_ERR(keyring))
+		return PTR_ERR(keyring);
+
+	return ima_modsig_verify(keyring, modsig);
+}
+
 static int __init __integrity_init_keyring(const unsigned int id,
-					   struct key_acl *acl,
+					   key_perm_t perm,
 					   struct key_restriction *restriction)
 {
 	const struct cred *cred = current_cred();
 	int err = 0;
 
 	keyring[id] = keyring_alloc(keyring_name[id], KUIDT_INIT(0),
-				    KGIDT_INIT(0), cred, acl,
+				    KGIDT_INIT(0), cred, perm,
 				    KEY_ALLOC_NOT_IN_QUOTA, restriction, NULL);
 	if (IS_ERR(keyring[id])) {
 		err = PTR_ERR(keyring[id]);
@@ -96,7 +120,10 @@ static int __init __integrity_init_keyring(const unsigned int id,
 int __init integrity_init_keyring(const unsigned int id)
 {
 	struct key_restriction *restriction;
-	struct key_acl *acl = &internal_keyring_acl;
+	key_perm_t perm;
+
+	perm = (KEY_POS_ALL & ~KEY_POS_SETATTR) | KEY_USR_VIEW
+		| KEY_USR_READ | KEY_USR_SEARCH;
 
 	if (id == INTEGRITY_KEYRING_PLATFORM) {
 		restriction = NULL;
@@ -111,14 +138,14 @@ int __init integrity_init_keyring(const unsigned int id)
 		return -ENOMEM;
 
 	restriction->check = restrict_link_to_ima;
-	acl = &internal_writable_keyring_acl;
+	perm |= KEY_USR_WRITE;
 
 out:
-	return __integrity_init_keyring(id, acl, restriction);
+	return __integrity_init_keyring(id, perm, restriction);
 }
 
-static int __init integrity_add_key(const unsigned int id, const void *data,
-				    off_t size, struct key_acl *acl)
+int __init integrity_add_key(const unsigned int id, const void *data,
+			     off_t size, key_perm_t perm)
 {
 	key_ref_t key;
 	int rc = 0;
@@ -127,7 +154,7 @@ static int __init integrity_add_key(const unsigned int id, const void *data,
 		return -EINVAL;
 
 	key = key_create_or_update(make_key_ref(keyring[id], 1), "asymmetric",
-				   NULL, data, size, acl ?: &internal_key_acl,
+				   NULL, data, size, perm,
 				   KEY_ALLOC_NOT_IN_QUOTA);
 	if (IS_ERR(key)) {
 		rc = PTR_ERR(key);
@@ -147,6 +174,7 @@ int __init integrity_load_x509(const unsigned int id, const char *path)
 	void *data;
 	loff_t size;
 	int rc;
+	key_perm_t perm;
 
 	rc = kernel_read_file_from_path(path, &data, &size, 0,
 					READING_X509_CERTIFICATE);
@@ -155,19 +183,21 @@ int __init integrity_load_x509(const unsigned int id, const char *path)
 		return rc;
 	}
 
+	perm = (KEY_POS_ALL & ~KEY_POS_SETATTR) | KEY_USR_VIEW | KEY_USR_READ;
+
 	pr_info("Loading X.509 certificate: %s\n", path);
-	rc = integrity_add_key(id, data, size, NULL);
+	rc = integrity_add_key(id, (const void *)data, size, perm);
 
 	vfree(data);
 	return rc;
 }
 
 int __init integrity_load_cert(const unsigned int id, const char *source,
-			       const void *data, size_t len, struct key_acl *acl)
+			       const void *data, size_t len, key_perm_t perm)
 {
 	if (!data)
 		return -EINVAL;
 
 	pr_info("Loading X.509 certificate: %s\n", source);
-	return integrity_add_key(id, data, len, acl);
+	return integrity_add_key(id, data, len, perm);
 }

@@ -32,25 +32,6 @@
 #include "cifsproto.h"
 static const struct cred *spnego_cred;
 
-static struct key_acl cifs_spnego_key_acl = {
-	.usage	= REFCOUNT_INIT(1),
-	.nr_ace	= 2,
-	.possessor_viewable = true,
-	.aces = {
-		KEY_POSSESSOR_ACE(KEY_ACE_VIEW | KEY_ACE_SEARCH | KEY_ACE_READ),
-		KEY_OWNER_ACE(KEY_ACE_VIEW),
-	}
-};
-
-static struct key_acl cifs_spnego_keyring_acl = {
-	.usage	= REFCOUNT_INIT(1),
-	.nr_ace	= 2,
-	.aces = {
-		KEY_POSSESSOR_ACE(KEY_ACE_SEARCH | KEY_ACE_WRITE),
-		KEY_OWNER_ACE(KEY_ACE_VIEW | KEY_ACE_READ | KEY_ACE_CLEAR),
-	}
-};
-
 /* create a new cifs key */
 static int
 cifs_spnego_key_instantiate(struct key *key, struct key_preparsed_payload *prep)
@@ -117,7 +98,7 @@ struct key_type cifs_spnego_key_type = {
 struct key *
 cifs_get_spnego_key(struct cifs_ses *sesInfo)
 {
-	struct TCP_Server_Info *server = sesInfo->server;
+	struct TCP_Server_Info *server = cifs_ses_server(sesInfo);
 	struct sockaddr_in *sa = (struct sockaddr_in *) &server->dstaddr;
 	struct sockaddr_in6 *sa6 = (struct sockaddr_in6 *) &server->dstaddr;
 	char *description, *dp;
@@ -189,8 +170,7 @@ cifs_get_spnego_key(struct cifs_ses *sesInfo)
 
 	cifs_dbg(FYI, "key description = %s\n", description);
 	saved_cred = override_creds(spnego_cred);
-	spnego_key = request_key(&cifs_spnego_key_type, description, "",
-				 &cifs_spnego_key_acl);
+	spnego_key = request_key(&cifs_spnego_key_type, description, "");
 	revert_creds(saved_cred);
 
 #ifdef CONFIG_CIFS_DEBUG2
@@ -227,7 +207,8 @@ init_cifs_spnego(void)
 
 	keyring = keyring_alloc(".cifs_spnego",
 				GLOBAL_ROOT_UID, GLOBAL_ROOT_GID, cred,
-				&cifs_spnego_keyring_acl,
+				(KEY_POS_ALL & ~KEY_POS_SETATTR) |
+				KEY_USR_VIEW | KEY_USR_READ,
 				KEY_ALLOC_NOT_IN_QUOTA, NULL, NULL);
 	if (IS_ERR(keyring)) {
 		ret = PTR_ERR(keyring);

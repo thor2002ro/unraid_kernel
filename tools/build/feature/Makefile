@@ -20,6 +20,7 @@ FILES=                                          \
          test-libbfd-liberty.bin                \
          test-libbfd-liberty-z.bin              \
          test-cplus-demangle.bin                \
+         test-libcap.bin			\
          test-libelf.bin                        \
          test-libelf-getphdrnum.bin             \
          test-libelf-gelf_getnote.bin           \
@@ -52,6 +53,7 @@ FILES=                                          \
          test-zlib.bin                          \
          test-lzma.bin                          \
          test-bpf.bin                           \
+         test-libbpf.bin                        \
          test-get_cpuid.bin                     \
          test-sdt.bin                           \
          test-cxx.bin                           \
@@ -104,6 +106,9 @@ $(OUTPUT)test-fortify-source.bin:
 
 $(OUTPUT)test-bionic.bin:
 	$(BUILD)
+
+$(OUTPUT)test-libcap.bin:
+	$(BUILD) -lcap
 
 $(OUTPUT)test-libelf.bin:
 	$(BUILD) -lelf
@@ -265,6 +270,9 @@ $(OUTPUT)test-get_cpuid.bin:
 
 $(OUTPUT)test-bpf.bin:
 	$(BUILD)
+
+$(OUTPUT)test-libbpf.bin:
+	$(BUILD) -lbpf
 
 $(OUTPUT)test-sdt.bin:
 	$(BUILD)

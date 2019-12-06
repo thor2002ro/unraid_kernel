@@ -35,6 +35,8 @@
 #define EVENT_CYCLES_COUNTER	0
 #define NUM_COUNTERS		4
 
+#define AXI_MASKING_REVERT	0xffff0000	/* AXI_MASKING(MSB 16bits) + AXI_ID(LSB 16bits) */
+
 #define to_ddr_pmu(p)		container_of(p, struct ddr_pmu, pmu)
 
 #define DDR_PERF_DEV_NAME	"imx8_ddr"
@@ -42,11 +44,31 @@
 
 static DEFINE_IDA(ddr_ida);
 
+/* DDR Perf hardware feature */
+#define DDR_CAP_AXI_ID_FILTER			0x1     /* support AXI ID filter */
+#define DDR_CAP_AXI_ID_FILTER_ENHANCED		0x3     /* support enhanced AXI ID filter */
+
+struct fsl_ddr_devtype_data {
+	unsigned int quirks;    /* quirks needed for different DDR Perf core */
+};
+
+static const struct fsl_ddr_devtype_data imx8_devtype_data;
+
+static const struct fsl_ddr_devtype_data imx8m_devtype_data = {
+	.quirks = DDR_CAP_AXI_ID_FILTER,
+};
+
+static const struct fsl_ddr_devtype_data imx8mp_devtype_data = {
+	.quirks = DDR_CAP_AXI_ID_FILTER_ENHANCED,
+};
+
 static const struct of_device_id imx_ddr_pmu_dt_ids[] = {
-	{ .compatible = "fsl,imx8-ddr-pmu",},
-	{ .compatible = "fsl,imx8m-ddr-pmu",},
+	{ .compatible = "fsl,imx8-ddr-pmu", .data = &imx8_devtype_data},
+	{ .compatible = "fsl,imx8m-ddr-pmu", .data = &imx8m_devtype_data},
+	{ .compatible = "fsl,imx8mp-ddr-pmu", .data = &imx8mp_devtype_data},
 	{ /* sentinel */ }
 };
+MODULE_DEVICE_TABLE(of, imx_ddr_pmu_dt_ids);
 
 struct ddr_pmu {
 	struct pmu pmu;
@@ -57,8 +79,64 @@ struct ddr_pmu {
 	struct perf_event *events[NUM_COUNTERS];
 	int active_events;
 	enum cpuhp_state cpuhp_state;
+	const struct fsl_ddr_devtype_data *devtype_data;
 	int irq;
 	int id;
+};
+
+enum ddr_perf_filter_capabilities {
+	PERF_CAP_AXI_ID_FILTER = 0,
+	PERF_CAP_AXI_ID_FILTER_ENHANCED,
+	PERF_CAP_AXI_ID_FEAT_MAX,
+};
+
+static u32 ddr_perf_filter_cap_get(struct ddr_pmu *pmu, int cap)
+{
+	u32 quirks = pmu->devtype_data->quirks;
+
+	switch (cap) {
+	case PERF_CAP_AXI_ID_FILTER:
+		return !!(quirks & DDR_CAP_AXI_ID_FILTER);
+	case PERF_CAP_AXI_ID_FILTER_ENHANCED:
+		quirks &= DDR_CAP_AXI_ID_FILTER_ENHANCED;
+		return quirks == DDR_CAP_AXI_ID_FILTER_ENHANCED;
+	default:
+		WARN(1, "unknown filter cap %d\n", cap);
+	}
+
+	return 0;
+}
+
+static ssize_t ddr_perf_filter_cap_show(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
+{
+	struct ddr_pmu *pmu = dev_get_drvdata(dev);
+	struct dev_ext_attribute *ea =
+		container_of(attr, struct dev_ext_attribute, attr);
+	int cap = (long)ea->var;
+
+	return snprintf(buf, PAGE_SIZE, "%u\n",
+			ddr_perf_filter_cap_get(pmu, cap));
+}
+
+#define PERF_EXT_ATTR_ENTRY(_name, _func, _var)				\
+	(&((struct dev_ext_attribute) {					\
+		__ATTR(_name, 0444, _func, NULL), (void *)_var		\
+	}).attr.attr)
+
+#define PERF_FILTER_EXT_ATTR_ENTRY(_name, _var)				\
+	PERF_EXT_ATTR_ENTRY(_name, ddr_perf_filter_cap_show, _var)
+
+static struct attribute *ddr_perf_filter_cap_attr[] = {
+	PERF_FILTER_EXT_ATTR_ENTRY(filter, PERF_CAP_AXI_ID_FILTER),
+	PERF_FILTER_EXT_ATTR_ENTRY(enhanced_filter, PERF_CAP_AXI_ID_FILTER_ENHANCED),
+	NULL,
+};
+
+static struct attribute_group ddr_perf_filter_cap_attr_group = {
+	.name = "caps",
+	.attrs = ddr_perf_filter_cap_attr,
 };
 
 static ssize_t ddr_perf_cpumask_show(struct device *dev,
@@ -128,6 +206,8 @@ static struct attribute *ddr_perf_events_attrs[] = {
 	IMX8_DDR_PMU_EVENT_ATTR(refresh, 0x37),
 	IMX8_DDR_PMU_EVENT_ATTR(write, 0x38),
 	IMX8_DDR_PMU_EVENT_ATTR(raw-hazard, 0x39),
+	IMX8_DDR_PMU_EVENT_ATTR(axid-read, 0x41),
+	IMX8_DDR_PMU_EVENT_ATTR(axid-write, 0x42),
 	NULL,
 };
 
@@ -137,9 +217,13 @@ static struct attribute_group ddr_perf_events_attr_group = {
 };
 
 PMU_FORMAT_ATTR(event, "config:0-7");
+PMU_FORMAT_ATTR(axi_id, "config1:0-15");
+PMU_FORMAT_ATTR(axi_mask, "config1:16-31");
 
 static struct attribute *ddr_perf_format_attrs[] = {
 	&format_attr_event.attr,
+	&format_attr_axi_id.attr,
+	&format_attr_axi_mask.attr,
 	NULL,
 };
 
@@ -152,8 +236,39 @@ static const struct attribute_group *attr_groups[] = {
 	&ddr_perf_events_attr_group,
 	&ddr_perf_format_attr_group,
 	&ddr_perf_cpumask_attr_group,
+	&ddr_perf_filter_cap_attr_group,
 	NULL,
 };
+
+static bool ddr_perf_is_filtered(struct perf_event *event)
+{
+	return event->attr.config == 0x41 || event->attr.config == 0x42;
+}
+
+static u32 ddr_perf_filter_val(struct perf_event *event)
+{
+	return event->attr.config1;
+}
+
+static bool ddr_perf_filters_compatible(struct perf_event *a,
+					struct perf_event *b)
+{
+	if (!ddr_perf_is_filtered(a))
+		return true;
+	if (!ddr_perf_is_filtered(b))
+		return true;
+	return ddr_perf_filter_val(a) == ddr_perf_filter_val(b);
+}
+
+static bool ddr_perf_is_enhanced_filtered(struct perf_event *event)
+{
+	unsigned int filt;
+	struct ddr_pmu *pmu = to_ddr_pmu(event->pmu);
+
+	filt = pmu->devtype_data->quirks & DDR_CAP_AXI_ID_FILTER_ENHANCED;
+	return (filt == DDR_CAP_AXI_ID_FILTER_ENHANCED) &&
+		ddr_perf_is_filtered(event);
+}
 
 static u32 ddr_perf_alloc_counter(struct ddr_pmu *pmu, int event)
 {
@@ -186,7 +301,17 @@ static void ddr_perf_free_counter(struct ddr_pmu *pmu, int counter)
 
 static u32 ddr_perf_read_counter(struct ddr_pmu *pmu, int counter)
 {
-	return readl_relaxed(pmu->base + COUNTER_READ + counter * 4);
+	struct perf_event *event = pmu->events[counter];
+	void __iomem *base = pmu->base;
+
+	/*
+	 * return bytes instead of bursts from ddr transaction for
+	 * axid-read and axid-write event if PMU core supports enhanced
+	 * filter.
+	 */
+	base += ddr_perf_is_enhanced_filtered(event) ? COUNTER_DPCR1 :
+						       COUNTER_READ;
+	return readl_relaxed(base + counter * 4);
 }
 
 static int ddr_perf_event_init(struct perf_event *event)
@@ -214,6 +339,15 @@ static int ddr_perf_event_init(struct perf_event *event)
 	if (event->group_leader->pmu != event->pmu &&
 			!is_software_event(event->group_leader))
 		return -EINVAL;
+
+	if (pmu->devtype_data->quirks & DDR_CAP_AXI_ID_FILTER) {
+		if (!ddr_perf_filters_compatible(event, event->group_leader))
+			return -EINVAL;
+		for_each_sibling_event(sibling, event->group_leader) {
+			if (!ddr_perf_filters_compatible(event, sibling))
+				return -EINVAL;
+		}
+	}
 
 	for_each_sibling_event(sibling, event->group_leader) {
 		if (sibling->pmu != event->pmu &&
@@ -287,6 +421,23 @@ static int ddr_perf_event_add(struct perf_event *event, int flags)
 	struct hw_perf_event *hwc = &event->hw;
 	int counter;
 	int cfg = event->attr.config;
+	int cfg1 = event->attr.config1;
+
+	if (pmu->devtype_data->quirks & DDR_CAP_AXI_ID_FILTER) {
+		int i;
+
+		for (i = 1; i < NUM_COUNTERS; i++) {
+			if (pmu->events[i] &&
+			    !ddr_perf_filters_compatible(event, pmu->events[i]))
+				return -EINVAL;
+		}
+
+		if (ddr_perf_is_filtered(event)) {
+			/* revert axi id masking(axi_mask) value */
+			cfg1 ^= AXI_MASKING_REVERT;
+			writel(cfg1, pmu->base + COUNTER_DPCR1);
+		}
+	}
 
 	counter = ddr_perf_alloc_counter(pmu, cfg);
 	if (counter < 0) {
@@ -471,6 +622,8 @@ static int ddr_perf_probe(struct platform_device *pdev)
 			      num);
 	if (!name)
 		return -ENOMEM;
+
+	pmu->devtype_data = of_device_get_match_data(&pdev->dev);
 
 	pmu->cpu = raw_smp_processor_id();
 	ret = cpuhp_setup_state_multi(CPUHP_AP_ONLINE_DYN,
