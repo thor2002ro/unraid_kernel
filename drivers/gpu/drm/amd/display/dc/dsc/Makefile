@@ -8,10 +8,16 @@ else ifneq ($(call cc-option, -mstack-alignment=16),)
 	cc_stack_align := -mstack-alignment=16
 endif
 
+ifdef CONFIG_X86
 dsc_ccflags := -mhard-float -msse $(cc_stack_align)
 
 ifdef CONFIG_CC_IS_CLANG
 dsc_ccflags += -msse2
+endif
+endif
+
+ifdef CONFIG_PPC64
+dsc_ccflags := -mhard-float -maltivec $(cc_stack_align)
 endif
 
 CFLAGS_$(AMDDALPATH)/dc/dsc/rc_calc.o := $(dsc_ccflags)

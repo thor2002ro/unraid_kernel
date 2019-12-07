@@ -1,5 +1,6 @@
 #
 # Copyright 2017 Advanced Micro Devices, Inc.
+# Copyright 2019 Raptor Engineering, LLC
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -30,10 +31,16 @@ else ifneq ($(call cc-option, -mstack-alignment=16),)
 	cc_stack_align := -mstack-alignment=16
 endif
 
+ifdef CONFIG_X86
 calcs_ccflags := -mhard-float -msse $(cc_stack_align)
 
 ifdef CONFIG_CC_IS_CLANG
 calcs_ccflags += -msse2
+endif
+endif
+
+ifdef CONFIG_PPC64
+calcs_ccflags := -mhard-float -maltivec $(cc_stack_align)
 endif
 
 CFLAGS_$(AMDDALPATH)/dc/calcs/dcn_calcs.o := $(calcs_ccflags)
