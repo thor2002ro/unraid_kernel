@@ -1,6 +1,10 @@
 arm/soc
 
 arm/dt
+	exynos/dt-5.5-2
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-dt-5.5-2
+	socfpga/dt-5.5-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/dinguyen/linux tags/socfpga_dts_updates_for_v5.5_part2
 
 arm/drivers
 
@@ -9,39 +13,6 @@ arm/defconfig
 arm/late
 
 arm/fixes
-	<no branch> (03212e347f9443e524d6383c6806ac08295c1fb0)
-		git://git.linaro.org/people/jens.wiklander/linux-tee tags/tee-fixes-for-v5.4
-	patch
-		MAINTAINERS: update Cavium ThunderX drivers
-		MAINTAINERS: Switch to Marvell addresses
-		soc: aspeed: Fix snoop_file_poll()'s return type
-		soc: mediatek: cmdq: fixup wrong input order of write api
-	<no branch> (6859ad379439df609915fd2e0c44dc39605c6618)
-		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.5/maintainers-part2
-	<no branch> (54fb3fe0f211d4729a2551cf9497bd612189af9d)
-		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/juno-fixes-5.5
-	<no branch> (8305e90a894f82c278c17e51a28459deee78b263)
-		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/scmi-fix-5.5-2
-	patch
-		ARM: pxa: Fix resource properties
-	<no branch> (b08baef02b26cf7c2123e4a24a2fa1fb7a593ffb)
-		Merge mainline/master into arm/fixes
-	patch
-		arm64: defconfig: re-run savedefconfig
-		ARM: defconfig: re-run savedefconfig on multi_v* configs
-		ARM: multi_v7_defconfig: Restore debugfs support
-	<no branch> (d7d8d62a3f3b50b606c9395298b017bd9fd9c8d4)
-		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/ti-sysc-late-signed
-	<no branch> (3e5c3c41ae925458150273e2f74ffbf999530c5f)
-		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.5/dt-fixes-merge-window-signed
-	<no branch> (716864586c6261b079a4d5ebc02f19adc8e6aa38)
-		git://git.kernel.org/pub/scm/linux/kernel/git/dinguyen/linux tags/socfpga_update_for_v5.5
-	<no branch> (0fb438eed10ca13d212a5675363beb5a5cd721f2)
-		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-cpufreq
-	<no branch> (48914c4ecb0c0fa1d70ea7b97d758ce5fadacfb0)
-		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-soc-fixes
-	<no branch> (030d2829f4c22e675e21904f32ab60f659174e72)
-		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.5-memory-fixes
-	<no branch> (be8af7a9e3cce3cc4b7abbc8211dd06f8e72b976)
-		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.5/devicetree-part2
+	<no branch> (c9385887cbbf292ee367f75b400874f00ea34890)
+		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/vexpress-fixes-5.5
 
