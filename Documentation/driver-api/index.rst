@@ -26,6 +26,7 @@ available subsections can be seen below.
    device_link
    component
    message-based
+   infiniband
    sound
    frame-buffer
    regulator
@@ -69,7 +70,6 @@ available subsections can be seen below.
    fpga/index
    acpi/index
    backlight/lp855x-driver.rst
-   bt8xxgpio
    connector
    console
    dcdbas
