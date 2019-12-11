@@ -127,18 +127,43 @@ DEFINE_EVENT(mm_vmscan_direct_reclaim_begin_template, mm_vmscan_direct_reclaim_b
 );
 
 #ifdef CONFIG_MEMCG
-DEFINE_EVENT(mm_vmscan_direct_reclaim_begin_template, mm_vmscan_memcg_reclaim_begin,
+DECLARE_EVENT_CLASS(mm_vmscan_memcg_reclaim_begin_template,
 
-	TP_PROTO(int order, gfp_t gfp_flags),
+	TP_PROTO(unsigned int cgroup_ino, int order, gfp_t gfp_flags),
 
-	TP_ARGS(order, gfp_flags)
+	TP_ARGS(cgroup_ino, order, gfp_flags),
+
+	TP_STRUCT__entry(
+		__field(unsigned int, cgroup_ino)
+		__field(int, order)
+		__field(gfp_t, gfp_flags)
+	),
+
+	TP_fast_assign(
+		__entry->cgroup_ino	= cgroup_ino;
+		__entry->order		= order;
+		__entry->gfp_flags	= gfp_flags;
+	),
+
+	TP_printk("cgroup_ino=%u order=%d gfp_flags=%s",
+		__entry->cgroup_ino, __entry->order,
+		show_gfp_flags(__entry->gfp_flags))
 );
 
-DEFINE_EVENT(mm_vmscan_direct_reclaim_begin_template, mm_vmscan_memcg_softlimit_reclaim_begin,
+DEFINE_EVENT(mm_vmscan_memcg_reclaim_begin_template,
+	     mm_vmscan_memcg_reclaim_begin,
 
-	TP_PROTO(int order, gfp_t gfp_flags),
+	TP_PROTO(unsigned int cgroup_ino, int order, gfp_t gfp_flags),
 
-	TP_ARGS(order, gfp_flags)
+	TP_ARGS(cgroup_ino, order, gfp_flags)
+);
+
+DEFINE_EVENT(mm_vmscan_memcg_reclaim_begin_template,
+	     mm_vmscan_memcg_softlimit_reclaim_begin,
+
+	TP_PROTO(unsigned int cgroup_ino, int order, gfp_t gfp_flags),
+
+	TP_ARGS(cgroup_ino, order, gfp_flags)
 );
 #endif /* CONFIG_MEMCG */
 
@@ -167,18 +192,40 @@ DEFINE_EVENT(mm_vmscan_direct_reclaim_end_template, mm_vmscan_direct_reclaim_end
 );
 
 #ifdef CONFIG_MEMCG
-DEFINE_EVENT(mm_vmscan_direct_reclaim_end_template, mm_vmscan_memcg_reclaim_end,
+DECLARE_EVENT_CLASS(mm_vmscan_memcg_reclaim_end_template,
 
-	TP_PROTO(unsigned long nr_reclaimed),
+	TP_PROTO(unsigned int cgroup_ino, unsigned long nr_reclaimed),
 
-	TP_ARGS(nr_reclaimed)
+	TP_ARGS(cgroup_ino, nr_reclaimed),
+
+	TP_STRUCT__entry(
+		__field(unsigned int, cgroup_ino)
+		__field(unsigned long, nr_reclaimed)
+	),
+
+	TP_fast_assign(
+		__entry->cgroup_ino	= cgroup_ino;
+		__entry->nr_reclaimed	= nr_reclaimed;
+	),
+
+	TP_printk("cgroup_ino=%u nr_reclaimed=%lu",
+		__entry->cgroup_ino, __entry->nr_reclaimed)
 );
 
-DEFINE_EVENT(mm_vmscan_direct_reclaim_end_template, mm_vmscan_memcg_softlimit_reclaim_end,
+DEFINE_EVENT(mm_vmscan_memcg_reclaim_end_template,
+	     mm_vmscan_memcg_reclaim_end,
 
-	TP_PROTO(unsigned long nr_reclaimed),
+	TP_PROTO(unsigned int cgroup_ino, unsigned long nr_reclaimed),
 
-	TP_ARGS(nr_reclaimed)
+	TP_ARGS(cgroup_ino, nr_reclaimed)
+);
+
+DEFINE_EVENT(mm_vmscan_memcg_reclaim_end_template,
+	     mm_vmscan_memcg_softlimit_reclaim_end,
+
+	TP_PROTO(unsigned int cgroup_ino, unsigned long nr_reclaimed),
+
+	TP_ARGS(cgroup_ino, nr_reclaimed)
 );
 #endif /* CONFIG_MEMCG */
 
