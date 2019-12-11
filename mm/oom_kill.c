@@ -399,7 +399,7 @@ static int add_candidate_task(struct task_struct *p, void *arg)
  */
 static void dump_tasks(struct oom_control *oc)
 {
-	static LIST_HEAD(list);
+	LIST_HEAD(list);
 	struct task_struct *p;
 	struct task_struct *t;
 
