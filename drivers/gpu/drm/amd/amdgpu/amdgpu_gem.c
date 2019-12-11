@@ -227,7 +227,7 @@ int amdgpu_gem_create_ioctl(struct drm_device *dev, void *data,
 		      AMDGPU_GEM_CREATE_VRAM_CLEARED |
 		      AMDGPU_GEM_CREATE_VM_ALWAYS_VALID |
 		      AMDGPU_GEM_CREATE_EXPLICIT_SYNC |
-		      AMDGPU_GEM_CREATE_ENCRYPTED))
+		      AMDGPU_GEM_CREATE_SECURE))
 
 		return -EINVAL;
 
@@ -235,7 +235,7 @@ int amdgpu_gem_create_ioctl(struct drm_device *dev, void *data,
 	if (args->in.domains & ~AMDGPU_GEM_DOMAIN_MASK)
 		return -EINVAL;
 
-	if (!adev->tmz.enabled && (flags & AMDGPU_GEM_CREATE_ENCRYPTED)) {
+	if (!adev->tmz.enabled && (flags & AMDGPU_GEM_CREATE_SECURE)) {
 		DRM_ERROR("Cannot allocate secure buffer while tmz is disabled\n");
 		return -EINVAL;
 	}
@@ -261,7 +261,7 @@ int amdgpu_gem_create_ioctl(struct drm_device *dev, void *data,
 		resv = vm->root.base.bo->tbo.base.resv;
 	}
 
-	if (flags & AMDGPU_GEM_CREATE_ENCRYPTED) {
+	if (flags & AMDGPU_GEM_CREATE_SECURE) {
 		/* XXX: pad out alignment to meet TMZ requirements */
 	}
 

@@ -232,7 +232,7 @@ static inline bool amdgpu_bo_explicit_sync(struct amdgpu_bo *bo)
  */
 static inline bool amdgpu_bo_encrypted(struct amdgpu_bo *bo)
 {
-	return bo->flags & AMDGPU_GEM_CREATE_ENCRYPTED;
+	return bo->flags & AMDGPU_GEM_CREATE_SECURE;
 }
 
 bool amdgpu_bo_is_amdgpu_bo(struct ttm_buffer_object *bo);
