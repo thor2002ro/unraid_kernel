@@ -2141,12 +2141,9 @@ static int apply_to_p4d_range(struct mm_struct *mm, pgd_t *pgd,
 	return err;
 }
 
-/*
- * Scan a region of virtual memory, filling in page tables as necessary
- * and calling a provided function on each leaf page table.
- */
-int apply_to_page_range(struct mm_struct *mm, unsigned long addr,
-			unsigned long size, pte_fn_t fn, void *data)
+static int __apply_to_page_range(struct mm_struct *mm, unsigned long addr,
+				 unsigned long size, pte_fn_t fn,
+				 void *data, bool create)
 {
 	pgd_t *pgd;
 	unsigned long next;
@@ -2159,12 +2156,24 @@ int apply_to_page_range(struct mm_struct *mm, unsigned long addr,
 	pgd = pgd_offset(mm, addr);
 	do {
 		next = pgd_addr_end(addr, end);
-		err = apply_to_p4d_range(mm, pgd, addr, next, fn, data, true);
+		if (!create && pgd_none_or_clear_bad(pgd))
+			continue;
+		err = apply_to_p4d_range(mm, pgd, addr, next, fn, data, create);
 		if (err)
 			break;
 	} while (pgd++, addr = next, addr != end);
 
 	return err;
+}
+
+/*
+ * Scan a region of virtual memory, filling in page tables as necessary
+ * and calling a provided function on each leaf page table.
+ */
+int apply_to_page_range(struct mm_struct *mm, unsigned long addr,
+			unsigned long size, pte_fn_t fn, void *data)
+{
+	return __apply_to_page_range(mm, addr, size, fn, data, true);
 }
 EXPORT_SYMBOL_GPL(apply_to_page_range);
 
@@ -2178,25 +2187,7 @@ EXPORT_SYMBOL_GPL(apply_to_page_range);
 int apply_to_existing_pages(struct mm_struct *mm, unsigned long addr,
 			    unsigned long size, pte_fn_t fn, void *data)
 {
-	pgd_t *pgd;
-	unsigned long next;
-	unsigned long end = addr + size;
-	int err = 0;
-
-	if (WARN_ON(addr >= end))
-		return -EINVAL;
-
-	pgd = pgd_offset(mm, addr);
-	do {
-		next = pgd_addr_end(addr, end);
-		if (pgd_none_or_clear_bad(pgd))
-			continue;
-		err = apply_to_p4d_range(mm, pgd, addr, next, fn, data, false);
-		if (err)
-			break;
-	} while (pgd++, addr = next, addr != end);
-
-	return err;
+	return __apply_to_page_range(mm, addr, size, fn, data, false);
 }
 EXPORT_SYMBOL_GPL(apply_to_existing_pages);
 
