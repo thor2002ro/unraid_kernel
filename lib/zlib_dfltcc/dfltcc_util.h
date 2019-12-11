@@ -3,6 +3,7 @@
 #define DFLTCC_UTIL_H
 
 #include <linux/zutil.h>
+#include <asm/setup.h>
 
 /*
  * C wrapper for the DEFLATE CONVERSION CALL instruction.
@@ -103,6 +104,10 @@ static inline int is_dfltcc_enabled(void)
 {
     uint64_t facilities[(DFLTCC_FACILITY / 64) + 1];
     register char r0 __asm__("r0");
+
+    /* Check for kernel dfltcc command line parameter */
+    if (zlib_dfltcc_support == ZLIB_DFLTCC_DISABLED)
+        return 0;
 
     memset(facilities, 0, sizeof(facilities));
     r0 = sizeof(facilities) / sizeof(facilities[0]) - 1;
