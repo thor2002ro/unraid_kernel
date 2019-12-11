@@ -3,6 +3,7 @@
 #define DFLTCC_H
 
 #include "../zlib_deflate/defutil.h"
+#include "dfltcc_util.h"
 
 /*
  * Tuning parameters.
@@ -120,6 +121,8 @@ dfltcc_inflate_action dfltcc_inflate(z_streamp strm,
 #define DEFLATE_HOOK dfltcc_deflate
 
 #define DEFLATE_NEED_CHECKSUM(strm) (!dfltcc_can_deflate((strm)))
+
+#define DEFLATE_DFLTCC_ENABLED() is_dfltcc_enabled()
 
 #define INFLATE_RESET_HOOK(strm) \
     dfltcc_reset((strm), sizeof(struct inflate_state))
