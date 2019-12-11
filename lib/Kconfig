@@ -292,6 +292,14 @@ config ZLIB_DFLTCC_DEFLATE
 	help
 	 Enable s390x hardware support for zlib deflate in the kernel.
 
+config ZLIB_DFLTCC_INFLATE
+	def_bool y
+	depends on ZLIB_DFLTCC && ZLIB_INFLATE
+	prompt "Enable s390x hardware support for zlib inflate functions"
+	help
+	 Enable s390x hardware support for zlib inflate in the kernel.
+
+
 config LZO_COMPRESS
 	tristate
 
