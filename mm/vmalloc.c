@@ -1062,6 +1062,26 @@ __alloc_vmap_area(unsigned long size, unsigned long align,
 }
 
 /*
+ * Free a region of KVA allocated by alloc_vmap_area
+ */
+static void free_vmap_area(struct vmap_area *va)
+{
+	/*
+	 * Remove from the busy tree/list.
+	 */
+	spin_lock(&vmap_area_lock);
+	unlink_va(va, &vmap_area_root);
+	spin_unlock(&vmap_area_lock);
+
+	/*
+	 * Insert/Merge it back to the free tree/list.
+	 */
+	spin_lock(&free_vmap_area_lock);
+	merge_or_add_vmap_area(va, &free_vmap_area_root, &free_vmap_area_list);
+	spin_unlock(&free_vmap_area_lock);
+}
+
+/*
  * Allocate a region of KVA of the specified size and alignment, within the
  * vstart and vend.
  */
@@ -1073,7 +1093,7 @@ static struct vmap_area *alloc_vmap_area(unsigned long size,
 	struct vmap_area *va, *pva;
 	unsigned long addr;
 	int purged = 0;
-	int ret = -EBUSY;
+	int ret;
 
 	BUG_ON(!size);
 	BUG_ON(offset_in_page(size));
@@ -1140,9 +1160,6 @@ retry:
 	va->va_end = addr + size;
 	va->vm = NULL;
 
-	ret = kasan_populate_vmalloc(addr, size);
-	if (ret)
-		goto out;
 
 	spin_lock(&vmap_area_lock);
 	insert_vmap_area(va, &vmap_area_root, &vmap_area_list);
@@ -1151,6 +1168,12 @@ retry:
 	BUG_ON(!IS_ALIGNED(va->va_start, align));
 	BUG_ON(va->va_start < vstart);
 	BUG_ON(va->va_end > vend);
+
+	ret = kasan_populate_vmalloc(addr, size);
+	if (ret) {
+		free_vmap_area(va);
+		return ERR_PTR(ret);
+	}
 
 	return va;
 
@@ -1174,9 +1197,8 @@ overflow:
 		pr_warn("vmap allocation for size %lu failed: use vmalloc=<size> to increase size\n",
 			size);
 
-out:
 	kmem_cache_free(vmap_area_cachep, va);
-	return ERR_PTR(ret);
+	return ERR_PTR(-EBUSY);
 }
 
 int register_vmap_purge_notifier(struct notifier_block *nb)
@@ -1190,26 +1212,6 @@ int unregister_vmap_purge_notifier(struct notifier_block *nb)
 	return blocking_notifier_chain_unregister(&vmap_notify_list, nb);
 }
 EXPORT_SYMBOL_GPL(unregister_vmap_purge_notifier);
-
-/*
- * Free a region of KVA allocated by alloc_vmap_area
- */
-static void free_vmap_area(struct vmap_area *va)
-{
-	/*
-	 * Remove from the busy tree/list.
-	 */
-	spin_lock(&vmap_area_lock);
-	unlink_va(va, &vmap_area_root);
-	spin_unlock(&vmap_area_lock);
-
-	/*
-	 * Insert/Merge it back to the free tree/list.
-	 */
-	spin_lock(&free_vmap_area_lock);
-	merge_or_add_vmap_area(va, &free_vmap_area_root, &free_vmap_area_list);
-	spin_unlock(&free_vmap_area_lock);
-}
 
 /*
  * Clear the pagetable entries of a given vmap_area
