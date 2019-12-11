@@ -35,9 +35,6 @@
 
 #include "vhost.h"
 
-static int newcode = 0;
-module_param(newcode, int, 0644);
-
 static int experimental_zcopytx = 0;
 module_param(experimental_zcopytx, int, 0444);
 MODULE_PARM_DESC(experimental_zcopytx, "Enable Zero Copy TX;"
@@ -568,14 +565,8 @@ static int vhost_net_tx_get_vq_desc(struct vhost_net *net,
 	struct vhost_virtqueue *rvq = &rnvq->vq;
 	struct vhost_virtqueue *tvq = &tnvq->vq;
 
-	int r;
-
-	if (newcode)
-		r = vhost_get_vq_desc_batch(tvq, tvq->iov, ARRAY_SIZE(tvq->iov),
-					    out_num, in_num, NULL, NULL);
-	else
-		r = vhost_get_vq_desc(tvq, tvq->iov, ARRAY_SIZE(tvq->iov),
-				      out_num, in_num, NULL, NULL);
+	int r = vhost_get_vq_desc(tvq, tvq->iov, ARRAY_SIZE(tvq->iov),
+				  out_num, in_num, NULL, NULL);
 
 	if (r == tvq->num && tvq->busyloop_timeout) {
 		/* Flush batched packets first */
@@ -584,12 +575,8 @@ static int vhost_net_tx_get_vq_desc(struct vhost_net *net,
 
 		vhost_net_busy_poll(net, rvq, tvq, busyloop_intr, false);
 
-		if (newcode)
-			r = vhost_get_vq_desc_batch(tvq, tvq->iov, ARRAY_SIZE(tvq->iov),
-						    out_num, in_num, NULL, NULL);
-		else
-			r = vhost_get_vq_desc(tvq, tvq->iov, ARRAY_SIZE(tvq->iov),
-					      out_num, in_num, NULL, NULL);
+		r = vhost_get_vq_desc(tvq, tvq->iov, ARRAY_SIZE(tvq->iov),
+				      out_num, in_num, NULL, NULL);
 	}
 
 	return r;
@@ -1059,14 +1046,9 @@ static int get_rx_bufs(struct vhost_virtqueue *vq,
 			r = -ENOBUFS;
 			goto err;
 		}
-		if (newcode)
-			r = vhost_get_vq_desc_batch(vq, vq->iov + seg,
-						    ARRAY_SIZE(vq->iov) - seg, &out,
-						    &in, log, log_num);
-		else
-			r = vhost_get_vq_desc(vq, vq->iov + seg,
-					      ARRAY_SIZE(vq->iov) - seg, &out,
-					      &in, log, log_num);
+		r = vhost_get_vq_desc(vq, vq->iov + seg,
+				      ARRAY_SIZE(vq->iov) - seg, &out,
+				      &in, log, log_num);
 		if (unlikely(r < 0))
 			goto err;
 
