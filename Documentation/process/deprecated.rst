@@ -84,7 +84,7 @@ buffer. This could result in linear overflows beyond the
 end of the buffer, leading to all kinds of misbehaviors. While
 `CONFIG_FORTIFY_SOURCE=y` and various compiler flags help reduce the
 risk of using this function, there is no good reason to add new uses of
-this function. The safe replacement is :c:func:`strscpy`.
+this function. The safe replacement is stracpy() or strscpy().
 
 strncpy() on NUL-terminated strings
 -----------------------------------
@@ -93,9 +93,9 @@ will be NUL terminated. This can lead to various linear read overflows
 and other misbehavior due to the missing termination. It also NUL-pads the
 destination buffer if the source contents are shorter than the destination
 buffer size, which may be a needless performance penalty for callers using
-only NUL-terminated strings. The safe replacement is :c:func:`strscpy`.
-(Users of :c:func:`strscpy` still needing NUL-padding will need an
-explicit :c:func:`memset` added.)
+only NUL-terminated strings. In this case, the safe replacement is
+stracpy() or strscpy(). If, however, the destination buffer still needs
+NUL-padding, the safe replacement is stracpy_pad().
 
 If a caller is using non-NUL-terminated strings, :c:func:`strncpy()` can
 still be used, but destinations should be marked with the `__nonstring
@@ -107,7 +107,7 @@ strlcpy()
 :c:func:`strlcpy` reads the entire source buffer first, possibly exceeding
 the given limit of bytes to copy. This is inefficient and can lead to
 linear read overflows if a source string is not NUL-terminated. The
-safe replacement is :c:func:`strscpy`.
+safe replacement is stracpy() or strscpy().
 
 Variable Length Arrays (VLAs)
 -----------------------------
