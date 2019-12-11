@@ -1946,7 +1946,7 @@ static int log_used(struct vhost_virtqueue *vq, u64 used_offset, u64 len)
 	return 0;
 }
 
-int vhost_log_write(struct vhost_virtqueue *vq, struct vhost_log *log,
+int vhost_log_write(struct vhost_virtqueue *vq, struct vhost_desc *log,
 		    unsigned int log_num, u64 len, struct iovec *iov, int count)
 {
 	int i, r;
@@ -2350,7 +2350,7 @@ static int fetch_descs(struct vhost_virtqueue *vq)
 int vhost_get_vq_desc(struct vhost_virtqueue *vq,
 		      struct iovec iov[], unsigned int iov_size,
 		      unsigned int *out_num, unsigned int *in_num,
-		      struct vhost_log *log, unsigned int *log_num)
+		      struct vhost_desc *log, unsigned int *log_num)
 {
 	int ret = fetch_descs(vq);
 	int i;
@@ -2392,11 +2392,8 @@ int vhost_get_vq_desc(struct vhost_virtqueue *vq,
 			/* If this is an input descriptor,
 			 * increment that count. */
 			*in_num += ret;
-			if (unlikely(log && ret)) {
-				log[*log_num].addr = desc->addr;
-				log[*log_num].len = desc->len;
-				++*log_num;
-			}
+			if (unlikely(log && ret))
+				log[*log_num++] = *desc;
 		} else {
 			/* If it's an output descriptor, they're all supposed
 			 * to come before any input descriptors. */

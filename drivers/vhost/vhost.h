@@ -47,11 +47,6 @@ void vhost_poll_queue(struct vhost_poll *poll);
 void vhost_work_flush(struct vhost_dev *dev, struct vhost_work *work);
 long vhost_vring_ioctl(struct vhost_dev *d, unsigned int ioctl, void __user *argp);
 
-struct vhost_log {
-	u64 addr;
-	u64 len;
-};
-
 #define START(node) ((node)->start)
 #define LAST(node) ((node)->last)
 
@@ -149,7 +144,7 @@ struct vhost_virtqueue {
 	u64 acked_backend_features;
 	/* Log write descriptors */
 	void __user *log_base;
-	struct vhost_log *log;
+	struct vhost_desc *log;
 
 	/* Ring endianness. Defaults to legacy native endianness.
 	 * Set to true when starting a modern virtio device. */
@@ -208,7 +203,7 @@ bool vhost_log_access_ok(struct vhost_dev *);
 int vhost_get_vq_desc(struct vhost_virtqueue *,
 		      struct iovec iov[], unsigned int iov_count,
 		      unsigned int *out_num, unsigned int *in_num,
-		      struct vhost_log *log, unsigned int *log_num);
+		      struct vhost_desc *log, unsigned int *log_num);
 void vhost_discard_vq_desc(struct vhost_virtqueue *, int n);
 
 int vhost_vq_init_access(struct vhost_virtqueue *);
@@ -224,7 +219,7 @@ void vhost_disable_notify(struct vhost_dev *, struct vhost_virtqueue *);
 bool vhost_vq_avail_empty(struct vhost_dev *, struct vhost_virtqueue *);
 bool vhost_enable_notify(struct vhost_dev *, struct vhost_virtqueue *);
 
-int vhost_log_write(struct vhost_virtqueue *vq, struct vhost_log *log,
+int vhost_log_write(struct vhost_virtqueue *vq, struct vhost_desc *log,
 		    unsigned int log_num, u64 len,
 		    struct iovec *iov, int count);
 int vq_meta_prefetch(struct vhost_virtqueue *vq);

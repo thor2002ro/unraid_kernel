@@ -1027,7 +1027,7 @@ static int get_rx_bufs(struct vhost_virtqueue *vq,
 		       struct vring_used_elem *heads,
 		       int datalen,
 		       unsigned *iovcount,
-		       struct vhost_log *log,
+		       struct vhost_desc *log,
 		       unsigned *log_num,
 		       unsigned int quota)
 {
@@ -1097,7 +1097,7 @@ static void handle_rx(struct vhost_net *net)
 	struct vhost_net_virtqueue *nvq = &net->vqs[VHOST_NET_VQ_RX];
 	struct vhost_virtqueue *vq = &nvq->vq;
 	unsigned uninitialized_var(in), log;
-	struct vhost_log *vq_log;
+	struct vhost_desc *vq_log;
 	struct msghdr msg = {
 		.msg_name = NULL,
 		.msg_namelen = 0,
