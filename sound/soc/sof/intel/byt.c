@@ -17,6 +17,8 @@
 #include <sound/sof/xtensa.h>
 #include "../ops.h"
 #include "shim.h"
+#include "../sof-audio.h"
+#include "../../intel/common/soc-intel-quirks.h"
 
 /* DSP memories */
 #define IRAM_OFFSET		0x0C0000
@@ -383,6 +385,76 @@ static int byt_reset(struct snd_sof_dev *sdev)
 	return 0;
 }
 
+static const char *fixup_tplg_name(struct snd_sof_dev *sdev,
+				   const char *sof_tplg_filename,
+				   const char *ssp_str)
+{
+	const char *tplg_filename = NULL;
+	char *filename;
+	char *split_ext;
+
+	filename = devm_kstrdup(sdev->dev, sof_tplg_filename, GFP_KERNEL);
+	if (!filename)
+		return NULL;
+
+	/* this assumes a .tplg extension */
+	split_ext = strsep(&filename, ".");
+	if (split_ext) {
+		tplg_filename = devm_kasprintf(sdev->dev, GFP_KERNEL,
+					       "%s-%s.tplg",
+					       split_ext, ssp_str);
+		if (!tplg_filename)
+			return NULL;
+	}
+	return tplg_filename;
+}
+
+static void byt_machine_select(struct snd_sof_dev *sdev)
+{
+	struct snd_sof_pdata *sof_pdata = sdev->pdata;
+	const struct sof_dev_desc *desc = sof_pdata->desc;
+	struct snd_soc_acpi_mach *mach;
+	struct platform_device *pdev;
+	const char *tplg_filename;
+
+	mach = snd_soc_acpi_find_machine(desc->machines);
+	if (!mach) {
+		dev_warn(sdev->dev, "warning: No matching ASoC machine driver found\n");
+		return;
+	}
+
+	pdev = to_platform_device(sdev->dev);
+	if (soc_intel_is_byt_cr(pdev)) {
+		dev_dbg(sdev->dev,
+			"BYT-CR detected, SSP0 used instead of SSP2\n");
+
+		tplg_filename = fixup_tplg_name(sdev,
+						mach->sof_tplg_filename,
+						"ssp0");
+	} else {
+		tplg_filename = mach->sof_tplg_filename;
+	}
+
+	if (!tplg_filename) {
+		dev_dbg(sdev->dev,
+			"error: no topology filename\n");
+		return;
+	}
+
+	sof_pdata->tplg_filename = tplg_filename;
+	mach->mach_params.acpi_ipc_irq_index = desc->irqindex_host_ipc;
+	sof_pdata->machine = mach;
+}
+
+static void byt_set_mach_params(const struct snd_soc_acpi_mach *mach,
+				struct device *dev)
+{
+	struct snd_soc_acpi_mach_params *mach_params;
+
+	mach_params = (struct snd_soc_acpi_mach_params *)&mach->mach_params;
+	mach_params->platform = dev_name(dev);
+}
+
 /* Baytrail DAIs */
 static struct snd_soc_dai_driver byt_dai[] = {
 {
@@ -514,6 +586,12 @@ const struct snd_sof_dsp_ops sof_tng_ops = {
 
 	.ipc_msg_data	= intel_ipc_msg_data,
 	.ipc_pcm_params	= intel_ipc_pcm_params,
+
+	/* machine driver */
+	.machine_select = byt_machine_select,
+	.machine_register = sof_machine_register,
+	.machine_unregister = sof_machine_unregister,
+	.set_mach_params = byt_set_mach_params,
 
 	/* debug */
 	.debug_map	= byt_debugfs,
@@ -683,6 +761,12 @@ const struct snd_sof_dsp_ops sof_byt_ops = {
 	.ipc_msg_data	= intel_ipc_msg_data,
 	.ipc_pcm_params	= intel_ipc_pcm_params,
 
+	/* machine driver */
+	.machine_select = byt_machine_select,
+	.machine_register = sof_machine_register,
+	.machine_unregister = sof_machine_unregister,
+	.set_mach_params = byt_set_mach_params,
+
 	/* debug */
 	.debug_map	= byt_debugfs,
 	.debug_map_count	= ARRAY_SIZE(byt_debugfs),
@@ -748,6 +832,12 @@ const struct snd_sof_dsp_ops sof_cht_ops = {
 
 	.ipc_msg_data	= intel_ipc_msg_data,
 	.ipc_pcm_params	= intel_ipc_pcm_params,
+
+	/* machine driver */
+	.machine_select = byt_machine_select,
+	.machine_register = sof_machine_register,
+	.machine_unregister = sof_machine_unregister,
+	.set_mach_params = byt_set_mach_params,
 
 	/* debug */
 	.debug_map	= cht_debugfs,
