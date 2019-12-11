@@ -15,4 +15,10 @@ arm/late
 arm/fixes
 	<no branch> (c9385887cbbf292ee367f75b400874f00ea34890)
 		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/vexpress-fixes-5.5
+	patch
+		ARM: mmp: include the correct cputype.h
+	<no branch> (30e647a764d446723a7e0fb08d209e0104f16173)
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.5/devicetree-fixes
+	<no branch> (db23808615e29d9a04f96806cac56f78b0fee0ef)
+		git://git.pengutronix.de/git/pza/linux tags/reset-fixes-for-v5.5-2
 
