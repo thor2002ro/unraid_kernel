@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (GPL-2.0+ or MIT)
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 /*
  * Copyright (C) 2019 Clément Péron <peron.clem@gmail.com>
  */
@@ -73,6 +73,10 @@
 };
 
 &de {
+	status = "okay";
+};
+
+&dwc3 {
 	status = "okay";
 };
 
@@ -290,5 +294,9 @@
 
 &usb2phy {
 	usb0_vbus-supply = <&reg_vcc5v>;
+	status = "okay";
+};
+
+&usb3phy {
 	status = "okay";
 };
