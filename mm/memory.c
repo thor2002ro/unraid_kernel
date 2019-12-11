@@ -2184,12 +2184,12 @@ EXPORT_SYMBOL_GPL(apply_to_page_range);
  * Unlike apply_to_page_range, this does _not_ fill in page tables
  * where they are absent.
  */
-int apply_to_existing_pages(struct mm_struct *mm, unsigned long addr,
-			    unsigned long size, pte_fn_t fn, void *data)
+int apply_to_existing_page_range(struct mm_struct *mm, unsigned long addr,
+				 unsigned long size, pte_fn_t fn, void *data)
 {
 	return __apply_to_page_range(mm, addr, size, fn, data, false);
 }
-EXPORT_SYMBOL_GPL(apply_to_existing_pages);
+EXPORT_SYMBOL_GPL(apply_to_existing_page_range);
 
 /*
  * handle_pte_fault chooses page fault handler according to an entry which was
