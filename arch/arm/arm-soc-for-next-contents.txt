@@ -21,4 +21,6 @@ arm/fixes
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.5/devicetree-fixes
 	<no branch> (db23808615e29d9a04f96806cac56f78b0fee0ef)
 		git://git.pengutronix.de/git/pza/linux tags/reset-fixes-for-v5.5-2
+	<no branch> (7947e3238b64c00c396e6f5738f94c4d653bc6a2)
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-5.5
 
