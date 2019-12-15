@@ -1261,6 +1261,8 @@ struct device_node *of_find_node_by_phandle(phandle handle)
 			if (np->phandle == handle &&
 			    !of_node_check_flag(np, OF_DETACHED)) {
 				if (phandle_cache) {
+					if (phandle_cache[masked_handle])
+						of_node_put(phandle_cache[masked_handle]);
 					/* will put when removed from cache */
 					of_node_get(np);
 					phandle_cache[masked_handle] = np;
