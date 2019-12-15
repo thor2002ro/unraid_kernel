@@ -295,20 +295,7 @@ static int crypto_init_ops(struct crypto_tfm *tfm, u32 type, u32 mask)
 
 	if (type_obj)
 		return type_obj->init(tfm, type, mask);
-
-	switch (crypto_tfm_alg_type(tfm)) {
-	case CRYPTO_ALG_TYPE_CIPHER:
-		return crypto_init_cipher_ops(tfm);
-
-	case CRYPTO_ALG_TYPE_COMPRESS:
-		return crypto_init_compress_ops(tfm);
-
-	default:
-		break;
-	}
-
-	BUG();
-	return -EINVAL;
+	return 0;
 }
 
 static void crypto_exit_ops(struct crypto_tfm *tfm)
@@ -344,13 +331,12 @@ static unsigned int crypto_ctxsize(struct crypto_alg *alg, u32 type, u32 mask)
 	return len;
 }
 
-void crypto_shoot_alg(struct crypto_alg *alg)
+static void crypto_shoot_alg(struct crypto_alg *alg)
 {
 	down_write(&crypto_alg_sem);
 	alg->cra_flags |= CRYPTO_ALG_DYING;
 	up_write(&crypto_alg_sem);
 }
-EXPORT_SYMBOL_GPL(crypto_shoot_alg);
 
 struct crypto_tfm *__crypto_alloc_tfm(struct crypto_alg *alg, u32 type,
 				      u32 mask)
@@ -516,7 +502,7 @@ EXPORT_SYMBOL_GPL(crypto_find_alg);
  *
  *	The returned transform is of a non-determinate type.  Most people
  *	should use one of the more specific allocation functions such as
- *	crypto_alloc_blkcipher.
+ *	crypto_alloc_skcipher().
  *
  *	In case of error the return value is an error pointer.
  */

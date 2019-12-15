@@ -578,14 +578,9 @@ int skcipher_walk_aead_decrypt(struct skcipher_walk *walk,
 }
 EXPORT_SYMBOL_GPL(skcipher_walk_aead_decrypt);
 
-static unsigned int crypto_skcipher_extsize(struct crypto_alg *alg)
-{
-	return crypto_alg_extsize(alg);
-}
-
 static void skcipher_set_needkey(struct crypto_skcipher *tfm)
 {
-	if (tfm->keysize)
+	if (crypto_skcipher_max_keysize(tfm) != 0)
 		crypto_skcipher_set_flags(tfm, CRYPTO_TFM_NEED_KEY);
 }
 
@@ -610,7 +605,7 @@ static int skcipher_setkey_unaligned(struct crypto_skcipher *tfm,
 	return ret;
 }
 
-static int skcipher_setkey(struct crypto_skcipher *tfm, const u8 *key,
+int crypto_skcipher_setkey(struct crypto_skcipher *tfm, const u8 *key,
 			   unsigned int keylen)
 {
 	struct skcipher_alg *cipher = crypto_skcipher_alg(tfm);
@@ -635,6 +630,7 @@ static int skcipher_setkey(struct crypto_skcipher *tfm, const u8 *key,
 	crypto_skcipher_clear_flags(tfm, CRYPTO_TFM_NEED_KEY);
 	return 0;
 }
+EXPORT_SYMBOL_GPL(crypto_skcipher_setkey);
 
 int crypto_skcipher_encrypt(struct skcipher_request *req)
 {
@@ -647,7 +643,7 @@ int crypto_skcipher_encrypt(struct skcipher_request *req)
 	if (crypto_skcipher_get_flags(tfm) & CRYPTO_TFM_NEED_KEY)
 		ret = -ENOKEY;
 	else
-		ret = tfm->encrypt(req);
+		ret = crypto_skcipher_alg(tfm)->encrypt(req);
 	crypto_stats_skcipher_encrypt(cryptlen, ret, alg);
 	return ret;
 }
@@ -664,7 +660,7 @@ int crypto_skcipher_decrypt(struct skcipher_request *req)
 	if (crypto_skcipher_get_flags(tfm) & CRYPTO_TFM_NEED_KEY)
 		ret = -ENOKEY;
 	else
-		ret = tfm->decrypt(req);
+		ret = crypto_skcipher_alg(tfm)->decrypt(req);
 	crypto_stats_skcipher_decrypt(cryptlen, ret, alg);
 	return ret;
 }
@@ -682,12 +678,6 @@ static int crypto_skcipher_init_tfm(struct crypto_tfm *tfm)
 {
 	struct crypto_skcipher *skcipher = __crypto_skcipher_cast(tfm);
 	struct skcipher_alg *alg = crypto_skcipher_alg(skcipher);
-
-	skcipher->setkey = skcipher_setkey;
-	skcipher->encrypt = alg->encrypt;
-	skcipher->decrypt = alg->decrypt;
-	skcipher->ivsize = alg->ivsize;
-	skcipher->keysize = alg->max_keysize;
 
 	skcipher_set_needkey(skcipher);
 
@@ -754,7 +744,7 @@ static int crypto_skcipher_report(struct sk_buff *skb, struct crypto_alg *alg)
 #endif
 
 static const struct crypto_type crypto_skcipher_type = {
-	.extsize = crypto_skcipher_extsize,
+	.extsize = crypto_alg_extsize,
 	.init_tfm = crypto_skcipher_init_tfm,
 	.free = crypto_skcipher_free_instance,
 #ifdef CONFIG_PROC_FS

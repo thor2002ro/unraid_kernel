@@ -133,7 +133,7 @@ static irqreturn_t cc_isr(int irq, void *dev_id)
 	u32 imr;
 
 	/* STAT_OP_TYPE_GENERIC STAT_PHASE_0: Interrupt */
-	/* if driver suspended return, probebly shared interrupt */
+	/* if driver suspended return, probably shared interrupt */
 	if (cc_pm_is_dev_suspended(dev))
 		return IRQ_NONE;
 
@@ -465,7 +465,7 @@ static int init_cc_resources(struct platform_device *plat_dev)
 
 	rc = cc_fips_init(new_drvdata);
 	if (rc) {
-		dev_err(dev, "CC_FIPS_INIT failed 0x%x\n", rc);
+		dev_err(dev, "cc_fips_init failed 0x%x\n", rc);
 		goto post_debugfs_err;
 	}
 	rc = cc_sram_mgr_init(new_drvdata);
@@ -490,13 +490,13 @@ static int init_cc_resources(struct platform_device *plat_dev)
 
 	rc = cc_buffer_mgr_init(new_drvdata);
 	if (rc) {
-		dev_err(dev, "buffer_mgr_init failed\n");
+		dev_err(dev, "cc_buffer_mgr_init failed\n");
 		goto post_req_mgr_err;
 	}
 
 	rc = cc_pm_init(new_drvdata);
 	if (rc) {
-		dev_err(dev, "ssi_power_mgr_init failed\n");
+		dev_err(dev, "cc_pm_init failed\n");
 		goto post_buf_mgr_err;
 	}
 

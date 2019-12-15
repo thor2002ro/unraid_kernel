@@ -85,6 +85,12 @@ static inline bool crypto_shash_alg_has_setkey(struct shash_alg *alg)
 	return alg->setkey != shash_no_setkey;
 }
 
+static inline bool crypto_shash_alg_needs_key(struct shash_alg *alg)
+{
+	return crypto_shash_alg_has_setkey(alg) &&
+		!(alg->base.cra_flags & CRYPTO_ALG_OPTIONAL_KEY);
+}
+
 bool crypto_hash_alg_has_setkey(struct hash_alg_common *halg);
 
 int crypto_init_ahash_spawn(struct crypto_ahash_spawn *spawn,
@@ -212,6 +218,12 @@ static inline struct shash_instance *shash_instance(
 {
 	return container_of(__crypto_shash_alg(&inst->alg),
 			    struct shash_instance, alg);
+}
+
+static inline struct shash_instance *shash_alg_instance(
+	struct crypto_shash *shash)
+{
+	return shash_instance(crypto_tfm_alg_instance(&shash->base));
 }
 
 static inline void *shash_instance_ctx(struct shash_instance *inst)
