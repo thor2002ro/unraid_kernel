@@ -31,6 +31,47 @@
 static struct kmem_cache *bio_post_read_ctx_cache;
 static struct kmem_cache *bio_entry_slab;
 static mempool_t *bio_post_read_ctx_pool;
+static struct bio_set f2fs_bioset;
+
+#define	F2FS_BIO_POOL_SIZE	NR_CURSEG_TYPE
+
+int __init f2fs_init_bioset(void)
+{
+	if (bioset_init(&f2fs_bioset, F2FS_BIO_POOL_SIZE,
+					0, BIOSET_NEED_BVECS))
+		return -ENOMEM;
+	return 0;
+}
+
+void f2fs_destroy_bioset(void)
+{
+	bioset_exit(&f2fs_bioset);
+}
+
+static inline struct bio *__f2fs_bio_alloc(gfp_t gfp_mask,
+						unsigned int nr_iovecs)
+{
+	return bio_alloc_bioset(gfp_mask, nr_iovecs, &f2fs_bioset);
+}
+
+struct bio *f2fs_bio_alloc(struct f2fs_sb_info *sbi, int npages, bool no_fail)
+{
+	struct bio *bio;
+
+	if (no_fail) {
+		/* No failure on bio allocation */
+		bio = __f2fs_bio_alloc(GFP_NOIO, npages);
+		if (!bio)
+			bio = __f2fs_bio_alloc(GFP_NOIO | __GFP_NOFAIL, npages);
+		return bio;
+	}
+	if (time_to_inject(sbi, FAULT_ALLOC_BIO)) {
+		f2fs_show_injection_info(sbi, FAULT_ALLOC_BIO);
+		return NULL;
+	}
+
+	return __f2fs_bio_alloc(GFP_KERNEL, npages);
+}
 
 static bool __is_cp_guaranteed(struct page *page)
 {
@@ -1179,19 +1220,6 @@ int f2fs_preallocate_blocks(struct kiocb *iocb, struct iov_iter *from)
 	int flag;
 	int err = 0;
 	bool direct_io = iocb->ki_flags & IOCB_DIRECT;
-
-	/* convert inline data for Direct I/O*/
-	if (direct_io) {
-		err = f2fs_convert_inline_inode(inode);
-		if (err)
-			return err;
-	}
-
-	if (direct_io && allow_outplace_dio(inode, iocb, from))
-		return 0;
-
-	if (is_inode_flag_set(inode, FI_NO_PREALLOC))
-		return 0;
 
 	map.m_lblk = F2FS_BLK_ALIGN(iocb->ki_pos);
 	map.m_len = F2FS_BYTES_TO_BLK(iocb->ki_pos + iov_iter_count(from));
@@ -2613,14 +2641,16 @@ static void f2fs_write_failed(struct address_space *mapping, loff_t to)
 	struct inode *inode = mapping->host;
 	loff_t i_size = i_size_read(inode);
 
+	if (IS_NOQUOTA(inode))
+		return;
+
 	/* In the fs-verity case, f2fs_end_enable_verity() does the truncate */
 	if (to > i_size && !f2fs_verity_in_progress(inode)) {
 		down_write(&F2FS_I(inode)->i_gc_rwsem[WRITE]);
 		down_write(&F2FS_I(inode)->i_mmap_sem);
 
 		truncate_pagecache(inode, i_size);
-		if (!IS_NOQUOTA(inode))
-			f2fs_truncate_blocks(inode, i_size, true);
+		f2fs_truncate_blocks(inode, i_size, true);
 
 		up_write(&F2FS_I(inode)->i_mmap_sem);
 		up_write(&F2FS_I(inode)->i_gc_rwsem[WRITE]);
@@ -3328,7 +3358,7 @@ int __init f2fs_init_bio_entry_cache(void)
 	return 0;
 }
 
-void __exit f2fs_destroy_bio_entry_cache(void)
+void f2fs_destroy_bio_entry_cache(void)
 {
 	kmem_cache_destroy(bio_entry_slab);
 }
