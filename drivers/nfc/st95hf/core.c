@@ -980,8 +980,6 @@ static int st95hf_in_send_cmd(struct nfc_digital_dev *ddev,
 		goto free_skb_resp;
 	}
 
-	kfree_skb(skb);
-
 	return rc;
 
 free_skb_resp:
@@ -1103,8 +1101,10 @@ static int st95hf_probe(struct spi_device *nfc_spi_dev)
 		}
 	}
 
+	sema_init(&st95context->exchange_lock, 1);
 	init_completion(&spicontext->done);
 	mutex_init(&spicontext->spi_lock);
+	mutex_init(&st95context->rm_lock);
 
 	/*
 	 * Store spicontext in spi device object for using it in
@@ -1187,9 +1187,6 @@ static int st95hf_probe(struct spi_device *nfc_spi_dev)
 
 	/* store st95context in nfc device object */
 	nfc_digital_set_drvdata(st95context->ddev, st95context);
-
-	sema_init(&st95context->exchange_lock, 1);
-	mutex_init(&st95context->rm_lock);
 
 	return ret;
 
