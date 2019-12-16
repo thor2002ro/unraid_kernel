@@ -175,8 +175,8 @@ int delta_ipc_open(struct delta_ctx *pctx, const char *name,
 	msg.ipc_buf_size = ipc_buf_size;
 	msg.ipc_buf_paddr = ctx->ipc_buf->paddr;
 
-	memcpy(msg.name, name, sizeof(msg.name));
-	msg.name[sizeof(msg.name) - 1] = 0;
+	memset(msg.name, 0, sizeof(msg.name));
+	strcpy(msg.name, name);
 
 	msg.param_size = param->size;
 	memcpy(ctx->ipc_buf->vaddr, param->data, msg.param_size);
