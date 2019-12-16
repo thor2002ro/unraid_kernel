@@ -53,6 +53,9 @@ struct amdgpu_bo_list_entry;
 #define AMDGPU_PTE_SYSTEM	(1ULL << 1)
 #define AMDGPU_PTE_SNOOPED	(1ULL << 2)
 
+/* RV+ */
+#define AMDGPU_PTE_TMZ		(1ULL << 3)
+
 /* VI only */
 #define AMDGPU_PTE_EXECUTABLE	(1ULL << 4)
 
@@ -239,6 +242,10 @@ struct amdgpu_vm {
 	/* tree of virtual addresses mapped */
 	struct rb_root_cached	va;
 
+	/* Lock to prevent eviction while we are updating page tables */
+	struct mutex		eviction_lock;
+	bool			evicting;
+
 	/* BOs who needs a validation */
 	struct list_head	evicted;
 
@@ -265,6 +272,10 @@ struct amdgpu_vm {
 	/* Scheduler entities for page table updates */
 	struct drm_sched_entity	direct;
 	struct drm_sched_entity	delayed;
+
+	/* Last submission to the scheduler entities */
+	struct dma_fence	*last_direct;
+	struct dma_fence	*last_delayed;
 
 	unsigned int		pasid;
 	/* dedicated to vm */
@@ -298,6 +309,8 @@ struct amdgpu_vm {
 	struct ttm_lru_bulk_move lru_bulk_move;
 	/* mark whether can do the bulk move */
 	bool			bulk_moveable;
+	/* Flag to indicate if VM is used for compute */
+	bool			is_compute_context;
 };
 
 struct amdgpu_vm_manager {
@@ -376,6 +389,7 @@ int amdgpu_vm_handle_moved(struct amdgpu_device *adev,
 int amdgpu_vm_bo_update(struct amdgpu_device *adev,
 			struct amdgpu_bo_va *bo_va,
 			bool clear);
+bool amdgpu_vm_evictable(struct amdgpu_bo *bo);
 void amdgpu_vm_bo_invalidate(struct amdgpu_device *adev,
 			     struct amdgpu_bo *bo, bool evicted);
 uint64_t amdgpu_vm_map_gart(const dma_addr_t *pages_addr, uint64_t addr);

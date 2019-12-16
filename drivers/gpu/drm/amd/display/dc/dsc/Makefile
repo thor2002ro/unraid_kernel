@@ -2,7 +2,13 @@
 #
 # Makefile for the 'dsc' sub-component of DAL.
 
+ifdef CONFIG_X86
 dsc_ccflags := -mhard-float -msse
+endif
+
+ifdef CONFIG_PPC64
+dsc_ccflags := -mhard-float -maltivec
+endif
 
 ifdef CONFIG_CC_IS_GCC
 ifeq ($(call cc-ifversion, -lt, 0701, y), y)
@@ -16,7 +22,9 @@ ifdef IS_OLD_GCC
 # (8B stack alignment).
 dsc_ccflags += -mpreferred-stack-boundary=4
 else
+ifdef CONFIG_X86
 dsc_ccflags += -msse2
+endif
 endif
 
 CFLAGS_$(AMDDALPATH)/dc/dsc/rc_calc.o := $(dsc_ccflags)

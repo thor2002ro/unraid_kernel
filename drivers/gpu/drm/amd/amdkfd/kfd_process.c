@@ -324,6 +324,8 @@ struct kfd_process *kfd_create_process(struct file *filep)
 					(int)process->lead_thread->pid);
 	}
 out:
+	if (!IS_ERR(process))
+		kref_get(&process->ref);
 	mutex_unlock(&kfd_processes_mutex);
 
 	return process;
@@ -560,8 +562,7 @@ static int kfd_process_init_cwsr_apu(struct kfd_process *p, struct file *filep)
 		if (!dev->cwsr_enabled || qpd->cwsr_kaddr || qpd->cwsr_base)
 			continue;
 
-		offset = (KFD_MMAP_TYPE_RESERVED_MEM | KFD_MMAP_GPU_ID(dev->id))
-			<< PAGE_SHIFT;
+		offset = KFD_MMAP_TYPE_RESERVED_MEM | KFD_MMAP_GPU_ID(dev->id);
 		qpd->tba_addr = (int64_t)vm_mmap(filep, 0,
 			KFD_CWSR_TBA_TMA_SIZE, PROT_READ | PROT_EXEC,
 			MAP_SHARED, offset);
