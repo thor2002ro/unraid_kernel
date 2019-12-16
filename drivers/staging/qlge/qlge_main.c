@@ -178,8 +178,9 @@ int ql_wait_reg_rdy(struct ql_adapter *qdev, u32 reg, u32 bit, u32 err_bit)
 				    "register 0x%.08x access error, value = 0x%.08x!.\n",
 				    reg, temp);
 			return -EIO;
-		} else if (temp & bit)
+		} else if (temp & bit) {
 			return 0;
+		}
 		udelay(UDELAY_DELAY);
 	}
 	netif_alert(qdev, probe, qdev->ndev,
@@ -401,8 +402,8 @@ static int ql_set_mac_addr_reg(struct ql_adapter *qdev, u8 *addr, u32 type,
 				   (index << MAC_ADDR_IDX_SHIFT) |	/* index */
 				   type);	/* type */
 			/* This field should also include the queue id
-			   and possibly the function id.  Right now we hardcode
-			   the route field to NIC core.
+			 * and possibly the function id.  Right now we hardcode
+			 * the route field to NIC core.
 			 */
 			cam_output = (CAM_OUT_ROUTE_NIC |
 				      (qdev->
@@ -682,7 +683,7 @@ static int ql_read_flash_word(struct ql_adapter *qdev, int offset, __le32 *data)
 			FLASH_ADDR, FLASH_ADDR_RDY, FLASH_ADDR_ERR);
 	if (status)
 		goto exit;
-	 /* This data is stored on flash as an array of
+	/* This data is stored on flash as an array of
 	 * __le32.  Since ql_read32() returns cpu endian
 	 * we need to swap it back.
 	 */
@@ -2222,7 +2223,8 @@ static int ql_napi_poll_msix(struct napi_struct *napi, int budget)
 		     "Enter, NAPI POLL cq_id = %d.\n", rx_ring->cq_id);
 
 	/* Service the TX rings first.  They start
-	 * right after the RSS rings. */
+	 * right after the RSS rings.
+	 */
 	for (i = qdev->rss_ring_count; i < qdev->rx_ring_count; i++) {
 		trx_ring = &qdev->rx_ring[i];
 		/* If this TX completion ring belongs to this vector and
@@ -2887,7 +2889,8 @@ static void ql_free_rx_resources(struct ql_adapter *qdev,
 }
 
 /* Allocate queues and buffers for this completions queue based
- * on the values in the parameter structure. */
+ * on the values in the parameter structure.
+ */
 static int ql_alloc_rx_resources(struct ql_adapter *qdev,
 				 struct rx_ring *rx_ring)
 {
@@ -3731,8 +3734,9 @@ static int ql_adapter_reset(struct ql_adapter *qdev)
 
 		/* Wait for the NIC and MGMNT FIFOs to empty. */
 		ql_wait_fifo_empty(qdev);
-	} else
+	} else {
 		clear_bit(QL_ASIC_RECOVERY, &qdev->flags);
+	}
 
 	ql_write32(qdev, RST_FO, (RST_FO_FR << 16) | RST_FO_FR);
 
@@ -4099,11 +4103,11 @@ static int qlge_change_mtu(struct net_device *ndev, int new_mtu)
 	struct ql_adapter *qdev = netdev_priv(ndev);
 	int status;
 
-	if (ndev->mtu == 1500 && new_mtu == 9000) {
+	if (ndev->mtu == 1500 && new_mtu == 9000)
 		netif_err(qdev, ifup, qdev->ndev, "Changing to jumbo MTU.\n");
-	} else if (ndev->mtu == 9000 && new_mtu == 1500) {
+	else if (ndev->mtu == 9000 && new_mtu == 1500)
 		netif_err(qdev, ifup, qdev->ndev, "Changing to normal MTU.\n");
-	} else
+	else
 		return -EINVAL;
 
 	queue_delayed_work(qdev->workqueue,
@@ -4111,9 +4115,8 @@ static int qlge_change_mtu(struct net_device *ndev, int new_mtu)
 
 	ndev->mtu = new_mtu;
 
-	if (!netif_running(qdev->ndev)) {
+	if (!netif_running(qdev->ndev))
 		return 0;
-	}
 
 	status = ql_change_rx_buffers(qdev);
 	if (status) {
@@ -4578,7 +4581,7 @@ static int qlge_probe(struct pci_dev *pdev,
 {
 	struct net_device *ndev = NULL;
 	struct ql_adapter *qdev = NULL;
-	static int cards_found = 0;
+	static int cards_found;
 	int err = 0;
 
 	ndev = alloc_etherdev_mq(sizeof(struct ql_adapter),
