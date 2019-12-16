@@ -198,31 +198,11 @@ static inline void debug_rcu_head_unqueue(struct rcu_head *head)
 }
 #endif	/* #else !CONFIG_DEBUG_OBJECTS_RCU_HEAD */
 
-void kfree(const void *);
+extern int rcu_cpu_stall_suppress_at_boot;
 
-/*
- * Reclaim the specified callback, either by invoking it (non-lazy case)
- * or freeing it directly (lazy case).  Return true if lazy, false otherwise.
- */
-static inline bool __rcu_reclaim(const char *rn, struct rcu_head *head)
+static inline bool rcu_stall_is_suppressed_at_boot(void)
 {
-	rcu_callback_t f;
-	unsigned long offset = (unsigned long)head->func;
-
-	rcu_lock_acquire(&rcu_callback_map);
-	if (__is_kfree_rcu_offset(offset)) {
-		trace_rcu_invoke_kfree_callback(rn, head, offset);
-		kfree((void *)head - offset);
-		rcu_lock_release(&rcu_callback_map);
-		return true;
-	} else {
-		trace_rcu_invoke_callback(rn, head);
-		f = head->func;
-		WRITE_ONCE(head->func, (rcu_callback_t)0L);
-		f(head);
-		rcu_lock_release(&rcu_callback_map);
-		return false;
-	}
+	return rcu_cpu_stall_suppress_at_boot && !rcu_inkernel_boot_has_ended();
 }
 
 #ifdef CONFIG_RCU_STALL_COMMON
@@ -231,6 +211,11 @@ extern int rcu_cpu_stall_ftrace_dump;
 extern int rcu_cpu_stall_suppress;
 extern int rcu_cpu_stall_timeout;
 int rcu_jiffies_till_stall_check(void);
+
+static inline bool rcu_stall_is_suppressed(void)
+{
+	return rcu_stall_is_suppressed_at_boot() || rcu_cpu_stall_suppress;
+}
 
 #define rcu_ftrace_dump_stall_suppress() \
 do { \
@@ -245,6 +230,11 @@ do { \
 } while (0)
 
 #else /* #endif #ifdef CONFIG_RCU_STALL_COMMON */
+
+static inline bool rcu_stall_is_suppressed(void)
+{
+	return rcu_stall_is_suppressed_at_boot();
+}
 #define rcu_ftrace_dump_stall_suppress()
 #define rcu_ftrace_dump_stall_unsuppress()
 #endif /* #ifdef CONFIG_RCU_STALL_COMMON */
@@ -281,7 +271,7 @@ void rcu_test_sync_prims(void);
  */
 extern void resched_cpu(int cpu);
 
-#if defined(SRCU) || !defined(TINY_RCU)
+#if defined(CONFIG_SRCU) || !defined(CONFIG_TINY_RCU)
 
 #include <linux/rcu_node_tree.h>
 
@@ -418,7 +408,7 @@ do {									\
 #define raw_lockdep_assert_held_rcu_node(p)				\
 	lockdep_assert_held(&ACCESS_PRIVATE(p, lock))
 
-#endif /* #if defined(SRCU) || !defined(TINY_RCU) */
+#endif /* #if defined(CONFIG_SRCU) || !defined(CONFIG_TINY_RCU) */
 
 #ifdef CONFIG_SRCU
 void srcu_init(void);
@@ -454,7 +444,7 @@ enum rcutorture_type {
 	INVALID_RCU_FLAVOR
 };
 
-#if defined(CONFIG_TREE_RCU) || defined(CONFIG_PREEMPT_RCU)
+#if defined(CONFIG_TREE_RCU)
 void rcutorture_get_gp_data(enum rcutorture_type test_type, int *flags,
 			    unsigned long *gp_seq);
 void do_trace_rcu_torture_read(const char *rcutorturename,

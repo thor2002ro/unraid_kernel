@@ -523,8 +523,8 @@ static long watch_queue_set_filter(struct inode *inode,
 	kfree(tf);
 set:
 	inode_lock(inode);
-	rcu_swap_protected(wqueue->filter, wfilter,
-			   lockdep_is_held(&inode->i_rwsem));
+	wfilter = rcu_replace_pointer(wqueue->filter, wfilter,
+				      lockdep_is_held(&inode->i_rwsem));
 	inode_unlock(inode);
 	if (wfilter)
 		kfree_rcu(wfilter, rcu);

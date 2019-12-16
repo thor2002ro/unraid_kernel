@@ -447,6 +447,8 @@ source "lib/Kconfig.kgdb"
 
 source "lib/Kconfig.ubsan"
 
+source "lib/Kconfig.kcsan"
+
 endmenu
 
 config DEBUG_KERNEL
@@ -2131,8 +2133,6 @@ config MEMTEST
 	  If you are unsure how to answer this question, answer N.
 
 source "samples/Kconfig"
-
-source "lib/Kconfig.kcsan"
 
 config ARCH_HAS_DEVMEM_IS_ALLOWED
 	bool
