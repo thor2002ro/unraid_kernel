@@ -1,10 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *
  * Copyright (C) 2011 Novell Inc.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -74,19 +71,35 @@ enum ovl_entry_flag {
 #error Endianness not defined
 #endif
 
-/* The type returned by overlay exportfs ops when encoding an ovl_fh handle */
-#define OVL_FILEID	0xfb
+/* The type used to be returned by overlay exportfs for misaligned fid */
+#define OVL_FILEID_V0	0xfb
+/* The type returned by overlay exportfs for 32bit aligned fid */
+#define OVL_FILEID_V1	0xf8
 
-/* On-disk and in-memeory format for redirect by file handle */
-struct ovl_fh {
+/* On-disk format for "origin" file handle */
+struct ovl_fb {
 	u8 version;	/* 0 */
 	u8 magic;	/* 0xfb */
 	u8 len;		/* size of this header + size of fid */
 	u8 flags;	/* OVL_FH_FLAG_* */
 	u8 type;	/* fid_type of fid */
 	uuid_t uuid;	/* uuid of filesystem */
-	u8 fid[0];	/* file identifier */
+	u32 fid[0];	/* file identifier should be 32bit aligned in-memory */
 } __packed;
+
+/* In-memory and on-wire format for overlay file handle */
+struct ovl_fh {
+	u8 padding[3];	/* make sure fb.fid is 32bit aligned */
+	union {
+		struct ovl_fb fb;
+		u8 buf[0];
+	};
+} __packed;
+
+#define OVL_FH_WIRE_OFFSET	offsetof(struct ovl_fh, fb)
+#define OVL_FH_LEN(fh)		(OVL_FH_WIRE_OFFSET + (fh)->fb.len)
+#define OVL_FH_FID_OFFSET	(OVL_FH_WIRE_OFFSET + \
+				 offsetof(struct ovl_fb, fid))
 
 static inline int ovl_do_rmdir(struct inode *dir, struct dentry *dentry)
 {
@@ -270,6 +283,7 @@ void ovl_clear_flag(unsigned long flag, struct inode *inode);
 bool ovl_test_flag(unsigned long flag, struct inode *inode);
 bool ovl_inuse_trylock(struct dentry *dentry);
 void ovl_inuse_unlock(struct dentry *dentry);
+bool ovl_is_inuse(struct dentry *dentry);
 bool ovl_need_index(struct dentry *dentry);
 int ovl_nlink_start(struct dentry *dentry);
 void ovl_nlink_end(struct dentry *dentry);
@@ -304,7 +318,13 @@ static inline void ovl_inode_unlock(struct inode *inode)
 
 
 /* namei.c */
-int ovl_check_fh_len(struct ovl_fh *fh, int fh_len);
+int ovl_check_fb_len(struct ovl_fb *fb, int fb_len);
+
+static inline int ovl_check_fh_len(struct ovl_fh *fh, int fh_len)
+{
+	return ovl_check_fb_len(&fh->fb, fh_len - OVL_FH_WIRE_OFFSET);
+}
+
 struct dentry *ovl_decode_real_fh(struct ovl_fh *fh, struct vfsmount *mnt,
 				  bool connected);
 int ovl_check_origin_fh(struct ovl_fs *ofs, struct ovl_fh *fh, bool connected,
@@ -376,6 +396,8 @@ struct ovl_inode_params {
 struct inode *ovl_new_inode(struct super_block *sb, umode_t mode, dev_t rdev);
 struct inode *ovl_lookup_inode(struct super_block *sb, struct dentry *real,
 			       bool is_upper);
+bool ovl_lookup_trap_inode(struct super_block *sb, struct dentry *dir);
+struct inode *ovl_get_trap_inode(struct super_block *sb, struct dentry *dir);
 struct inode *ovl_get_inode(struct super_block *sb,
 			    struct ovl_inode_params *oip);
 static inline void ovl_copyattr(struct inode *from, struct inode *to)

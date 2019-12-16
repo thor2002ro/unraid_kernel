@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Accelerated GHASH implementation with Intel PCLMULQDQ-NI
  * instructions. This file contains glue code.
  *
  * Copyright (c) 2009 Intel Corp.
  *   Author: Huang Ying <ying.huang@intel.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation.
  */
 
 #include <linux/err.h>
@@ -360,6 +357,5 @@ module_init(ghash_pclmulqdqni_mod_init);
 module_exit(ghash_pclmulqdqni_mod_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("GHASH Message Digest Algorithm, "
-		   "accelerated by PCLMULQDQ-NI");
+MODULE_DESCRIPTION("GHASH hash function, accelerated by PCLMULQDQ-NI");
 MODULE_ALIAS_CRYPTO("ghash");

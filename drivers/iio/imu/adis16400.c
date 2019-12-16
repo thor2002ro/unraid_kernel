@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * adis16400.c	support Analog Devices ADIS16400/5
  *		3d 2g Linear Accelerometers,
@@ -7,11 +8,6 @@
  * Copyright (c) 2009 Manuel Stahl <manuel.stahl@iis.fraunhofer.de>
  * Copyright (c) 2007 Jonathan Cameron <jic23@kernel.org>
  * Copyright (c) 2011 Analog Devices Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/interrupt.h>
@@ -221,16 +217,16 @@ static ssize_t adis16400_show_serial_number(struct file *file,
 	int ret;
 
 	ret = adis_read_reg_16(&st->adis, ADIS16334_LOT_ID1, &lot1);
-	if (ret < 0)
+	if (ret)
 		return ret;
 
 	ret = adis_read_reg_16(&st->adis, ADIS16334_LOT_ID2, &lot2);
-	if (ret < 0)
+	if (ret)
 		return ret;
 
 	ret = adis_read_reg_16(&st->adis, ADIS16334_SERIAL_NUMBER,
 			&serial_number);
-	if (ret < 0)
+	if (ret)
 		return ret;
 
 	len = snprintf(buf, sizeof(buf), "%.4x-%.4x-%.4x\n", lot1, lot2,
@@ -253,7 +249,7 @@ static int adis16400_show_product_id(void *arg, u64 *val)
 	int ret;
 
 	ret = adis_read_reg_16(&st->adis, ADIS16400_PRODUCT_ID, &prod_id);
-	if (ret < 0)
+	if (ret)
 		return ret;
 
 	*val = prod_id;
@@ -270,7 +266,7 @@ static int adis16400_show_flash_count(void *arg, u64 *val)
 	int ret;
 
 	ret = adis_read_reg_16(&st->adis, ADIS16400_FLASH_CNT, &flash_count);
-	if (ret < 0)
+	if (ret)
 		return ret;
 
 	*val = flash_count;
@@ -331,7 +327,7 @@ static int adis16334_get_freq(struct adis16400_state *st)
 	uint16_t t;
 
 	ret = adis_read_reg_16(&st->adis, ADIS16400_SMPL_PRD, &t);
-	if (ret < 0)
+	if (ret)
 		return ret;
 
 	t >>= ADIS16334_RATE_DIV_SHIFT;
@@ -363,7 +359,7 @@ static int adis16400_get_freq(struct adis16400_state *st)
 	uint16_t t;
 
 	ret = adis_read_reg_16(&st->adis, ADIS16400_SMPL_PRD, &t);
-	if (ret < 0)
+	if (ret)
 		return ret;
 
 	sps = (t & ADIS16400_SMPL_PRD_TIME_BASE) ? 52851 : 1638404;
@@ -420,7 +416,7 @@ static int adis16400_set_filter(struct iio_dev *indio_dev, int sps, int val)
 	}
 
 	ret = adis_read_reg_16(&st->adis, ADIS16400_SENS_AVG, &val16);
-	if (ret < 0)
+	if (ret)
 		return ret;
 
 	ret = adis_write_reg_16(&st->adis, ADIS16400_SENS_AVG,
@@ -619,7 +615,7 @@ static int adis16400_read_raw(struct iio_dev *indio_dev,
 		ret = adis_read_reg_16(&st->adis,
 						ADIS16400_SENS_AVG,
 						&val16);
-		if (ret < 0) {
+		if (ret) {
 			mutex_unlock(&indio_dev->mlock);
 			return ret;
 		}
@@ -630,12 +626,12 @@ static int adis16400_read_raw(struct iio_dev *indio_dev,
 			*val2 = (ret % 1000) * 1000;
 		}
 		mutex_unlock(&indio_dev->mlock);
-		if (ret < 0)
+		if (ret)
 			return ret;
 		return IIO_VAL_INT_PLUS_MICRO;
 	case IIO_CHAN_INFO_SAMP_FREQ:
 		ret = st->variant->get_freq(st);
-		if (ret < 0)
+		if (ret)
 			return ret;
 		*val = ret / 1000;
 		*val2 = (ret % 1000) * 1000;

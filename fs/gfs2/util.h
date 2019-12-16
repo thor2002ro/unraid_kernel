@@ -1,10 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) Sistina Software, Inc.  1997-2003 All rights reserved.
  * Copyright (C) 2004-2006 Red Hat, Inc.  All rights reserved.
- *
- * This copyrighted material is made available to anyone wishing to use,
- * modify, copy, or redistribute it subject to the terms and conditions
- * of the GNU General Public License version 2.
  */
 
 #ifndef __UTIL_DOT_H__
@@ -165,6 +162,15 @@ static inline unsigned int gfs2_tune_get_i(struct gfs2_tune *gt,
 	x = *p;
 	spin_unlock(&gt->gt_spin);
 	return x;
+}
+
+/**
+ * gfs2_withdrawn - test whether the file system is withdrawing or withdrawn
+ * @sdp: the superblock
+ */
+static inline bool gfs2_withdrawn(struct gfs2_sbd *sdp)
+{
+	return test_bit(SDF_WITHDRAWN, &sdp->sd_flags);
 }
 
 #define gfs2_tune_get(sdp, field) \

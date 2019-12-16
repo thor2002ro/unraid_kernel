@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2008-2009 Patrick McHardy <kaber@trash.net>
  * Copyright (c) 2012 Pablo Neira Ayuso <pablo@netfilter.org>
  * Copyright (c) 2012 Intel Corporation
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
  */
 
 #include <linux/module.h>
@@ -145,10 +141,10 @@ static int nft_nat_init(const struct nft_ctx *ctx, const struct nft_expr *expr,
 
 	switch (family) {
 	case NFPROTO_IPV4:
-		alen = FIELD_SIZEOF(struct nf_nat_range, min_addr.ip);
+		alen = sizeof_field(struct nf_nat_range, min_addr.ip);
 		break;
 	case NFPROTO_IPV6:
-		alen = FIELD_SIZEOF(struct nf_nat_range, min_addr.ip6);
+		alen = sizeof_field(struct nf_nat_range, min_addr.ip6);
 		break;
 	default:
 		return -EAFNOSUPPORT;
@@ -175,7 +171,7 @@ static int nft_nat_init(const struct nft_ctx *ctx, const struct nft_expr *expr,
 		}
 	}
 
-	plen = FIELD_SIZEOF(struct nf_nat_range, min_addr.all);
+	plen = sizeof_field(struct nf_nat_range, min_addr.all);
 	if (tb[NFTA_NAT_REG_PROTO_MIN]) {
 		priv->sreg_proto_min =
 			nft_parse_register(tb[NFTA_NAT_REG_PROTO_MIN]);

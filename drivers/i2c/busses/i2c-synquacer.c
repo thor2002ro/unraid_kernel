@@ -351,7 +351,7 @@ static int synquacer_i2c_doxfer(struct synquacer_i2c *i2c,
 	/* wait 2 clock periods to ensure the stop has been through the bus */
 	udelay(DIV_ROUND_UP(2 * 1000, i2c->speed_khz));
 
-	return 0;
+	return ret;
 }
 
 static irqreturn_t synquacer_i2c_isr(int irq, void *dev_id)
@@ -526,7 +526,7 @@ static const struct i2c_algorithm synquacer_i2c_algo = {
 	.functionality	= synquacer_i2c_functionality,
 };
 
-static struct i2c_adapter synquacer_i2c_ops = {
+static const struct i2c_adapter synquacer_i2c_ops = {
 	.owner		= THIS_MODULE,
 	.name		= "synquacer_i2c-adapter",
 	.algo		= &synquacer_i2c_algo,

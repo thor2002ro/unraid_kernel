@@ -1,21 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * (C) COPYRIGHT 2016 ARM Limited. All rights reserved.
  * Author: Liviu Dudau <Liviu.Dudau@arm.com>
- *
- * This program is free software and is provided to you under the terms of the
- * GNU General Public License version 2 as published by the Free Software
- * Foundation, and any use by you of this program is subject to the terms
- * of such GNU licence.
  *
  * ARM Mali DP plane manipulation routines.
  */
 
 #include <linux/iommu.h>
+#include <linux/platform_device.h>
 
-#include <drm/drmP.h>
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
+#include <drm/drm_drv.h>
 #include <drm/drm_fb_cma_helper.h>
+#include <drm/drm_fourcc.h>
 #include <drm/drm_gem_cma_helper.h>
 #include <drm/drm_gem_framebuffer_helper.h>
 #include <drm/drm_plane_helper.h>
@@ -227,14 +225,13 @@ bool malidp_format_mod_supported(struct drm_device *drm,
 
 	if (modifier & AFBC_SPLIT) {
 		if (!info->is_yuv) {
-			if (drm_format_plane_cpp(format, 0) <= 2) {
+			if (info->cpp[0] <= 2) {
 				DRM_DEBUG_KMS("RGB formats <= 16bpp are not supported with SPLIT\n");
 				return false;
 			}
 		}
 
-		if ((drm_format_horz_chroma_subsampling(format) != 1) ||
-		    (drm_format_vert_chroma_subsampling(format) != 1)) {
+		if ((info->hsub != 1) || (info->vsub != 1)) {
 			if (!(format == DRM_FORMAT_YUV420_10BIT &&
 			      (map->features & MALIDP_DEVICE_AFBC_YUV_420_10_SUPPORT_SPLIT))) {
 				DRM_DEBUG_KMS("Formats which are sub-sampled should never be split\n");
@@ -244,8 +241,7 @@ bool malidp_format_mod_supported(struct drm_device *drm,
 	}
 
 	if (modifier & AFBC_CBR) {
-		if ((drm_format_horz_chroma_subsampling(format) == 1) ||
-		    (drm_format_vert_chroma_subsampling(format) == 1)) {
+		if ((info->hsub == 1) || (info->vsub == 1)) {
 			DRM_DEBUG_KMS("Formats which are not sub-sampled should not have CBR set\n");
 			return false;
 		}

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 
 /*
  * Hauppauge HD PVR USB driver
@@ -6,11 +7,6 @@
  *
  * IR device registration code is
  * Copyright (C) 2010	Andy Walls <awalls@md.metrocast.net>
- *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License as
- *	published by the Free Software Foundation, version 2.
- *
  */
 
 #if IS_ENABLED(CONFIG_I2C)
@@ -197,8 +193,6 @@ static int hdpvr_activate_ir(struct hdpvr_device *dev)
 
 int hdpvr_register_i2c_adapter(struct hdpvr_device *dev)
 {
-	int retval = -ENOMEM;
-
 	hdpvr_activate_ir(dev);
 
 	dev->i2c_adapter = hdpvr_i2c_adapter_template;
@@ -206,9 +200,7 @@ int hdpvr_register_i2c_adapter(struct hdpvr_device *dev)
 
 	i2c_set_adapdata(&dev->i2c_adapter, dev);
 
-	retval = i2c_add_adapter(&dev->i2c_adapter);
-
-	return retval;
+	return i2c_add_adapter(&dev->i2c_adapter);
 }
 
 #endif

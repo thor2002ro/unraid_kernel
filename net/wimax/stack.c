@@ -1,25 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Linux WiMAX
  * Initialization, addition and removal of wimax devices
  *
- *
  * Copyright (C) 2005-2006 Intel Corporation <linux-wimax@intel.com>
  * Inaky Perez-Gonzalez <inaky.perez-gonzalez@intel.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
- * 02110-1301, USA.
- *
  *
  * This implements:
  *
@@ -496,12 +481,7 @@ int wimax_dev_add(struct wimax_dev *wimax_dev, struct net_device *net_dev)
 	/* Set up user-space interaction */
 	mutex_lock(&wimax_dev->mutex);
 	wimax_id_table_add(wimax_dev);
-	result = wimax_debugfs_add(wimax_dev);
-	if (result < 0) {
-		dev_err(dev, "cannot initialize debugfs: %d\n",
-			result);
-		goto error_debugfs_add;
-	}
+	wimax_debugfs_add(wimax_dev);
 
 	__wimax_state_set(wimax_dev, WIMAX_ST_DOWN);
 	mutex_unlock(&wimax_dev->mutex);
@@ -513,10 +493,6 @@ int wimax_dev_add(struct wimax_dev *wimax_dev, struct net_device *net_dev)
 	d_fnend(3, dev, "(wimax_dev %p net_dev %p) = 0\n", wimax_dev, net_dev);
 	return 0;
 
-error_debugfs_add:
-	wimax_id_table_rm(wimax_dev);
-	mutex_unlock(&wimax_dev->mutex);
-	wimax_rfkill_rm(wimax_dev);
 error_rfkill_add:
 	d_fnend(3, dev, "(wimax_dev %p net_dev %p) = %d\n",
 		wimax_dev, net_dev, result);

@@ -1,34 +1,24 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2015 Red Hat
  * Copyright (C) 2015 Sony Mobile Communications Inc.
  * Author: Werner Johansson <werner.johansson@sonymobile.com>
  *
  * Based on AUO panel driver by Rob Clark <robdclark@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/backlight.h>
+#include <linux/delay.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/regulator/consumer.h>
 
-#include <drm/drmP.h>
+#include <video/mipi_display.h>
+
 #include <drm/drm_crtc.h>
+#include <drm/drm_device.h>
 #include <drm/drm_mipi_dsi.h>
 #include <drm/drm_panel.h>
-
-#include <video/mipi_display.h>
 
 /*
  * When power is turned off to this panel a minimum off time of 500ms has to be
@@ -233,9 +223,8 @@ static int wuxga_nt_panel_add(struct wuxga_nt_panel *wuxga_nt)
 			return -EPROBE_DEFER;
 	}
 
-	drm_panel_init(&wuxga_nt->base);
-	wuxga_nt->base.funcs = &wuxga_nt_panel_funcs;
-	wuxga_nt->base.dev = &wuxga_nt->dsi->dev;
+	drm_panel_init(&wuxga_nt->base, &wuxga_nt->dsi->dev,
+		       &wuxga_nt_panel_funcs, DRM_MODE_CONNECTOR_DSI);
 
 	ret = drm_panel_add(&wuxga_nt->base);
 	if (ret < 0)

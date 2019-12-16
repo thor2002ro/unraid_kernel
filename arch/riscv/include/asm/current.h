@@ -1,22 +1,14 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Based on arm/arm64/include/asm/current.h
  *
  * Copyright (C) 2016 ARM
  * Copyright (C) 2017 SiFive
- *
- *   This program is free software; you can redistribute it and/or
- *   modify it under the terms of the GNU General Public License
- *   as published by the Free Software Foundation, version 2.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
  */
 
 
-#ifndef __ASM_CURRENT_H
-#define __ASM_CURRENT_H
+#ifndef _ASM_RISCV_CURRENT_H
+#define _ASM_RISCV_CURRENT_H
 
 #include <linux/bug.h>
 #include <linux/compiler.h>
@@ -42,4 +34,4 @@ static __always_inline struct task_struct *get_current(void)
 
 #endif /* __ASSEMBLY__ */
 
-#endif /* __ASM_CURRENT_H */
+#endif /* _ASM_RISCV_CURRENT_H */

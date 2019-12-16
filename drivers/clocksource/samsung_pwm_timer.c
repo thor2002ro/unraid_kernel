@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2011 Samsung Electronics Co., Ltd.
  *		http://www.samsung.com/
  *
  * samsung - Common hr-timer support (s3c and s5p)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
 */
 
 #include <linux/interrupt.h>
@@ -433,8 +430,7 @@ static int __init samsung_pwm_alloc(struct device_node *np,
 
 	of_property_for_each_u32(np, "samsung,pwm-outputs", prop, cur, val) {
 		if (val >= SAMSUNG_PWM_NUM) {
-			pr_warning("%s: invalid channel index in samsung,pwm-outputs property\n",
-								__func__);
+			pr_warn("%s: invalid channel index in samsung,pwm-outputs property\n", __func__);
 			continue;
 		}
 		pwm.variant.output_mask |= 1 << val;

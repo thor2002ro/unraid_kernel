@@ -320,6 +320,9 @@ void __init efi_reserve_boot_services(void)
 {
 	efi_memory_desc_t *md;
 
+	if (!efi_enabled(EFI_MEMMAP))
+		return;
+
 	for_each_efi_memory_desc(md) {
 		u64 start = md->phys_addr;
 		u64 size = md->num_pages << EFI_PAGE_SHIFT;
@@ -512,6 +515,9 @@ int __init efi_reuse_config(u64 tables, int nr_tables)
 	int i, sz, ret = 0;
 	void *p, *tablep;
 	struct efi_setup_data *data;
+
+	if (nr_tables == 0)
+		return 0;
 
 	if (!efi_setup)
 		return 0;
@@ -725,7 +731,7 @@ void efi_recover_from_page_fault(unsigned long phys_addr)
 	 * Address range 0x0000 - 0x0fff is always mapped in the efi_pgd, so
 	 * page faulting on these addresses isn't expected.
 	 */
-	if (phys_addr >= 0x0000 && phys_addr <= 0x0fff)
+	if (phys_addr <= 0x0fff)
 		return;
 
 	/*

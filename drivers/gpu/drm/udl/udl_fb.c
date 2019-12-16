@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2012 Red Hat
  *
@@ -5,23 +6,18 @@
  * Copyright (C) 2009 Roberto De Ioris <roberto@unbit.it>
  * Copyright (C) 2009 Jaya Kumar <jayakumar.lkml@gmail.com>
  * Copyright (C) 2009 Bernie Thompson <bernie@plugable.com>
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License v2. See the file COPYING in the main directory of this archive for
- * more details.
  */
-#include <linux/module.h>
-#include <linux/slab.h>
-#include <linux/fb.h>
+
+#include <linux/moduleparam.h>
 #include <linux/dma-buf.h>
-#include <linux/mem_encrypt.h>
 
-#include <drm/drmP.h>
-#include <drm/drm_crtc.h>
 #include <drm/drm_crtc_helper.h>
-#include "udl_drv.h"
-
+#include <drm/drm_drv.h>
 #include <drm/drm_fb_helper.h>
+#include <drm/drm_fourcc.h>
+#include <drm/drm_modeset_helper.h>
+
+#include "udl_drv.h"
 
 #define DL_DEFIO_WRITE_DELAY    (HZ/20) /* fb_deferred_io.delay in jiffies */
 

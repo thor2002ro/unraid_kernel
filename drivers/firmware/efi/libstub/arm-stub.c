@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * EFI stub implementation that is shared by arm and arm64 architectures.
  * This should be #included by the EFI stub implementation files.
@@ -6,10 +7,6 @@
  *     Roy Franz <roy.franz@linaro.org
  * Copyright (C) 2013 Red Hat, Inc.
  *     Mark Salter <msalter@redhat.com>
- *
- * This file is part of the Linux kernel, and is made available under the
- * terms of the GNU General Public License version 2.
- *
  */
 
 #include <linux/efi.h>
@@ -191,6 +188,8 @@ unsigned long efi_entry(void *handle, efi_system_table_t *sys_table,
 		pr_efi_err(sys_table, "Failed to relocate kernel\n");
 		goto fail_free_cmdline;
 	}
+
+	efi_retrieve_tpm2_eventlog(sys_table);
 
 	/* Ask the firmware to clear memory on unclean shutdown */
 	efi_enable_reset_attack_mitigation(sys_table);

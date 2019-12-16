@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Header file for dma buffer sharing framework.
  *
@@ -8,18 +9,6 @@
  * Arnd Bergmann <arnd@arndb.de>, Rob Clark <rob@ti.com> and
  * Daniel Vetter <daniel@ffwll.ch> for their support in creation and
  * refining of this idea.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 #ifndef __DMA_BUF_H__
 #define __DMA_BUF_H__
@@ -39,18 +28,32 @@ struct dma_buf_attachment;
 
 /**
  * struct dma_buf_ops - operations possible on struct dma_buf
- * @map_atomic: [optional] maps a page from the buffer into kernel address
- *		space, users may not block until the subsequent unmap call.
- *		This callback must not sleep.
- * @unmap_atomic: [optional] unmaps a atomically mapped page from the buffer.
- *		  This Callback must not sleep.
- * @map: [optional] maps a page from the buffer into kernel address space.
- * @unmap: [optional] unmaps a page from the buffer.
  * @vmap: [optional] creates a virtual mapping for the buffer into kernel
  *	  address space. Same restrictions as for vmap and friends apply.
  * @vunmap: [optional] unmaps a vmap from the buffer
  */
 struct dma_buf_ops {
+	/**
+	  * @cache_sgt_mapping:
+	  *
+	  * If true the framework will cache the first mapping made for each
+	  * attachment. This avoids creating mappings for attachments multiple
+	  * times.
+	  */
+	bool cache_sgt_mapping;
+
+	/**
+	 * @dynamic_mapping:
+	 *
+	 * If true the framework makes sure that the map/unmap_dma_buf
+	 * callbacks are always called with the dma_resv object locked.
+	 *
+	 * If false the framework makes sure that the map/unmap_dma_buf
+	 * callbacks are always called without the dma_resv object locked.
+	 * Mutual exclusive with @cache_sgt_mapping.
+	 */
+	bool dynamic_mapping;
+
 	/**
 	 * @attach:
 	 *
@@ -117,6 +120,9 @@ struct dma_buf_ops {
 	 * multiple users accessing at the same time (for reading, maybe), or
 	 * any other kind of sharing that the exporter might wish to make
 	 * available to buffer-users.
+	 *
+	 * This is always called with the dmabuf->resv object locked when
+	 * the dynamic_mapping flag is true.
 	 *
 	 * Returns:
 	 *
@@ -205,8 +211,6 @@ struct dma_buf_ops {
 	 * to be restarted.
 	 */
 	int (*end_cpu_access)(struct dma_buf *, enum dma_data_direction);
-	void *(*map)(struct dma_buf *, unsigned long);
-	void (*unmap)(struct dma_buf *, unsigned long, void *);
 
 	/**
 	 * @mmap:
@@ -245,6 +249,31 @@ struct dma_buf_ops {
 	 */
 	int (*mmap)(struct dma_buf *, struct vm_area_struct *vma);
 
+	/**
+	 * @map:
+	 *
+	 * Maps a page from the buffer into kernel address space. The page is
+	 * specified by offset into the buffer in PAGE_SIZE units.
+	 *
+	 * This callback is optional.
+	 *
+	 * Returns:
+	 *
+	 * Virtual address pointer where requested page can be accessed. NULL
+	 * on error or when this function is unimplemented by the exporter.
+	 */
+	void *(*map)(struct dma_buf *, unsigned long);
+
+	/**
+	 * @unmap:
+	 *
+	 * Unmaps a page from the buffer. Page offset and address pointer should
+	 * be the same as the one passed to and returned by matching call to map.
+	 *
+	 * This callback is optional.
+	 */
+	void (*unmap)(struct dma_buf *, unsigned long, void *);
+
 	void *(*vmap)(struct dma_buf *);
 	void (*vunmap)(struct dma_buf *, void *vaddr);
 };
@@ -253,12 +282,16 @@ struct dma_buf_ops {
  * struct dma_buf - shared buffer object
  * @size: size of the buffer
  * @file: file pointer used for sharing buffers across, and for refcounting.
- * @attachments: list of dma_buf_attachment that denotes all devices attached.
+ * @attachments: list of dma_buf_attachment that denotes all devices attached,
+ *               protected by dma_resv lock.
  * @ops: dma_buf_ops associated with this buffer object.
- * @lock: used internally to serialize list manipulation, attach/detach and vmap/unmap
+ * @lock: used internally to serialize list manipulation, attach/detach and
+ *        vmap/unmap
  * @vmapping_counter: used internally to refcnt the vmaps
  * @vmap_ptr: the current vmap ptr if vmapping_counter > 0
  * @exp_name: name of the exporter; useful for debugging.
+ * @name: userspace-provided name; useful for accounting and debugging,
+ *        protected by @resv.
  * @owner: pointer to exporter module; used for refcounting when exporter is a
  *         kernel module.
  * @list_node: node for dma_buf accounting and debugging.
@@ -286,10 +319,11 @@ struct dma_buf {
 	unsigned vmapping_counter;
 	void *vmap_ptr;
 	const char *exp_name;
+	const char *name;
 	struct module *owner;
 	struct list_head list_node;
 	void *priv;
-	struct reservation_object *resv;
+	struct dma_resv *resv;
 
 	/* poll support */
 	wait_queue_head_t poll;
@@ -306,8 +340,12 @@ struct dma_buf {
  * struct dma_buf_attachment - holds device-buffer attachment data
  * @dmabuf: buffer for this attachment.
  * @dev: device attached to the buffer.
- * @node: list of dma_buf_attachment.
+ * @node: list of dma_buf_attachment, protected by dma_resv lock of the dmabuf.
+ * @sgt: cached mapping.
+ * @dir: direction of cached mapping.
  * @priv: exporter specific attachment data.
+ * @dynamic_mapping: true if dma_buf_map/unmap_attachment() is called with the
+ * dma_resv lock held.
  *
  * This structure holds the attachment information between the dma_buf buffer
  * and its user device(s). The list contains one attachment struct per device
@@ -322,6 +360,9 @@ struct dma_buf_attachment {
 	struct dma_buf *dmabuf;
 	struct device *dev;
 	struct list_head node;
+	struct sg_table *sgt;
+	enum dma_data_direction dir;
+	bool dynamic_mapping;
 	void *priv;
 };
 
@@ -344,7 +385,7 @@ struct dma_buf_export_info {
 	const struct dma_buf_ops *ops;
 	size_t size;
 	int flags;
-	struct reservation_object *resv;
+	struct dma_resv *resv;
 	void *priv;
 };
 
@@ -373,10 +414,40 @@ static inline void get_dma_buf(struct dma_buf *dmabuf)
 	get_file(dmabuf->file);
 }
 
+/**
+ * dma_buf_is_dynamic - check if a DMA-buf uses dynamic mappings.
+ * @dmabuf: the DMA-buf to check
+ *
+ * Returns true if a DMA-buf exporter wants to be called with the dma_resv
+ * locked for the map/unmap callbacks, false if it doesn't wants to be called
+ * with the lock held.
+ */
+static inline bool dma_buf_is_dynamic(struct dma_buf *dmabuf)
+{
+	return dmabuf->ops->dynamic_mapping;
+}
+
+/**
+ * dma_buf_attachment_is_dynamic - check if a DMA-buf attachment uses dynamic
+ * mappinsg
+ * @attach: the DMA-buf attachment to check
+ *
+ * Returns true if a DMA-buf importer wants to call the map/unmap functions with
+ * the dma_resv lock held.
+ */
+static inline bool
+dma_buf_attachment_is_dynamic(struct dma_buf_attachment *attach)
+{
+	return attach->dynamic_mapping;
+}
+
 struct dma_buf_attachment *dma_buf_attach(struct dma_buf *dmabuf,
-							struct device *dev);
+					  struct device *dev);
+struct dma_buf_attachment *
+dma_buf_dynamic_attach(struct dma_buf *dmabuf, struct device *dev,
+		       bool dynamic_mapping);
 void dma_buf_detach(struct dma_buf *dmabuf,
-				struct dma_buf_attachment *dmabuf_attach);
+		    struct dma_buf_attachment *attach);
 
 struct dma_buf *dma_buf_export(const struct dma_buf_export_info *exp_info);
 
@@ -388,6 +459,7 @@ struct sg_table *dma_buf_map_attachment(struct dma_buf_attachment *,
 					enum dma_data_direction);
 void dma_buf_unmap_attachment(struct dma_buf_attachment *, struct sg_table *,
 				enum dma_data_direction);
+void dma_buf_move_notify(struct dma_buf *dma_buf);
 int dma_buf_begin_cpu_access(struct dma_buf *dma_buf,
 			     enum dma_data_direction dir);
 int dma_buf_end_cpu_access(struct dma_buf *dma_buf,

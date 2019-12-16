@@ -1,18 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2016 Facebook
  * Copyright (C) 2013-2014 Jens Axboe
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public
- * License v2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include <linux/sched.h>
@@ -37,9 +26,7 @@ static inline bool sbitmap_deferred_clear(struct sbitmap *sb, int index)
 	/*
 	 * First get a stable cleared mask, setting the old mask to 0.
 	 */
-	do {
-		mask = sb->map[index].cleared;
-	} while (cmpxchg(&sb->map[index].cleared, mask, 0) != mask);
+	mask = xchg(&sb->map[index].cleared, 0);
 
 	/*
 	 * Now clear the masked bits in our free word
@@ -248,23 +235,6 @@ bool sbitmap_any_bit_set(const struct sbitmap *sb)
 	return false;
 }
 EXPORT_SYMBOL_GPL(sbitmap_any_bit_set);
-
-bool sbitmap_any_bit_clear(const struct sbitmap *sb)
-{
-	unsigned int i;
-
-	for (i = 0; i < sb->map_nr; i++) {
-		const struct sbitmap_word *word = &sb->map[i];
-		unsigned long mask = word->word & ~word->cleared;
-		unsigned long ret;
-
-		ret = find_first_zero_bit(&mask, word->depth);
-		if (ret < word->depth)
-			return true;
-	}
-	return false;
-}
-EXPORT_SYMBOL_GPL(sbitmap_any_bit_clear);
 
 static unsigned int __sbitmap_weight(const struct sbitmap *sb, bool set)
 {
@@ -527,10 +497,8 @@ static struct sbq_wait_state *sbq_wake_ptr(struct sbitmap_queue *sbq)
 		struct sbq_wait_state *ws = &sbq->ws[wake_index];
 
 		if (waitqueue_active(&ws->wait)) {
-			int o = atomic_read(&sbq->wake_index);
-
-			if (wake_index != o)
-				atomic_cmpxchg(&sbq->wake_index, o, wake_index);
+			if (wake_index != atomic_read(&sbq->wake_index))
+				atomic_set(&sbq->wake_index, wake_index);
 			return ws;
 		}
 

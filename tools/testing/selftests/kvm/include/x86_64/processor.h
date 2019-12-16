@@ -1,10 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * tools/testing/selftests/kvm/include/x86_64/processor.h
  *
  * Copyright (C) 2018, Google LLC.
- *
- * This work is licensed under the terms of the GNU GPL, version 2.
- *
  */
 
 #ifndef SELFTEST_KVM_PROCESSOR_H
@@ -303,10 +301,14 @@ static inline unsigned long get_xmm(int n)
 	return 0;
 }
 
+bool is_intel_cpu(void);
+
 struct kvm_x86_state;
 struct kvm_x86_state *vcpu_save_state(struct kvm_vm *vm, uint32_t vcpuid);
 void vcpu_load_state(struct kvm_vm *vm, uint32_t vcpuid,
 		     struct kvm_x86_state *state);
+
+struct kvm_msr_list *kvm_get_msr_index_list(void);
 
 struct kvm_cpuid2 *kvm_get_supported_cpuid(void);
 void vcpu_set_cpuid(struct kvm_vm *vm, uint32_t vcpuid,
@@ -322,8 +324,14 @@ kvm_get_supported_cpuid_entry(uint32_t function)
 }
 
 uint64_t vcpu_get_msr(struct kvm_vm *vm, uint32_t vcpuid, uint64_t msr_index);
+int _vcpu_set_msr(struct kvm_vm *vm, uint32_t vcpuid, uint64_t msr_index,
+		  uint64_t msr_value);
 void vcpu_set_msr(struct kvm_vm *vm, uint32_t vcpuid, uint64_t msr_index,
 	  	  uint64_t msr_value);
+
+uint32_t kvm_get_cpuid_max_basic(void);
+uint32_t kvm_get_cpuid_max_extended(void);
+void kvm_get_cpu_address_width(unsigned int *pa_bits, unsigned int *va_bits);
 
 /*
  * Basic CPU control in CR0
@@ -1079,6 +1087,9 @@ void vcpu_set_msr(struct kvm_vm *vm, uint32_t vcpuid, uint64_t msr_index,
 #define VMX_BASIC_MEM_TYPE_MASK	0x003c000000000000LLU
 #define VMX_BASIC_MEM_TYPE_WB	6LLU
 #define VMX_BASIC_INOUT		0x0040000000000000LLU
+
+/* VMX_EPT_VPID_CAP bits */
+#define VMX_EPT_VPID_CAP_AD_BITS	(1ULL << 21)
 
 /* MSR_IA32_VMX_MISC bits */
 #define MSR_IA32_VMX_MISC_VMWRITE_SHADOW_RO_FIELDS (1ULL << 29)

@@ -1245,6 +1245,7 @@ enum {
 	C_SW_IBP_RDMA_SEQ,
 	C_SW_IBP_UNALIGNED,
 	C_SW_IBP_SEQ_NAK,
+	C_SW_IBP_RC_CRWAITS,
 	C_SW_CPU_RC_ACKS,
 	C_SW_CPU_RC_QACKS,
 	C_SW_CPU_RC_DELAYED_COMP,
@@ -1445,6 +1446,7 @@ void clear_all_interrupts(struct hfi1_devdata *dd);
 void remap_intr(struct hfi1_devdata *dd, int isrc, int msix_intr);
 void remap_sdma_interrupts(struct hfi1_devdata *dd, int engine, int msix_intr);
 void reset_interrupts(struct hfi1_devdata *dd);
+u8 hfi1_get_qp_map(struct hfi1_devdata *dd, u8 idx);
 
 /*
  * Interrupt source table.

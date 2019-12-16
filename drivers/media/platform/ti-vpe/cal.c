@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * TI CAL camera interface driver
  *
  * Copyright (c) 2015 Texas Instruments Inc.
  * Benoit Parrot, <bparrot@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation
  */
 
 #include <linux/interrupt.h>
@@ -916,9 +913,6 @@ static int cal_querycap(struct file *file, void *priv,
 
 	snprintf(cap->bus_info, sizeof(cap->bus_info),
 		 "platform:%s", ctx->v4l2_dev.name);
-	cap->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING |
-			    V4L2_CAP_READWRITE;
-	cap->capabilities = cap->device_caps | V4L2_CAP_DEVICE_CAPS;
 	return 0;
 }
 
@@ -1422,6 +1416,8 @@ static const struct video_device cal_videodev = {
 	.ioctl_ops	= &cal_ioctl_ops,
 	.minor		= -1,
 	.release	= video_device_release_empty,
+	.device_caps	= V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING |
+			  V4L2_CAP_READWRITE,
 };
 
 /* -----------------------------------------------------------------
@@ -1616,6 +1612,7 @@ of_get_next_port(const struct device_node *parent,
 			}
 			prev = port;
 		} while (!of_node_name_eq(port, "port"));
+		of_node_put(ports);
 	}
 
 	return port;

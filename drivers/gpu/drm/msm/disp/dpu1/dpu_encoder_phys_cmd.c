@@ -1,15 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015-2018 The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #define pr_fmt(fmt)	"[drm:%s:%d] " fmt, __func__, __LINE__
@@ -133,13 +124,11 @@ static void dpu_encoder_phys_cmd_pp_rd_ptr_irq(void *arg, int irq_idx)
 static void dpu_encoder_phys_cmd_ctl_start_irq(void *arg, int irq_idx)
 {
 	struct dpu_encoder_phys *phys_enc = arg;
-	struct dpu_encoder_phys_cmd *cmd_enc;
 
 	if (!phys_enc || !phys_enc->hw_ctl)
 		return;
 
 	DPU_ATRACE_BEGIN("ctl_start_irq");
-	cmd_enc = to_dpu_encoder_phys_cmd(phys_enc);
 
 	atomic_add_unless(&phys_enc->pending_ctlstart_cnt, -1, 0);
 
@@ -325,12 +314,8 @@ end:
 static void dpu_encoder_phys_cmd_irq_control(struct dpu_encoder_phys *phys_enc,
 		bool enable)
 {
-	struct dpu_encoder_phys_cmd *cmd_enc;
-
 	if (!phys_enc)
 		return;
-
-	cmd_enc = to_dpu_encoder_phys_cmd(phys_enc);
 
 	trace_dpu_enc_phys_cmd_irq_ctrl(DRMID(phys_enc->parent),
 			phys_enc->hw_pp->idx - PINGPONG_0,
@@ -364,7 +349,6 @@ static void dpu_encoder_phys_cmd_tearcheck_config(
 	struct drm_display_mode *mode;
 	bool tc_enable = true;
 	u32 vsync_hz;
-	struct msm_drm_private *priv;
 	struct dpu_kms *dpu_kms;
 
 	if (!phys_enc || !phys_enc->hw_pp) {
@@ -382,11 +366,6 @@ static void dpu_encoder_phys_cmd_tearcheck_config(
 	}
 
 	dpu_kms = phys_enc->dpu_kms;
-	if (!dpu_kms || !dpu_kms->dev || !dpu_kms->dev->dev_private) {
-		DPU_ERROR("invalid device\n");
-		return;
-	}
-	priv = dpu_kms->dev->dev_private;
 
 	/*
 	 * TE default: dsi byte clock calculated base on 70 fps;
@@ -659,12 +638,9 @@ static int dpu_encoder_phys_cmd_wait_for_tx_complete(
 		struct dpu_encoder_phys *phys_enc)
 {
 	int rc;
-	struct dpu_encoder_phys_cmd *cmd_enc;
 
 	if (!phys_enc)
 		return -EINVAL;
-
-	cmd_enc = to_dpu_encoder_phys_cmd(phys_enc);
 
 	rc = _dpu_encoder_phys_cmd_wait_for_idle(phys_enc);
 	if (rc) {
@@ -729,9 +705,6 @@ static int dpu_encoder_phys_cmd_wait_for_vblank(
 static void dpu_encoder_phys_cmd_handle_post_kickoff(
 		struct dpu_encoder_phys *phys_enc)
 {
-	if (!phys_enc)
-		return;
-
 	/**
 	 * re-enable external TE, either for the first time after enabling
 	 * or if disabled for Autorefresh

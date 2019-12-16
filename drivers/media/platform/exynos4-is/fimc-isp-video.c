@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Samsung EXYNOS4x12 FIMC-IS (Imaging Subsystem) driver
  *
@@ -8,10 +9,6 @@
  *
  * The hardware handling code derived from a driver written by
  * Younghwan Joo <yhwan.joo@samsung.com>.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/bitops.h>
@@ -316,7 +313,7 @@ static int isp_video_release(struct file *file)
 		ivc->streaming = 0;
 	}
 
-	vb2_fop_release(file);
+	_vb2_fop_release(file, NULL);
 
 	if (v4l2_fh_is_singular_file(file)) {
 		fimc_pipeline_call(&ivc->ve, close);
@@ -349,12 +346,12 @@ static int isp_video_querycap(struct file *file, void *priv,
 {
 	struct fimc_isp *isp = video_drvdata(file);
 
-	__fimc_vidioc_querycap(&isp->pdev->dev, cap, V4L2_CAP_STREAMING);
+	__fimc_vidioc_querycap(&isp->pdev->dev, cap);
 	return 0;
 }
 
-static int isp_video_enum_fmt_mplane(struct file *file, void *priv,
-					struct v4l2_fmtdesc *f)
+static int isp_video_enum_fmt(struct file *file, void *priv,
+			      struct v4l2_fmtdesc *f)
 {
 	const struct fimc_fmt *fmt;
 
@@ -365,7 +362,6 @@ static int isp_video_enum_fmt_mplane(struct file *file, void *priv,
 	if (WARN_ON(fmt == NULL))
 		return -EINVAL;
 
-	strscpy(f->description, fmt->name, sizeof(f->description));
 	f->pixelformat = fmt->fourcc;
 
 	return 0;
@@ -551,7 +547,7 @@ static int isp_video_reqbufs(struct file *file, void *priv,
 
 static const struct v4l2_ioctl_ops isp_video_ioctl_ops = {
 	.vidioc_querycap		= isp_video_querycap,
-	.vidioc_enum_fmt_vid_cap_mplane	= isp_video_enum_fmt_mplane,
+	.vidioc_enum_fmt_vid_cap	= isp_video_enum_fmt,
 	.vidioc_try_fmt_vid_cap_mplane	= isp_video_try_fmt_mplane,
 	.vidioc_s_fmt_vid_cap_mplane	= isp_video_s_fmt_mplane,
 	.vidioc_g_fmt_vid_cap_mplane	= isp_video_g_fmt_mplane,
@@ -614,6 +610,7 @@ int fimc_isp_video_device_register(struct fimc_isp *isp,
 	vdev->minor = -1;
 	vdev->release = video_device_release_empty;
 	vdev->lock = &isp->video_lock;
+	vdev->device_caps = V4L2_CAP_STREAMING | V4L2_CAP_VIDEO_CAPTURE_MPLANE;
 
 	iv->pad.flags = MEDIA_PAD_FL_SINK;
 	ret = media_entity_pads_init(&vdev->entity, 1, &iv->pad);

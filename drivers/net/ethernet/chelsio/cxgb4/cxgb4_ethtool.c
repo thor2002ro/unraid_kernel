@@ -1,18 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Copyright (C) 2013-2015 Chelsio Communications.  All rights reserved.
- *
- *  This program is free software; you can redistribute it and/or modify it
- *  under the terms and conditions of the GNU General Public License,
- *  version 2, as published by the Free Software Foundation.
- *
- *  This program is distributed in the hope it will be useful, but WITHOUT
- *  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- *  more details.
- *
- *  The full GNU General Public License is included in this distribution in
- *  the file called "COPYING".
- *
  */
 
 #include <linux/firmware.h>
@@ -103,6 +91,7 @@ static const char stats_strings[][ETH_GSTRING_LEN] = {
 	"rx_bg3_frames_trunc    ",
 
 	"tso                    ",
+	"uso                    ",
 	"tx_csum_offload        ",
 	"rx_csum_good           ",
 	"vlan_extractions       ",
@@ -232,6 +221,7 @@ static void get_strings(struct net_device *dev, u32 stringset, u8 *data)
  */
 struct queue_port_stats {
 	u64 tso;
+	u64 uso;
 	u64 tx_csum;
 	u64 rx_csum;
 	u64 vlan_ex;
@@ -252,19 +242,31 @@ static void collect_sge_port_stats(const struct adapter *adap,
 				   const struct port_info *p,
 				   struct queue_port_stats *s)
 {
-	int i;
 	const struct sge_eth_txq *tx = &adap->sge.ethtxq[p->first_qset];
 	const struct sge_eth_rxq *rx = &adap->sge.ethrxq[p->first_qset];
+	struct sge_eohw_txq *eohw_tx;
+	unsigned int i;
 
 	memset(s, 0, sizeof(*s));
 	for (i = 0; i < p->nqsets; i++, rx++, tx++) {
 		s->tso += tx->tso;
+		s->uso += tx->uso;
 		s->tx_csum += tx->tx_cso;
 		s->rx_csum += rx->stats.rx_cso;
 		s->vlan_ex += rx->stats.vlan_ex;
 		s->vlan_ins += tx->vlan_ins;
 		s->gro_pkts += rx->stats.lro_pkts;
 		s->gro_merged += rx->stats.lro_merged;
+	}
+
+	if (adap->sge.eohw_txq) {
+		eohw_tx = &adap->sge.eohw_txq[p->first_qset];
+		for (i = 0; i < p->nqsets; i++, eohw_tx++) {
+			s->tso += eohw_tx->tso;
+			s->uso += eohw_tx->uso;
+			s->tx_csum += eohw_tx->tx_cso;
+			s->vlan_ins += eohw_tx->vlan_ins;
+		}
 	}
 }
 
