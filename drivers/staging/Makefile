@@ -54,3 +54,5 @@ obj-$(CONFIG_EXFAT_FS)		+= exfat/
 obj-$(CONFIG_QLGE)		+= qlge/
 obj-$(CONFIG_NET_VENDOR_HP)	+= hp/
 obj-$(CONFIG_WFX)		+= wfx/
+
+obj-y		+= CoreFreq/
