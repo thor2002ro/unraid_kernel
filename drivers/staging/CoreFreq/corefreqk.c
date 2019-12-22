@@ -8651,10 +8651,10 @@ static long CoreFreqK_Limit_Idle(int target)
 	for (idx = 0; idx < CoreFreqK.IdleDriver.state_count; idx++)
 	{
 		if (idx < target) {
-			CoreFreqK.IdleDriver.states[idx].disabled = false;
+			CoreFreqK.IdleDriver.states[idx].flags = CPUIDLE_FLAG_NONE;
 			floor = idx;
 		} else
-			CoreFreqK.IdleDriver.states[idx].disabled = true;
+			CoreFreqK.IdleDriver.states[idx].flags = CPUIDLE_FLAG_UNUSABLE;
 	}
 	rc = 0;
     }
@@ -8662,7 +8662,7 @@ static long CoreFreqK_Limit_Idle(int target)
     {
 	for (idx = 0; idx < CoreFreqK.IdleDriver.state_count; idx++)
 	{
-		CoreFreqK.IdleDriver.states[idx].disabled = false;
+		CoreFreqK.IdleDriver.states[idx].flags = CPUIDLE_FLAG_NONE;
 		floor = idx;
 	}
 	rc = 0;
