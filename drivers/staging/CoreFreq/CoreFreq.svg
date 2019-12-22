@@ -1,0 +1,1330 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   xmlns:dc="http://purl.org/dc/elements/1.1/"
+   xmlns:cc="http://creativecommons.org/ns#"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   width="851.92487"
+   height="982.92993"
+   viewBox="0 0 798.67957 921.49678"
+   id="svg2"
+   version="1.1"
+   inkscape:version="0.92.0 r"
+   sodipodi:docname="CoreFreq.svg"
+   inkscape:export-filename="/home/cyril/src/CoreFreq-algorithm.png"
+   inkscape:export-xdpi="90"
+   inkscape:export-ydpi="90">
+  <title
+     id="title6604">CoreFreq</title>
+  <defs
+     id="defs4" />
+  <sodipodi:namedview
+     id="base"
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1.0"
+     inkscape:pageopacity="0.0"
+     inkscape:pageshadow="2"
+     inkscape:zoom="1"
+     inkscape:cx="321.20684"
+     inkscape:cy="446.61717"
+     inkscape:document-units="px"
+     inkscape:current-layer="layer1"
+     showgrid="false"
+     units="px"
+     showguides="true"
+     fit-margin-top="0"
+     fit-margin-left="0"
+     fit-margin-right="0"
+     fit-margin-bottom="0"
+     inkscape:showpageshadow="false"
+     showborder="false">
+    <inkscape:grid
+       type="xygrid"
+       id="grid4804"
+       originx="-18.213546"
+       originy="331.34672"
+       spacingx="1"
+       spacingy="1" />
+  </sodipodi:namedview>
+  <metadata
+     id="metadata7">
+    <rdf:RDF>
+      <cc:Work
+         rdf:about="">
+        <dc:format>image/svg+xml</dc:format>
+        <dc:type
+           rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
+        <dc:title>CoreFreq</dc:title>
+        <dc:rights>
+          <cc:Agent>
+            <dc:title>GPL</dc:title>
+          </cc:Agent>
+        </dc:rights>
+        <dc:creator>
+          <cc:Agent>
+            <dc:title>CyrIng</dc:title>
+          </cc:Agent>
+        </dc:creator>
+        <dc:publisher>
+          <cc:Agent>
+            <dc:title>CYRIL INGENIERIE</dc:title>
+          </cc:Agent>
+        </dc:publisher>
+        <cc:license
+           rdf:resource="" />
+      </cc:Work>
+    </rdf:RDF>
+  </metadata>
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1"
+     transform="translate(-18.213545,-462.21221)">
+    <rect
+       style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:2.36143136;stroke-linecap:butt;stroke-linejoin:round;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate"
+       id="rect4642-1-1"
+       width="594.71448"
+       height="295.71454"
+       x="215.35631"
+       y="1086.8137" />
+    <rect
+       style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:3.65517592;stroke-linecap:butt;stroke-linejoin:round;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate"
+       id="rect4642-1-9"
+       width="744.32684"
+       height="559.08368"
+       x="70.738708"
+       y="464.03976" />
+    <rect
+       style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:3.68649507;stroke-linecap:butt;stroke-linejoin:round;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate"
+       id="rect4642-1"
+       width="758.88953"
+       height="564.78064"
+       x="39.30529"
+       y="484.2764" />
+    <rect
+       style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:3.7061348;stroke-linecap:butt;stroke-linejoin:round;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate"
+       id="rect4642"
+       width="761.86664"
+       height="567.86664"
+       x="20.066612"
+       y="505.42883" />
+    <rect
+       style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#410040;stroke-width:1.31833887;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate"
+       id="rect5111-12-6-3-6-2"
+       width="135.06853"
+       height="201.86942"
+       x="631.46576"
+       y="566.02686" />
+    <circle
+       style="opacity:0.33000004;fill:none;fill-opacity:1;stroke:#ff0000;stroke-width:3.5;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-opacity:1"
+       id="path3336"
+       cx="193.0769"
+       cy="644.13062"
+       r="121.22842" />
+    <text
+       xml:space="preserve"
+       style="font-style:italic;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:11.25px;line-height:110.00000238%;font-family:Sans;-inkscape-font-specification:'Sans, Italic';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;opacity:0.66000001;fill:#ff0040;fill-opacity:1;stroke:#ff0040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="331.69946"
+       y="524.19006"
+       id="text4140-3"><tspan
+         sodipodi:role="line"
+         id="tspan5256"
+         x="331.69946"
+         y="524.19006">&quot; In kernel module, timer function</tspan><tspan
+         sodipodi:role="line"
+         id="tspan5258"
+         x="331.69946"
+         y="536.56506">pinned to the cpu id &quot;</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:italic;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:11.25px;line-height:110.00000238%;font-family:Sans;-inkscape-font-specification:'Sans, Italic';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;opacity:0.66000001;fill:#ff0000;fill-opacity:1;stroke:#0000ff;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="472.69946"
+       y="776.19019"
+       id="text4140-3-0"><tspan
+         sodipodi:role="line"
+         id="tspan5250"
+         x="472.69946"
+         y="776.19019">&quot; In user-space,</tspan><tspan
+         sodipodi:role="line"
+         id="tspan5252"
+         x="472.69946"
+         y="788.56519">a thread loop pinned</tspan><tspan
+         sodipodi:role="line"
+         id="tspan5254"
+         x="472.69946"
+         y="800.94019">to the same cpu id &quot;</tspan></text>
+    <ellipse
+       style="opacity:0.33000004;fill:none;fill-opacity:1;stroke:#0000ff;stroke-width:3.5;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-opacity:1"
+       id="path3336-3"
+       cx="431.92307"
+       cy="931.28528"
+       rx="121.22841"
+       ry="121.22842" />
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.75px;line-height:125%;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:0.99425288;stroke:#000000;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="337.00696"
+       y="1004.8566"
+       id="text4140-9-1-6"><tspan
+         sodipodi:role="line"
+         id="tspan4614"
+         x="337.00696"
+         y="1004.8566">store ratios in the</tspan><tspan
+         sodipodi:role="line"
+         id="tspan4616"
+         x="337.00696"
+         y="1022.0441">mem struct @ index</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.75px;line-height:125%;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:0.99425288;stroke:#000000;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="544.74194"
+       y="987.19019"
+       id="text4140-9-8-3"><tspan
+         sodipodi:role="line"
+         id="tspan3630"
+         x="544.74194"
+         y="987.19019">compute perf ratios</tspan><tspan
+         sodipodi:role="line"
+         id="tspan3632"
+         x="544.74194"
+         y="1004.3777">from delta</tspan></text>
+    <g
+       id="g5240"
+       transform="matrix(0.78295072,0,0,1.4071361,-37.084654,-230.91072)">
+      <rect
+         y="697.53735"
+         x="386.67429"
+         height="99.150604"
+         width="2.1506054"
+         id="rect4493"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#400040;fill-opacity:0.99607843;fill-rule:evenodd;stroke:#400040;stroke-width:0.84939313;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <g
+         style="fill:#400040;fill-opacity:0.99607843;stroke:#400040;stroke-opacity:1"
+         transform="translate(2.5,-255.5)"
+         id="g4534">
+        <rect
+           style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#400040;fill-opacity:0.99607843;fill-rule:evenodd;stroke:#400040;stroke-width:0.30129969;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate"
+           id="rect4493-4"
+           width="3.0851436"
+           height="8.6968365"
+           x="-139.4218"
+           y="1171.7903"
+           transform="matrix(1,0,0.44278457,0.89662803,0,0)" />
+        <rect
+           style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#400040;fill-opacity:0.99607843;fill-rule:evenodd;stroke:#400040;stroke-width:0.31843534;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate"
+           id="rect4493-4-6"
+           width="3.0851436"
+           height="9.7141857"
+           x="1169.7485"
+           y="1308.6198"
+           transform="matrix(1,0,-0.59634834,0.80272576,0,0)" />
+      </g>
+    </g>
+    <text
+       xml:space="preserve"
+       style="font-style:italic;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:15px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Italic';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#ff0000;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="59.457764"
+       y="523.12537"
+       id="text4140-3-2"><tspan
+         sodipodi:role="line"
+         id="tspan5696"
+         x="59.457764"
+         y="523.12537">Core #0</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:italic;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:15px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Italic';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#ff0000;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="80.036621"
+       y="500.0686"
+       id="text4140-3-2-4"><tspan
+         sodipodi:role="line"
+         id="tspan5698"
+         x="80.036621"
+         y="500.0686">Core #1</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:italic;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:15px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Italic';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#ff0000;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="111.79468"
+       y="478.16962"
+       id="text4140-3-2-4-0"><tspan
+         sodipodi:role="line"
+         id="tspan5700"
+         x="111.79468"
+         y="478.16962">Core #N</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:11.25px;line-height:125%;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#ff0000;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="118.95782"
+       y="1111.7253"
+       id="text4140-3-2-0"><tspan
+         sodipodi:role="line"
+         id="tspan3603"
+         x="118.95782"
+         y="1111.7253"
+         style="font-size:12.5px">CoreFreq 2015-2020</tspan><tspan
+         sodipodi:role="line"
+         id="tspan3605"
+         x="118.95782"
+         y="1126.1125"
+         style="font-size:12.5px">(C) CYRIL INGÉNIERIE</tspan></text>
+    <g
+       id="g5502"
+       transform="translate(0,14.000028)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="569.11804"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113"
+         y="583.7619"
+         x="621.27643"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan5924"
+           x="621.27643"
+           y="583.7619">Sync atomic [int]</tspan></text>
+    </g>
+    <g
+       id="g5497"
+       transform="translate(0,5.9090858)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="599.13623"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-1"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-5"
+         y="615.36194"
+         x="619.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan5926"
+           x="619.97601"
+           y="615.36194">UCC counter [int]</tspan></text>
+    </g>
+    <g
+       id="g5492"
+       transform="translate(0,-2.181857)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="629.15436"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-9"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-6"
+         y="645.36194"
+         x="619.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan5928"
+           x="619.97601"
+           y="645.36194">URC counter [int]</tspan></text>
+    </g>
+    <g
+       id="g5487"
+       transform="translate(0,-10.27286)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="659.17255"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-12"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-52"
+         y="675.36194"
+         x="619.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan5930"
+           x="619.97601"
+           y="675.36194">TSC counter [int]</tspan></text>
+    </g>
+    <text
+       id="text5113-7"
+       y="529.49188"
+       x="682"
+       style="font-style:italic;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Italic';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       xml:space="preserve"><tspan
+         sodipodi:role="line"
+         id="tspan3607"
+         x="682"
+         y="529.49188">SLAB memory</tspan><tspan
+         sodipodi:role="line"
+         id="tspan3609"
+         x="682"
+         y="545.11688">(Public kernel space)</tspan></text>
+    <g
+       id="g5467"
+       transform="translate(0,-107.63608)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="778.24451"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-12-6-3"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-52-6-9"
+         y="794.36194"
+         x="619.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan5938"
+           x="619.97601"
+           y="794.36194">C0 counter [int]</tspan></text>
+    </g>
+    <g
+       id="g5462"
+       transform="translate(0,-115.72702)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="808.26263"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-12-6-3-1"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-52-6-9-4"
+         y="824.36194"
+         x="619.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan5940"
+           x="619.97601"
+           y="824.36194">C1 counter [int]</tspan></text>
+    </g>
+    <g
+       id="g5457"
+       transform="translate(0,-123.81803)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="838.28082"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-12-6-3-7"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-52-6-9-5"
+         y="854.36194"
+         x="619.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan5942"
+           x="619.97601"
+           y="854.36194">C3 counter [int]</tspan></text>
+    </g>
+    <g
+       id="g5452"
+       transform="translate(0,-131.90897)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="868.29895"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-12-6-3-70"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-52-6-9-7"
+         y="884.36194"
+         x="619.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan5944"
+           x="619.97601"
+           y="884.36194">C6 counter [int]</tspan></text>
+    </g>
+    <g
+       id="g5447"
+       transform="translate(0,-139.99997)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="898.31714"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-12-6-3-6"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-52-6-9-9"
+         y="914.36194"
+         x="619.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan5946"
+           x="619.97601"
+           y="914.36194">C7 counter [int]</tspan></text>
+    </g>
+    <text
+       id="text5113-7-9"
+       y="803.49188"
+       x="689"
+       style="font-style:italic;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:11.25px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Italic';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       xml:space="preserve"><tspan
+         sodipodi:role="line"
+         id="tspan5678"
+         x="689"
+         y="803.49188">(cache aligned per cpu)</tspan></text>
+    <text
+       id="text5113-7-9-6"
+       y="604.87817"
+       x="-702.63019"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.75px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       xml:space="preserve"
+       transform="rotate(-90)"><tspan
+         sodipodi:role="line"
+         id="tspan5590"
+         x="-702.63019"
+         y="604.87817">counters structure</tspan></text>
+    <text
+       id="text5113-7-9-6-5"
+       y="761.87817"
+       x="-624.63019"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.75px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       xml:space="preserve"
+       transform="rotate(-90)"><tspan
+         sodipodi:role="line"
+         id="tspan5610"
+         x="-624.63019"
+         y="761.87817">delta structure</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.75px;line-height:125%;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:0.99425288;stroke:#000000;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="367.86536"
+       y="845.88623"
+       id="text4140-9-1"><tspan
+         sodipodi:role="line"
+         id="tspan3612"
+         x="367.86536"
+         y="845.88623">clear Sync bit</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.75px;line-height:125%;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#0000ff;fill-opacity:0.99425288;stroke:#00c440;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="295.69946"
+       y="916.19006"
+       id="text4140-0"><tspan
+         sodipodi:role="line"
+         id="tspan3608"
+         x="295.69946"
+         y="916.19006">test and wait</tspan><tspan
+         sodipodi:role="line"
+         id="tspan3610"
+         x="295.69946"
+         y="933.37756"> until Sync bit is set</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.75px;line-height:125%;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:0.99425288;stroke:#000000;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="285.86536"
+       y="591.88623"
+       id="text4140-9-8"><tspan
+         sodipodi:role="line"
+         id="tspan3626"
+         x="285.86536"
+         y="591.88623">compute counters delta</tspan><tspan
+         sodipodi:role="line"
+         id="tspan3628"
+         x="285.86536"
+         y="609.07373">[current] - [prev]</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.75px;line-height:125%;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:0.99425288;stroke:#000000;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="255.86536"
+       y="742.88623"
+       id="text4140-9-86"><tspan
+         sodipodi:role="line"
+         id="tspan3606"
+         x="255.86536"
+         y="742.88623">set Sync bit</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.75px;line-height:125%;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:#000000;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="136.10327"
+       y="530.88623"
+       id="text4140-9-9"><tspan
+         sodipodi:role="line"
+         id="tspan5630"
+         x="136.10327"
+         y="530.88623">store</tspan><tspan
+         sodipodi:role="line"
+         x="136.10327"
+         y="548.07373"
+         id="tspan3650">counters</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.75px;line-height:125%;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:0.99425288;stroke:#000000;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="307.86536"
+       y="683.88623"
+       id="text4140-9-8-4"><tspan
+         sodipodi:role="line"
+         id="tspan5650"
+         x="307.86536"
+         y="683.88623">store delta</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.75px;line-height:125%;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#0000ff;fill-opacity:0.99425288;stroke:#00c440;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="51"
+       y="692.36218"
+       id="text4140"><tspan
+         sodipodi:role="line"
+         id="tspan4571"
+         x="51"
+         y="692.36218">cpu pinned</tspan><tspan
+         sodipodi:role="line"
+         x="51"
+         y="709.54968"
+         id="tspan3623">timer expired</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.75px;line-height:125%;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:0.99425288;stroke:#000000;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="88.103271"
+       y="580.88623"
+       id="text4140-9"><tspan
+         sodipodi:role="line"
+         id="tspan6126"
+         x="88.103271"
+         y="580.88623">read msr</tspan><tspan
+         sodipodi:role="line"
+         id="tspan6128"
+         x="88.103271"
+         y="598.07373">counters</tspan></text>
+    <text
+       id="text5113-7-9-7"
+       y="561.49188"
+       x="742"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:11.25px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       xml:space="preserve"><tspan
+         sodipodi:role="line"
+         id="tspan5720"
+         x="742"
+         y="561.49188">x #Cores</tspan></text>
+    <rect
+       style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#410040;stroke-width:1.25186598;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate"
+       id="rect5111-12-6-3-6-2-2"
+       width="135.13498"
+       height="181.93587"
+       x="71.432503"
+       y="850.99371" />
+    <g
+       id="g5502-9"
+       transform="translate(-560,252.00006)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="569.11804"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-8"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-4"
+         y="583.7619"
+         x="617.27643"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan5922"
+           x="617.27643"
+           y="583.7619">Toggle [int]</tspan></text>
+    </g>
+    <g
+       id="g5497-8"
+       transform="translate(-560,265.90912)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="599.13623"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-1-2"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-5-2"
+         y="615.36194"
+         x="615.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan5920"
+           x="615.97601"
+           y="615.36194">Turbo ratio [double]</tspan></text>
+    </g>
+    <g
+       id="g5492-7"
+       transform="translate(-560,257.81817)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="629.15436"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-9-9"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-6-7"
+         y="645.36194"
+         x="615.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan5976"
+           x="615.97601"
+           y="645.36194">C0 ratio [double]</tspan></text>
+    </g>
+    <g
+       id="g5487-2"
+       transform="translate(-560,249.72717)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="659.17255"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-12-8"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-52-5"
+         y="675.36194"
+         x="615.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan5978"
+           x="615.97601"
+           y="675.36194">C1 ratio [double]</tspan></text>
+    </g>
+    <g
+       id="g5482-8"
+       transform="translate(-560,241.63623)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="689.19067"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-1-8-1"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-5-0-0"
+         y="705.36194"
+         x="615.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan5980"
+           x="615.97601"
+           y="705.36194">C3 ratio [double]</tspan></text>
+    </g>
+    <g
+       id="g5477-8"
+       transform="translate(-560,233.54522)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="719.20886"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-9-8-1"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-6-0-2"
+         y="735.36194"
+         x="615.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan5982"
+           x="615.97601"
+           y="735.36194">C6 ratio [double]</tspan></text>
+    </g>
+    <g
+       id="g5472-3"
+       transform="translate(-560,225.45428)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="749.22699"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-12-6-9"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-52-6-7"
+         y="765.36194"
+         x="615.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan5984"
+           x="615.97601"
+           y="765.36194">C7 ratio [double]</tspan></text>
+    </g>
+    <text
+       id="text5113-7-5"
+       y="775.49188"
+       x="122"
+       style="font-style:italic;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Italic';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       xml:space="preserve"><tspan
+         sodipodi:role="line"
+         id="tspan4525"
+         x="122"
+         y="775.49188">per cpu</tspan><tspan
+         sodipodi:role="line"
+         id="tspan4527"
+         x="122"
+         y="791.11688">memory struct</tspan><tspan
+         sodipodi:role="line"
+         id="tspan4529"
+         x="122"
+         y="806.74188">(user-space)</tspan></text>
+    <g
+       id="g5467-4"
+       transform="translate(-560,218.36395)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="778.24451"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-12-6-3-14"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-52-6-9-8"
+         y="794.36194"
+         x="615.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:11.25px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan5986"
+           x="615.97601"
+           y="794.36194">Relative ratio [double]</tspan></text>
+    </g>
+    <g
+       id="g5462-6"
+       transform="translate(-560,210.27301)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="808.26263"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-12-6-3-1-2"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-52-6-9-4-8"
+         y="824.36194"
+         x="615.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:11.25px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan6000"
+           x="615.97601"
+           y="824.36194">Rel. frequency [double]</tspan></text>
+    </g>
+    <g
+       id="g5457-3"
+       transform="translate(-560,202.182)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="838.28082"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-12-6-3-7-7"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-52-6-9-5-1"
+         y="854.36194"
+         x="619.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan5994"
+           x="619.97601"
+           y="854.36194">. . .</tspan></text>
+    </g>
+    <text
+       id="text5113-7-9-6-4"
+       y="44.878166"
+       x="-1016.6302"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.75px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       xml:space="preserve"
+       transform="rotate(-90)"><tspan
+         sodipodi:role="line"
+         id="tspan5996"
+         x="-1016.6302"
+         y="44.878166">Flip</tspan></text>
+    <text
+       id="text5113-7-9-6-5-8"
+       y="201.87817"
+       x="-878.63013"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.75px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       xml:space="preserve"
+       transform="rotate(-90)"><tspan
+         sodipodi:role="line"
+         id="tspan5998"
+         x="-878.63013"
+         y="201.87817">Flop</tspan></text>
+    <text
+       id="text5113-7-9-7-9"
+       y="819.49188"
+       x="164"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:11.25px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       xml:space="preserve"><tspan
+         sodipodi:role="line"
+         id="tspan5720-5"
+         x="164"
+         y="819.49188">x #Cores</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:italic;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:15px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Italic';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#ff0000;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="191.45776"
+       y="651.12537"
+       id="text4140-3-2-7"><tspan
+         sodipodi:role="line"
+         id="tspan5966"
+         x="191.45776"
+         y="651.12537">PMU</tspan></text>
+    <g
+       id="g5492-7-1"
+       transform="translate(19,503.81817)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="629.15436"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-9-9-4"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-6-7-5"
+         y="645.36194"
+         x="615.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan6086"
+           x="615.97601"
+           y="645.36194">Room [bitmap]</tspan></text>
+    </g>
+    <text
+       id="text5113-7-9-7-9-7"
+       y="1170.4919"
+       x="698"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:11.25px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       xml:space="preserve"><tspan
+         sodipodi:role="line"
+         id="tspan6351"
+         x="698"
+         y="1170.4919">00000000 ... 10110011</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.75px;line-height:125%;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:0.99425288;stroke:#000000;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="549.00696"
+       y="892.85663"
+       id="text4140-9-1-6-2"><tspan
+         sodipodi:role="line"
+         id="tspan4608"
+         x="549.00696"
+         y="892.85663">is Room bit @ cpu# set ?</tspan><tspan
+         sodipodi:role="line"
+         id="tspan4610"
+         x="549.00696"
+         y="910.04413">then toggle index (Flip)</tspan><tspan
+         sodipodi:role="line"
+         id="tspan4612"
+         x="549.00696"
+         y="927.23163">and clear that bit</tspan></text>
+    <ellipse
+       style="opacity:0.33000004;fill:none;fill-opacity:1;stroke:#0000ff;stroke-width:3.5;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-opacity:1"
+       id="path3336-3-6"
+       cx="413.92307"
+       cy="1247.2853"
+       rx="121.22841"
+       ry="121.22842" />
+    <g
+       id="g5497-8-5"
+       transform="translate(18,623.90912)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="599.13623"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-1-2-68"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-5-2-6"
+         y="615.36194"
+         x="615.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan6381"
+           x="615.97601"
+           y="615.36194">Avg Turbo [double]</tspan></text>
+    </g>
+    <g
+       id="g5492-7-2"
+       transform="translate(18,615.81817)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="629.15436"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-9-9-47"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-6-7-0"
+         y="645.36194"
+         x="615.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan6383"
+           x="615.97601"
+           y="645.36194">Avg C0 [double]</tspan></text>
+    </g>
+    <g
+       id="g5482-8-1"
+       transform="translate(18,599.63623)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="689.19067"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-1-8-1-8"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-5-0-0-2"
+         y="705.36194"
+         x="615.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan6387"
+           x="615.97601"
+           y="705.36194">Avg C3 [double]</tspan></text>
+    </g>
+    <g
+       id="g5477-8-8"
+       transform="translate(18,591.54522)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="719.20886"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-9-8-1-8"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-6-0-2-5"
+         y="735.36194"
+         x="615.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan6389"
+           x="615.97601"
+           y="735.36194">Avg C6 [double]</tspan></text>
+    </g>
+    <g
+       id="g5472-3-2"
+       transform="translate(18,583.45428)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="749.22699"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-12-6-9-6"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-52-6-7-6"
+         y="765.36194"
+         x="615.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan6391"
+           x="615.97601"
+           y="765.36194">Avg C7 [double]</tspan></text>
+    </g>
+    <g
+       id="g5467-4-5"
+       transform="translate(18,422.36395)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="778.24451"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-12-6-3-14-0"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-52-6-9-8-0"
+         y="794.36194"
+         x="615.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan6379"
+           x="615.97601"
+           y="794.36194">Clock.R [int]</tspan></text>
+    </g>
+    <g
+       id="g5487-2-1"
+       transform="translate(18,607.72717)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="659.17255"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-12-8-0"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-52-5-4"
+         y="675.36194"
+         x="615.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan6385"
+           x="615.97601"
+           y="675.36194">Avg C1 [double]</tspan></text>
+    </g>
+    <g
+       id="g5467-4-5-7"
+       transform="translate(18,398.36395)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="778.24451"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-12-6-3-14-0-7"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-52-6-9-8-0-2"
+         y="794.36194"
+         x="615.97601"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan6377"
+           x="615.97601"
+           y="794.36194">Clock.Q [int]</tspan></text>
+    </g>
+    <text
+       id="text5113-7-5-7"
+       y="1106.4918"
+       x="701"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       xml:space="preserve"><tspan
+         sodipodi:role="line"
+         id="tspan4566"
+         x="701"
+         y="1106.4918">average values</tspan><tspan
+         sodipodi:role="line"
+         id="tspan4568"
+         x="701"
+         y="1122.1168">(user-space)</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.75px;line-height:121.00000381%;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:0.99425288;stroke:#000000;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="524.00696"
+       y="1191.8567"
+       id="text4140-9-1-6-2-0"><tspan
+         sodipodi:role="line"
+         id="tspan4642"
+         x="524.00696"
+         y="1191.8567">divide sum by</tspan><tspan
+         sodipodi:role="line"
+         id="tspan4644"
+         x="524.00696"
+         y="1208.4941"> cores count</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.75px;line-height:121.00000381%;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:0.99425288;stroke:#000000;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="314.74194"
+       y="1166.1902"
+       id="text4140-9-8-3-9"><tspan
+         sodipodi:role="line"
+         id="tspan4652"
+         x="314.74194"
+         y="1166.1902">read perf ratios</tspan><tspan
+         sodipodi:role="line"
+         id="tspan4654"
+         x="314.74194"
+         y="1182.8276"> from cores</tspan><tspan
+         sodipodi:role="line"
+         id="tspan4656"
+         x="314.74194"
+         y="1199.4652"> (Flop mem struct)</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.75px;line-height:121.00000381%;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#0000ff;fill-opacity:0.99425288;stroke:#00c440;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="309.69946"
+       y="1251.1902"
+       id="text4140-0-5"><tspan
+         sodipodi:role="line"
+         id="tspan3713"
+         x="309.69946"
+         y="1251.1902">test and wait</tspan><tspan
+         sodipodi:role="line"
+         id="tspan3715"
+         x="309.69946"
+         y="1267.8276"> until Room integer</tspan><tspan
+         sodipodi:role="line"
+         id="tspan3717"
+         x="309.69946"
+         y="1284.4652"> is cleared</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.75px;line-height:121.00000381%;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:0.99425288;stroke:#000000;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="354.74194"
+       y="1345.1902"
+       id="text4140-9-8-3-9-4"><tspan
+         sodipodi:role="line"
+         id="tspan3709"
+         x="354.74194"
+         y="1345.1902">set all Room</tspan><tspan
+         sodipodi:role="line"
+         id="tspan3711"
+         x="354.74194"
+         y="1361.8276"> bits to 1</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.75px;line-height:121.00000381%;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:0.99425288;stroke:#000000;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="424.20685"
+       y="1122.6456"
+       id="text4140-9-8-3-9-8"><tspan
+         sodipodi:role="line"
+         id="tspan3689"
+         x="424.20685"
+         y="1122.6456">sum perf ratios</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.75px;line-height:121.00000381%;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:0.99425288;stroke:#000000;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="505.20685"
+       y="1288.6456"
+       id="text4140-9-8-3-9-2"><tspan
+         sodipodi:role="line"
+         id="tspan3701"
+         x="505.20685"
+         y="1288.6456">store average ratios in</tspan><tspan
+         sodipodi:role="line"
+         id="tspan3703"
+         x="505.20685"
+         y="1305.2831"> processor mem struct</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:italic;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:11.25px;line-height:110.00000238%;font-family:Sans;-inkscape-font-specification:'Sans, Italic';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;opacity:0.66000001;fill:#ff0000;fill-opacity:1;stroke:#0000ff;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="543.44177"
+       y="1138.6278"
+       id="text4140-3-0-4"><tspan
+         sodipodi:role="line"
+         id="tspan4682"
+         x="543.44177"
+         y="1138.6278">&quot; In user-space,</tspan><tspan
+         sodipodi:role="line"
+         x="543.44177"
+         y="1151.0028"
+         id="tspan3611"> an aggregating</tspan><tspan
+         sodipodi:role="line"
+         x="543.44177"
+         y="1163.3778"
+         id="tspan3615"> thread&quot;</tspan></text>
+    <g
+       id="g5502-8"
+       transform="translate(-164.88317,12.80951)"
+       style="fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-opacity:1">
+      <rect
+         y="553.11804"
+         x="609.75604"
+         height="22.28878"
+         width="138.4879"
+         id="rect5111-2"
+         style="color:#000000;display:inline;overflow:visible;visibility:visible;fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#400040;stroke-width:1.51210582;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:0;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;marker:none;enable-background:accumulate" />
+      <text
+         id="text5113-9"
+         y="567.7619"
+         x="621.27643"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:start;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke:#400040;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+         xml:space="preserve"><tspan
+           sodipodi:role="line"
+           id="tspan4485"
+           x="621.27643"
+           y="567.7619">CPU pinned timer</tspan></text>
+    </g>
+    <text
+       id="text5113-7-53"
+       y="530.29712"
+       x="514.37225"
+       style="font-style:italic;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:12.5px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Italic';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       xml:space="preserve"><tspan
+         sodipodi:role="line"
+         id="tspan4461"
+         x="514.37225"
+         y="530.29712">SLAB memory</tspan><tspan
+         sodipodi:role="line"
+         id="tspan4463"
+         x="514.37225"
+         y="545.92212">(Private kernel space)</tspan></text>
+    <text
+       id="text5113-7-9-7-5"
+       y="560.86615"
+       x="551.32892"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:11.25px;line-height:125%;font-family:Sans;-inkscape-font-specification:'Sans, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:1;stroke:none;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       xml:space="preserve"><tspan
+         sodipodi:role="line"
+         id="tspan5720-9"
+         x="551.32892"
+         y="560.86615">x #Cores</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:13.75px;line-height:125%;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-align:center;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:middle;fill:#000000;fill-opacity:0.99425288;stroke:#000000;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="73.595871"
+       y="640.30334"
+       id="text4140-9-3"><tspan
+         sodipodi:role="line"
+         id="tspan6128-7"
+         x="73.595871"
+         y="640.30334">restart</tspan><tspan
+         sodipodi:role="line"
+         x="73.595871"
+         y="657.49084"
+         id="tspan3648">timer</tspan></text>
+  </g>
+</svg>
