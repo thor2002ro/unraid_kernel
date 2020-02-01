@@ -237,4 +237,6 @@
 #error Unsupported Xtensa ABI
 #endif
 
+#define __XTENSA_HANDLER	.section ".handler.text", "ax"
+
 #endif /* _XTENSA_ASMMACRO_H */
