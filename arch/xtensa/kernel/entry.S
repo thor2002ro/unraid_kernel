@@ -940,6 +940,7 @@ ENDPROC(unrecoverable_exception)
 /* -------------------------- FAST EXCEPTION HANDLERS ----------------------- */
 
 	__XTENSA_HANDLER
+	.literal_position
 
 /*
  * Fast-handler for alloca exceptions
