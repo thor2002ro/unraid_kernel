@@ -115,7 +115,7 @@ SECTIONS
     SECTION_VECTOR2 (.UserExceptionVector.text, USER_VECTOR_VADDR)
     SECTION_VECTOR2 (.DoubleExceptionVector.text, DOUBLEEXC_VECTOR_VADDR)
 
-    *(.handler.text)
+    *(.exception.text)
 #endif
 
     IRQENTRY_TEXT
@@ -196,8 +196,8 @@ SECTIONS
 		   .DoubleExceptionVector.text);
     RELOCATE_ENTRY(_DebugInterruptVector_text,
 		   .DebugInterruptVector.text);
-    RELOCATE_ENTRY(_handler_text,
-		   .handler.text);
+    RELOCATE_ENTRY(_exception_text,
+		   .exception.text);
 #endif
 #ifdef CONFIG_XIP_KERNEL
     RELOCATE_ENTRY(_xip_data, .data);
@@ -306,12 +306,12 @@ SECTIONS
 
 #endif
 #if !MERGED_VECTORS
-  SECTION_VECTOR4 (_handler_text,
-		  .handler.text,
+  SECTION_VECTOR4 (_exception_text,
+		  .exception.text,
 		  ,
 		  LAST)
 #undef LAST
-#define LAST .handler.text
+#define LAST .exception.text
 
 #endif
   . = (LOADADDR(LAST) + SIZEOF(LAST) + 3) & ~ 3;
