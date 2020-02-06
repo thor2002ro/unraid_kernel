@@ -99,30 +99,6 @@ enum fscache_checkaux nfs_fscache_inode_check_aux(void *cookie_netfs_data,
 }
 
 /*
- * Get an extra reference on a read context.
- * - This function can be absent if the completion function doesn't require a
- *   context.
- * - The read context is passed back to NFS in the event that a data read on the
- *   cache fails with EIO - in which case the server must be contacted to
- *   retrieve the data, which requires the read context for security.
- */
-static void nfs_fh_get_context(void *cookie_netfs_data, void *context)
-{
-	get_nfs_open_context(context);
-}
-
-/*
- * Release an extra reference on a read context.
- * - This function can be absent if the completion function doesn't require a
- *   context.
- */
-static void nfs_fh_put_context(void *cookie_netfs_data, void *context)
-{
-	if (context)
-		put_nfs_open_context(context);
-}
-
-/*
  * Define the inode object for FS-Cache.  This is used to describe an inode
  * object to fscache_acquire_cookie().  It is keyed by the NFS file handle for
  * an inode.
@@ -135,6 +111,4 @@ const struct fscache_cookie_def nfs_fscache_inode_object_def = {
 	.name		= "NFS.fh",
 	.type		= FSCACHE_COOKIE_TYPE_DATAFILE,
 	.check_aux	= nfs_fscache_inode_check_aux,
-	.get_context	= nfs_fh_get_context,
-	.put_context	= nfs_fh_put_context,
 };
