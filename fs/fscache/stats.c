@@ -127,7 +127,6 @@ atomic_t fscache_n_cop_allocate_page;
 atomic_t fscache_n_cop_allocate_pages;
 atomic_t fscache_n_cop_write_page;
 atomic_t fscache_n_cop_uncache_page;
-atomic_t fscache_n_cop_dissociate_pages;
 
 atomic_t fscache_n_cache_no_space_reject;
 atomic_t fscache_n_cache_stale_objects;
@@ -271,14 +270,13 @@ int fscache_stats_show(struct seq_file *m, void *v)
 		   atomic_read(&fscache_n_cop_put_object),
 		   atomic_read(&fscache_n_cop_attr_changed),
 		   atomic_read(&fscache_n_cop_sync_cache));
-	seq_printf(m, "CacheOp: rap=%d ras=%d alp=%d als=%d wrp=%d ucp=%d dsp=%d\n",
+	seq_printf(m, "CacheOp: rap=%d ras=%d alp=%d als=%d wrp=%d ucp=%d\n",
 		   atomic_read(&fscache_n_cop_read_or_alloc_page),
 		   atomic_read(&fscache_n_cop_read_or_alloc_pages),
 		   atomic_read(&fscache_n_cop_allocate_page),
 		   atomic_read(&fscache_n_cop_allocate_pages),
 		   atomic_read(&fscache_n_cop_write_page),
-		   atomic_read(&fscache_n_cop_uncache_page),
-		   atomic_read(&fscache_n_cop_dissociate_pages));
+		   atomic_read(&fscache_n_cop_uncache_page));
 	seq_printf(m, "CacheEv: nsp=%d stl=%d rtr=%d cul=%d\n",
 		   atomic_read(&fscache_n_cache_no_space_reject),
 		   atomic_read(&fscache_n_cache_stale_objects),
