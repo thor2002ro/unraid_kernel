@@ -94,8 +94,9 @@ static int __gt_park(struct intel_wakeref *wf)
 		intel_uncore_forcewake_put(&i915->uncore, FORCEWAKE_ALL);
 	}
 
+	/* Defer dropping the display power well for 100ms, it's slow! */
 	GEM_BUG_ON(!wakeref);
-	intel_display_power_put(i915, POWER_DOMAIN_GT_IRQ, wakeref);
+	intel_display_power_put_async(i915, POWER_DOMAIN_GT_IRQ, wakeref);
 
 	i915_globals_park();
 
@@ -105,7 +106,6 @@ static int __gt_park(struct intel_wakeref *wf)
 static const struct intel_wakeref_ops wf_ops = {
 	.get = __gt_unpark,
 	.put = __gt_park,
-	.flags = INTEL_WAKEREF_PUT_ASYNC,
 };
 
 void intel_gt_pm_init_early(struct intel_gt *gt)
@@ -272,7 +272,7 @@ void intel_gt_suspend_prepare(struct intel_gt *gt)
 
 static suspend_state_t pm_suspend_target(void)
 {
-#if IS_ENABLED(CONFIG_PM_SLEEP)
+#if IS_ENABLED(CONFIG_SUSPEND) && IS_ENABLED(CONFIG_PM_SLEEP)
 	return pm_suspend_target_state;
 #else
 	return PM_SUSPEND_TO_IDLE;

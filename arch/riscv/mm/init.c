@@ -46,6 +46,37 @@ static void setup_zero_page(void)
 	memset((void *)empty_zero_page, 0, PAGE_SIZE);
 }
 
+#ifdef CONFIG_DEBUG_VM
+static inline void print_mlk(char *name, unsigned long b, unsigned long t)
+{
+	pr_notice("%12s : 0x%08lx - 0x%08lx   (%4ld kB)\n", name, b, t,
+		  (((t) - (b)) >> 10));
+}
+
+static inline void print_mlm(char *name, unsigned long b, unsigned long t)
+{
+	pr_notice("%12s : 0x%08lx - 0x%08lx   (%4ld MB)\n", name, b, t,
+		  (((t) - (b)) >> 20));
+}
+
+static void print_vm_layout(void)
+{
+	pr_notice("Virtual kernel memory layout:\n");
+	print_mlk("fixmap", (unsigned long)FIXADDR_START,
+		  (unsigned long)FIXADDR_TOP);
+	print_mlm("pci io", (unsigned long)PCI_IO_START,
+		  (unsigned long)PCI_IO_END);
+	print_mlm("vmemmap", (unsigned long)VMEMMAP_START,
+		  (unsigned long)VMEMMAP_END);
+	print_mlm("vmalloc", (unsigned long)VMALLOC_START,
+		  (unsigned long)VMALLOC_END);
+	print_mlm("lowmem", (unsigned long)PAGE_OFFSET,
+		  (unsigned long)high_memory);
+}
+#else
+static void print_vm_layout(void) { }
+#endif /* CONFIG_DEBUG_VM */
+
 void __init mem_init(void)
 {
 #ifdef CONFIG_FLATMEM
@@ -56,6 +87,7 @@ void __init mem_init(void)
 	memblock_free_all();
 
 	mem_init_print_info(NULL);
+	print_vm_layout();
 }
 
 #ifdef CONFIG_BLK_DEV_INITRD
@@ -67,13 +99,13 @@ static void __init setup_initrd(void)
 		pr_info("initrd not found or empty");
 		goto disable;
 	}
-	if (__pa(initrd_end) > PFN_PHYS(max_low_pfn)) {
+	if (__pa_symbol(initrd_end) > PFN_PHYS(max_low_pfn)) {
 		pr_err("initrd extends beyond end of memory");
 		goto disable;
 	}
 
 	size = initrd_end - initrd_start;
-	memblock_reserve(__pa(initrd_start), size);
+	memblock_reserve(__pa_symbol(initrd_start), size);
 	initrd_below_start_ok = 1;
 
 	pr_info("Initial ramdisk at: 0x%p (%lu bytes)\n",
@@ -92,8 +124,8 @@ void __init setup_bootmem(void)
 {
 	struct memblock_region *reg;
 	phys_addr_t mem_size = 0;
-	phys_addr_t vmlinux_end = __pa(&_end);
-	phys_addr_t vmlinux_start = __pa(&_start);
+	phys_addr_t vmlinux_end = __pa_symbol(&_end);
+	phys_addr_t vmlinux_start = __pa_symbol(&_start);
 
 	/* Find the memory region containing the kernel */
 	for_each_memblock(memory, reg) {
@@ -413,7 +445,7 @@ static void __init setup_vm_final(void)
 
 	/* Setup swapper PGD for fixmap */
 	create_pgd_mapping(swapper_pg_dir, FIXADDR_START,
-			   __pa(fixmap_pgd_next),
+			   __pa_symbol(fixmap_pgd_next),
 			   PGDIR_SIZE, PAGE_TABLE);
 
 	/* Map all memory banks */
@@ -442,7 +474,7 @@ static void __init setup_vm_final(void)
 	clear_fixmap(FIX_PMD);
 
 	/* Move to swapper page table */
-	csr_write(CSR_SATP, PFN_DOWN(__pa(swapper_pg_dir)) | SATP_MODE);
+	csr_write(CSR_SATP, PFN_DOWN(__pa_symbol(swapper_pg_dir)) | SATP_MODE);
 	local_flush_tlb_all();
 }
 #else

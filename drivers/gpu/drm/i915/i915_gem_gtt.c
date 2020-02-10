@@ -1177,6 +1177,7 @@ gen8_ppgtt_insert_pte(struct i915_ppgtt *ppgtt,
 	pd = i915_pd_entry(pdp, gen8_pd_index(idx, 2));
 	vaddr = kmap_atomic_px(i915_pt_entry(pd, gen8_pd_index(idx, 1)));
 	do {
+		GEM_BUG_ON(iter->sg->length < I915_GTT_PAGE_SIZE);
 		vaddr[gen8_pd_index(idx, 0)] = pte_encode | iter->dma;
 
 		iter->dma += I915_GTT_PAGE_SIZE;
@@ -1660,6 +1661,7 @@ static void gen6_ppgtt_insert_entries(struct i915_address_space *vm,
 
 	vaddr = kmap_atomic_px(i915_pt_entry(pd, act_pt));
 	do {
+		GEM_BUG_ON(iter.sg->length < I915_GTT_PAGE_SIZE);
 		vaddr[act_pte] = pte_encode | GEN6_PTE_ADDR_ENCODE(iter.dma);
 
 		iter.dma += I915_GTT_PAGE_SIZE;
@@ -3304,7 +3306,7 @@ void i915_ggtt_disable_guc(struct i915_ggtt *ggtt)
 
 static void ggtt_restore_mappings(struct i915_ggtt *ggtt)
 {
-	struct i915_vma *vma, *vn;
+	struct i915_vma *vma;
 	bool flush = false;
 	int open;
 
@@ -3319,13 +3321,10 @@ static void ggtt_restore_mappings(struct i915_ggtt *ggtt)
 	open = atomic_xchg(&ggtt->vm.open, 0);
 
 	/* clflush objects bound into the GGTT and rebind them. */
-	list_for_each_entry_safe(vma, vn, &ggtt->vm.bound_list, vm_link) {
+	list_for_each_entry(vma, &ggtt->vm.bound_list, vm_link) {
 		struct drm_i915_gem_object *obj = vma->obj;
 
 		if (!i915_vma_is_bound(vma, I915_VMA_GLOBAL_BIND))
-			continue;
-
-		if (!__i915_vma_unbind(vma))
 			continue;
 
 		clear_bit(I915_VMA_GLOBAL_BIND_BIT, __i915_vma_flags(vma));
