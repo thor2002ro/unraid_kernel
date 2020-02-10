@@ -37,7 +37,8 @@ struct lockdep_map __mmu_notifier_invalidate_range_start_map = {
 struct mmu_notifier_subscriptions {
 	/* all mmu notifiers registered in this mm are queued in this list */
 	struct hlist_head list;
-	bool has_itree;
+	u8 has_itree;
+	u8 no_blocking;
 	/* to serialize the list modifications and hlist_unhashed */
 	spinlock_t lock;
 	unsigned long invalidate_seq;
@@ -475,6 +476,10 @@ static int mn_hlist_invalidate_range_start(
 	int ret = 0;
 	int id;
 
+	if (unlikely(subscriptions->no_blocking &&
+		     !mmu_notifier_range_blockable(range)))
+		return -EAGAIN;
+
 	id = srcu_read_lock(&srcu);
 	hlist_for_each_entry_rcu(subscription, &subscriptions->list, hlist) {
 		const struct mmu_notifier_ops *ops = subscription->ops;
@@ -591,6 +596,48 @@ void __mmu_notifier_invalidate_range(struct mm_struct *mm,
 }
 
 /*
+ * Add a hlist subscription to the list. The list is kept sorted by the
+ * existence of ops->invalidate_range_end. If there is more than one
+ * invalidate_range_end in the list then this process can no longer support
+ * non-blocking invalidation.
+ *
+ * non-blocking invalidation is problematic as a requirement to block results
+ * in the invalidation being aborted, however due to the use of RCU we have no
+ * reliable way to ensure that every successful invalidate_range_start()
+ * results in a call to invalidate_range_end().
+ *
+ * Thus to support blocking only the last subscription in the list can have
+ * invalidate_range_end() set.
+ */
+static void
+mn_hlist_add_subscription(struct mmu_notifier_subscriptions *subscriptions,
+			  struct mmu_notifier *subscription)
+{
+	struct mmu_notifier *last = NULL;
+	struct mmu_notifier *itr;
+
+	hlist_for_each_entry(itr, &subscriptions->list, hlist)
+		last = itr;
+
+	if (last && last->ops->invalidate_range_end &&
+	    subscription->ops->invalidate_range_end) {
+		subscriptions->no_blocking = true;
+		pr_warn_once(
+			"%s (%d) created two mmu_notifier's with invalidate_range_end(): %ps and %ps, non-blocking notifiers disabled\n",
+			current->comm, current->pid,
+			last->ops->invalidate_range_end,
+			subscription->ops->invalidate_range_end);
+	}
+	if (!last || !last->ops->invalidate_range_end)
+		subscriptions->no_blocking = false;
+
+	if (last && subscription->ops->invalidate_range_end)
+		hlist_add_behind_rcu(&subscription->hlist, &last->hlist);
+	else
+		hlist_add_head_rcu(&subscription->hlist, &subscriptions->list);
+}
+
+/*
  * Same as mmu_notifier_register but here the caller must hold the mmap_sem in
  * write mode. A NULL mn signals the notifier is being registered for itree
  * mode.
@@ -660,8 +707,8 @@ int __mmu_notifier_register(struct mmu_notifier *subscription,
 		subscription->users = 1;
 
 		spin_lock(&mm->notifier_subscriptions->lock);
-		hlist_add_head_rcu(&subscription->hlist,
-				   &mm->notifier_subscriptions->list);
+		mn_hlist_add_subscription(mm->notifier_subscriptions,
+					  subscription);
 		spin_unlock(&mm->notifier_subscriptions->lock);
 	} else
 		mm->notifier_subscriptions->has_itree = true;
