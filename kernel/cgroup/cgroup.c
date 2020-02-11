@@ -3055,8 +3055,6 @@ static int cgroup_apply_control_enable(struct cgroup *cgrp)
 		for_each_subsys(ss, ssid) {
 			struct cgroup_subsys_state *css = cgroup_css(dsct, ss);
 
-			WARN_ON_ONCE(css && percpu_ref_is_dying(&css->refcnt));
-
 			if (!(cgroup_ss_mask(dsct) & (1 << ss->id)))
 				continue;
 
@@ -3065,6 +3063,8 @@ static int cgroup_apply_control_enable(struct cgroup *cgrp)
 				if (IS_ERR(css))
 					return PTR_ERR(css);
 			}
+
+			WARN_ON_ONCE(percpu_ref_is_dying(&css->refcnt));
 
 			if (css_visible(css)) {
 				ret = css_populate_dir(css);
@@ -3101,10 +3101,10 @@ static void cgroup_apply_control_disable(struct cgroup *cgrp)
 		for_each_subsys(ss, ssid) {
 			struct cgroup_subsys_state *css = cgroup_css(dsct, ss);
 
-			WARN_ON_ONCE(css && percpu_ref_is_dying(&css->refcnt));
-
 			if (!css)
 				continue;
+
+			WARN_ON_ONCE(percpu_ref_is_dying(&css->refcnt));
 
 			if (css->parent &&
 			    !(cgroup_ss_mask(dsct) & (1 << ss->id))) {
@@ -3392,7 +3392,8 @@ static ssize_t cgroup_type_write(struct kernfs_open_file *of, char *buf,
 	if (strcmp(strstrip(buf), "threaded"))
 		return -EINVAL;
 
-	cgrp = cgroup_kn_lock_live(of->kn, false);
+	/* drain dying csses before we re-apply (threaded) subtree control */
+	cgrp = cgroup_kn_lock_live(of->kn, true);
 	if (!cgrp)
 		return -ENOENT;
 
@@ -6288,12 +6289,13 @@ void cgroup_sk_free(struct sock_cgroup_data *skcd)
 
 #ifdef CONFIG_CGROUP_BPF
 int cgroup_bpf_attach(struct cgroup *cgrp, struct bpf_prog *prog,
-		      enum bpf_attach_type type, u32 flags)
+		      struct bpf_prog *replace_prog, enum bpf_attach_type type,
+		      u32 flags)
 {
 	int ret;
 
 	mutex_lock(&cgroup_mutex);
-	ret = __cgroup_bpf_attach(cgrp, prog, type, flags);
+	ret = __cgroup_bpf_attach(cgrp, prog, replace_prog, type, flags);
 	mutex_unlock(&cgroup_mutex);
 	return ret;
 }

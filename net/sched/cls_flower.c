@@ -1481,7 +1481,7 @@ static int fl_init_mask_hashtable(struct fl_flow_mask *mask)
 }
 
 #define FL_KEY_MEMBER_OFFSET(member) offsetof(struct fl_flow_key, member)
-#define FL_KEY_MEMBER_SIZE(member) FIELD_SIZEOF(struct fl_flow_key, member)
+#define FL_KEY_MEMBER_SIZE(member) sizeof_field(struct fl_flow_key, member)
 
 #define FL_KEY_IS_MASKED(mask, member)						\
 	memchr_inv(((char *)mask) + FL_KEY_MEMBER_OFFSET(member),		\
@@ -2765,12 +2765,28 @@ nla_put_failure:
 	return -EMSGSIZE;
 }
 
-static void fl_bind_class(void *fh, u32 classid, unsigned long cl)
+static void fl_bind_class(void *fh, u32 classid, unsigned long cl, void *q,
+			  unsigned long base)
 {
 	struct cls_fl_filter *f = fh;
 
-	if (f && f->res.classid == classid)
-		f->res.class = cl;
+	if (f && f->res.classid == classid) {
+		if (cl)
+			__tcf_bind_filter(q, &f->res, base);
+		else
+			__tcf_unbind_filter(q, &f->res);
+	}
+}
+
+static bool fl_delete_empty(struct tcf_proto *tp)
+{
+	struct cls_fl_head *head = fl_head_dereference(tp);
+
+	spin_lock(&tp->lock);
+	tp->deleting = idr_is_empty(&head->handle_idr);
+	spin_unlock(&tp->lock);
+
+	return tp->deleting;
 }
 
 static struct tcf_proto_ops cls_fl_ops __read_mostly = {
@@ -2782,6 +2798,7 @@ static struct tcf_proto_ops cls_fl_ops __read_mostly = {
 	.put		= fl_put,
 	.change		= fl_change,
 	.delete		= fl_delete,
+	.delete_empty	= fl_delete_empty,
 	.walk		= fl_walk,
 	.reoffload	= fl_reoffload,
 	.hw_add		= fl_hw_add,

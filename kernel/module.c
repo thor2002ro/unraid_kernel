@@ -2031,49 +2031,6 @@ static void module_enable_nx(const struct module *mod)
 	frob_writable_data(&mod->init_layout, set_memory_nx);
 }
 
-/* Iterate through all modules and set each module's text as RW */
-void set_all_modules_text_rw(void)
-{
-	struct module *mod;
-
-	if (!rodata_enabled)
-		return;
-
-	mutex_lock(&module_mutex);
-	list_for_each_entry_rcu(mod, &modules, list) {
-		if (mod->state == MODULE_STATE_UNFORMED)
-			continue;
-
-		frob_text(&mod->core_layout, set_memory_rw);
-		frob_text(&mod->init_layout, set_memory_rw);
-	}
-	mutex_unlock(&module_mutex);
-}
-
-/* Iterate through all modules and set each module's text as RO */
-void set_all_modules_text_ro(void)
-{
-	struct module *mod;
-
-	if (!rodata_enabled)
-		return;
-
-	mutex_lock(&module_mutex);
-	list_for_each_entry_rcu(mod, &modules, list) {
-		/*
-		 * Ignore going modules since it's possible that ro
-		 * protection has already been disabled, otherwise we'll
-		 * run into protection faults at module deallocation.
-		 */
-		if (mod->state == MODULE_STATE_UNFORMED ||
-			mod->state == MODULE_STATE_GOING)
-			continue;
-
-		frob_text(&mod->core_layout, set_memory_ro);
-		frob_text(&mod->init_layout, set_memory_ro);
-	}
-	mutex_unlock(&module_mutex);
-}
 #else /* !CONFIG_STRICT_MODULE_RWX */
 static void module_enable_nx(const struct module *mod) { }
 #endif /*  CONFIG_STRICT_MODULE_RWX */
@@ -3730,6 +3687,7 @@ static int complete_formation(struct module *mod, struct load_info *info)
 
 	module_enable_ro(mod, false);
 	module_enable_nx(mod);
+	module_enable_x(mod);
 
 	/* Mark state as coming so strong_try_module_get() ignores us,
 	 * but kallsyms etc. can see us. */
@@ -3751,11 +3709,6 @@ static int prepare_coming_module(struct module *mod)
 	err = klp_module_coming(mod);
 	if (err)
 		return err;
-
-	/* Make module executable after ftrace is enabled */
-	mutex_lock(&module_mutex);
-	module_enable_x(mod);
-	mutex_unlock(&module_mutex);
 
 	blocking_notifier_call_chain(&module_notify_list,
 				     MODULE_STATE_COMING, mod);

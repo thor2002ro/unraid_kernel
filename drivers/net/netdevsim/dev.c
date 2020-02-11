@@ -53,7 +53,7 @@ static ssize_t nsim_dev_take_snapshot_write(struct file *file,
 
 	get_random_bytes(dummy_data, NSIM_DEV_DUMMY_REGION_SIZE);
 
-	id = devlink_region_shapshot_id_get(priv_to_devlink(nsim_dev));
+	id = devlink_region_snapshot_id_get(priv_to_devlink(nsim_dev));
 	err = devlink_region_snapshot_create(nsim_dev->dummy_region,
 					     dummy_data, id, kfree);
 	if (err) {
@@ -270,7 +270,7 @@ struct nsim_trap_data {
 };
 
 /* All driver-specific traps must be documented in
- * Documentation/networking/devlink-trap-netdevsim.rst
+ * Documentation/networking/devlink/netdevsim.rst
  */
 enum {
 	NSIM_TRAP_ID_BASE = DEVLINK_TRAP_GENERIC_ID_MAX,

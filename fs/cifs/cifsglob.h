@@ -1061,7 +1061,7 @@ cap_unix(struct cifs_ses *ses)
 struct cached_fid {
 	bool is_valid:1;	/* Do we have a useable root fid */
 	bool file_all_info_is_valid:1;
-
+	bool has_lease:1;
 	struct kref refcount;
 	struct cifs_fid *fid;
 	struct mutex fid_mutex;
@@ -1588,6 +1588,7 @@ struct mid_q_entry {
 	mid_callback_t *callback; /* call completion callback */
 	mid_handle_t *handle; /* call handle mid callback */
 	void *callback_data;	  /* general purpose pointer for callback */
+	struct task_struct *creator;
 	void *resp_buf;		/* pointer to received SMB header */
 	unsigned int resp_buf_size;
 	int mid_state;	/* wish this were enum but can not pass to wait_event */
@@ -1693,6 +1694,7 @@ struct cifs_fattr {
 	struct timespec64 cf_atime;
 	struct timespec64 cf_mtime;
 	struct timespec64 cf_ctime;
+	u32             cf_cifstag;
 };
 
 static inline void free_dfs_info_param(struct dfs_info3_param *param)

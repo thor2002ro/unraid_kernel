@@ -70,6 +70,8 @@ extern int smb3_handle_read_data(struct TCP_Server_Info *server,
 extern int open_shroot(unsigned int xid, struct cifs_tcon *tcon,
 			struct cifs_fid *pfid);
 extern void close_shroot(struct cached_fid *cfid);
+extern void close_shroot_lease(struct cached_fid *cfid);
+extern void close_shroot_lease_locked(struct cached_fid *cfid);
 extern void move_smb2_info_to_cifs(FILE_ALL_INFO *dst,
 				   struct smb2_file_all_info *src);
 extern int smb2_query_path_info(const unsigned int xid, struct cifs_tcon *tcon,
@@ -195,6 +197,11 @@ extern int SMB2_echo(struct TCP_Server_Info *server);
 extern int SMB2_query_directory(const unsigned int xid, struct cifs_tcon *tcon,
 				u64 persistent_fid, u64 volatile_fid, int index,
 				struct cifs_search_info *srch_inf);
+extern int SMB2_query_directory_init(unsigned int xid, struct cifs_tcon *tcon,
+				     struct smb_rqst *rqst,
+				     u64 persistent_fid, u64 volatile_fid,
+				     int index, int info_level);
+extern void SMB2_query_directory_free(struct smb_rqst *rqst);
 extern int SMB2_set_eof(const unsigned int xid, struct cifs_tcon *tcon,
 			u64 persistent_fid, u64 volatile_fid, u32 pid,
 			__le64 *eof);

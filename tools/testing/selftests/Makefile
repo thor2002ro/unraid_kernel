@@ -32,6 +32,7 @@ TARGETS += memory-hotplug
 TARGETS += mount
 TARGETS += mqueue
 TARGETS += net
+TARGETS += net/mptcp
 TARGETS += netfilter
 TARGETS += networking/timestamping
 TARGETS += nsfs
@@ -40,6 +41,7 @@ TARGETS += powerpc
 TARGETS += proc
 TARGETS += pstore
 TARGETS += ptrace
+TARGETS += openat2
 TARGETS += rseq
 TARGETS += rtc
 TARGETS += seccomp
@@ -50,6 +52,7 @@ TARGETS += splice
 TARGETS += static_keys
 TARGETS += sync
 TARGETS += sysctl
+TARGETS += timens
 ifneq (1, $(quicktest))
 TARGETS += timers
 endif

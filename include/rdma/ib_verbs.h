@@ -2832,6 +2832,11 @@ int rdma_user_mmap_io(struct ib_ucontext *ucontext, struct vm_area_struct *vma,
 int rdma_user_mmap_entry_insert(struct ib_ucontext *ucontext,
 				struct rdma_user_mmap_entry *entry,
 				size_t length);
+int rdma_user_mmap_entry_insert_range(struct ib_ucontext *ucontext,
+				      struct rdma_user_mmap_entry *entry,
+				      size_t length, u32 min_pgoff,
+				      u32 max_pgoff);
+
 struct rdma_user_mmap_entry *
 rdma_user_mmap_entry_get_pgoff(struct ib_ucontext *ucontext,
 			       unsigned long pgoff);
@@ -4148,6 +4153,15 @@ static inline void ib_dma_free_coherent(struct ib_device *dev,
 	dma_free_coherent(dev->dma_device, size, cpu_addr, dma_handle);
 }
 
+/* ib_reg_user_mr - register a memory region for virtual addresses from kernel
+ * space. This function should be called when 'current' is the owning MM.
+ */
+struct ib_mr *ib_reg_user_mr(struct ib_pd *pd, u64 start, u64 length,
+			     u64 virt_addr, int mr_access_flags);
+
+/* ib_advise_mr -  give an advice about an address range in a memory region */
+int ib_advise_mr(struct ib_pd *pd, enum ib_uverbs_advise_mr_advice advice,
+		 u32 flags, struct ib_sge *sg_list, u32 num_sge);
 /**
  * ib_dereg_mr_user - Deregisters a memory region and removes it from the
  *   HCA translation table.

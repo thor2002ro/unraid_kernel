@@ -69,6 +69,7 @@ struct rseq;
 union bpf_attr;
 struct io_uring_params;
 struct clone_args;
+struct open_how;
 
 #include <linux/types.h>
 #include <linux/aio_abi.h>
@@ -439,6 +440,8 @@ asmlinkage long sys_fchownat(int dfd, const char __user *filename, uid_t user,
 asmlinkage long sys_fchown(unsigned int fd, uid_t user, gid_t group);
 asmlinkage long sys_openat(int dfd, const char __user *filename, int flags,
 			   umode_t mode);
+asmlinkage long sys_openat2(int dfd, const char __user *filename,
+			    struct open_how *how, size_t size);
 asmlinkage long sys_close(unsigned int fd);
 asmlinkage long sys_vhangup(void);
 
@@ -1231,8 +1234,6 @@ asmlinkage long sys_ni_syscall(void);
  * the ksys_xyzyyz() functions prototyped below.
  */
 
-int ksys_mount(const char __user *dev_name, const char __user *dir_name,
-	       const char __user *type, unsigned long flags, void __user *data);
 int ksys_umount(char __user *name, int flags);
 int ksys_dup(unsigned int fildes);
 int ksys_chroot(const char __user *filename);

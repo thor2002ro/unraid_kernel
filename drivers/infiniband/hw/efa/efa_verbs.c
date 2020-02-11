@@ -145,7 +145,7 @@ static inline bool is_rdma_read_cap(struct efa_dev *dev)
 }
 
 #define field_avail(x, fld, sz) (offsetof(typeof(x), fld) + \
-				 FIELD_SIZEOF(typeof(x), fld) <= (sz))
+				 sizeof_field(typeof(x), fld) <= (sz))
 
 #define is_reserved_cleared(reserved) \
 	!memchr_inv(reserved, 0, sizeof(reserved))
@@ -1358,7 +1358,7 @@ struct ib_mr *efa_reg_mr(struct ib_pd *ibpd, u64 start, u64 length,
 	int inline_size;
 	int err;
 
-	if (udata->inlen &&
+	if (udata && udata->inlen &&
 	    !ib_is_udata_cleared(udata, 0, sizeof(udata->inlen))) {
 		ibdev_dbg(&dev->ibdev,
 			  "Incompatible ABI params, udata not cleared\n");
@@ -1384,7 +1384,7 @@ struct ib_mr *efa_reg_mr(struct ib_pd *ibpd, u64 start, u64 length,
 		goto err_out;
 	}
 
-	mr->umem = ib_umem_get(udata, start, length, access_flags);
+	mr->umem = ib_umem_get(ibpd->device, start, length, access_flags);
 	if (IS_ERR(mr->umem)) {
 		err = PTR_ERR(mr->umem);
 		ibdev_dbg(&dev->ibdev,

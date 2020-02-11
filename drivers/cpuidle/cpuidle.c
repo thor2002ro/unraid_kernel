@@ -121,6 +121,9 @@ void cpuidle_use_deepest_state(u64 latency_limit_ns)
  * cpuidle_find_deepest_state - Find the deepest available idle state.
  * @drv: cpuidle driver for the given CPU.
  * @dev: cpuidle device for the given CPU.
+ * @latency_limit_ns: Idle state exit latency limit
+ *
+ * Return: the index of the deepest available idle state.
  */
 int cpuidle_find_deepest_state(struct cpuidle_driver *drv,
 			       struct cpuidle_device *dev,
@@ -381,7 +384,8 @@ u64 cpuidle_poll_time(struct cpuidle_driver *drv,
 		if (dev->states_usage[i].disable)
 			continue;
 
-		limit_ns = (u64)drv->states[i].target_residency_ns;
+		limit_ns = drv->states[i].target_residency_ns;
+		break;
 	}
 
 	dev->poll_limit_ns = limit_ns;
@@ -571,9 +575,13 @@ static int __cpuidle_register_device(struct cpuidle_device *dev)
 	if (!try_module_get(drv->owner))
 		return -EINVAL;
 
-	for (i = 0; i < drv->state_count; i++)
+	for (i = 0; i < drv->state_count; i++) {
 		if (drv->states[i].flags & CPUIDLE_FLAG_UNUSABLE)
 			dev->states_usage[i].disable |= CPUIDLE_STATE_DISABLED_BY_DRIVER;
+
+		if (drv->states[i].flags & CPUIDLE_FLAG_OFF)
+			dev->states_usage[i].disable |= CPUIDLE_STATE_DISABLED_BY_USER;
+	}
 
 	per_cpu(cpuidle_devices, dev->cpu) = dev;
 	list_add(&dev->device_list, &cpuidle_detected_devices);

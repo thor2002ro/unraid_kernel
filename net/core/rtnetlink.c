@@ -1041,6 +1041,7 @@ static noinline size_t if_nlmsg_size(const struct net_device *dev,
 	       + nla_total_size(4)  /* IFLA_MIN_MTU */
 	       + nla_total_size(4)  /* IFLA_MAX_MTU */
 	       + rtnl_prop_list_size(dev)
+	       + nla_total_size(MAX_ADDR_LEN) /* IFLA_PERM_ADDRESS */
 	       + 0;
 }
 
@@ -1757,6 +1758,9 @@ static int rtnl_fill_ifinfo(struct sk_buff *skb,
 	    nla_put_s32(skb, IFLA_NEW_IFINDEX, new_ifindex) < 0)
 		goto nla_put_failure;
 
+	if (memchr_inv(dev->perm_addr, '\0', dev->addr_len) &&
+	    nla_put(skb, IFLA_PERM_ADDRESS, dev->addr_len, dev->perm_addr))
+		goto nla_put_failure;
 
 	rcu_read_lock();
 	if (rtnl_fill_link_af(skb, dev, ext_filter_mask))
@@ -1822,6 +1826,7 @@ static const struct nla_policy ifla_policy[IFLA_MAX+1] = {
 	[IFLA_PROP_LIST]	= { .type = NLA_NESTED },
 	[IFLA_ALT_IFNAME]	= { .type = NLA_STRING,
 				    .len = ALTIFNAMSIZ - 1 },
+	[IFLA_PERM_ADDRESS]	= { .type = NLA_REJECT },
 };
 
 static const struct nla_policy ifla_info_policy[IFLA_INFO_MAX+1] = {
@@ -3048,8 +3053,17 @@ struct net_device *rtnl_create_link(struct net *net, const char *ifname,
 	dev->rtnl_link_ops = ops;
 	dev->rtnl_link_state = RTNL_LINK_INITIALIZING;
 
-	if (tb[IFLA_MTU])
-		dev->mtu = nla_get_u32(tb[IFLA_MTU]);
+	if (tb[IFLA_MTU]) {
+		u32 mtu = nla_get_u32(tb[IFLA_MTU]);
+		int err;
+
+		err = dev_validate_mtu(dev, mtu, extack);
+		if (err) {
+			free_netdev(dev);
+			return ERR_PTR(err);
+		}
+		dev->mtu = mtu;
+	}
 	if (tb[IFLA_ADDRESS]) {
 		memcpy(dev->dev_addr, nla_data(tb[IFLA_ADDRESS]),
 				nla_len(tb[IFLA_ADDRESS]));

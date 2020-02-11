@@ -2081,7 +2081,11 @@ static int
 mvneta_run_xdp(struct mvneta_port *pp, struct mvneta_rx_queue *rxq,
 	       struct bpf_prog *prog, struct xdp_buff *xdp)
 {
-	u32 ret, act = bpf_prog_run_xdp(prog, xdp);
+	unsigned int len;
+	u32 ret, act;
+
+	len = xdp->data_end - xdp->data_hard_start - pp->rx_offset_correction;
+	act = bpf_prog_run_xdp(prog, xdp);
 
 	switch (act) {
 	case XDP_PASS:
@@ -2094,9 +2098,8 @@ mvneta_run_xdp(struct mvneta_port *pp, struct mvneta_rx_queue *rxq,
 		if (err) {
 			ret = MVNETA_XDP_DROPPED;
 			__page_pool_put_page(rxq->page_pool,
-					virt_to_head_page(xdp->data),
-					xdp->data_end - xdp->data_hard_start,
-					true);
+					     virt_to_head_page(xdp->data),
+					     len, true);
 		} else {
 			ret = MVNETA_XDP_REDIR;
 		}
@@ -2106,9 +2109,8 @@ mvneta_run_xdp(struct mvneta_port *pp, struct mvneta_rx_queue *rxq,
 		ret = mvneta_xdp_xmit_back(pp, xdp);
 		if (ret != MVNETA_XDP_TX)
 			__page_pool_put_page(rxq->page_pool,
-					virt_to_head_page(xdp->data),
-					xdp->data_end - xdp->data_hard_start,
-					true);
+					     virt_to_head_page(xdp->data),
+					     len, true);
 		break;
 	default:
 		bpf_warn_invalid_xdp_action(act);
@@ -2119,8 +2121,7 @@ mvneta_run_xdp(struct mvneta_port *pp, struct mvneta_rx_queue *rxq,
 	case XDP_DROP:
 		__page_pool_put_page(rxq->page_pool,
 				     virt_to_head_page(xdp->data),
-				     xdp->data_end - xdp->data_hard_start,
-				     true);
+				     len, true);
 		ret = MVNETA_XDP_DROPPED;
 		break;
 	}
@@ -3071,7 +3072,7 @@ static int mvneta_create_page_pool(struct mvneta_port *pp,
 		.order = 0,
 		.flags = PP_FLAG_DMA_MAP | PP_FLAG_DMA_SYNC_DEV,
 		.pool_size = size,
-		.nid = cpu_to_node(0),
+		.nid = NUMA_NO_NODE,
 		.dev = pp->dev->dev.parent,
 		.dma_dir = xdp_prog ? DMA_BIDIRECTIONAL : DMA_FROM_DEVICE,
 		.offset = pp->rx_offset_correction,
@@ -4222,6 +4223,12 @@ static int mvneta_xdp_setup(struct net_device *dev, struct bpf_prog *prog,
 
 	if (prog && dev->mtu > MVNETA_MAX_RX_BUF_SIZE) {
 		NL_SET_ERR_MSG_MOD(extack, "Jumbo frames not supported on XDP");
+		return -EOPNOTSUPP;
+	}
+
+	if (pp->bm_priv) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "Hardware Buffer Management not supported on XDP");
 		return -EOPNOTSUPP;
 	}
 

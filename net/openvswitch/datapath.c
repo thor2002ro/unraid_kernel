@@ -321,8 +321,7 @@ static int queue_gso_packets(struct datapath *dp, struct sk_buff *skb,
 	}
 
 	/* Queue all of the segments. */
-	skb = segs;
-	do {
+	skb_list_walk_safe(segs, skb, nskb) {
 		if (gso_type & SKB_GSO_UDP && skb != segs)
 			key = &later_key;
 
@@ -330,17 +329,15 @@ static int queue_gso_packets(struct datapath *dp, struct sk_buff *skb,
 		if (err)
 			break;
 
-	} while ((skb = skb->next));
+	}
 
 	/* Free all of the segments. */
-	skb = segs;
-	do {
-		nskb = skb->next;
+	skb_list_walk_safe(segs, skb, nskb) {
 		if (err)
 			kfree_skb(skb);
 		else
 			consume_skb(skb);
-	} while ((skb = nskb));
+	}
 	return err;
 }
 
@@ -2497,7 +2494,7 @@ static int __init dp_init(void)
 {
 	int err;
 
-	BUILD_BUG_ON(sizeof(struct ovs_skb_cb) > FIELD_SIZEOF(struct sk_buff, cb));
+	BUILD_BUG_ON(sizeof(struct ovs_skb_cb) > sizeof_field(struct sk_buff, cb));
 
 	pr_info("Open vSwitch switching datapath\n");
 

@@ -1293,7 +1293,7 @@ static void tx_complete (struct urb *urb)
 
 /*-------------------------------------------------------------------------*/
 
-void usbnet_tx_timeout (struct net_device *net)
+void usbnet_tx_timeout (struct net_device *net, unsigned int txqueue)
 {
 	struct usbnet		*dev = netdev_priv(net);
 
@@ -2184,7 +2184,7 @@ static int __init usbnet_init(void)
 {
 	/* Compiler should optimize this out. */
 	BUILD_BUG_ON(
-		FIELD_SIZEOF(struct sk_buff, cb) < sizeof(struct skb_data));
+		sizeof_field(struct sk_buff, cb) < sizeof(struct skb_data));
 
 	eth_random_addr(node_id);
 	return 0;

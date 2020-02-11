@@ -1303,18 +1303,28 @@ static void hw_perf_event_update(struct perf_event *event, int flush_all)
 		 */
 		if (flush_all && done)
 			break;
-
-		/* If an event overflow happened, discard samples by
-		 * processing any remaining sample-data-blocks.
-		 */
-		if (event_overflow)
-			flush_all = 1;
 	}
 
 	/* Account sample overflows in the event hardware structure */
 	if (sampl_overflow)
 		OVERFLOW_REG(hwc) = DIV_ROUND_UP(OVERFLOW_REG(hwc) +
 						 sampl_overflow, 1 + num_sdb);
+
+	/* Perf_event_overflow() and perf_event_account_interrupt() limit
+	 * the interrupt rate to an upper limit. Roughly 1000 samples per
+	 * task tick.
+	 * Hitting this limit results in a large number
+	 * of throttled REF_REPORT_THROTTLE entries and the samples
+	 * are dropped.
+	 * Slightly increase the interval to avoid hitting this limit.
+	 */
+	if (event_overflow) {
+		SAMPL_RATE(hwc) += DIV_ROUND_UP(SAMPL_RATE(hwc), 10);
+		debug_sprintf_event(sfdbg, 1, "%s: rate adjustment %ld\n",
+				    __func__,
+				    DIV_ROUND_UP(SAMPL_RATE(hwc), 10));
+	}
+
 	if (sampl_overflow || event_overflow)
 		debug_sprintf_event(sfdbg, 4, "%s: "
 				    "overflows: sample %llu event %llu"
@@ -1373,7 +1383,8 @@ static void aux_output_end(struct perf_output_handle *handle)
 	te = aux_sdb_trailer(aux, aux->alert_mark);
 	te->flags &= ~SDB_TE_ALERT_REQ_MASK;
 
-	debug_sprintf_event(sfdbg, 6, "%s: collect %#lx SDBs\n", __func__, i);
+	debug_sprintf_event(sfdbg, 6, "%s: SDBs %ld range %ld head %ld\n",
+			    __func__, i, range_scan, aux->head);
 }
 
 /*
@@ -1406,13 +1417,17 @@ static int aux_output_begin(struct perf_output_handle *handle,
 	 * SDBs between aux->head and aux->empty_mark are already ready
 	 * for new data. range_scan is num of SDBs not within them.
 	 */
+	debug_sprintf_event(sfdbg, 6,
+			    "%s: range %ld head %ld alert %ld empty %ld\n",
+			    __func__, range, aux->head, aux->alert_mark,
+			    aux->empty_mark);
 	if (range > AUX_SDB_NUM_EMPTY(aux)) {
 		range_scan = range - AUX_SDB_NUM_EMPTY(aux);
 		idx = aux->empty_mark + 1;
 		for (i = 0; i < range_scan; i++, idx++) {
 			te = aux_sdb_trailer(aux, idx);
-			te->flags = te->flags & ~SDB_TE_BUFFER_FULL_MASK;
-			te->flags = te->flags & ~SDB_TE_ALERT_REQ_MASK;
+			te->flags &= ~(SDB_TE_BUFFER_FULL_MASK |
+				       SDB_TE_ALERT_REQ_MASK);
 			te->overflow = 0;
 		}
 		/* Save the position of empty SDBs */
@@ -1431,15 +1446,11 @@ static int aux_output_begin(struct perf_output_handle *handle,
 	cpuhw->lsctl.tear = base + offset * sizeof(unsigned long);
 	cpuhw->lsctl.dear = aux->sdb_index[head];
 
-	debug_sprintf_event(sfdbg, 6, "%s: "
-			    "head->alert_mark->empty_mark (num_alert, range)"
-			    "[%#lx -> %#lx -> %#lx] (%#lx, %#lx) "
-			    "tear index %#lx, tear %#lx dear %#lx\n", __func__,
+	debug_sprintf_event(sfdbg, 6, "%s: head %ld alert %ld empty %ld "
+			    "index %ld tear %#lx dear %#lx\n", __func__,
 			    aux->head, aux->alert_mark, aux->empty_mark,
-			    AUX_SDB_NUM_ALERT(aux), range,
 			    head / CPUM_SF_SDB_PER_TABLE,
-			    cpuhw->lsctl.tear,
-			    cpuhw->lsctl.dear);
+			    cpuhw->lsctl.tear, cpuhw->lsctl.dear);
 
 	return 0;
 }
@@ -1459,8 +1470,7 @@ static bool aux_set_alert(struct aux_buffer *aux, unsigned long alert_index,
 	te = aux_sdb_trailer(aux, alert_index);
 	do {
 		orig_flags = te->flags;
-		orig_overflow = te->overflow;
-		*overflow = orig_overflow;
+		*overflow = orig_overflow = te->overflow;
 		if (orig_flags & SDB_TE_BUFFER_FULL_MASK) {
 			/*
 			 * SDB is already set by hardware.
@@ -1502,9 +1512,12 @@ static bool aux_reset_buffer(struct aux_buffer *aux, unsigned long range,
 			     unsigned long long *overflow)
 {
 	unsigned long long orig_overflow, orig_flags, new_flags;
-	unsigned long i, range_scan, idx;
+	unsigned long i, range_scan, idx, idx_old;
 	struct hws_trailer_entry *te;
 
+	debug_sprintf_event(sfdbg, 6, "%s: range %ld head %ld alert %ld "
+			    "empty %ld\n", __func__, range, aux->head,
+			    aux->alert_mark, aux->empty_mark);
 	if (range <= AUX_SDB_NUM_EMPTY(aux))
 		/*
 		 * No need to scan. All SDBs in range are marked as empty.
@@ -1527,7 +1540,7 @@ static bool aux_reset_buffer(struct aux_buffer *aux, unsigned long range,
 	 * indicator fall into this range, set it.
 	 */
 	range_scan = range - AUX_SDB_NUM_EMPTY(aux);
-	idx = aux->empty_mark + 1;
+	idx_old = idx = aux->empty_mark + 1;
 	for (i = 0; i < range_scan; i++, idx++) {
 		te = aux_sdb_trailer(aux, idx);
 		do {
@@ -1547,6 +1560,9 @@ static bool aux_reset_buffer(struct aux_buffer *aux, unsigned long range,
 	/* Update empty_mark to new position */
 	aux->empty_mark = aux->head + range - 1;
 
+	debug_sprintf_event(sfdbg, 6, "%s: range_scan %ld idx %ld..%ld "
+			    "empty %ld\n", __func__, range_scan, idx_old,
+			    idx - 1, aux->empty_mark);
 	return true;
 }
 
@@ -1560,7 +1576,6 @@ static void hw_collect_aux(struct cpu_hw_sf *cpuhw)
 	unsigned long range = 0, size;
 	unsigned long long overflow = 0;
 	struct perf_output_handle *handle = &cpuhw->handle;
-	unsigned long num_sdb;
 
 	aux = perf_get_aux(handle);
 	if (WARN_ON_ONCE(!aux))
@@ -1568,8 +1583,9 @@ static void hw_collect_aux(struct cpu_hw_sf *cpuhw)
 
 	/* Inform user space new data arrived */
 	size = AUX_SDB_NUM_ALERT(aux) << PAGE_SHIFT;
+	debug_sprintf_event(sfdbg, 6, "%s: #alert %ld\n", __func__,
+			    size >> PAGE_SHIFT);
 	perf_aux_output_end(handle, size);
-	num_sdb = aux->sfb.num_sdb;
 
 	while (!done) {
 		/* Get an output handle */
@@ -1577,7 +1593,7 @@ static void hw_collect_aux(struct cpu_hw_sf *cpuhw)
 		if (handle->size == 0) {
 			pr_err("The AUX buffer with %lu pages for the "
 			       "diagnostic-sampling mode is full\n",
-				num_sdb);
+				aux->sfb.num_sdb);
 			debug_sprintf_event(sfdbg, 1,
 					    "%s: AUX buffer used up\n",
 					    __func__);
@@ -1602,14 +1618,14 @@ static void hw_collect_aux(struct cpu_hw_sf *cpuhw)
 			size = range << PAGE_SHIFT;
 			perf_aux_output_end(&cpuhw->handle, size);
 			pr_err("Sample data caused the AUX buffer with %lu "
-			       "pages to overflow\n", num_sdb);
-			debug_sprintf_event(sfdbg, 1, "%s: head %#lx range %#lx "
-					    "overflow %#llx\n", __func__,
+			       "pages to overflow\n", aux->sfb.num_sdb);
+			debug_sprintf_event(sfdbg, 1, "%s: head %ld range %ld "
+					    "overflow %lld\n", __func__,
 					    aux->head, range, overflow);
 		} else {
 			size = AUX_SDB_NUM_ALERT(aux) << PAGE_SHIFT;
 			perf_aux_output_end(&cpuhw->handle, size);
-			debug_sprintf_event(sfdbg, 6, "%s: head %#lx alert %#lx "
+			debug_sprintf_event(sfdbg, 6, "%s: head %ld alert %ld "
 					    "already full, try another\n",
 					    __func__,
 					    aux->head, aux->alert_mark);
@@ -1617,11 +1633,9 @@ static void hw_collect_aux(struct cpu_hw_sf *cpuhw)
 	}
 
 	if (done)
-		debug_sprintf_event(sfdbg, 6, "%s: aux_reset_buffer "
-				    "[%#lx -> %#lx -> %#lx] (%#lx, %#lx)\n",
-				    __func__, aux->head, aux->alert_mark,
-				    aux->empty_mark, AUX_SDB_NUM_ALERT(aux),
-				    range);
+		debug_sprintf_event(sfdbg, 6, "%s: head %ld alert %ld "
+				    "empty %ld\n", __func__, aux->head,
+				    aux->alert_mark, aux->empty_mark);
 }
 
 /*
@@ -1644,8 +1658,7 @@ static void aux_buffer_free(void *data)
 	kfree(aux->sdb_index);
 	kfree(aux);
 
-	debug_sprintf_event(sfdbg, 4, "%s: free "
-			    "%lu SDBTs\n", __func__, num_sdbt);
+	debug_sprintf_event(sfdbg, 4, "%s: SDBTs %lu\n", __func__, num_sdbt);
 }
 
 static void aux_sdb_init(unsigned long sdb)
@@ -1697,13 +1710,13 @@ static void *aux_buffer_setup(struct perf_event *event, void **pages,
 	}
 
 	/* Allocate aux_buffer struct for the event */
-	aux = kmalloc(sizeof(struct aux_buffer), GFP_KERNEL);
+	aux = kzalloc(sizeof(struct aux_buffer), GFP_KERNEL);
 	if (!aux)
 		goto no_aux;
 	sfb = &aux->sfb;
 
 	/* Allocate sdbt_index for fast reference */
-	n_sdbt = (nr_pages + CPUM_SF_SDB_PER_TABLE - 1) / CPUM_SF_SDB_PER_TABLE;
+	n_sdbt = DIV_ROUND_UP(nr_pages, CPUM_SF_SDB_PER_TABLE);
 	aux->sdbt_index = kmalloc_array(n_sdbt, sizeof(void *), GFP_KERNEL);
 	if (!aux->sdbt_index)
 		goto no_sdbt_index;
@@ -1753,8 +1766,8 @@ static void *aux_buffer_setup(struct perf_event *event, void **pages,
 	 */
 	aux->empty_mark = sfb->num_sdb - 1;
 
-	debug_sprintf_event(sfdbg, 4, "%s: setup %lu SDBTs and %lu SDBs\n",
-			    __func__, sfb->num_sdbt, sfb->num_sdb);
+	debug_sprintf_event(sfdbg, 4, "%s: SDBTs %lu SDBs %lu\n", __func__,
+			    sfb->num_sdbt, sfb->num_sdb);
 
 	return aux;
 
