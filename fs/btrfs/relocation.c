@@ -1511,6 +1511,10 @@ int btrfs_init_reloc_root(struct btrfs_trans_handle *trans,
 	int clear_rsv = 0;
 	int ret;
 
+	if (!rc || !rc->create_reloc_tree ||
+	    root->root_key.objectid == BTRFS_TREE_RELOC_OBJECTID)
+		return 0;
+
 	/*
 	 * The subvolume has reloc tree but the swap is finished, no need to
 	 * create/update the dead reloc tree
@@ -1523,10 +1527,6 @@ int btrfs_init_reloc_root(struct btrfs_trans_handle *trans,
 		reloc_root->last_trans = trans->transid;
 		return 0;
 	}
-
-	if (!rc || !rc->create_reloc_tree ||
-	    root->root_key.objectid == BTRFS_TREE_RELOC_OBJECTID)
-		return 0;
 
 	if (!trans->reloc_reserved) {
 		rsv = trans->block_rsv;
