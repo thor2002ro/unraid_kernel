@@ -64,6 +64,7 @@ config CSKY
 	select PCI_DOMAINS_GENERIC if PCI
 	select PCI_SYSCALL if PCI
 	select PCI_MSI if PCI
+	select ARCH_HAS_GCOV_PROFILE_ALL
 
 config CPU_HAS_CACHEV2
 	bool
