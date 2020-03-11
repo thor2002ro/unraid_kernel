@@ -227,8 +227,8 @@
 	};
 
 	backlight_pins: backlight {
-		renesas,groups = "tpu_to3_c";
-		renesas,function = "tpu";
+		groups = "tpu_to3_c";
+		function = "tpu";
 	};
 
 	can0_pins: can0 {
@@ -237,9 +237,8 @@
 	};
 
 	du0_pins: du0 {
-		renesas,groups = "du0_rgb666", "du0_sync", "du0_disp",
-				 "du0_clk0_out";
-		renesas,function = "du0";
+		groups = "du0_rgb666", "du0_sync", "du0_disp", "du0_clk0_out";
+		function = "du0";
 	};
 
 	hscif1_pins: hscif1 {
