@@ -2834,7 +2834,7 @@ void flush_workqueue(struct workqueue_struct *wq)
 	 * First flushers are responsible for cascading flushes and
 	 * handling overflow.  Non-first flushers can simply return.
 	 */
-	if (wq->first_flusher != &this_flusher)
+	if (READ_ONCE(wq->first_flusher) != &this_flusher)
 		return;
 
 	mutex_lock(&wq->mutex);
@@ -2843,7 +2843,7 @@ void flush_workqueue(struct workqueue_struct *wq)
 	if (wq->first_flusher != &this_flusher)
 		goto out_unlock;
 
-	wq->first_flusher = NULL;
+	WRITE_ONCE(wq->first_flusher, NULL);
 
 	WARN_ON_ONCE(!list_empty(&this_flusher.list));
 	WARN_ON_ONCE(wq->flush_color != this_flusher.flush_color);
