@@ -960,7 +960,7 @@ void btrfs_sysfs_remove_mounted(struct btrfs_fs_info *fs_info)
 	addrm_unknown_feature_attrs(fs_info, false);
 	sysfs_remove_group(&fs_info->fs_devices->fsid_kobj, &btrfs_feature_attr_group);
 	sysfs_remove_files(&fs_info->fs_devices->fsid_kobj, btrfs_attrs);
-	btrfs_sysfs_rm_device_link(fs_info->fs_devices, NULL);
+	btrfs_sysfs_remove_devices_dir(fs_info->fs_devices, NULL);
 }
 
 static const char * const btrfs_feature_set_names[FEAT_MAX] = {
@@ -1149,7 +1149,7 @@ int btrfs_sysfs_add_space_info_type(struct btrfs_fs_info *fs_info,
 
 /* when one_device is NULL, it removes all device links */
 
-int btrfs_sysfs_rm_device_link(struct btrfs_fs_devices *fs_devices,
+int btrfs_sysfs_remove_devices_dir(struct btrfs_fs_devices *fs_devices,
 		struct btrfs_device *one_device)
 {
 	struct hd_struct *disk;
@@ -1205,7 +1205,7 @@ static ssize_t btrfs_devinfo_in_fs_metadata_show(struct kobject *kobj,
 }
 BTRFS_ATTR(devid, in_fs_metadata, btrfs_devinfo_in_fs_metadata_show);
 
-static ssize_t btrfs_sysfs_missing_show(struct kobject *kobj,
+static ssize_t btrfs_devinfo_missing_show(struct kobject *kobj,
 					struct kobj_attribute *a, char *buf)
 {
 	int val;
@@ -1216,7 +1216,7 @@ static ssize_t btrfs_sysfs_missing_show(struct kobject *kobj,
 
 	return snprintf(buf, PAGE_SIZE, "%d\n", val);
 }
-BTRFS_ATTR(devid, missing, btrfs_sysfs_missing_show);
+BTRFS_ATTR(devid, missing, btrfs_devinfo_missing_show);
 
 static ssize_t btrfs_devinfo_replace_target_show(struct kobject *kobj,
 					         struct kobj_attribute *a,
@@ -1269,7 +1269,7 @@ static struct kobj_type devid_ktype = {
 	.release	= btrfs_release_devid_kobj,
 };
 
-int btrfs_sysfs_add_device_link(struct btrfs_fs_devices *fs_devices,
+int btrfs_sysfs_add_devices_dir(struct btrfs_fs_devices *fs_devices,
 				struct btrfs_device *one_device)
 {
 	int error = 0;
@@ -1371,7 +1371,7 @@ int btrfs_sysfs_add_fsid(struct btrfs_fs_devices *fs_devs)
 	if (!fs_devs->devices_kobj) {
 		btrfs_err(fs_devs->fs_info,
 			  "failed to init sysfs device interface");
-		kobject_put(&fs_devs->fsid_kobj);
+		btrfs_sysfs_remove_fsid(fs_devs);
 		return -ENOMEM;
 	}
 
@@ -1395,13 +1395,13 @@ int btrfs_sysfs_add_mounted(struct btrfs_fs_info *fs_info)
 
 	btrfs_set_fs_info_ptr(fs_info);
 
-	error = btrfs_sysfs_add_device_link(fs_devs, NULL);
+	error = btrfs_sysfs_add_devices_dir(fs_devs, NULL);
 	if (error)
 		return error;
 
 	error = sysfs_create_files(fsid_kobj, btrfs_attrs);
 	if (error) {
-		btrfs_sysfs_rm_device_link(fs_devs, NULL);
+		btrfs_sysfs_remove_devices_dir(fs_devs, NULL);
 		return error;
 	}
 
