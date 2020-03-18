@@ -1029,13 +1029,16 @@ static void f2fs_submit_discard_endio(struct bio *bio)
 	struct discard_cmd *dc = (struct discard_cmd *)bio->bi_private;
 	unsigned long flags;
 
-	dc->error = blk_status_to_errno(bio->bi_status);
-
 	spin_lock_irqsave(&dc->lock, flags);
+	if (!dc->error)
+		dc->error = blk_status_to_errno(bio->bi_status);
+
 	dc->bio_ref--;
-	if (!dc->bio_ref && dc->state == D_SUBMIT) {
-		dc->state = D_DONE;
-		complete_all(&dc->wait);
+	if (!dc->bio_ref) {
+		if (dc->error || dc->state == D_SUBMIT) {
+			dc->state = D_DONE;
+			complete_all(&dc->wait);
+		}
 	}
 	spin_unlock_irqrestore(&dc->lock, flags);
 	bio_put(bio);
@@ -1124,9 +1127,12 @@ static int __submit_discard_cmd(struct f2fs_sb_info *sbi,
 	struct discard_cmd_control *dcc = SM_I(sbi)->dcc_info;
 	struct list_head *wait_list = (dpolicy->type == DPOLICY_FSTRIM) ?
 					&(dcc->fstrim_list) : &(dcc->wait_list);
-	int flag = dpolicy->sync ? REQ_SYNC : 0;
-	block_t lstart, start, len, total_len;
+	int flag;
+	block_t lstart, start, len, total_len, orig_len;
 	int err = 0;
+
+	flag = dpolicy->sync ? REQ_SYNC : 0;
+	flag |= dpolicy->type == DPOLICY_UMOUNT ? REQ_NOWAIT : 0;
 
 	if (dc->state != D_PREP)
 		return 0;
@@ -1139,7 +1145,7 @@ static int __submit_discard_cmd(struct f2fs_sb_info *sbi,
 	lstart = dc->lstart;
 	start = dc->start;
 	len = dc->len;
-	total_len = len;
+	orig_len = total_len = len;
 
 	dc->len = 0;
 
@@ -1203,6 +1209,14 @@ submit:
 		bio->bi_end_io = f2fs_submit_discard_endio;
 		bio->bi_opf |= flag;
 		submit_bio(bio);
+		if (flag & REQ_NOWAIT) {
+			if (dc->error == -EAGAIN) {
+				dc->len = orig_len;
+				list_move(&dc->list, &dcc->retry_list);
+				err = dc->error;
+				break;
+			}
+		}
 
 		atomic_inc(&dcc->issued_discard);
 
@@ -1463,6 +1477,40 @@ next:
 	return issued;
 }
 
+static bool __should_discard_retry(struct f2fs_sb_info *sbi,
+		struct discard_policy *dpolicy)
+{
+	struct discard_cmd_control *dcc = SM_I(sbi)->dcc_info;
+	struct discard_cmd *dc, *tmp;
+	bool retry = false;
+	unsigned long flags;
+
+	if (dpolicy->type != DPOLICY_UMOUNT)
+		f2fs_bug_on(sbi, 1);
+
+	mutex_lock(&dcc->cmd_lock);
+	list_for_each_entry_safe(dc, tmp, &(dcc->retry_list), list) {
+		if (dpolicy->timeout != 0 &&
+			f2fs_time_over(sbi, dpolicy->timeout)) {
+			retry = false;
+			break;
+		}
+
+		spin_lock_irqsave(&dc->lock, flags);
+		if (!dc->bio_ref) {
+			dc->state = D_PREP;
+			dc->error = 0;
+			reinit_completion(&dc->wait);
+			__relocate_discard_cmd(dcc, dc);
+			retry = true;
+		}
+		spin_unlock_irqrestore(&dc->lock, flags);
+	}
+	mutex_unlock(&dcc->cmd_lock);
+
+	return retry;
+}
+
 static int __issue_discard_cmd(struct f2fs_sb_info *sbi,
 					struct discard_policy *dpolicy)
 {
@@ -1470,12 +1518,13 @@ static int __issue_discard_cmd(struct f2fs_sb_info *sbi,
 	struct list_head *pend_list;
 	struct discard_cmd *dc, *tmp;
 	struct blk_plug plug;
-	int i, issued = 0;
+	int i, err, issued = 0;
 	bool io_interrupted = false;
 
 	if (dpolicy->timeout != 0)
 		f2fs_update_time(sbi, dpolicy->timeout);
 
+retry:
 	for (i = MAX_PLIST_NUM - 1; i >= 0; i--) {
 		if (dpolicy->timeout != 0 &&
 				f2fs_time_over(sbi, dpolicy->timeout))
@@ -1509,7 +1558,10 @@ static int __issue_discard_cmd(struct f2fs_sb_info *sbi,
 				break;
 			}
 
-			__submit_discard_cmd(sbi, dpolicy, dc, &issued);
+			err = __submit_discard_cmd(sbi, dpolicy, dc, &issued);
+			if (err == -EAGAIN)
+				congestion_wait(BLK_RW_ASYNC,
+						DEFAULT_IO_TIMEOUT);
 
 			if (issued >= dpolicy->max_requests)
 				break;
@@ -1521,6 +1573,10 @@ next:
 		if (issued >= dpolicy->max_requests || io_interrupted)
 			break;
 	}
+
+	if (!list_empty(&dcc->retry_list) &&
+		__should_discard_retry(sbi, dpolicy))
+		goto retry;
 
 	if (!issued && io_interrupted)
 		issued = -1;
@@ -1610,6 +1666,12 @@ next:
 
 	if (need_wait) {
 		trimmed += __wait_one_discard_bio(sbi, dc);
+		goto next;
+	}
+
+	if (dpolicy->type == DPOLICY_UMOUNT &&
+		!list_empty(&dcc->retry_list)) {
+		wait_list = &dcc->retry_list;
 		goto next;
 	}
 
@@ -2051,6 +2113,7 @@ static int create_discard_cmd_control(struct f2fs_sb_info *sbi)
 	for (i = 0; i < MAX_PLIST_NUM; i++)
 		INIT_LIST_HEAD(&dcc->pend_list[i]);
 	INIT_LIST_HEAD(&dcc->wait_list);
+	INIT_LIST_HEAD(&dcc->retry_list);
 	INIT_LIST_HEAD(&dcc->fstrim_list);
 	mutex_init(&dcc->cmd_lock);
 	atomic_set(&dcc->issued_discard, 0);
