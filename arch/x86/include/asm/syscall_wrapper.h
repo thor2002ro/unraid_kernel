@@ -214,12 +214,12 @@ extern long __ia32_sys_ni_syscall(const struct pt_regs *regs);
  * COND_SYSCALL_COMPAT in kernel/sys_ni.c and COMPAT_SYS_NI in
  * kernel/time/posix-stubs.c to cover this case as well.
  */
-#define COND_SYSCALL_COMPAT(name) 					\
-	__IA32_COMPAT_COND_SYSCALL(name)				\
+#define COND_SYSCALL_COMPAT(name)					\
+	__IA32_COMPAT_COND_SYSCALL(name);				\
 	__X32_COMPAT_COND_SYSCALL(name)
 
 #define COMPAT_SYS_NI(name)						\
-	__IA32_COMPAT_SYS_NI(name)					\
+	__IA32_COMPAT_SYS_NI(name);					\
 	__X32_COMPAT_SYS_NI(name)
 
 #endif /* CONFIG_COMPAT */
@@ -257,7 +257,7 @@ extern long __ia32_sys_ni_syscall(const struct pt_regs *regs);
 	__IA32_COND_SYSCALL(name)
 
 #define SYS_NI(name)							\
-	__X64_SYS_NI(name)						\
+	__X64_SYS_NI(name);						\
 	__IA32_SYS_NI(name)
 
 
