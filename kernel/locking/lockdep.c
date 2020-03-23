@@ -3081,10 +3081,10 @@ print_usage_bug(struct task_struct *curr, struct held_lock *this,
 
 	pr_warn("%s/%d [HC%u[%lu]:SC%u[%lu]:HE%u:SE%u] takes:\n",
 		curr->comm, task_pid_nr(curr),
-		trace_hardirq_context(curr), hardirq_count() >> HARDIRQ_SHIFT,
-		trace_softirq_context(curr), softirq_count() >> SOFTIRQ_SHIFT,
-		trace_hardirqs_enabled(curr),
-		trace_softirqs_enabled(curr));
+		lockdep_hardirq_context(curr), hardirq_count() >> HARDIRQ_SHIFT,
+		lockdep_softirq_context(curr), softirq_count() >> SOFTIRQ_SHIFT,
+		lockdep_hardirqs_enabled(curr),
+		lockdep_softirqs_enabled(curr));
 	print_lock(this);
 
 	pr_warn("{%s} state was registered at:\n", usage_str[prev_bit]);
@@ -3468,7 +3468,7 @@ NOKPROBE_SYMBOL(lockdep_hardirqs_off);
 /*
  * Softirqs will be enabled:
  */
-void trace_softirqs_on(unsigned long ip)
+void lockdep_softirqs_on(unsigned long ip)
 {
 	struct task_struct *curr = current;
 
@@ -3508,7 +3508,7 @@ void trace_softirqs_on(unsigned long ip)
 /*
  * Softirqs were disabled:
  */
-void trace_softirqs_off(unsigned long ip)
+void lockdep_softirqs_off(unsigned long ip)
 {
 	struct task_struct *curr = current;
 
