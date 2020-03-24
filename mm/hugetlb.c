@@ -5542,13 +5542,6 @@ static unsigned long hugetlb_cma_size __initdata;
 
 static int __init cmdline_parse_hugetlb_cma(char *p)
 {
-	unsigned long long val;
-	char *endptr;
-
-	if (!p)
-		return -EINVAL;
-
-	val = simple_strtoull(p, &endptr, 0);
 	hugetlb_cma_size = memparse(p, &p);
 	return 0;
 }
