@@ -641,16 +641,17 @@ extern bool report_enabled(void);
 
 bool kasan_report(unsigned long addr, size_t size, bool is_write, unsigned long ip)
 {
-	unsigned long flags;
+	unsigned long flags = user_access_save();
+	bool ret = false;
 
-	if (likely(!report_enabled()))
-		return false;
+	if (likely(report_enabled())) {
+		__kasan_report(addr, size, is_write, ip);
+		ret = true;
+	}
 
-	flags = user_access_save();
-	__kasan_report(addr, size, is_write, ip);
 	user_access_restore(flags);
 
-	return true;
+	return ret;
 }
 
 #ifdef CONFIG_MEMORY_HOTPLUG
