@@ -19,6 +19,7 @@
 
 struct hugetlb_cgroup;
 struct resv_map;
+struct file_region;
 
 /*
  * Minimum page order trackable by hugetlb cgroup.
