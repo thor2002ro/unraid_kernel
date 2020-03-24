@@ -426,8 +426,13 @@ static unsigned long move_vma(struct vm_area_struct *vma,
 		 * for old_len, but we're now adding new_len - old_len locked
 		 * bytes to the new mapping.
 		 */
-		if (new_len > old_len)
+		if (vm_flags & VM_LOCKED && new_len > old_len) {
 			mm->locked_vm += (new_len - old_len) >> PAGE_SHIFT;
+			*locked = true;
+		}
+
+		/* We always clear VM_LOCKED[ONFAULT] on the old vma */
+		vma->vm_flags &= VM_LOCKED_CLEAR_MASK;
 
 		goto out;
 	}
@@ -686,7 +691,7 @@ SYSCALL_DEFINE5(mremap, unsigned long, addr, unsigned long, old_len,
 	if (down_write_killable(&current->mm->mmap_sem))
 		return -EINTR;
 
-	if (flags & MREMAP_FIXED || flags & MREMAP_DONTUNMAP) {
+	if (flags & (MREMAP_FIXED | MREMAP_DONTUNMAP)) {
 		ret = mremap_to(addr, old_len, new_addr, new_len,
 				&locked, flags, &uf, &uf_unmap_early,
 				&uf_unmap);
