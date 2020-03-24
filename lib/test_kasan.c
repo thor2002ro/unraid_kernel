@@ -289,6 +289,7 @@ static noinline void __init kmalloc_memmove_invalid_size(void)
 {
 	char *ptr;
 	size_t size = 64;
+	volatile size_t invalid_size = -2;
 
 	pr_info("invalid size in memmove\n");
 	ptr = kmalloc(size, GFP_KERNEL);
@@ -298,7 +299,7 @@ static noinline void __init kmalloc_memmove_invalid_size(void)
 	}
 
 	memset((char *)ptr, 0, 64);
-	memmove((char *)ptr, (char *)ptr + 4, -2);
+	memmove((char *)ptr, (char *)ptr + 4, invalid_size);
 	kfree(ptr);
 }
 
