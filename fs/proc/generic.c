@@ -533,9 +533,8 @@ struct proc_dir_entry *proc_create_reg(const char *name, umode_t mode,
 
 static inline void pde_set_flags(struct proc_dir_entry *pde)
 {
-	if (pde->proc_ops->proc_flags & PROC_ENTRY_PERMANENT) {
+	if (pde->proc_ops->proc_flags & PROC_ENTRY_PERMANENT)
 		pde->flags |= PROC_ENTRY_PERMANENT;
-	}
 }
 
 struct proc_dir_entry *proc_create_data(const char *name, umode_t mode,
@@ -677,9 +676,8 @@ void remove_proc_entry(const char *name, struct proc_dir_entry *parent)
 			de = NULL;
 		} else {
 			rb_erase(&de->subdir_node, &parent->subdir);
-			if (S_ISDIR(de->mode)) {
+			if (S_ISDIR(de->mode))
 				parent->nlink--;
-			}
 		}
 	}
 	write_unlock(&proc_subdir_lock);
