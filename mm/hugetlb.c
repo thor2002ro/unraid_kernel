@@ -289,48 +289,6 @@ static bool has_same_uncharge_info(struct file_region *rg,
 #endif
 }
 
-#if defined(CONFIG_DEBUG_VM) && defined(CONFIG_CGROUP_HUGETLB)
-static void dump_resv_map(struct resv_map *resv)
-{
-	struct list_head *head = &resv->regions;
-	struct file_region *rg = NULL;
-
-	pr_err("--------- start print resv_map ---------\n");
-	list_for_each_entry(rg, head, link) {
-		pr_err("rg->from=%ld, rg->to=%ld, rg->reservation_counter=%px, rg->css=%px\n",
-		       rg->from, rg->to, rg->reservation_counter, rg->css);
-	}
-	pr_err("--------- end print resv_map ---------\n");
-}
-
-/* Debug function to loop over the resv_map and make sure that coalescing is
- * working.
- */
-static void check_coalesce_bug(struct resv_map *resv)
-{
-	struct list_head *head = &resv->regions;
-	struct file_region *rg = NULL, *nrg = NULL;
-
-	list_for_each_entry(rg, head, link) {
-		nrg = list_next_entry(rg, link);
-
-		if (&nrg->link == head)
-			break;
-
-		if (nrg->reservation_counter && nrg->from == rg->to &&
-		    nrg->reservation_counter == rg->reservation_counter &&
-		    nrg->css == rg->css) {
-			dump_resv_map(resv);
-			VM_BUG_ON(true);
-		}
-	}
-}
-#else
-static void check_coalesce_bug(struct resv_map *resv)
-{
-}
-#endif
-
 static void coalesce_file_region(struct resv_map *resv, struct file_region *rg)
 {
 	struct file_region *nrg = NULL, *prg = NULL;
@@ -435,7 +393,6 @@ static long add_reservation_in_range(struct resv_map *resv, long f, long t,
 	}
 
 	VM_BUG_ON(add < 0);
-	check_coalesce_bug(resv);
 	return add;
 }
 
