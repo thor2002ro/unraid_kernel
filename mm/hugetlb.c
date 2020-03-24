@@ -5572,16 +5572,21 @@ void __init hugetlb_cma_reserve(int order)
 
 	reserved = 0;
 	for_each_node_state(nid, N_ONLINE) {
-		unsigned long start_pfn, end_pfn;
 		unsigned long min_pfn = 0, max_pfn = 0;
-		int res, i;
+		int res;
+#ifdef CONFIG_NUMA
+		unsigned long start_pfn, end_pfn;
+		int i;
 
 		for_each_mem_pfn_range(i, nid, &start_pfn, &end_pfn, NULL) {
 			if (!min_pfn)
 				min_pfn = start_pfn;
 			max_pfn = end_pfn;
 		}
-
+#else
+		min_pfn = min_low_pfn;
+		max_pfn = max_low_pfn;
+#endif
 		size = min(per_node, hugetlb_cma_size - reserved);
 		size = round_up(size, PAGE_SIZE << order);
 
