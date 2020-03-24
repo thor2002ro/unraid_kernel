@@ -648,9 +648,9 @@ void migrate_page_states(struct page *newpage, struct page *page)
 		end_page_writeback(newpage);
 
 	/*
-	 * PG_readahead share the same bit with PG_reclaim, the above
-	 * end_page_writeback() may clear PG_readahead mistakenly, so set
-	 * the bit after that.
+	 * PG_readahead shares the same bit with PG_reclaim.  The above
+	 * end_page_writeback() may clear PG_readahead mistakenly, so set the
+	 * bit after that.
 	 */
 	if (PageReadahead(page))
 		SetPageReadahead(newpage);
