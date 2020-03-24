@@ -10,6 +10,8 @@
 #include <linux/cred.h>
 #include <linux/refcount.h>
 #include <linux/posix-timers.h>
+#include <linux/mm_types.h>
+#include <asm/ptrace.h>
 
 /*
  * Types defining task->signal and task->sighand and APIs using them:
@@ -375,7 +377,7 @@ static inline int signal_pending_state(long state, struct task_struct *p)
  * instead, especially with the case where we've got interrupted with
  * a VM_FAULT_RETRY.
  */
-static inline bool fault_signal_pending(unsigned int fault_flags,
+static inline bool fault_signal_pending(vm_fault_t fault_flags,
 					struct pt_regs *regs)
 {
 	return unlikely((fault_flags & VM_FAULT_RETRY) &&
