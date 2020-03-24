@@ -1475,8 +1475,11 @@ static int insert_page_into_pte_locked(struct mm_struct *mm, pte_t *pte,
 static int insert_page_in_batch_locked(struct mm_struct *mm, pmd_t *pmd,
 			unsigned long addr, struct page *page, pgprot_t prot)
 {
-	const int err = validate_page_before_insert(page);
+	int err;
 
+	if (!page_count(page))
+		return -EINVAL;
+	err = validate_page_before_insert(page);
 	return err ? err : insert_page_into_pte_locked(
 		mm, pte_offset_map(pmd, addr), addr, page, prot);
 }
