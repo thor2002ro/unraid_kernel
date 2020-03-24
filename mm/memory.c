@@ -1472,18 +1472,6 @@ static int insert_page_into_pte_locked(struct mm_struct *mm, pte_t *pte,
 	return 0;
 }
 
-static int insert_page_in_batch_locked(struct mm_struct *mm, pmd_t *pmd,
-			unsigned long addr, struct page *page, pgprot_t prot)
-{
-	int err;
-
-	if (!page_count(page))
-		return -EINVAL;
-	err = validate_page_before_insert(page);
-	return err ? err : insert_page_into_pte_locked(
-		mm, pte_offset_map(pmd, addr), addr, page, prot);
-}
-
 /*
  * This is the old fallback for page remapping.
  *
@@ -1512,8 +1500,21 @@ out:
 	return retval;
 }
 
+#ifdef pte_index
+static int insert_page_in_batch_locked(struct mm_struct *mm, pmd_t *pmd,
+			unsigned long addr, struct page *page, pgprot_t prot)
+{
+	int err;
+
+	if (!page_count(page))
+		return -EINVAL;
+	err = validate_page_before_insert(page);
+	return err ? err : insert_page_into_pte_locked(
+		mm, pte_offset_map(pmd, addr), addr, page, prot);
+}
+
 /* insert_pages() amortizes the cost of spinlock operations
- * when inserting pages in a loop.
+ * when inserting pages in a loop. Arch *must* define pte_index.
  */
 static int insert_pages(struct vm_area_struct *vma, unsigned long addr,
 			struct page **pages, unsigned long *num, pgprot_t prot)
@@ -1568,6 +1569,7 @@ out:
 	*num = remaining_pages_total;
 	return ret;
 }
+#endif  /* ifdef pte_index */
 
 /**
  * vm_insert_pages - insert multiple pages into user vma, batching the pmd lock.
@@ -1587,6 +1589,7 @@ out:
 int vm_insert_pages(struct vm_area_struct *vma, unsigned long addr,
 			struct page **pages, unsigned long *num)
 {
+#ifdef pte_index
 	const unsigned long end_addr = addr + (*num * PAGE_SIZE) - 1;
 
 	if (addr < vma->vm_start || end_addr >= vma->vm_end)
@@ -1598,6 +1601,18 @@ int vm_insert_pages(struct vm_area_struct *vma, unsigned long addr,
 	}
 	/* Defer page refcount checking till we're about to map that page. */
 	return insert_pages(vma, addr, pages, num, vma->vm_page_prot);
+#else
+	unsigned long idx = 0, pgcount = *num;
+	int err;
+
+	for (; idx < pgcount; ++idx) {
+		err = vm_insert_page(vma, addr + (PAGE_SIZE * idx), pages[idx]);
+		if (err)
+			break;
+	}
+	*num = pgcount - idx;
+	return err;
+#endif  /* ifdef pte_index */
 }
 EXPORT_SYMBOL(vm_insert_pages);
 
