@@ -28,6 +28,7 @@
 #include <linux/jhash.h>
 #include <linux/numa.h>
 #include <linux/llist.h>
+#include <linux/cma.h>
 
 #include <asm/page.h>
 #include <asm/pgtable.h>
@@ -44,6 +45,9 @@
 int hugetlb_max_hstate __read_mostly;
 unsigned int default_hstate_idx;
 struct hstate hstates[HUGE_MAX_HSTATE];
+
+static struct cma *hugetlb_cma[MAX_NUMNODES];
+
 /*
  * Minimum page order among possible hugepage sizes, set to a proper value
  * at boot time.
@@ -1228,6 +1232,14 @@ static void destroy_compound_gigantic_page(struct page *page,
 
 static void free_gigantic_page(struct page *page, unsigned int order)
 {
+	/*
+	 * If the page isn't allocated using the cma allocator,
+	 * cma_release() returns false.
+	 */
+	if (IS_ENABLED(CONFIG_CMA) &&
+	    cma_release(hugetlb_cma[page_to_nid(page)], page, 1 << order))
+		return;
+
 	free_contig_range(page_to_pfn(page), 1 << order);
 }
 
@@ -1236,6 +1248,21 @@ static struct page *alloc_gigantic_page(struct hstate *h, gfp_t gfp_mask,
 		int nid, nodemask_t *nodemask)
 {
 	unsigned long nr_pages = 1UL << huge_page_order(h);
+
+	if (IS_ENABLED(CONFIG_CMA)) {
+		struct page *page;
+		int node;
+
+		for_each_node_mask(node, *nodemask) {
+			if (!hugetlb_cma[node])
+				break;
+
+			page = cma_alloc(hugetlb_cma[node], nr_pages,
+					 huge_page_order(h), true);
+			if (page)
+				return page;
+		}
+	}
 
 	return alloc_contig_pages(nr_pages, gfp_mask, nid, nodemask);
 }
@@ -2538,6 +2565,10 @@ static void __init hugetlb_hstate_alloc_pages(struct hstate *h)
 
 	for (i = 0; i < h->max_huge_pages; ++i) {
 		if (hstate_is_gigantic(h)) {
+			if (IS_ENABLED(CONFIG_CMA) && hugetlb_cma[0]) {
+				pr_warn_once("HugeTLB: hugetlb_cma is enabled, skip boot time allocation\n");
+				break;
+			}
 			if (!alloc_bootmem_huge_page(h))
 				break;
 		} else if (!alloc_pool_huge_page(h,
@@ -5505,3 +5536,88 @@ void move_hugetlb_state(struct page *oldpage, struct page *newpage, int reason)
 		spin_unlock(&hugetlb_lock);
 	}
 }
+
+#ifdef CONFIG_CMA
+static unsigned long hugetlb_cma_size __initdata;
+
+static int __init cmdline_parse_hugetlb_cma(char *p)
+{
+	unsigned long long val;
+	char *endptr;
+
+	if (!p)
+		return -EINVAL;
+
+	val = simple_strtoull(p, &endptr, 0);
+	hugetlb_cma_size = memparse(p, &p);
+	return 0;
+}
+
+early_param("hugetlb_cma", cmdline_parse_hugetlb_cma);
+
+void __init hugetlb_cma_reserve(int order)
+{
+	unsigned long size, reserved, per_node;
+	int nid;
+
+	if (!hugetlb_cma_size)
+		return;
+
+	if (hugetlb_cma_size < (PAGE_SIZE << order)) {
+		pr_warn("hugetlb_cma: cma area should be at least %lu MiB\n",
+			(PAGE_SIZE << order) / SZ_1M);
+		return;
+	}
+
+	/*
+	 * If 3 GB area is requested on a machine with 4 numa nodes,
+	 * let's allocate 1 GB on first three nodes and ignore the last one.
+	 */
+	per_node = DIV_ROUND_UP(hugetlb_cma_size, nr_online_nodes);
+	pr_info("hugetlb_cma: reserve %lu MiB, up to %lu MiB per node\n",
+		hugetlb_cma_size / SZ_1M, per_node / SZ_1M);
+
+	reserved = 0;
+	for_each_node_state(nid, N_ONLINE) {
+		unsigned long start_pfn, end_pfn;
+		unsigned long min_pfn = 0, max_pfn = 0;
+		int res, i;
+
+		for_each_mem_pfn_range(i, nid, &start_pfn, &end_pfn, NULL) {
+			if (!min_pfn)
+				min_pfn = start_pfn;
+			max_pfn = end_pfn;
+		}
+
+		size = max(per_node, hugetlb_cma_size - reserved);
+		size = round_up(size, PAGE_SIZE << order);
+
+		if (size > ((max_pfn - min_pfn) << PAGE_SHIFT) / 2) {
+			pr_warn("hugetlb_cma: cma_area is too big, please try less than %lu MiB\n",
+				round_down(((max_pfn - min_pfn) << PAGE_SHIFT) *
+					   nr_online_nodes / 2 / SZ_1M,
+					   PAGE_SIZE << order));
+			break;
+		}
+
+		res = cma_declare_contiguous(PFN_PHYS(min_pfn), size,
+					     PFN_PHYS(max_pfn),
+					     PAGE_SIZE << order,
+					     0, false,
+					     "hugetlb", &hugetlb_cma[nid]);
+		if (res) {
+			pr_warn("hugetlb_cma: reservation failed: err %d, node %d, [%llu, %llu)",
+				res, nid, PFN_PHYS(min_pfn), PFN_PHYS(max_pfn));
+			break;
+		}
+
+		reserved += size;
+		pr_info("hugetlb_cma: reserved %lu MiB on node %d\n",
+			size / SZ_1M, nid);
+
+		if (reserved >= hugetlb_cma_size)
+			break;
+	}
+}
+
+#endif /* CONFIG_CMA */
