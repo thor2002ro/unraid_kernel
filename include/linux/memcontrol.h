@@ -695,6 +695,7 @@ static inline unsigned long lruvec_page_state_local(struct lruvec *lruvec,
 void __mod_lruvec_state(struct lruvec *lruvec, enum node_stat_item idx,
 			int val);
 void __mod_lruvec_slab_state(void *p, enum node_stat_item idx, int val);
+void mod_memcg_obj_state(void *p, int idx, int val);
 
 static inline void mod_lruvec_state(struct lruvec *lruvec,
 				    enum node_stat_item idx, int val)
@@ -1121,6 +1122,10 @@ static inline void __mod_lruvec_slab_state(void *p, enum node_stat_item idx,
 	struct page *page = virt_to_head_page(p);
 
 	__mod_node_page_state(page_pgdat(page), idx, val);
+}
+
+static inline void mod_memcg_obj_state(void *p, int idx, int val)
+{
 }
 
 static inline
