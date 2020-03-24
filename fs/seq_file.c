@@ -233,7 +233,7 @@ Fill:
 
 		p = m->op->next(m, p, &m->index);
 		if (pos == m->index) {
-			pr_info("buggy seq_file .next function %ps "
+			pr_info_ratelimited("buggy seq_file .next function %ps "
 				"did not updated position index\n",
 				m->op->next);
 			m->index++;
