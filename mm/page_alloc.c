@@ -8292,12 +8292,12 @@ struct page *has_unmovable_pages(struct zone *zone, struct page *page,
 			struct page *head = compound_head(page);
 			unsigned int skip_pages;
 
-			if (PageHuge(page) &&
-			    !hugepage_migration_supported(page_hstate(head)))
+			if (PageHuge(page)) {
+				if (!hugepage_migration_supported(page_hstate(head)))
+					return page;
+			} else if (!PageLRU(head) && !__PageMovable(head)) {
 				return page;
-
-			if (!PageLRU(head) && !__PageMovable(head))
-				return page;
+			}
 
 			skip_pages = compound_nr(head) - (page - head);
 			iter += skip_pages - 1;
