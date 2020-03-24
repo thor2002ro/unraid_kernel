@@ -206,18 +206,16 @@ unsigned int stack_depot_fetch(depot_stack_handle_t handle,
 	size_t offset = parts.offset << STACK_ALLOC_ALIGN;
 	struct stack_record *stack;
 
+	*entries = NULL;
 	if (parts.slabindex > depot_index) {
 		WARN(1, "slab index %d out of bounds (%d) for stack id %08x\n",
 			parts.slabindex, depot_index, handle);
-		*entries = NULL;
 		return 0;
 	}
 	slab = stack_slabs[parts.slabindex];
-	stack = slab + offset;
-	if (!stack) {
-		*entries = NULL;
+	if (!slab)
 		return 0;
-	}
+	stack = slab + offset;
 
 	*entries = stack->entries;
 	return stack->size;
