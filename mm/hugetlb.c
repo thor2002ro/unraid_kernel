@@ -5604,8 +5604,10 @@ void __init hugetlb_cma_reserve(int order)
 					     0, false,
 					     "hugetlb", &hugetlb_cma[nid]);
 		if (res) {
-			pr_warn("hugetlb_cma: reservation failed: err %d, node %d, [%llu, %llu)",
-				res, nid, PFN_PHYS(min_pfn), PFN_PHYS(max_pfn));
+			phys_addr_t begpa = PFN_PHYS(min_pfn);
+			phys_addr_t endpa = PFN_PHYS(max_pfn);
+			pr_warn("hugetlb_cma: reservation failed: err %d, node %d, [%pap, %pap)",
+				res, nid, &begpa, &endpa);
 			break;
 		}
 
