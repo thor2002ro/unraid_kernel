@@ -1432,6 +1432,8 @@ static inline int memcg_cache_id(struct mem_cgroup *memcg)
 	return memcg ? memcg->kmemcg_id : -1;
 }
 
+struct mem_cgroup *mem_cgroup_from_obj(void *p);
+
 #else
 
 static inline int memcg_kmem_charge(struct page *page, gfp_t gfp, int order)
@@ -1471,6 +1473,11 @@ static inline void memcg_get_cache_ids(void)
 
 static inline void memcg_put_cache_ids(void)
 {
+}
+
+static inline struct mem_cgroup *mem_cgroup_from_obj(void *p)
+{
+       return NULL;
 }
 
 #endif /* CONFIG_MEMCG_KMEM */
