@@ -225,7 +225,7 @@ static void mremap_dontunmap_partial_mapping()
 }
 
 // This test validates that we can remap over only a portion of a mapping.
-static void mremap_dontunmap_partial_mapping_overwrite()
+static void mremap_dontunmap_partial_mapping_overwrite(void)
 {
 	/*
 	 *  source mapping:
