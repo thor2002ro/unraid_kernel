@@ -289,7 +289,7 @@ static bool has_same_uncharge_info(struct file_region *rg,
 #endif
 }
 
-#ifdef CONFIG_DEBUG_VM
+#if defined(CONFIG_DEBUG_VM) && defined(CONFIG_CGROUP_HUGETLB)
 static void dump_resv_map(struct resv_map *resv)
 {
 	struct list_head *head = &resv->regions;
@@ -324,6 +324,10 @@ static void check_coalesce_bug(struct resv_map *resv)
 			VM_BUG_ON(true);
 		}
 	}
+}
+#else
+static void check_coalesce_bug(struct resv_map *resv)
+{
 }
 #endif
 
@@ -431,9 +435,7 @@ static long add_reservation_in_range(struct resv_map *resv, long f, long t,
 	}
 
 	VM_BUG_ON(add < 0);
-#ifdef CONFIG_DEBUG_VM
 	check_coalesce_bug(resv);
-#endif
 	return add;
 }
 
