@@ -273,7 +273,7 @@ extern pgd_t swapper_pg_dir[];
  * Platform specific pte_special() and pte_mkspecial() definitions
  * are required only when ARCH_HAS_PTE_SPECIAL is enabled.
  */
-#if !defined(CONFIG_32BIT) && !defined(CONFIG_CPU_HAS_RIXI)
+#if defined(CONFIG_ARCH_HAS_PTE_SPECIAL)
 #if defined(CONFIG_PHYS_ADDR_T_64BIT) && defined(CONFIG_CPU_MIPS32)
 static inline int pte_special(pte_t pte)
 {
@@ -297,7 +297,7 @@ static inline pte_t pte_mkspecial(pte_t pte)
 	return pte;
 }
 #endif
-#endif
+#endif /* CONFIG_ARCH_HAS_PTE_SPECIAL */
 
 /*
  * The following only work if pte_present() is true.
