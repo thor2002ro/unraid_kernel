@@ -18,6 +18,8 @@
 #include <linux/mmdebug.h>
 
 struct hugetlb_cgroup;
+struct resv_map;
+
 /*
  * Minimum page order trackable by hugetlb cgroup.
  * At least 4 pages are necessary for all the tracking information.
