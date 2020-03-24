@@ -5582,7 +5582,7 @@ void __init hugetlb_cma_reserve(int order)
 			max_pfn = end_pfn;
 		}
 
-		size = max(per_node, hugetlb_cma_size - reserved);
+		size = min(per_node, hugetlb_cma_size - reserved);
 		size = round_up(size, PAGE_SIZE << order);
 
 		if (size > ((max_pfn - min_pfn) << PAGE_SHIFT) / 2) {
