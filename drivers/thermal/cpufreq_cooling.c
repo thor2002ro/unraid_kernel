@@ -273,7 +273,7 @@ static int cpufreq_state2power(struct thermal_cooling_device *cdev,
 	struct cpufreq_cooling_device *cpufreq_cdev = cdev->devdata;
 
 	/* Request state should be less than max_level */
-	if (WARN_ON(state > cpufreq_cdev->max_level))
+	if (state > cpufreq_cdev->max_level)
 		return -EINVAL;
 
 	num_cpus = cpumask_weight(cpufreq_cdev->policy->cpus);
@@ -431,9 +431,10 @@ static int cpufreq_set_cur_state(struct thermal_cooling_device *cdev,
 				 unsigned long state)
 {
 	struct cpufreq_cooling_device *cpufreq_cdev = cdev->devdata;
+	int ret;
 
 	/* Request state should be less than max_level */
-	if (WARN_ON(state > cpufreq_cdev->max_level))
+	if (state > cpufreq_cdev->max_level)
 		return -EINVAL;
 
 	/* Check if the old cooling action is same as new cooling action */
@@ -442,8 +443,9 @@ static int cpufreq_set_cur_state(struct thermal_cooling_device *cdev,
 
 	cpufreq_cdev->cpufreq_state = state;
 
-	return freq_qos_update_request(&cpufreq_cdev->qos_req,
-				get_state_freq(cpufreq_cdev, state));
+	ret = freq_qos_update_request(&cpufreq_cdev->qos_req,
+				      get_state_freq(cpufreq_cdev, state));
+	return ret < 0 ? ret : 0;
 }
 
 /* Bind cpufreq callbacks to thermal cooling device ops */
