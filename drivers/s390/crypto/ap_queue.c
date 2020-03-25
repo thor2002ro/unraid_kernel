@@ -152,7 +152,7 @@ static struct ap_queue_status ap_sm_recv(struct ap_queue *aq)
 			ap_msg->receive(aq, ap_msg, aq->reply);
 			break;
 		}
-		/* fall through */
+		fallthrough;
 	case AP_RESPONSE_NO_PENDING_REPLY:
 		if (!status.queue_empty || aq->queue_count <= 0)
 			break;
@@ -219,7 +219,7 @@ static enum ap_wait ap_sm_suspend_read(struct ap_queue *aq)
 	case AP_RESPONSE_NORMAL:
 		if (aq->queue_count > 0)
 			return AP_WAIT_AGAIN;
-		/* fall through */
+		fallthrough;
 	default:
 		return AP_WAIT_NONE;
 	}
@@ -254,7 +254,7 @@ static enum ap_wait ap_sm_write(struct ap_queue *aq)
 			aq->state = AP_STATE_WORKING;
 			return AP_WAIT_AGAIN;
 		}
-		/* fall through */
+		fallthrough;
 	case AP_RESPONSE_Q_FULL:
 		aq->state = AP_STATE_QUEUE_FULL;
 		return AP_WAIT_INTERRUPT;
@@ -380,7 +380,7 @@ static enum ap_wait ap_sm_setirq_wait(struct ap_queue *aq)
 	case AP_RESPONSE_NORMAL:
 		if (aq->queue_count > 0)
 			return AP_WAIT_AGAIN;
-		/* fallthrough */
+		fallthrough;
 	case AP_RESPONSE_NO_PENDING_REPLY:
 		return AP_WAIT_TIMEOUT;
 	default:
@@ -484,7 +484,7 @@ static ssize_t request_count_show(struct device *dev,
 	spin_lock_bh(&aq->lock);
 	req_cnt = aq->total_request_count;
 	spin_unlock_bh(&aq->lock);
-	return snprintf(buf, PAGE_SIZE, "%llu\n", req_cnt);
+	return scnprintf(buf, PAGE_SIZE, "%llu\n", req_cnt);
 }
 
 static ssize_t request_count_store(struct device *dev,
@@ -511,7 +511,7 @@ static ssize_t requestq_count_show(struct device *dev,
 	spin_lock_bh(&aq->lock);
 	reqq_cnt = aq->requestq_count;
 	spin_unlock_bh(&aq->lock);
-	return snprintf(buf, PAGE_SIZE, "%d\n", reqq_cnt);
+	return scnprintf(buf, PAGE_SIZE, "%d\n", reqq_cnt);
 }
 
 static DEVICE_ATTR_RO(requestq_count);
@@ -525,7 +525,7 @@ static ssize_t pendingq_count_show(struct device *dev,
 	spin_lock_bh(&aq->lock);
 	penq_cnt = aq->pendingq_count;
 	spin_unlock_bh(&aq->lock);
-	return snprintf(buf, PAGE_SIZE, "%d\n", penq_cnt);
+	return scnprintf(buf, PAGE_SIZE, "%d\n", penq_cnt);
 }
 
 static DEVICE_ATTR_RO(pendingq_count);
@@ -540,14 +540,14 @@ static ssize_t reset_show(struct device *dev,
 	switch (aq->state) {
 	case AP_STATE_RESET_START:
 	case AP_STATE_RESET_WAIT:
-		rc = snprintf(buf, PAGE_SIZE, "Reset in progress.\n");
+		rc = scnprintf(buf, PAGE_SIZE, "Reset in progress.\n");
 		break;
 	case AP_STATE_WORKING:
 	case AP_STATE_QUEUE_FULL:
-		rc = snprintf(buf, PAGE_SIZE, "Reset Timer armed.\n");
+		rc = scnprintf(buf, PAGE_SIZE, "Reset Timer armed.\n");
 		break;
 	default:
-		rc = snprintf(buf, PAGE_SIZE, "No Reset Timer set.\n");
+		rc = scnprintf(buf, PAGE_SIZE, "No Reset Timer set.\n");
 	}
 	spin_unlock_bh(&aq->lock);
 	return rc;
@@ -581,11 +581,11 @@ static ssize_t interrupt_show(struct device *dev,
 
 	spin_lock_bh(&aq->lock);
 	if (aq->state == AP_STATE_SETIRQ_WAIT)
-		rc = snprintf(buf, PAGE_SIZE, "Enable Interrupt pending.\n");
+		rc = scnprintf(buf, PAGE_SIZE, "Enable Interrupt pending.\n");
 	else if (aq->interrupt == AP_INTR_ENABLED)
-		rc = snprintf(buf, PAGE_SIZE, "Interrupts enabled.\n");
+		rc = scnprintf(buf, PAGE_SIZE, "Interrupts enabled.\n");
 	else
-		rc = snprintf(buf, PAGE_SIZE, "Interrupts disabled.\n");
+		rc = scnprintf(buf, PAGE_SIZE, "Interrupts disabled.\n");
 	spin_unlock_bh(&aq->lock);
 	return rc;
 }
