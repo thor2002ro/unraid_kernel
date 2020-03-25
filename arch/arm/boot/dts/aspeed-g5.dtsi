@@ -195,6 +195,8 @@
 			reg = <0x1e6a0000 0x300>;
 			interrupts = <5>;
 			clocks = <&syscon ASPEED_CLK_GATE_USBPORT1CLK>;
+			aspeed,vhub-downstream-ports = <5>;
+			aspeed,vhub-generic-endpoints = <15>;
 			pinctrl-names = "default";
 			pinctrl-0 = <&pinctrl_usb2ad_default>;
 			status = "disabled";
@@ -221,6 +223,14 @@
 				ranges = <0 0x1e6e2000 0x1000>;
 				#clock-cells = <1>;
 				#reset-cells = <1>;
+
+				scu_ic: interrupt-controller@18 {
+					#interrupt-cells = <1>;
+					compatible = "aspeed,ast2500-scu-ic";
+					reg = <0x18 0x4>;
+					interrupts = <21>;
+					interrupt-controller;
+				};
 
 				p2a: p2a-control@2c {
 					compatible = "aspeed,ast2500-p2a-ctrl";
@@ -250,6 +260,17 @@
 				resets = <&syscon ASPEED_RESET_CRT1>;
 				status = "disabled";
 				interrupts = <0x19>;
+			};
+
+			xdma: xdma@1e6e7000 {
+				compatible = "aspeed,ast2500-xdma";
+				reg = <0x1e6e7000 0x100>;
+				clocks = <&syscon ASPEED_CLK_GATE_BCLK>;
+				resets = <&syscon ASPEED_RESET_XDMA>;
+				interrupts-extended = <&vic 6>, <&scu_ic 2>;
+				pcie-device = "bmc";
+				aspeed,scu = <&syscon>;
+				status = "disabled";
 			};
 
 			adc: adc@1e6e9000 {
