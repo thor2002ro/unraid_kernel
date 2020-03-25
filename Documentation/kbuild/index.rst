@@ -20,6 +20,7 @@ Kernel Build System
     issues
     reproducible-builds
     llvm
+    gcc-plugins
 
 .. only::  subproject and html
 
