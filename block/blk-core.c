@@ -346,7 +346,6 @@ void blk_cleanup_queue(struct request_queue *q)
 
 	blk_queue_flag_set(QUEUE_FLAG_NOMERGES, q);
 	blk_queue_flag_set(QUEUE_FLAG_NOXMERGES, q);
-	blk_queue_flag_set(QUEUE_FLAG_DYING, q);
 
 	/*
 	 * Drain all requests queued before DYING marking. Set DEAD flag to
@@ -1121,10 +1120,9 @@ blk_qc_t direct_make_request(struct bio *bio)
 
 	if (unlikely(blk_queue_enter(q, nowait ? BLK_MQ_REQ_NOWAIT : 0))) {
 		if (nowait && !blk_queue_dying(q))
-			bio->bi_status = BLK_STS_AGAIN;
+			bio_wouldblock_error(bio);
 		else
-			bio->bi_status = BLK_STS_IOERR;
-		bio_endio(bio);
+			bio_io_error(bio);
 		return BLK_QC_T_NONE;
 	}
 
@@ -1203,7 +1201,7 @@ EXPORT_SYMBOL(submit_bio);
 
 /**
  * blk_cloned_rq_check_limits - Helper function to check a cloned request
- *                              for new the queue limits
+ *                              for the new queue limits
  * @q:  the queue
  * @rq: the request being checked
  *
@@ -1339,10 +1337,9 @@ void blk_account_io_done(struct request *req, u64 now)
 		part_stat_lock();
 		part = req->part;
 
-		update_io_ticks(part, jiffies);
+		update_io_ticks(part, jiffies, true);
 		part_stat_inc(part, ios[sgrp]);
 		part_stat_add(part, nsecs[sgrp], now - req->start_time_ns);
-		part_stat_add(part, time_in_queue, nsecs_to_jiffies64(now - req->start_time_ns));
 		part_dec_in_flight(req->q, part, rq_data_dir(req));
 
 		hd_struct_put(part);
@@ -1381,7 +1378,7 @@ void blk_account_io_start(struct request *rq, bool new_io)
 		rq->part = part;
 	}
 
-	update_io_ticks(part, jiffies);
+	update_io_ticks(part, jiffies, false);
 
 	part_stat_unlock();
 }
@@ -1583,23 +1580,6 @@ void blk_rq_unprep_clone(struct request *rq)
 }
 EXPORT_SYMBOL_GPL(blk_rq_unprep_clone);
 
-/*
- * Copy attributes of the original request to the clone request.
- * The actual data parts (e.g. ->cmd, ->sense) are not copied.
- */
-static void __blk_rq_prep_clone(struct request *dst, struct request *src)
-{
-	dst->__sector = blk_rq_pos(src);
-	dst->__data_len = blk_rq_bytes(src);
-	if (src->rq_flags & RQF_SPECIAL_PAYLOAD) {
-		dst->rq_flags |= RQF_SPECIAL_PAYLOAD;
-		dst->special_vec = src->special_vec;
-	}
-	dst->nr_phys_segments = src->nr_phys_segments;
-	dst->ioprio = src->ioprio;
-	dst->extra_len = src->extra_len;
-}
-
 /**
  * blk_rq_prep_clone - Helper function to setup clone request
  * @rq: the request to be setup
@@ -1612,8 +1592,6 @@ static void __blk_rq_prep_clone(struct request *dst, struct request *src)
  *
  * Description:
  *     Clones bios in @rq_src to @rq, and copies attributes of @rq_src to @rq.
- *     The actual data parts of @rq_src (e.g. ->cmd, ->sense)
- *     are not copied, and copying such parts is the caller's responsibility.
  *     Also, pages which the original bios are pointing to are not copied
  *     and the cloned bios just point same pages.
  *     So cloned bios must be completed before original bios, which means
@@ -1644,7 +1622,16 @@ int blk_rq_prep_clone(struct request *rq, struct request *rq_src,
 			rq->bio = rq->biotail = bio;
 	}
 
-	__blk_rq_prep_clone(rq, rq_src);
+	/* Copy attributes of the original request to the clone request. */
+	rq->__sector = blk_rq_pos(rq_src);
+	rq->__data_len = blk_rq_bytes(rq_src);
+	if (rq_src->rq_flags & RQF_SPECIAL_PAYLOAD) {
+		rq->rq_flags |= RQF_SPECIAL_PAYLOAD;
+		rq->special_vec = rq_src->special_vec;
+	}
+	rq->nr_phys_segments = rq_src->nr_phys_segments;
+	rq->ioprio = rq_src->ioprio;
+	rq->extra_len = rq_src->extra_len;
 
 	return 0;
 
