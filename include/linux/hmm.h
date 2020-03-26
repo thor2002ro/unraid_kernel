@@ -74,7 +74,6 @@
  * Flags:
  * HMM_PFN_VALID: pfn is valid. It has, at least, read permission.
  * HMM_PFN_WRITE: CPU page table has write permission set
- * HMM_PFN_DEVICE_PRIVATE: private device memory (ZONE_DEVICE)
  *
  * The driver provides a flags array for mapping page protections to device
  * PTE bits. If the driver valid bit for an entry is bit 3,
@@ -86,7 +85,6 @@
 enum hmm_pfn_flag_e {
 	HMM_PFN_VALID = 0,
 	HMM_PFN_WRITE,
-	HMM_PFN_DEVICE_PRIVATE,
 	HMM_PFN_FLAG_MAX
 };
 
@@ -134,6 +132,7 @@ enum hmm_pfn_value_e {
  * @pfn_flags_mask: allows to mask pfn flags so that only default_flags matter
  * @pfn_shifts: pfn shift value (should be <= PAGE_SHIFT)
  * @valid: pfns array did not change since it has been fill by an HMM function
+ * @dev_private_owner: owner of device private pages
  */
 struct hmm_range {
 	struct mmu_interval_notifier *notifier;
@@ -146,6 +145,7 @@ struct hmm_range {
 	uint64_t		default_flags;
 	uint64_t		pfn_flags_mask;
 	uint8_t			pfn_shift;
+	void			*dev_private_owner;
 };
 
 /*
@@ -217,25 +217,13 @@ static inline uint64_t hmm_device_entry_from_pfn(const struct hmm_range *range,
 		range->flags[HMM_PFN_VALID];
 }
 
-/*
- * Retry fault if non-blocking, drop mmap_sem and return -EAGAIN in that case.
- */
-#define HMM_FAULT_ALLOW_RETRY		(1 << 0)
-
 /* Don't fault in missing PTEs, just snapshot the current state. */
 #define HMM_FAULT_SNAPSHOT		(1 << 1)
 
-#ifdef CONFIG_HMM_MIRROR
 /*
  * Please see Documentation/vm/hmm.rst for how to use the range API.
  */
 long hmm_range_fault(struct hmm_range *range, unsigned int flags);
-#else
-static inline long hmm_range_fault(struct hmm_range *range, unsigned int flags)
-{
-	return -EOPNOTSUPP;
-}
-#endif
 
 /*
  * HMM_RANGE_DEFAULT_TIMEOUT - default timeout (ms) when waiting for a range
