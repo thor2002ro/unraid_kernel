@@ -145,6 +145,20 @@ config LEDS_EL15203000
 	  To compile this driver as a module, choose M here: the module
 	  will be called leds-el15203000.
 
+config LEDS_TURRIS_OMNIA
+	tristate "LED support for CZ.NIC's Turris Omnia"
+	depends on LEDS_CLASS
+	depends on I2C
+	depends on MACH_ARMADA_38X || COMPILE_TEST
+	depends on OF
+	help
+	  This option enables basic support for the LEDs found on the front
+	  side of CZ.NIC's Turris Omnia router. There are 12 RGB LEDs on the
+	  front panel.
+	  This driver does not currently support setting LED colors, only
+	  brightness. Also HW triggering is disabled when the controller is
+	  probed by this driver.
+
 config LEDS_LM3530
 	tristate "LCD Backlight driver for LM3530"
 	depends on LEDS_CLASS
@@ -845,6 +859,17 @@ config LEDS_TPS6105X
 	  This driver supports TPS61050/TPS61052 LED chips.
 	  It is a single boost converter primarily for white LEDs and
 	  audio amplifiers.
+
+config LEDS_IP30
+	tristate "LED support for SGI Octane machines"
+	depends on LEDS_CLASS
+	depends on SGI_MFD_IOC3
+	help
+	  This option enables support for the Red and White LEDs of
+	  SGI Octane machines.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called leds-ip30.
 
 comment "LED Triggers"
 source "drivers/leds/trigger/Kconfig"
