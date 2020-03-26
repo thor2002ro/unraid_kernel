@@ -1845,7 +1845,6 @@ resolve_func_ptr(const struct btf *btf, __u32 id, __u32 *res_id)
  * type definition, while using only sizeof(void *) space in ELF data section.
  */
 static bool get_map_field_int(const char *map_name, const struct btf *btf,
-			      const struct btf_type *def,
 			      const struct btf_member *m, __u32 *res)
 {
 	const struct btf_type *t = skip_mods_and_typedefs(btf, m->type, NULL);
@@ -1972,19 +1971,19 @@ static int bpf_object__init_user_btf_map(struct bpf_object *obj,
 			return -EINVAL;
 		}
 		if (strcmp(name, "type") == 0) {
-			if (!get_map_field_int(map_name, obj->btf, def, m,
+			if (!get_map_field_int(map_name, obj->btf, m,
 					       &map->def.type))
 				return -EINVAL;
 			pr_debug("map '%s': found type = %u.\n",
 				 map_name, map->def.type);
 		} else if (strcmp(name, "max_entries") == 0) {
-			if (!get_map_field_int(map_name, obj->btf, def, m,
+			if (!get_map_field_int(map_name, obj->btf, m,
 					       &map->def.max_entries))
 				return -EINVAL;
 			pr_debug("map '%s': found max_entries = %u.\n",
 				 map_name, map->def.max_entries);
 		} else if (strcmp(name, "map_flags") == 0) {
-			if (!get_map_field_int(map_name, obj->btf, def, m,
+			if (!get_map_field_int(map_name, obj->btf, m,
 					       &map->def.map_flags))
 				return -EINVAL;
 			pr_debug("map '%s': found map_flags = %u.\n",
@@ -1992,8 +1991,7 @@ static int bpf_object__init_user_btf_map(struct bpf_object *obj,
 		} else if (strcmp(name, "key_size") == 0) {
 			__u32 sz;
 
-			if (!get_map_field_int(map_name, obj->btf, def, m,
-					       &sz))
+			if (!get_map_field_int(map_name, obj->btf, m, &sz))
 				return -EINVAL;
 			pr_debug("map '%s': found key_size = %u.\n",
 				 map_name, sz);
@@ -2035,8 +2033,7 @@ static int bpf_object__init_user_btf_map(struct bpf_object *obj,
 		} else if (strcmp(name, "value_size") == 0) {
 			__u32 sz;
 
-			if (!get_map_field_int(map_name, obj->btf, def, m,
-					       &sz))
+			if (!get_map_field_int(map_name, obj->btf, m, &sz))
 				return -EINVAL;
 			pr_debug("map '%s': found value_size = %u.\n",
 				 map_name, sz);
@@ -2079,8 +2076,7 @@ static int bpf_object__init_user_btf_map(struct bpf_object *obj,
 			__u32 val;
 			int err;
 
-			if (!get_map_field_int(map_name, obj->btf, def, m,
-					       &val))
+			if (!get_map_field_int(map_name, obj->btf, m, &val))
 				return -EINVAL;
 			pr_debug("map '%s': found pinning = %u.\n",
 				 map_name, val);
@@ -4855,8 +4851,8 @@ load_program(struct bpf_program *prog, struct bpf_insn *insns, int insns_cnt,
 {
 	struct bpf_load_program_attr load_attr;
 	char *cp, errmsg[STRERR_BUFSIZE];
-	int log_buf_size = BPF_LOG_BUF_SIZE;
-	char *log_buf;
+	size_t log_buf_size = 0;
+	char *log_buf = NULL;
 	int btf_fd, ret;
 
 	if (!insns || !insns_cnt)
@@ -4896,22 +4892,28 @@ load_program(struct bpf_program *prog, struct bpf_insn *insns, int insns_cnt,
 	load_attr.prog_flags = prog->prog_flags;
 
 retry_load:
-	log_buf = malloc(log_buf_size);
-	if (!log_buf)
-		pr_warn("Alloc log buffer for bpf loader error, continue without log\n");
+	if (log_buf_size) {
+		log_buf = malloc(log_buf_size);
+		if (!log_buf)
+			return -ENOMEM;
+
+		*log_buf = 0;
+	}
 
 	ret = bpf_load_program_xattr(&load_attr, log_buf, log_buf_size);
 
 	if (ret >= 0) {
-		if (load_attr.log_level)
+		if (log_buf && load_attr.log_level)
 			pr_debug("verifier log:\n%s", log_buf);
 		*pfd = ret;
 		ret = 0;
 		goto out;
 	}
 
-	if (errno == ENOSPC) {
-		log_buf_size <<= 1;
+	if (!log_buf || errno == ENOSPC) {
+		log_buf_size = max((size_t)BPF_LOG_BUF_SIZE,
+				   log_buf_size << 1);
+
 		free(log_buf);
 		goto retry_load;
 	}
