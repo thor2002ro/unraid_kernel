@@ -133,6 +133,7 @@ needed).
    PCI/index
    misc-devices/index
    scheduler/index
+   mhi/index
 
 Architecture-agnostic documentation
 -----------------------------------
