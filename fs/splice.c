@@ -1118,8 +1118,8 @@ long do_splice(struct file *in, loff_t __user *off_in,
 	loff_t offset;
 	long ret;
 
-	ipipe = get_pipe_info(in);
-	opipe = get_pipe_info(out);
+	ipipe = get_pipe_info(in, true);
+	opipe = get_pipe_info(out, true);
 
 	if (ipipe && opipe) {
 		if (off_in || off_out)
@@ -1278,7 +1278,7 @@ static int pipe_to_user(struct pipe_inode_info *pipe, struct pipe_buffer *buf,
 static long vmsplice_to_user(struct file *file, struct iov_iter *iter,
 			     unsigned int flags)
 {
-	struct pipe_inode_info *pipe = get_pipe_info(file);
+	struct pipe_inode_info *pipe = get_pipe_info(file, true);
 	struct splice_desc sd = {
 		.total_len = iov_iter_count(iter),
 		.flags = flags,
@@ -1313,7 +1313,7 @@ static long vmsplice_to_pipe(struct file *file, struct iov_iter *iter,
 	if (flags & SPLICE_F_GIFT)
 		buf_flag = PIPE_BUF_FLAG_GIFT;
 
-	pipe = get_pipe_info(file);
+	pipe = get_pipe_info(file, true);
 	if (!pipe)
 		return -EBADF;
 
@@ -1766,8 +1766,8 @@ static int link_pipe(struct pipe_inode_info *ipipe,
 static long do_tee(struct file *in, struct file *out, size_t len,
 		   unsigned int flags)
 {
-	struct pipe_inode_info *ipipe = get_pipe_info(in);
-	struct pipe_inode_info *opipe = get_pipe_info(out);
+	struct pipe_inode_info *ipipe = get_pipe_info(in, true);
+	struct pipe_inode_info *opipe = get_pipe_info(out, true);
 	int ret = -EINVAL;
 
 	/*
