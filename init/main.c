@@ -54,6 +54,7 @@
 #include <linux/delayacct.h>
 #include <linux/unistd.h>
 #include <linux/utsname.h>
+#include <linux/mmdebug.h>
 #include <linux/rmap.h>
 #include <linux/mempolicy.h>
 #include <linux/key.h>
@@ -1360,6 +1361,7 @@ static int __ref kernel_init(void *unused)
 	kernel_init_freeable();
 	/* need to finish all async __init code before freeing the memory */
 	async_synchronize_full();
+	debug_vm_pgtable();
 	ftrace_free_init_mem();
 	free_initmem();
 	mark_readonly();
