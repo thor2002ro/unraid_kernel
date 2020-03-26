@@ -745,13 +745,13 @@ TRACE_EVENT(kvm_emulate_insn,
 
 	TP_fast_assign(
 		__entry->csbase = kvm_x86_ops->get_segment_base(vcpu, VCPU_SREG_CS);
-		__entry->len = vcpu->arch.emulate_ctxt.fetch.ptr
-			       - vcpu->arch.emulate_ctxt.fetch.data;
-		__entry->rip = vcpu->arch.emulate_ctxt._eip - __entry->len;
+		__entry->len = vcpu->arch.emulate_ctxt->fetch.ptr
+			       - vcpu->arch.emulate_ctxt->fetch.data;
+		__entry->rip = vcpu->arch.emulate_ctxt->_eip - __entry->len;
 		memcpy(__entry->insn,
-		       vcpu->arch.emulate_ctxt.fetch.data,
+		       vcpu->arch.emulate_ctxt->fetch.data,
 		       15);
-		__entry->flags = kei_decode_mode(vcpu->arch.emulate_ctxt.mode);
+		__entry->flags = kei_decode_mode(vcpu->arch.emulate_ctxt->mode);
 		__entry->failed = failed;
 		),
 
@@ -1365,6 +1365,24 @@ TRACE_EVENT(kvm_avic_unaccelerated_access,
 		  __entry->ft ? "trap" : "fault",
 		  __entry->rw ? "write" : "read",
 		  __entry->vec)
+);
+
+TRACE_EVENT(kvm_avic_ga_log,
+	    TP_PROTO(u32 vmid, u32 vcpuid),
+	    TP_ARGS(vmid, vcpuid),
+
+	TP_STRUCT__entry(
+		__field(u32, vmid)
+		__field(u32, vcpuid)
+	),
+
+	TP_fast_assign(
+		__entry->vmid = vmid;
+		__entry->vcpuid = vcpuid;
+	),
+
+	TP_printk("vmid=%u, vcpuid=%u",
+		  __entry->vmid, __entry->vcpuid)
 );
 
 TRACE_EVENT(kvm_hv_timer_state,
