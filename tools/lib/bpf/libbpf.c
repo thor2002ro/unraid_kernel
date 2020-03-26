@@ -2284,11 +2284,16 @@ static void bpf_object__sanitize_btf_ext(struct bpf_object *obj)
 	}
 }
 
-static bool bpf_object__is_btf_mandatory(const struct bpf_object *obj)
+static bool libbpf_needs_btf(const struct bpf_object *obj)
 {
 	return obj->efile.btf_maps_shndx >= 0 ||
-		obj->efile.st_ops_shndx >= 0 ||
-		obj->nr_extern > 0;
+	       obj->efile.st_ops_shndx >= 0 ||
+	       obj->nr_extern > 0;
+}
+
+static bool kernel_needs_btf(const struct bpf_object *obj)
+{
+	return obj->efile.st_ops_shndx >= 0;
 }
 
 static int bpf_object__init_btf(struct bpf_object *obj,
@@ -2324,7 +2329,7 @@ static int bpf_object__init_btf(struct bpf_object *obj,
 		}
 	}
 out:
-	if (err && bpf_object__is_btf_mandatory(obj)) {
+	if (err && libbpf_needs_btf(obj)) {
 		pr_warn("BTF is required, but is missing or corrupted.\n");
 		return err;
 	}
@@ -2348,7 +2353,7 @@ static int bpf_object__finalize_btf(struct bpf_object *obj)
 	btf_ext__free(obj->btf_ext);
 	obj->btf_ext = NULL;
 
-	if (bpf_object__is_btf_mandatory(obj)) {
+	if (libbpf_needs_btf(obj)) {
 		pr_warn("BTF is required, but is missing or corrupted.\n");
 		return -ENOENT;
 	}
@@ -2412,7 +2417,7 @@ static int bpf_object__sanitize_and_load_btf(struct bpf_object *obj)
 			obj->btf_ext = NULL;
 		}
 
-		if (bpf_object__is_btf_mandatory(obj))
+		if (kernel_needs_btf(obj))
 			return err;
 	}
 	return 0;
@@ -3868,6 +3873,10 @@ static struct ids_vec *bpf_core_find_cands(const struct btf *local_btf,
 		if (str_is_empty(targ_name))
 			continue;
 
+		t = skip_mods_and_typedefs(targ_btf, i, NULL);
+		if (!btf_is_composite(t) && !btf_is_array(t))
+			continue;
+
 		targ_essent_len = bpf_core_essential_name_len(targ_name);
 		if (targ_essent_len != local_essent_len)
 			continue;
@@ -4945,8 +4954,8 @@ int bpf_program__load(struct bpf_program *prog, char *license, __u32 kern_ver)
 {
 	int err = 0, fd, i, btf_id;
 
-	if (prog->type == BPF_PROG_TYPE_TRACING ||
-	    prog->type == BPF_PROG_TYPE_EXT) {
+	if ((prog->type == BPF_PROG_TYPE_TRACING ||
+	     prog->type == BPF_PROG_TYPE_EXT) && !prog->attach_btf_id) {
 		btf_id = libbpf_find_attach_btf_id(prog);
 		if (btf_id <= 0)
 			return btf_id;
@@ -6290,6 +6299,10 @@ static const struct bpf_sec_def section_defs[] = {
 		.expected_attach_type = BPF_TRACE_FENTRY,
 		.is_attach_btf = true,
 		.attach_fn = attach_trace),
+	SEC_DEF("fmod_ret/", TRACING,
+		.expected_attach_type = BPF_MODIFY_RETURN,
+		.is_attach_btf = true,
+		.attach_fn = attach_trace),
 	SEC_DEF("fexit/", TRACING,
 		.expected_attach_type = BPF_TRACE_FEXIT,
 		.is_attach_btf = true,
@@ -6589,6 +6602,9 @@ static inline int __find_vmlinux_btf_id(struct btf *btf, const char *name,
 	else
 		err = btf__find_by_name_kind(btf, name, BTF_KIND_FUNC);
 
+	if (err <= 0)
+		pr_warn("%s is not found in vmlinux BTF\n", name);
+
 	return err;
 }
 
@@ -6661,8 +6677,6 @@ static int libbpf_find_attach_btf_id(struct bpf_program *prog)
 			err = __find_vmlinux_btf_id(prog->obj->btf_vmlinux,
 						    name + section_defs[i].len,
 						    attach_type);
-		if (err <= 0)
-			pr_warn("%s is not found in vmlinux BTF\n", name);
 		return err;
 	}
 	pr_warn("failed to identify btf_id based on ELF section name '%s'\n", name);
@@ -6932,6 +6946,8 @@ int bpf_prog_load_xattr(const struct bpf_prog_load_attr *attr,
 struct bpf_link {
 	int (*detach)(struct bpf_link *link);
 	int (*destroy)(struct bpf_link *link);
+	char *pin_path;		/* NULL, if not pinned */
+	int fd;			/* hook FD, -1 if not applicable */
 	bool disconnected;
 };
 
@@ -6961,26 +6977,109 @@ int bpf_link__destroy(struct bpf_link *link)
 		err = link->detach(link);
 	if (link->destroy)
 		link->destroy(link);
+	if (link->pin_path)
+		free(link->pin_path);
 	free(link);
 
 	return err;
 }
 
-struct bpf_link_fd {
-	struct bpf_link link; /* has to be at the top of struct */
-	int fd; /* hook FD */
-};
+int bpf_link__fd(const struct bpf_link *link)
+{
+	return link->fd;
+}
+
+const char *bpf_link__pin_path(const struct bpf_link *link)
+{
+	return link->pin_path;
+}
+
+static int bpf_link__detach_fd(struct bpf_link *link)
+{
+	return close(link->fd);
+}
+
+struct bpf_link *bpf_link__open(const char *path)
+{
+	struct bpf_link *link;
+	int fd;
+
+	fd = bpf_obj_get(path);
+	if (fd < 0) {
+		fd = -errno;
+		pr_warn("failed to open link at %s: %d\n", path, fd);
+		return ERR_PTR(fd);
+	}
+
+	link = calloc(1, sizeof(*link));
+	if (!link) {
+		close(fd);
+		return ERR_PTR(-ENOMEM);
+	}
+	link->detach = &bpf_link__detach_fd;
+	link->fd = fd;
+
+	link->pin_path = strdup(path);
+	if (!link->pin_path) {
+		bpf_link__destroy(link);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	return link;
+}
+
+int bpf_link__pin(struct bpf_link *link, const char *path)
+{
+	int err;
+
+	if (link->pin_path)
+		return -EBUSY;
+	err = make_parent_dir(path);
+	if (err)
+		return err;
+	err = check_path(path);
+	if (err)
+		return err;
+
+	link->pin_path = strdup(path);
+	if (!link->pin_path)
+		return -ENOMEM;
+
+	if (bpf_obj_pin(link->fd, link->pin_path)) {
+		err = -errno;
+		zfree(&link->pin_path);
+		return err;
+	}
+
+	pr_debug("link fd=%d: pinned at %s\n", link->fd, link->pin_path);
+	return 0;
+}
+
+int bpf_link__unpin(struct bpf_link *link)
+{
+	int err;
+
+	if (!link->pin_path)
+		return -EINVAL;
+
+	err = unlink(link->pin_path);
+	if (err != 0)
+		return -errno;
+
+	pr_debug("link fd=%d: unpinned from %s\n", link->fd, link->pin_path);
+	zfree(&link->pin_path);
+	return 0;
+}
 
 static int bpf_link__detach_perf_event(struct bpf_link *link)
 {
-	struct bpf_link_fd *l = (void *)link;
 	int err;
 
-	err = ioctl(l->fd, PERF_EVENT_IOC_DISABLE, 0);
+	err = ioctl(link->fd, PERF_EVENT_IOC_DISABLE, 0);
 	if (err)
 		err = -errno;
 
-	close(l->fd);
+	close(link->fd);
 	return err;
 }
 
@@ -6988,7 +7087,7 @@ struct bpf_link *bpf_program__attach_perf_event(struct bpf_program *prog,
 						int pfd)
 {
 	char errmsg[STRERR_BUFSIZE];
-	struct bpf_link_fd *link;
+	struct bpf_link *link;
 	int prog_fd, err;
 
 	if (pfd < 0) {
@@ -7006,7 +7105,7 @@ struct bpf_link *bpf_program__attach_perf_event(struct bpf_program *prog,
 	link = calloc(1, sizeof(*link));
 	if (!link)
 		return ERR_PTR(-ENOMEM);
-	link->link.detach = &bpf_link__detach_perf_event;
+	link->detach = &bpf_link__detach_perf_event;
 	link->fd = pfd;
 
 	if (ioctl(pfd, PERF_EVENT_IOC_SET_BPF, prog_fd) < 0) {
@@ -7025,7 +7124,7 @@ struct bpf_link *bpf_program__attach_perf_event(struct bpf_program *prog,
 			   libbpf_strerror_r(err, errmsg, sizeof(errmsg)));
 		return ERR_PTR(err);
 	}
-	return (struct bpf_link *)link;
+	return link;
 }
 
 /*
@@ -7313,18 +7412,11 @@ out:
 	return link;
 }
 
-static int bpf_link__detach_fd(struct bpf_link *link)
-{
-	struct bpf_link_fd *l = (void *)link;
-
-	return close(l->fd);
-}
-
 struct bpf_link *bpf_program__attach_raw_tracepoint(struct bpf_program *prog,
 						    const char *tp_name)
 {
 	char errmsg[STRERR_BUFSIZE];
-	struct bpf_link_fd *link;
+	struct bpf_link *link;
 	int prog_fd, pfd;
 
 	prog_fd = bpf_program__fd(prog);
@@ -7337,7 +7429,7 @@ struct bpf_link *bpf_program__attach_raw_tracepoint(struct bpf_program *prog,
 	link = calloc(1, sizeof(*link));
 	if (!link)
 		return ERR_PTR(-ENOMEM);
-	link->link.detach = &bpf_link__detach_fd;
+	link->detach = &bpf_link__detach_fd;
 
 	pfd = bpf_raw_tracepoint_open(tp_name, prog_fd);
 	if (pfd < 0) {
@@ -7349,7 +7441,7 @@ struct bpf_link *bpf_program__attach_raw_tracepoint(struct bpf_program *prog,
 		return ERR_PTR(pfd);
 	}
 	link->fd = pfd;
-	return (struct bpf_link *)link;
+	return link;
 }
 
 static struct bpf_link *attach_raw_tp(const struct bpf_sec_def *sec,
@@ -7363,7 +7455,7 @@ static struct bpf_link *attach_raw_tp(const struct bpf_sec_def *sec,
 struct bpf_link *bpf_program__attach_trace(struct bpf_program *prog)
 {
 	char errmsg[STRERR_BUFSIZE];
-	struct bpf_link_fd *link;
+	struct bpf_link *link;
 	int prog_fd, pfd;
 
 	prog_fd = bpf_program__fd(prog);
@@ -7376,7 +7468,7 @@ struct bpf_link *bpf_program__attach_trace(struct bpf_program *prog)
 	link = calloc(1, sizeof(*link));
 	if (!link)
 		return ERR_PTR(-ENOMEM);
-	link->link.detach = &bpf_link__detach_fd;
+	link->detach = &bpf_link__detach_fd;
 
 	pfd = bpf_raw_tracepoint_open(NULL, prog_fd);
 	if (pfd < 0) {
@@ -7410,10 +7502,9 @@ struct bpf_link *bpf_program__attach(struct bpf_program *prog)
 
 static int bpf_link__detach_struct_ops(struct bpf_link *link)
 {
-	struct bpf_link_fd *l = (void *)link;
 	__u32 zero = 0;
 
-	if (bpf_map_delete_elem(l->fd, &zero))
+	if (bpf_map_delete_elem(link->fd, &zero))
 		return -errno;
 
 	return 0;
@@ -7422,7 +7513,7 @@ static int bpf_link__detach_struct_ops(struct bpf_link *link)
 struct bpf_link *bpf_map__attach_struct_ops(struct bpf_map *map)
 {
 	struct bpf_struct_ops *st_ops;
-	struct bpf_link_fd *link;
+	struct bpf_link *link;
 	__u32 i, zero = 0;
 	int err;
 
@@ -7454,10 +7545,10 @@ struct bpf_link *bpf_map__attach_struct_ops(struct bpf_map *map)
 		return ERR_PTR(err);
 	}
 
-	link->link.detach = bpf_link__detach_struct_ops;
+	link->detach = bpf_link__detach_struct_ops;
 	link->fd = map->fd;
 
-	return (struct bpf_link *)link;
+	return link;
 }
 
 enum bpf_perf_event_ret
@@ -8136,6 +8227,31 @@ void bpf_program__bpil_offs_to_addr(struct bpf_prog_info_linear *info_linear)
 		bpf_prog_info_set_offset_u64(&info_linear->info,
 					     desc->array_offset, addr);
 	}
+}
+
+int bpf_program__set_attach_target(struct bpf_program *prog,
+				   int attach_prog_fd,
+				   const char *attach_func_name)
+{
+	int btf_id;
+
+	if (!prog || attach_prog_fd < 0 || !attach_func_name)
+		return -EINVAL;
+
+	if (attach_prog_fd)
+		btf_id = libbpf_find_prog_btf_id(attach_func_name,
+						 attach_prog_fd);
+	else
+		btf_id = __find_vmlinux_btf_id(prog->obj->btf_vmlinux,
+					       attach_func_name,
+					       prog->expected_attach_type);
+
+	if (btf_id < 0)
+		return btf_id;
+
+	prog->attach_btf_id = btf_id;
+	prog->attach_prog_fd = attach_prog_fd;
+	return 0;
 }
 
 int parse_cpu_mask_str(const char *s, bool **mask, int *mask_sz)

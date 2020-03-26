@@ -457,6 +457,7 @@ static void dsa_port_phylink_mac_pcs_get_state(struct phylink_config *config,
 {
 	struct dsa_port *dp = container_of(config, struct dsa_port, pl_config);
 	struct dsa_switch *ds = dp->ds;
+	int err;
 
 	/* Only called for inband modes */
 	if (!ds->ops->phylink_mac_link_state) {
@@ -464,8 +465,12 @@ static void dsa_port_phylink_mac_pcs_get_state(struct phylink_config *config,
 		return;
 	}
 
-	if (ds->ops->phylink_mac_link_state(ds, dp->index, state) < 0)
+	err = ds->ops->phylink_mac_link_state(ds, dp->index, state);
+	if (err < 0) {
+		dev_err(ds->dev, "p%d: phylink_mac_link_state() failed: %d\n",
+			dp->index, err);
 		state->link = 0;
+	}
 }
 
 static void dsa_port_phylink_mac_config(struct phylink_config *config,
@@ -513,9 +518,11 @@ static void dsa_port_phylink_mac_link_down(struct phylink_config *config,
 }
 
 static void dsa_port_phylink_mac_link_up(struct phylink_config *config,
+					 struct phy_device *phydev,
 					 unsigned int mode,
 					 phy_interface_t interface,
-					 struct phy_device *phydev)
+					 int speed, int duplex,
+					 bool tx_pause, bool rx_pause)
 {
 	struct dsa_port *dp = container_of(config, struct dsa_port, pl_config);
 	struct dsa_switch *ds = dp->ds;
@@ -526,7 +533,8 @@ static void dsa_port_phylink_mac_link_up(struct phylink_config *config,
 		return;
 	}
 
-	ds->ops->phylink_mac_link_up(ds, dp->index, mode, interface, phydev);
+	ds->ops->phylink_mac_link_up(ds, dp->index, mode, interface, phydev,
+				     speed, duplex, tx_pause, rx_pause);
 }
 
 const struct phylink_mac_ops dsa_port_phylink_mac_ops = {

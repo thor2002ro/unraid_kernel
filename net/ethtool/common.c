@@ -168,6 +168,7 @@ const char link_mode_names[][ETH_GSTRING_LEN] = {
 	__DEFINE_LINK_MODE_NAME(400000, LR8_ER8_FR8, Full),
 	__DEFINE_LINK_MODE_NAME(400000, DR8, Full),
 	__DEFINE_LINK_MODE_NAME(400000, CR8, Full),
+	__DEFINE_SPECIAL_MODE_NAME(FEC_LLRS, "LLRS"),
 };
 static_assert(ARRAY_SIZE(link_mode_names) == __ETHTOOL_LINK_MODE_MASK_NBITS);
 
@@ -256,4 +257,46 @@ int __ethtool_get_link(struct net_device *dev)
 		return -EOPNOTSUPP;
 
 	return netif_running(dev) && dev->ethtool_ops->get_link(dev);
+}
+
+int ethtool_get_max_rxfh_channel(struct net_device *dev, u32 *max)
+{
+	u32 dev_size, current_max = 0;
+	u32 *indir;
+	int ret;
+
+	if (!dev->ethtool_ops->get_rxfh_indir_size ||
+	    !dev->ethtool_ops->get_rxfh)
+		return -EOPNOTSUPP;
+	dev_size = dev->ethtool_ops->get_rxfh_indir_size(dev);
+	if (dev_size == 0)
+		return -EOPNOTSUPP;
+
+	indir = kcalloc(dev_size, sizeof(indir[0]), GFP_USER);
+	if (!indir)
+		return -ENOMEM;
+
+	ret = dev->ethtool_ops->get_rxfh(dev, indir, NULL, NULL);
+	if (ret)
+		goto out;
+
+	while (dev_size--)
+		current_max = max(current_max, indir[dev_size]);
+
+	*max = current_max;
+
+out:
+	kfree(indir);
+	return ret;
+}
+
+int ethtool_check_ops(const struct ethtool_ops *ops)
+{
+	if (WARN_ON(ops->set_coalesce && !ops->supported_coalesce_params))
+		return -EINVAL;
+	/* NOTE: sufficiently insane drivers may swap ethtool_ops at runtime,
+	 * the fact that ops are checked at registration time does not
+	 * mean the ops attached to a netdev later on are sane.
+	 */
+	return 0;
 }

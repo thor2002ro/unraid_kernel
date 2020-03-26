@@ -110,9 +110,9 @@
 #define ANCHOR_NUM_PRIOS 1
 #define ANCHOR_MIN_LEVEL (BY_PASS_MIN_LEVEL + 1)
 
-#define OFFLOADS_MAX_FT 1
-#define OFFLOADS_NUM_PRIOS 1
-#define OFFLOADS_MIN_LEVEL (ANCHOR_MIN_LEVEL + 1)
+#define OFFLOADS_MAX_FT 2
+#define OFFLOADS_NUM_PRIOS 2
+#define OFFLOADS_MIN_LEVEL (ANCHOR_MIN_LEVEL + OFFLOADS_NUM_PRIOS)
 
 #define LAG_PRIO_NUM_LEVELS 1
 #define LAG_NUM_PRIOS 1
@@ -145,7 +145,7 @@ static struct init_tree_node {
 			   ADD_NS(MLX5_FLOW_TABLE_MISS_ACTION_DEF,
 				  ADD_MULTIPLE_PRIO(LAG_NUM_PRIOS,
 						    LAG_PRIO_NUM_LEVELS))),
-		  ADD_PRIO(0, OFFLOADS_MIN_LEVEL, 0, {},
+		  ADD_PRIO(0, OFFLOADS_MIN_LEVEL, 0, FS_CHAINING_CAPS,
 			   ADD_NS(MLX5_FLOW_TABLE_MISS_ACTION_DEF,
 				  ADD_MULTIPLE_PRIO(OFFLOADS_NUM_PRIOS,
 						    OFFLOADS_MAX_FT))),
@@ -1892,11 +1892,15 @@ mlx5_add_flow_rules(struct mlx5_flow_table *ft,
 		    int num_dest)
 {
 	struct mlx5_flow_root_namespace *root = find_root(&ft->node);
+	static const struct mlx5_flow_spec zero_spec = {};
 	struct mlx5_flow_destination gen_dest = {};
 	struct mlx5_flow_table *next_ft = NULL;
 	struct mlx5_flow_handle *handle = NULL;
 	u32 sw_action = flow_act->action;
 	struct fs_prio *prio;
+
+	if (!spec)
+		spec = &zero_spec;
 
 	fs_get_obj(prio, ft->node.parent);
 	if (flow_act->action == MLX5_FLOW_CONTEXT_ACTION_FWD_NEXT_PRIO) {
@@ -2695,6 +2699,17 @@ static int init_fdb_root_ns(struct mlx5_flow_steering *steering)
 		goto out_err;
 
 	maj_prio = fs_create_prio(&steering->fdb_root_ns->ns, FDB_SLOW_PATH, 1);
+	if (IS_ERR(maj_prio)) {
+		err = PTR_ERR(maj_prio);
+		goto out_err;
+	}
+
+	/* We put this priority last, knowing that nothing will get here
+	 * unless explicitly forwarded to. This is possible because the
+	 * slow path tables have catch all rules and nothing gets passed
+	 * those tables.
+	 */
+	maj_prio = fs_create_prio(&steering->fdb_root_ns->ns, FDB_PER_VPORT, 1);
 	if (IS_ERR(maj_prio)) {
 		err = PTR_ERR(maj_prio);
 		goto out_err;

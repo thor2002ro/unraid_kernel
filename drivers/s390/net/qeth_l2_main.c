@@ -499,6 +499,7 @@ static void qeth_l2_rx_mode_work(struct work_struct *work)
 static int qeth_l2_xmit_osn(struct qeth_card *card, struct sk_buff *skb,
 			    struct qeth_qdio_out_q *queue)
 {
+	gfp_t gfp = GFP_ATOMIC | (skb_pfmemalloc(skb) ? __GFP_MEMALLOC : 0);
 	struct qeth_hdr *hdr = (struct qeth_hdr *)skb->data;
 	addr_t end = (addr_t)(skb->data + sizeof(*hdr));
 	addr_t start = (addr_t)skb->data;
@@ -511,7 +512,7 @@ static int qeth_l2_xmit_osn(struct qeth_card *card, struct sk_buff *skb,
 
 	if (qeth_get_elements_for_range(start, end) > 1) {
 		/* Misaligned HW header, move it to its own buffer element. */
-		hdr = kmem_cache_alloc(qeth_core_header_cache, GFP_ATOMIC);
+		hdr = kmem_cache_alloc(qeth_core_header_cache, gfp);
 		if (!hdr)
 			return -ENOMEM;
 		hd_len = sizeof(*hdr);
@@ -570,7 +571,9 @@ static u16 qeth_l2_select_queue(struct net_device *dev, struct sk_buff *skb,
 		return qeth_iqd_select_queue(dev, skb,
 					     qeth_get_ether_cast_type(skb),
 					     sb_dev);
-	return qeth_get_priority_queue(card, skb);
+
+	return IS_VM_NIC(card) ? netdev_pick_tx(dev, skb, sb_dev) :
+				 qeth_get_priority_queue(card, skb);
 }
 
 static const struct device_type qeth_l2_devtype = {
@@ -610,7 +613,7 @@ static void qeth_l2_remove_device(struct ccwgroup_device *cgdev)
 		qeth_set_offline(card, false);
 
 	cancel_work_sync(&card->close_dev_work);
-	if (qeth_netdev_is_registered(card->dev))
+	if (card->dev->reg_state == NETREG_REGISTERED)
 		unregister_netdev(card->dev);
 }
 
@@ -648,7 +651,7 @@ static const struct net_device_ops qeth_osn_netdev_ops = {
 	.ndo_tx_timeout		= qeth_tx_timeout,
 };
 
-static int qeth_l2_setup_netdev(struct qeth_card *card, bool carrier_ok)
+static int qeth_l2_setup_netdev(struct qeth_card *card)
 {
 	int rc;
 
@@ -657,6 +660,10 @@ static int qeth_l2_setup_netdev(struct qeth_card *card, bool carrier_ok)
 		card->dev->flags |= IFF_NOARP;
 		goto add_napi;
 	}
+
+	rc = qeth_setup_netdev(card);
+	if (rc)
+		return rc;
 
 	card->dev->needed_headroom = sizeof(struct qeth_hdr);
 	card->dev->netdev_ops = &qeth_l2_netdev_ops;
@@ -704,13 +711,7 @@ static int qeth_l2_setup_netdev(struct qeth_card *card, bool carrier_ok)
 
 add_napi:
 	netif_napi_add(card->dev, &card->napi, qeth_poll, QETH_NAPI_WEIGHT);
-	rc = register_netdev(card->dev);
-	if (!rc && carrier_ok)
-		netif_carrier_on(card->dev);
-
-	if (rc)
-		card->dev->netdev_ops = NULL;
-	return rc;
+	return register_netdev(card->dev);
 }
 
 static void qeth_l2_trace_features(struct qeth_card *card)
@@ -783,10 +784,13 @@ static int qeth_l2_set_online(struct qeth_card *card)
 
 	qeth_set_allowed_threads(card, 0xffffffff, 0);
 
-	if (!qeth_netdev_is_registered(dev)) {
-		rc = qeth_l2_setup_netdev(card, carrier_ok);
+	if (dev->reg_state != NETREG_REGISTERED) {
+		rc = qeth_l2_setup_netdev(card);
 		if (rc)
 			goto out_remove;
+
+		if (carrier_ok)
+			netif_carrier_on(dev);
 	} else {
 		rtnl_lock();
 		if (carrier_ok)
@@ -1512,8 +1516,6 @@ int qeth_bridgeport_an_set(struct qeth_card *card, int enable)
 	struct ccw_device *ddev;
 	struct subchannel_id schid;
 
-	if (!card)
-		return -EINVAL;
 	if (!card->options.sbp.supported_funcs)
 		return -EOPNOTSUPP;
 	ddev = CARD_DDEV(card);
@@ -1568,23 +1570,11 @@ static int qeth_l2_vnicc_makerc(struct qeth_card *card, u16 ipa_rc)
 	return rc;
 }
 
-/* generic VNICC request call back control */
-struct _qeth_l2_vnicc_request_cbctl {
-	struct {
-		union{
-			u32 *sup_cmds;
-			u32 *timeout;
-		};
-	} result;
-};
-
 /* generic VNICC request call back */
 static int qeth_l2_vnicc_request_cb(struct qeth_card *card,
 				    struct qeth_reply *reply,
 				    unsigned long data)
 {
-	struct _qeth_l2_vnicc_request_cbctl *cbctl =
-		(struct _qeth_l2_vnicc_request_cbctl *) reply->param;
 	struct qeth_ipa_cmd *cmd = (struct qeth_ipa_cmd *) data;
 	struct qeth_ipacmd_vnicc *rep = &cmd->data.vnicc;
 	u32 sub_cmd = cmd->data.vnicc.hdr.sub_command;
@@ -1597,9 +1587,9 @@ static int qeth_l2_vnicc_request_cb(struct qeth_card *card,
 	card->options.vnicc.cur_chars = rep->vnicc_cmds.enabled;
 
 	if (sub_cmd == IPA_VNICC_QUERY_CMDS)
-		*cbctl->result.sup_cmds = rep->data.query_cmds.sup_cmds;
+		*(u32 *)reply->param = rep->data.query_cmds.sup_cmds;
 	else if (sub_cmd == IPA_VNICC_GET_TIMEOUT)
-		*cbctl->result.timeout = rep->data.getset_timeout.timeout;
+		*(u32 *)reply->param = rep->data.getset_timeout.timeout;
 
 	return 0;
 }
@@ -1640,7 +1630,6 @@ static int qeth_l2_vnicc_query_chars(struct qeth_card *card)
 static int qeth_l2_vnicc_query_cmds(struct qeth_card *card, u32 vnic_char,
 				    u32 *sup_cmds)
 {
-	struct _qeth_l2_vnicc_request_cbctl cbctl;
 	struct qeth_cmd_buffer *iob;
 
 	QETH_CARD_TEXT(card, 2, "vniccqcm");
@@ -1651,10 +1640,7 @@ static int qeth_l2_vnicc_query_cmds(struct qeth_card *card, u32 vnic_char,
 
 	__ipa_cmd(iob)->data.vnicc.data.query_cmds.vnic_char = vnic_char;
 
-	/* prepare callback control */
-	cbctl.result.sup_cmds = sup_cmds;
-
-	return qeth_send_ipa_cmd(card, iob, qeth_l2_vnicc_request_cb, &cbctl);
+	return qeth_send_ipa_cmd(card, iob, qeth_l2_vnicc_request_cb, sup_cmds);
 }
 
 /* VNICC enable/disable characteristic request */
@@ -1678,7 +1664,6 @@ static int qeth_l2_vnicc_getset_timeout(struct qeth_card *card, u32 vnicc,
 					u32 cmd, u32 *timeout)
 {
 	struct qeth_vnicc_getset_timeout *getset_timeout;
-	struct _qeth_l2_vnicc_request_cbctl cbctl;
 	struct qeth_cmd_buffer *iob;
 
 	QETH_CARD_TEXT(card, 2, "vniccgst");
@@ -1693,11 +1678,7 @@ static int qeth_l2_vnicc_getset_timeout(struct qeth_card *card, u32 vnicc,
 	if (cmd == IPA_VNICC_SET_TIMEOUT)
 		getset_timeout->timeout = *timeout;
 
-	/* prepare callback control */
-	if (cmd == IPA_VNICC_GET_TIMEOUT)
-		cbctl.result.timeout = timeout;
-
-	return qeth_send_ipa_cmd(card, iob, qeth_l2_vnicc_request_cb, &cbctl);
+	return qeth_send_ipa_cmd(card, iob, qeth_l2_vnicc_request_cb, timeout);
 }
 
 /* set current VNICC flag state; called from sysfs store function */

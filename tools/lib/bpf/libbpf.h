@@ -219,6 +219,11 @@ LIBBPF_API void bpf_program__unload(struct bpf_program *prog);
 
 struct bpf_link;
 
+LIBBPF_API struct bpf_link *bpf_link__open(const char *path);
+LIBBPF_API int bpf_link__fd(const struct bpf_link *link);
+LIBBPF_API const char *bpf_link__pin_path(const struct bpf_link *link);
+LIBBPF_API int bpf_link__pin(struct bpf_link *link, const char *path);
+LIBBPF_API int bpf_link__unpin(struct bpf_link *link);
 LIBBPF_API void bpf_link__disconnect(struct bpf_link *link);
 LIBBPF_API int bpf_link__destroy(struct bpf_link *link);
 
@@ -333,6 +338,10 @@ bpf_program__get_expected_attach_type(struct bpf_program *prog);
 LIBBPF_API void
 bpf_program__set_expected_attach_type(struct bpf_program *prog,
 				      enum bpf_attach_type type);
+
+LIBBPF_API int
+bpf_program__set_attach_target(struct bpf_program *prog, int attach_prog_fd,
+			       const char *attach_func_name);
 
 LIBBPF_API bool bpf_program__is_socket_filter(const struct bpf_program *prog);
 LIBBPF_API bool bpf_program__is_tracepoint(const struct bpf_program *prog);

@@ -36,11 +36,15 @@ struct sja1105_regs {
 	u64 port_control;
 	u64 rgu;
 	u64 config;
+	u64 sgmii;
 	u64 rmii_pll1;
+	u64 ptppinst;
+	u64 ptppindur;
 	u64 ptp_control;
 	u64 ptpclkval;
 	u64 ptpclkrate;
 	u64 ptpclkcorp;
+	u64 ptpsyncts;
 	u64 ptpschtm;
 	u64 ptpegr_ts[SJA1105_NUM_PORTS];
 	u64 pad_mii_tx[SJA1105_NUM_PORTS];
@@ -159,6 +163,7 @@ typedef enum {
 	XMII_MODE_MII		= 0,
 	XMII_MODE_RMII		= 1,
 	XMII_MODE_RGMII		= 2,
+	XMII_MODE_SGMII		= 3,
 } sja1105_phy_interface_t;
 
 typedef enum {
@@ -211,6 +216,8 @@ size_t sja1105et_l2_lookup_entry_packing(void *buf, void *entry_ptr,
 size_t sja1105_vlan_lookup_entry_packing(void *buf, void *entry_ptr,
 					 enum packing_op op);
 size_t sja1105pqrs_mac_config_entry_packing(void *buf, void *entry_ptr,
+					    enum packing_op op);
+size_t sja1105pqrs_avb_params_entry_packing(void *buf, void *entry_ptr,
 					    enum packing_op op);
 
 #endif

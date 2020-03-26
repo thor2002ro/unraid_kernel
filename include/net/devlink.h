@@ -16,6 +16,7 @@
 #include <linux/workqueue.h>
 #include <linux/refcount.h>
 #include <net/net_namespace.h>
+#include <net/flow_offload.h>
 #include <uapi/linux/devlink.h>
 
 struct devlink_ops;
@@ -489,6 +490,8 @@ enum devlink_param_generic_id {
 #define DEVLINK_INFO_VERSION_GENERIC_FW_PSID	"fw.psid"
 /* RoCE FW version */
 #define DEVLINK_INFO_VERSION_GENERIC_FW_ROCE	"fw.roce"
+/* Firmware bundle identifier */
+#define DEVLINK_INFO_VERSION_GENERIC_FW_BUNDLE_ID	"fw.bundle_id"
 
 struct devlink_region;
 struct devlink_info_req;
@@ -541,6 +544,7 @@ struct devlink_trap_group {
 };
 
 #define DEVLINK_TRAP_METADATA_TYPE_F_IN_PORT	BIT(0)
+#define DEVLINK_TRAP_METADATA_TYPE_F_FA_COOKIE	BIT(1)
 
 /**
  * struct devlink_trap - Immutable packet trap attributes.
@@ -549,7 +553,7 @@ struct devlink_trap_group {
  * @generic: Whether the trap is generic or not.
  * @id: Trap identifier.
  * @name: Trap name.
- * @group: Immutable packet trap group attributes.
+ * @init_group_id: Initial group identifier.
  * @metadata_cap: Metadata types that can be provided by the trap.
  *
  * Describes immutable attributes of packet traps that drivers register with
@@ -561,7 +565,7 @@ struct devlink_trap {
 	bool generic;
 	u16 id;
 	const char *name;
-	struct devlink_trap_group group;
+	u16 init_group_id;
 	u32 metadata_cap;
 };
 
@@ -596,6 +600,8 @@ enum devlink_trap_generic_id {
 	DEVLINK_TRAP_GENERIC_ID_NON_ROUTABLE,
 	DEVLINK_TRAP_GENERIC_ID_DECAP_ERROR,
 	DEVLINK_TRAP_GENERIC_ID_OVERLAY_SMAC_MC,
+	DEVLINK_TRAP_GENERIC_ID_INGRESS_FLOW_ACTION_DROP,
+	DEVLINK_TRAP_GENERIC_ID_EGRESS_FLOW_ACTION_DROP,
 
 	/* Add new generic trap IDs above */
 	__DEVLINK_TRAP_GENERIC_ID_MAX,
@@ -610,6 +616,7 @@ enum devlink_trap_group_generic_id {
 	DEVLINK_TRAP_GROUP_GENERIC_ID_L3_DROPS,
 	DEVLINK_TRAP_GROUP_GENERIC_ID_BUFFER_DROPS,
 	DEVLINK_TRAP_GROUP_GENERIC_ID_TUNNEL_DROPS,
+	DEVLINK_TRAP_GROUP_GENERIC_ID_ACL_DROPS,
 
 	/* Add new generic trap group IDs above */
 	__DEVLINK_TRAP_GROUP_GENERIC_ID_MAX,
@@ -671,6 +678,10 @@ enum devlink_trap_group_generic_id {
 	"decap_error"
 #define DEVLINK_TRAP_GENERIC_NAME_OVERLAY_SMAC_MC \
 	"overlay_smac_is_mc"
+#define DEVLINK_TRAP_GENERIC_NAME_INGRESS_FLOW_ACTION_DROP \
+	"ingress_flow_action_drop"
+#define DEVLINK_TRAP_GENERIC_NAME_EGRESS_FLOW_ACTION_DROP \
+	"egress_flow_action_drop"
 
 #define DEVLINK_TRAP_GROUP_GENERIC_NAME_L2_DROPS \
 	"l2_drops"
@@ -680,19 +691,22 @@ enum devlink_trap_group_generic_id {
 	"buffer_drops"
 #define DEVLINK_TRAP_GROUP_GENERIC_NAME_TUNNEL_DROPS \
 	"tunnel_drops"
+#define DEVLINK_TRAP_GROUP_GENERIC_NAME_ACL_DROPS \
+	"acl_drops"
 
-#define DEVLINK_TRAP_GENERIC(_type, _init_action, _id, _group, _metadata_cap) \
+#define DEVLINK_TRAP_GENERIC(_type, _init_action, _id, _group_id,	      \
+			     _metadata_cap)				      \
 	{								      \
 		.type = DEVLINK_TRAP_TYPE_##_type,			      \
 		.init_action = DEVLINK_TRAP_ACTION_##_init_action,	      \
 		.generic = true,					      \
 		.id = DEVLINK_TRAP_GENERIC_ID_##_id,			      \
 		.name = DEVLINK_TRAP_GENERIC_NAME_##_id,		      \
-		.group = _group,					      \
+		.init_group_id = _group_id,				      \
 		.metadata_cap = _metadata_cap,				      \
 	}
 
-#define DEVLINK_TRAP_DRIVER(_type, _init_action, _id, _name, _group,	      \
+#define DEVLINK_TRAP_DRIVER(_type, _init_action, _id, _name, _group_id,	      \
 			    _metadata_cap)				      \
 	{								      \
 		.type = DEVLINK_TRAP_TYPE_##_type,			      \
@@ -700,7 +714,7 @@ enum devlink_trap_group_generic_id {
 		.generic = false,					      \
 		.id = _id,						      \
 		.name = _name,						      \
-		.group = _group,					      \
+		.init_group_id = _group_id,				      \
 		.metadata_cap = _metadata_cap,				      \
 	}
 
@@ -981,12 +995,17 @@ int devlink_fmsg_pair_nest_end(struct devlink_fmsg *fmsg);
 int devlink_fmsg_arr_pair_nest_start(struct devlink_fmsg *fmsg,
 				     const char *name);
 int devlink_fmsg_arr_pair_nest_end(struct devlink_fmsg *fmsg);
+int devlink_fmsg_binary_pair_nest_start(struct devlink_fmsg *fmsg,
+					const char *name);
+int devlink_fmsg_binary_pair_nest_end(struct devlink_fmsg *fmsg);
 
 int devlink_fmsg_bool_put(struct devlink_fmsg *fmsg, bool value);
 int devlink_fmsg_u8_put(struct devlink_fmsg *fmsg, u8 value);
 int devlink_fmsg_u32_put(struct devlink_fmsg *fmsg, u32 value);
 int devlink_fmsg_u64_put(struct devlink_fmsg *fmsg, u64 value);
 int devlink_fmsg_string_put(struct devlink_fmsg *fmsg, const char *value);
+int devlink_fmsg_binary_put(struct devlink_fmsg *fmsg, const void *value,
+			    u16 value_len);
 
 int devlink_fmsg_bool_pair_put(struct devlink_fmsg *fmsg, const char *name,
 			       bool value);
@@ -1035,10 +1054,16 @@ int devlink_traps_register(struct devlink *devlink,
 void devlink_traps_unregister(struct devlink *devlink,
 			      const struct devlink_trap *traps,
 			      size_t traps_count);
-void devlink_trap_report(struct devlink *devlink,
-			 struct sk_buff *skb, void *trap_ctx,
-			 struct devlink_port *in_devlink_port);
+void devlink_trap_report(struct devlink *devlink, struct sk_buff *skb,
+			 void *trap_ctx, struct devlink_port *in_devlink_port,
+			 const struct flow_action_cookie *fa_cookie);
 void *devlink_trap_ctx_priv(void *trap_ctx);
+int devlink_trap_groups_register(struct devlink *devlink,
+				 const struct devlink_trap_group *groups,
+				 size_t groups_count);
+void devlink_trap_groups_unregister(struct devlink *devlink,
+				    const struct devlink_trap_group *groups,
+				    size_t groups_count);
 
 #if IS_ENABLED(CONFIG_NET_DEVLINK)
 

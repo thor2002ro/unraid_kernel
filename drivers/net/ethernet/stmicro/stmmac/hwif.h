@@ -577,6 +577,18 @@ struct stmmac_mmc_ops {
 #define stmmac_mmc_read(__priv, __args...) \
 	stmmac_do_void_callback(__priv, mmc, read, __args)
 
+/* XPCS callbacks */
+#define stmmac_xpcs_validate(__priv, __args...) \
+	stmmac_do_callback(__priv, xpcs, validate, __args)
+#define stmmac_xpcs_config(__priv, __args...) \
+	stmmac_do_callback(__priv, xpcs, config, __args)
+#define stmmac_xpcs_get_state(__priv, __args...) \
+	stmmac_do_callback(__priv, xpcs, get_state, __args)
+#define stmmac_xpcs_link_up(__priv, __args...) \
+	stmmac_do_callback(__priv, xpcs, link_up, __args)
+#define stmmac_xpcs_probe(__priv, __args...) \
+	stmmac_do_callback(__priv, xpcs, probe, __args)
+
 struct stmmac_regs_off {
 	u32 ptp_off;
 	u32 mmc_off;
@@ -593,6 +605,7 @@ extern const struct stmmac_dma_ops dwmac410_dma_ops;
 extern const struct stmmac_ops dwmac510_ops;
 extern const struct stmmac_tc_ops dwmac510_tc_ops;
 extern const struct stmmac_ops dwxgmac210_ops;
+extern const struct stmmac_ops dwxlgmac2_ops;
 extern const struct stmmac_dma_ops dwxgmac210_dma_ops;
 extern const struct stmmac_desc_ops dwxgmac210_desc_ops;
 extern const struct stmmac_mmc_ops dwmac_mmc_ops;

@@ -259,11 +259,11 @@ static bool mptcp_established_options_mp(struct sock *sk, struct sk_buff *skb,
 	struct mptcp_ext *mpext;
 	unsigned int data_len;
 
-	pr_debug("subflow=%p fourth_ack=%d seq=%x:%x remaining=%d", subflow,
-		 subflow->fourth_ack, subflow->snd_isn,
+	pr_debug("subflow=%p fully established=%d seq=%x:%x remaining=%d",
+		 subflow, subflow->fully_established, subflow->snd_isn,
 		 skb ? TCP_SKB_CB(skb)->seq : 0, remaining);
 
-	if (subflow->mp_capable && !subflow->fourth_ack && skb &&
+	if (subflow->mp_capable && !subflow->fully_established && skb &&
 	    subflow->snd_isn == TCP_SKB_CB(skb)->seq) {
 		/* When skb is not available, we better over-estimate the
 		 * emitted options len. A full DSS option is longer than
@@ -304,21 +304,22 @@ static bool mptcp_established_options_mp(struct sock *sk, struct sk_buff *skb,
 static void mptcp_write_data_fin(struct mptcp_subflow_context *subflow,
 				 struct mptcp_ext *ext)
 {
-	ext->data_fin = 1;
-
 	if (!ext->use_map) {
 		/* RFC6824 requires a DSS mapping with specific values
 		 * if DATA_FIN is set but no data payload is mapped
 		 */
+		ext->data_fin = 1;
 		ext->use_map = 1;
 		ext->dsn64 = 1;
-		ext->data_seq = mptcp_sk(subflow->conn)->write_seq;
+		ext->data_seq = subflow->data_fin_tx_seq;
 		ext->subflow_seq = 0;
 		ext->data_len = 1;
-	} else {
-		/* If there's an existing DSS mapping, DATA_FIN consumes
-		 * 1 additional byte of mapping space.
+	} else if (ext->data_seq + ext->data_len == subflow->data_fin_tx_seq) {
+		/* If there's an existing DSS mapping and it is the
+		 * final mapping, DATA_FIN consumes 1 additional byte of
+		 * mapping space.
 		 */
+		ext->data_fin = 1;
 		ext->data_len++;
 	}
 }
@@ -334,8 +335,6 @@ static bool mptcp_established_options_dss(struct sock *sk, struct sk_buff *skb,
 	struct mptcp_sock *msk;
 	unsigned int ack_size;
 	bool ret = false;
-	bool can_ack;
-	u64 ack_seq;
 	u8 tcp_fin;
 
 	if (skb) {
@@ -356,8 +355,7 @@ static bool mptcp_established_options_dss(struct sock *sk, struct sk_buff *skb,
 		if (mpext)
 			opts->ext_copy = *mpext;
 
-		if (skb && tcp_fin &&
-		    subflow->conn->sk_state != TCP_ESTABLISHED)
+		if (skb && tcp_fin && subflow->data_fin_tx_enable)
 			mptcp_write_data_fin(subflow, &opts->ext_copy);
 		ret = true;
 	}
@@ -365,19 +363,9 @@ static bool mptcp_established_options_dss(struct sock *sk, struct sk_buff *skb,
 	/* passive sockets msk will set the 'can_ack' after accept(), even
 	 * if the first subflow may have the already the remote key handy
 	 */
-	can_ack = true;
 	opts->ext_copy.use_ack = 0;
 	msk = mptcp_sk(subflow->conn);
-	if (likely(msk && READ_ONCE(msk->can_ack))) {
-		ack_seq = msk->ack_seq;
-	} else if (subflow->can_ack) {
-		mptcp_crypto_key_sha(subflow->remote_key, NULL, &ack_seq);
-		ack_seq++;
-	} else {
-		can_ack = false;
-	}
-
-	if (unlikely(!can_ack)) {
+	if (!READ_ONCE(msk->can_ack)) {
 		*size = ALIGN(dss_size, 4);
 		return ret;
 	}
@@ -390,7 +378,7 @@ static bool mptcp_established_options_dss(struct sock *sk, struct sk_buff *skb,
 
 	dss_size += ack_size;
 
-	opts->ext_copy.data_ack = ack_seq;
+	opts->ext_copy.data_ack = msk->ack_seq;
 	opts->ext_copy.ack64 = 1;
 	opts->ext_copy.use_ack = 1;
 
@@ -439,19 +427,19 @@ bool mptcp_synack_options(const struct request_sock *req, unsigned int *size,
 	return false;
 }
 
-static bool check_fourth_ack(struct mptcp_subflow_context *subflow,
-			     struct sk_buff *skb,
-			     struct mptcp_options_received *mp_opt)
+static bool check_fully_established(struct mptcp_subflow_context *subflow,
+				    struct sk_buff *skb,
+				    struct mptcp_options_received *mp_opt)
 {
 	/* here we can process OoO, in-window pkts, only in-sequence 4th ack
 	 * are relevant
 	 */
-	if (likely(subflow->fourth_ack ||
+	if (likely(subflow->fully_established ||
 		   TCP_SKB_CB(skb)->seq != subflow->ssn_offset + 1))
 		return true;
 
 	if (mp_opt->use_ack)
-		subflow->fourth_ack = 1;
+		subflow->fully_established = 1;
 
 	if (subflow->can_ack)
 		return true;
@@ -477,7 +465,7 @@ void mptcp_incoming_options(struct sock *sk, struct sk_buff *skb,
 	struct mptcp_ext *mpext;
 
 	mp_opt = &opt_rx->mptcp;
-	if (!check_fourth_ack(subflow, skb, mp_opt))
+	if (!check_fully_established(subflow, skb, mp_opt))
 		return;
 
 	if (!mp_opt->dss)

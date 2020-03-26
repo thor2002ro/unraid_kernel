@@ -158,7 +158,7 @@ static void ionic_rx_clean(struct ionic_queue *q, struct ionic_desc_info *desc_i
 	}
 
 	/* no packet processing while resetting */
-	if (unlikely(test_bit(IONIC_LIF_QUEUE_RESET, q->lif->state))) {
+	if (unlikely(test_bit(IONIC_LIF_F_QUEUE_RESET, q->lif->state))) {
 		stats->dropped++;
 		return;
 	}
@@ -632,10 +632,7 @@ static int ionic_tx_tcp_pseudo_csum(struct sk_buff *skb)
 					   ip_hdr(skb)->daddr,
 					   0, IPPROTO_TCP, 0);
 	} else if (skb->protocol == cpu_to_be16(ETH_P_IPV6)) {
-		tcp_hdr(skb)->check =
-			~csum_ipv6_magic(&ipv6_hdr(skb)->saddr,
-					 &ipv6_hdr(skb)->daddr,
-					 0, IPPROTO_TCP, 0);
+		tcp_v6_gso_csum_prep(skb);
 	}
 
 	return 0;
@@ -1026,7 +1023,7 @@ netdev_tx_t ionic_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 	int ndescs;
 	int err;
 
-	if (unlikely(!test_bit(IONIC_LIF_UP, lif->state))) {
+	if (unlikely(!test_bit(IONIC_LIF_F_UP, lif->state))) {
 		dev_kfree_skb(skb);
 		return NETDEV_TX_OK;
 	}

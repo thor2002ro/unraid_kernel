@@ -35,6 +35,12 @@ if [ $? -ne 0 ]; then
 	exit 1
 fi
 
+devlink dev help 2>&1 | grep info &> /dev/null
+if [ $? -ne 0 ]; then
+	echo "SKIP: iproute2 too old, missing devlink dev info support"
+	exit 1
+fi
+
 ##############################################################################
 # Devlink helpers
 
@@ -373,6 +379,7 @@ devlink_trap_drop_test()
 	local trap_name=$1; shift
 	local group_name=$1; shift
 	local dev=$1; shift
+	local handle=$1; shift
 
 	# This is the common part of all the tests. It checks that stats are
 	# initially idle, then non-idle after changing the trap action and
@@ -397,7 +404,7 @@ devlink_trap_drop_test()
 	devlink_trap_group_stats_idle_test $group_name
 	check_err $? "Trap group stats not idle after setting action to drop"
 
-	tc_check_packets "dev $dev egress" 101 0
+	tc_check_packets "dev $dev egress" $handle 0
 	check_err $? "Packets were not dropped"
 }
 
@@ -406,7 +413,25 @@ devlink_trap_drop_cleanup()
 	local mz_pid=$1; shift
 	local dev=$1; shift
 	local proto=$1; shift
+	local pref=$1; shift
+	local handle=$1; shift
 
 	kill $mz_pid && wait $mz_pid &> /dev/null
-	tc filter del dev $dev egress protocol $proto pref 1 handle 101 flower
+	tc filter del dev $dev egress protocol $proto pref $pref handle $handle flower
+}
+
+devlink_port_by_netdev()
+{
+	local if_name=$1
+
+	devlink -j port show $if_name | jq -e '.[] | keys' | jq -r '.[]'
+}
+
+devlink_cpu_port_get()
+{
+	local cpu_dl_port_num=$(devlink port list | grep "$DEVLINK_DEV" |
+				grep cpu | cut -d/ -f3 | cut -d: -f1 |
+				sed -n '1p')
+
+	echo "$DEVLINK_DEV/$cpu_dl_port_num"
 }

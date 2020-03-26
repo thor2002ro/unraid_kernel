@@ -99,6 +99,16 @@ enum rtw_bandwidth {
 	RTW_CHANNEL_WIDTH_10	= 6,
 };
 
+enum rtw_sc_offset {
+	RTW_SC_DONT_CARE	= 0,
+	RTW_SC_20_UPPER		= 1,
+	RTW_SC_20_LOWER		= 2,
+	RTW_SC_20_UPMOST	= 3,
+	RTW_SC_20_LOWEST	= 4,
+	RTW_SC_40_UPPER		= 9,
+	RTW_SC_40_LOWER		= 10,
+};
+
 enum rtw_net_type {
 	RTW_NET_NO_LINK		= 0,
 	RTW_NET_AD_HOC		= 1,
@@ -742,6 +752,7 @@ struct rtw_vif {
 	u8 bssid[ETH_ALEN];
 	u8 port;
 	u8 bcn_ctrl;
+	struct list_head rsvd_page_list;
 	struct ieee80211_tx_queue_params tx_params[IEEE80211_NUM_ACS];
 	const struct rtw_vif_port *conf;
 
@@ -948,10 +959,10 @@ struct rtw_wow_param {
 };
 
 struct rtw_intf_phy_para_table {
-	struct rtw_intf_phy_para *usb2_para;
-	struct rtw_intf_phy_para *usb3_para;
-	struct rtw_intf_phy_para *gen1_para;
-	struct rtw_intf_phy_para *gen2_para;
+	const struct rtw_intf_phy_para *usb2_para;
+	const struct rtw_intf_phy_para *usb3_para;
+	const struct rtw_intf_phy_para *gen1_para;
+	const struct rtw_intf_phy_para *gen2_para;
 	u8 n_usb2_para;
 	u8 n_usb3_para;
 	u8 n_gen1_para;
@@ -1048,13 +1059,13 @@ struct rtw_chip_info {
 
 	/* init values */
 	u8 sys_func_en;
-	struct rtw_pwr_seq_cmd **pwr_on_seq;
-	struct rtw_pwr_seq_cmd **pwr_off_seq;
-	struct rtw_rqpn *rqpn_table;
-	struct rtw_page_table *page_table;
-	struct rtw_intf_phy_para_table *intf_table;
+	const struct rtw_pwr_seq_cmd **pwr_on_seq;
+	const struct rtw_pwr_seq_cmd **pwr_off_seq;
+	const struct rtw_rqpn *rqpn_table;
+	const struct rtw_page_table *page_table;
+	const struct rtw_intf_phy_para_table *intf_table;
 
-	struct rtw_hw_reg *dig;
+	const struct rtw_hw_reg *dig;
 	u32 rf_base_addr[2];
 	u32 rf_sipi_addr[2];
 
@@ -1500,7 +1511,7 @@ struct rtw_fifo_conf {
 	u16 rsvd_cpu_instr_addr;
 	u16 rsvd_fw_txbuf_addr;
 	u16 rsvd_csibuf_addr;
-	struct rtw_rqpn *rqpn;
+	const struct rtw_rqpn *rqpn;
 };
 
 struct rtw_fw_state {
@@ -1517,7 +1528,6 @@ struct rtw_hal {
 	u32 rcr;
 
 	u32 chip_version;
-	u8 fab_version;
 	u8 cut_version;
 	u8 mp_chip;
 	u8 oem_id;
@@ -1631,7 +1641,7 @@ struct rtw_dev {
 	struct rtw_wow_param wow;
 
 	/* hci related data, must be last */
-	u8 priv[0] __aligned(sizeof(void *));
+	u8 priv[] __aligned(sizeof(void *));
 };
 
 #include "hci.h"
