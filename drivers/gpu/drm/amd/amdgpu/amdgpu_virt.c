@@ -38,7 +38,8 @@ bool amdgpu_virt_mmio_blocked(struct amdgpu_device *adev)
 void amdgpu_virt_init_setting(struct amdgpu_device *adev)
 {
 	/* enable virtual display */
-	adev->mode_info.num_crtc = 1;
+	if (adev->mode_info.num_crtc == 0)
+		adev->mode_info.num_crtc = 1;
 	adev->enable_virtual_display = true;
 	adev->ddev->driver->driver_features &= ~DRIVER_ATOMIC;
 	adev->cg_flags = 0;
@@ -285,5 +286,38 @@ void amdgpu_virt_init_data_exchange(struct amdgpu_device *adev)
 					adev->virt.fw_reserve.checksum_key, 0));
 			}
 		}
+	}
+}
+
+void amdgpu_detect_virtualization(struct amdgpu_device *adev)
+{
+	uint32_t reg;
+
+	switch (adev->asic_type) {
+	case CHIP_TONGA:
+	case CHIP_FIJI:
+		reg = RREG32(mmBIF_IOV_FUNC_IDENTIFIER);
+		break;
+	case CHIP_VEGA10:
+	case CHIP_VEGA20:
+	case CHIP_NAVI10:
+	case CHIP_NAVI12:
+	case CHIP_ARCTURUS:
+		reg = RREG32(mmRCC_IOV_FUNC_IDENTIFIER);
+		break;
+	default: /* other chip doesn't support SRIOV */
+		reg = 0;
+		break;
+	}
+
+	if (reg & 1)
+		adev->virt.caps |= AMDGPU_SRIOV_CAPS_IS_VF;
+
+	if (reg & 0x80000000)
+		adev->virt.caps |= AMDGPU_SRIOV_CAPS_ENABLE_IOV;
+
+	if (!reg) {
+		if (is_virtual_machine())	/* passthrough mode exclus sriov mod */
+			adev->virt.caps |= AMDGPU_PASSTHROUGH_MODE;
 	}
 }

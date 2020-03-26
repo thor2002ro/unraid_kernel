@@ -159,10 +159,6 @@ static int psp_sw_fini(void *handle)
 	adev->psp.sos_fw = NULL;
 	release_firmware(adev->psp.asd_fw);
 	adev->psp.asd_fw = NULL;
-	if (adev->psp.cap_fw) {
-		release_firmware(adev->psp.cap_fw);
-		adev->psp.cap_fw = NULL;
-	}
 	if (adev->psp.ta_fw) {
 		release_firmware(adev->psp.ta_fw);
 		adev->psp.ta_fw = NULL;
@@ -205,6 +201,7 @@ psp_cmd_submit_buf(struct psp_context *psp,
 	int index;
 	int timeout = 2000;
 	bool ras_intr = false;
+	bool skip_unsupport = false;
 
 	mutex_lock(&psp->mutex);
 
@@ -236,6 +233,9 @@ psp_cmd_submit_buf(struct psp_context *psp,
 		amdgpu_asic_invalidate_hdp(psp->adev, NULL);
 	}
 
+	/* We allow TEE_ERROR_NOT_SUPPORTED for VMR command in SRIOV */
+	skip_unsupport = (psp->cmd_buf_mem->resp.status == 0xffff000a) && amdgpu_sriov_vf(psp->adev);
+
 	/* In some cases, psp response status is not 0 even there is no
 	 * problem while the command is submitted. Some version of PSP FW
 	 * doesn't write 0 to that field.
@@ -243,14 +243,14 @@ psp_cmd_submit_buf(struct psp_context *psp,
 	 * during psp initialization to avoid breaking hw_init and it doesn't
 	 * return -EINVAL.
 	 */
-	if ((psp->cmd_buf_mem->resp.status || !timeout) && !ras_intr) {
+	if (!skip_unsupport && (psp->cmd_buf_mem->resp.status || !timeout) && !ras_intr) {
 		if (ucode)
 			DRM_WARN("failed to load ucode id (%d) ",
 				  ucode->ucode_id);
 		DRM_WARN("psp command (0x%X) failed and response status is (0x%X)\n",
 			 psp->cmd_buf_mem->cmd_id,
 			 psp->cmd_buf_mem->resp.status);
-		if ((ucode->ucode_id == AMDGPU_UCODE_ID_CAP) || !timeout) {
+		if (!timeout) {
 			mutex_unlock(&psp->mutex);
 			return -EINVAL;
 		}
@@ -1192,9 +1192,6 @@ static int psp_get_fw_type(struct amdgpu_firmware_info *ucode,
 			   enum psp_gfx_fw_type *type)
 {
 	switch (ucode->ucode_id) {
-	case AMDGPU_UCODE_ID_CAP:
-		*type = GFX_FW_TYPE_CAP;
-		break;
 	case AMDGPU_UCODE_ID_SDMA0:
 		*type = GFX_FW_TYPE_SDMA0;
 		break;

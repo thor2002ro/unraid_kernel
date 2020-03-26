@@ -131,6 +131,7 @@ int amdgpu_ib_schedule(struct amdgpu_ring *ring, unsigned num_ibs,
 	uint64_t fence_ctx;
 	uint32_t status = 0, alloc_size;
 	unsigned fence_flags = 0;
+	bool secure;
 
 	unsigned i;
 	int r = 0;
@@ -215,6 +216,14 @@ int amdgpu_ib_schedule(struct amdgpu_ring *ring, unsigned num_ibs,
 		amdgpu_ring_emit_cntxcntl(ring, status);
 	}
 
+	/* Setup initial TMZiness and send it off.
+	 */
+	secure = false;
+	if (job && ring->funcs->emit_frame_cntl) {
+		secure = ib->flags & AMDGPU_IB_FLAGS_SECURE;
+		amdgpu_ring_emit_frame_cntl(ring, true, secure);
+	}
+
 	for (i = 0; i < num_ibs; ++i) {
 		ib = &ibs[i];
 
@@ -226,12 +235,20 @@ int amdgpu_ib_schedule(struct amdgpu_ring *ring, unsigned num_ibs,
 		    !amdgpu_sriov_vf(adev)) /* for SRIOV preemption, Preamble CE ib must be inserted anyway */
 			continue;
 
+		if (job && ring->funcs->emit_frame_cntl) {
+			if (secure != !!(ib->flags & AMDGPU_IB_FLAGS_SECURE)) {
+				amdgpu_ring_emit_frame_cntl(ring, false, secure);
+				secure = !secure;
+				amdgpu_ring_emit_frame_cntl(ring, true, secure);
+			}
+		}
+
 		amdgpu_ring_emit_ib(ring, job, ib, status);
 		status &= ~AMDGPU_HAVE_CTX_SWITCH;
 	}
 
-	if (ring->funcs->emit_tmz)
-		amdgpu_ring_emit_tmz(ring, false);
+	if (job && ring->funcs->emit_frame_cntl)
+		amdgpu_ring_emit_frame_cntl(ring, false, secure);
 
 #ifdef CONFIG_X86_64
 	if (!(adev->flags & AMD_IS_APU))

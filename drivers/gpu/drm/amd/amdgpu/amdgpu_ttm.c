@@ -65,7 +65,7 @@
 static int amdgpu_map_buffer(struct ttm_buffer_object *bo,
 			     struct ttm_mem_reg *mem, unsigned num_pages,
 			     uint64_t offset, unsigned window,
-			     struct amdgpu_ring *ring,
+			     struct amdgpu_ring *ring, bool tmz,
 			     uint64_t *addr);
 
 /**
@@ -290,17 +290,23 @@ static struct drm_mm_node *amdgpu_find_mm_node(struct ttm_mem_reg *mem,
 
 /**
  * amdgpu_copy_ttm_mem_to_mem - Helper function for copy
+ * @adev: amdgpu device
+ * @src: buffer/address where to read from
+ * @dst: buffer/address where to write to
+ * @size: number of bytes to copy
+ * @tmz: if a secure copy should be used
+ * @resv: resv object to sync to
+ * @f: Returns the last fence if multiple jobs are submitted.
  *
  * The function copies @size bytes from {src->mem + src->offset} to
  * {dst->mem + dst->offset}. src->bo and dst->bo could be same BO for a
  * move and different for a BO to BO copy.
  *
- * @f: Returns the last fence if multiple jobs are submitted.
  */
 int amdgpu_ttm_copy_mem_to_mem(struct amdgpu_device *adev,
 			       struct amdgpu_copy_mem *src,
 			       struct amdgpu_copy_mem *dst,
-			       uint64_t size,
+			       uint64_t size, bool tmz,
 			       struct dma_resv *resv,
 			       struct dma_fence **f)
 {
@@ -352,7 +358,7 @@ int amdgpu_ttm_copy_mem_to_mem(struct amdgpu_device *adev,
 		if (src->mem->start == AMDGPU_BO_INVALID_OFFSET) {
 			r = amdgpu_map_buffer(src->bo, src->mem,
 					PFN_UP(cur_size + src_page_offset),
-					src_node_start, 0, ring,
+					src_node_start, 0, ring, tmz,
 					&from);
 			if (r)
 				goto error;
@@ -365,7 +371,7 @@ int amdgpu_ttm_copy_mem_to_mem(struct amdgpu_device *adev,
 		if (dst->mem->start == AMDGPU_BO_INVALID_OFFSET) {
 			r = amdgpu_map_buffer(dst->bo, dst->mem,
 					PFN_UP(cur_size + dst_page_offset),
-					dst_node_start, 1, ring,
+					dst_node_start, 1, ring, tmz,
 					&to);
 			if (r)
 				goto error;
@@ -373,7 +379,7 @@ int amdgpu_ttm_copy_mem_to_mem(struct amdgpu_device *adev,
 		}
 
 		r = amdgpu_copy_buffer(ring, from, to, cur_size,
-				       resv, &next, false, true);
+				       resv, &next, false, true, tmz);
 		if (r)
 			goto error;
 
@@ -425,6 +431,7 @@ static int amdgpu_move_blit(struct ttm_buffer_object *bo,
 			    struct ttm_mem_reg *old_mem)
 {
 	struct amdgpu_device *adev = amdgpu_ttm_adev(bo->bdev);
+	struct amdgpu_bo *abo = ttm_to_amdgpu_bo(bo);
 	struct amdgpu_copy_mem src, dst;
 	struct dma_fence *fence = NULL;
 	int r;
@@ -438,14 +445,14 @@ static int amdgpu_move_blit(struct ttm_buffer_object *bo,
 
 	r = amdgpu_ttm_copy_mem_to_mem(adev, &src, &dst,
 				       new_mem->num_pages << PAGE_SHIFT,
+				       amdgpu_bo_encrypted(abo),
 				       bo->base.resv, &fence);
 	if (r)
 		goto error;
 
 	/* clear the space being freed */
 	if (old_mem->mem_type == TTM_PL_VRAM &&
-	    (ttm_to_amdgpu_bo(bo)->flags &
-	     AMDGPU_GEM_CREATE_VRAM_WIPE_ON_RELEASE)) {
+	    (abo->flags & AMDGPU_GEM_CREATE_VRAM_WIPE_ON_RELEASE)) {
 		struct dma_fence *wipe_fence = NULL;
 
 		r = amdgpu_fill_buffer(ttm_to_amdgpu_bo(bo), AMDGPU_POISON,
@@ -1028,6 +1035,9 @@ int amdgpu_ttm_gart_bind(struct amdgpu_device *adev,
 	struct amdgpu_ttm_tt *gtt = (void *)ttm;
 	int r;
 
+	if (amdgpu_bo_encrypted(abo))
+		flags |= AMDGPU_PTE_TMZ;
+
 	if (abo->flags & AMDGPU_GEM_CREATE_CP_MQD_GFX9) {
 		uint64_t page_idx = 1;
 
@@ -1540,6 +1550,9 @@ static bool amdgpu_ttm_bo_eviction_valuable(struct ttm_buffer_object *bo,
 
 	switch (bo->mem.mem_type) {
 	case TTM_PL_TT:
+		if (amdgpu_bo_is_amdgpu_bo(bo) &&
+		    amdgpu_bo_encrypted(ttm_to_amdgpu_bo(bo)))
+			return false;
 		return true;
 
 	case TTM_PL_VRAM:
@@ -1840,9 +1853,11 @@ int amdgpu_ttm_init(struct amdgpu_device *adev)
 	 *The reserved vram for memory training must be pinned to the specified
 	 *place on the VRAM, so reserve it early.
 	 */
-	r = amdgpu_ttm_training_reserve_vram_init(adev);
-	if (r)
-		return r;
+	if (!amdgpu_sriov_vf(adev)) {
+		r = amdgpu_ttm_training_reserve_vram_init(adev);
+		if (r)
+			return r;
+	}
 
 	/* allocate memory as required for VGA
 	 * This is used for VGA emulation and pre-OS scanout buffers to
@@ -2017,7 +2032,7 @@ int amdgpu_mmap(struct file *filp, struct vm_area_struct *vma)
 static int amdgpu_map_buffer(struct ttm_buffer_object *bo,
 			     struct ttm_mem_reg *mem, unsigned num_pages,
 			     uint64_t offset, unsigned window,
-			     struct amdgpu_ring *ring,
+			     struct amdgpu_ring *ring, bool tmz,
 			     uint64_t *addr)
 {
 	struct amdgpu_ttm_tt *gtt = (void *)bo->ttm;
@@ -2051,13 +2066,16 @@ static int amdgpu_map_buffer(struct ttm_buffer_object *bo,
 	dst_addr = amdgpu_bo_gpu_offset(adev->gart.bo);
 	dst_addr += window * AMDGPU_GTT_MAX_TRANSFER_SIZE * 8;
 	amdgpu_emit_copy_buffer(adev, &job->ibs[0], src_addr,
-				dst_addr, num_bytes);
+				dst_addr, num_bytes, false);
 
 	amdgpu_ring_pad_ib(ring, &job->ibs[0]);
 	WARN_ON(job->ibs[0].length_dw > num_dw);
 
 	dma_address = &gtt->ttm.dma_address[offset >> PAGE_SHIFT];
 	flags = amdgpu_ttm_tt_pte_flags(adev, ttm, mem);
+	if (tmz)
+		flags |= AMDGPU_PTE_TMZ;
+
 	r = amdgpu_gart_map(adev, 0, num_pages, dma_address, flags,
 			    &job->ibs[0].ptr[num_dw]);
 	if (r)
@@ -2081,7 +2099,7 @@ int amdgpu_copy_buffer(struct amdgpu_ring *ring, uint64_t src_offset,
 		       uint64_t dst_offset, uint32_t byte_count,
 		       struct dma_resv *resv,
 		       struct dma_fence **fence, bool direct_submit,
-		       bool vm_needs_flush)
+		       bool vm_needs_flush, bool tmz)
 {
 	struct amdgpu_device *adev = ring->adev;
 	struct amdgpu_job *job;
@@ -2122,7 +2140,7 @@ int amdgpu_copy_buffer(struct amdgpu_ring *ring, uint64_t src_offset,
 		uint32_t cur_size_in_bytes = min(byte_count, max_bytes);
 
 		amdgpu_emit_copy_buffer(adev, &job->ibs[0], src_offset,
-					dst_offset, cur_size_in_bytes);
+					dst_offset, cur_size_in_bytes, tmz);
 
 		src_offset += cur_size_in_bytes;
 		dst_offset += cur_size_in_bytes;
