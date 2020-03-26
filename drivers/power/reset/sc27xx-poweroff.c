@@ -35,7 +35,7 @@ static void sc27xx_poweroff_shutdown(void)
 
 	for_each_online_cpu(cpu) {
 		if (cpu != smp_processor_id())
-			cpu_down(cpu);
+			remove_cpu(cpu);
 	}
 #endif
 }

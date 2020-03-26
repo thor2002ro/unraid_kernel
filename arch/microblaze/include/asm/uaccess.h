@@ -9,7 +9,6 @@
 #define _ASM_MICROBLAZE_UACCESS_H
 
 #include <linux/kernel.h>
-#include <linux/mm.h>
 
 #include <asm/mmu.h>
 #include <asm/page.h>

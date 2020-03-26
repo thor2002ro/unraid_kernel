@@ -97,14 +97,19 @@ static struct instruction *next_insn_same_func(struct objtool_file *file,
 	for (insn = next_insn_same_sec(file, insn); insn;		\
 	     insn = next_insn_same_sec(file, insn))
 
+static bool is_static_jump(struct instruction *insn)
+{
+	return insn->type == INSN_JUMP_CONDITIONAL ||
+	       insn->type == INSN_JUMP_UNCONDITIONAL;
+}
+
 static bool is_sibling_call(struct instruction *insn)
 {
 	/* An indirect jump is either a sibling call or a jump to a table. */
 	if (insn->type == INSN_JUMP_DYNAMIC)
 		return list_empty(&insn->alts);
 
-	if (insn->type != INSN_JUMP_CONDITIONAL &&
-	    insn->type != INSN_JUMP_UNCONDITIONAL)
+	if (!is_static_jump(insn))
 		return false;
 
 	/* add_jump_destinations() sets insn->call_dest for sibling calls. */
@@ -415,8 +420,8 @@ static void add_ignores(struct objtool_file *file)
 			break;
 
 		case STT_SECTION:
-			func = find_symbol_by_offset(rela->sym->sec, rela->addend);
-			if (!func || func->type != STT_FUNC)
+			func = find_func_by_offset(rela->sym->sec, rela->addend);
+			if (!func)
 				continue;
 			break;
 
@@ -467,6 +472,24 @@ static const char *uaccess_safe_builtin[] = {
 	"__asan_report_store4_noabort",
 	"__asan_report_store8_noabort",
 	"__asan_report_store16_noabort",
+	/* KCSAN */
+	"kcsan_found_watchpoint",
+	"kcsan_setup_watchpoint",
+	/* KCSAN/TSAN */
+	"__tsan_func_entry",
+	"__tsan_func_exit",
+	"__tsan_read_range",
+	"__tsan_write_range",
+	"__tsan_read1",
+	"__tsan_read2",
+	"__tsan_read4",
+	"__tsan_read8",
+	"__tsan_read16",
+	"__tsan_write1",
+	"__tsan_write2",
+	"__tsan_write4",
+	"__tsan_write8",
+	"__tsan_write16",
 	/* KCOV */
 	"write_comp_data",
 	"__sanitizer_cov_trace_pc",
@@ -553,8 +576,7 @@ static int add_jump_destinations(struct objtool_file *file)
 	unsigned long dest_off;
 
 	for_each_insn(file, insn) {
-		if (insn->type != INSN_JUMP_CONDITIONAL &&
-		    insn->type != INSN_JUMP_UNCONDITIONAL)
+		if (!is_static_jump(insn))
 			continue;
 
 		if (insn->ignore || insn->offset == FAKE_JUMP_OFFSET)
@@ -661,10 +683,14 @@ static int add_call_destinations(struct objtool_file *file)
 					       insn->len);
 		if (!rela) {
 			dest_off = insn->offset + insn->len + insn->immediate;
-			insn->call_dest = find_symbol_by_offset(insn->sec,
-								dest_off);
+			insn->call_dest = find_func_by_offset(insn->sec, dest_off);
+			if (!insn->call_dest)
+				insn->call_dest = find_symbol_by_offset(insn->sec, dest_off);
 
-			if (!insn->call_dest && !insn->ignore) {
+			if (insn->ignore)
+				continue;
+
+			if (!insn->call_dest) {
 				WARN_FUNC("unsupported intra-function call",
 					  insn->sec, insn->offset);
 				if (retpoline)
@@ -672,11 +698,16 @@ static int add_call_destinations(struct objtool_file *file)
 				return -1;
 			}
 
+			if (insn->func && insn->call_dest->type != STT_FUNC) {
+				WARN_FUNC("unsupported call to non-function",
+					  insn->sec, insn->offset);
+				return -1;
+			}
+
 		} else if (rela->sym->type == STT_SECTION) {
-			insn->call_dest = find_symbol_by_offset(rela->sym->sec,
-								rela->addend+4);
-			if (!insn->call_dest ||
-			    insn->call_dest->type != STT_FUNC) {
+			insn->call_dest = find_func_by_offset(rela->sym->sec,
+							      rela->addend+4);
+			if (!insn->call_dest) {
 				WARN_FUNC("can't find call dest symbol at %s+0x%x",
 					  insn->sec, insn->offset,
 					  rela->sym->sec->name,
@@ -764,8 +795,28 @@ static int handle_group_alt(struct objtool_file *file,
 		insn->ignore = orig_insn->ignore_alts;
 		insn->func = orig_insn->func;
 
-		if (insn->type != INSN_JUMP_CONDITIONAL &&
-		    insn->type != INSN_JUMP_UNCONDITIONAL)
+		/*
+		 * Since alternative replacement code is copy/pasted by the
+		 * kernel after applying relocations, generally such code can't
+		 * have relative-address relocation references to outside the
+		 * .altinstr_replacement section, unless the arch's
+		 * alternatives code can adjust the relative offsets
+		 * accordingly.
+		 *
+		 * The x86 alternatives code adjusts the offsets only when it
+		 * encounters a branch instruction at the very beginning of the
+		 * replacement group.
+		 */
+		if ((insn->offset != special_alt->new_off ||
+		    (insn->type != INSN_CALL && !is_static_jump(insn))) &&
+		    find_rela_by_dest_range(insn->sec, insn->offset, insn->len)) {
+
+			WARN_FUNC("unsupported relocation in alternatives section",
+				  insn->sec, insn->offset);
+			return -1;
+		}
+
+		if (!is_static_jump(insn))
 			continue;
 
 		if (!insn->immediate)
@@ -1001,7 +1052,7 @@ static struct rela *find_jump_table(struct objtool_file *file,
 				      struct instruction *insn)
 {
 	struct rela *text_rela, *table_rela;
-	struct instruction *orig_insn = insn;
+	struct instruction *dest_insn, *orig_insn = insn;
 	struct section *table_sec;
 	unsigned long table_offset;
 
@@ -1053,9 +1104,16 @@ static struct rela *find_jump_table(struct objtool_file *file,
 		    strcmp(table_sec->name, C_JUMP_TABLE_SECTION))
 			continue;
 
-		/* Each table entry has a rela associated with it. */
+		/*
+		 * Each table entry has a rela associated with it.  The rela
+		 * should reference text in the same function as the original
+		 * instruction.
+		 */
 		table_rela = find_rela_by_dest(table_sec, table_offset);
 		if (!table_rela)
+			continue;
+		dest_insn = find_insn(file, table_rela->sym->sec, table_rela->addend);
+		if (!dest_insn || !dest_insn->func || dest_insn->func->pfunc != func)
 			continue;
 
 		/*
@@ -2491,8 +2549,14 @@ int check(const char *_objname, bool orc)
 out:
 	cleanup(&file);
 
-	/* ignore warnings for now until we get all the code cleaned up */
-	if (ret || warnings)
-		return 0;
+	if (ret < 0) {
+		/*
+		 *  Fatal error.  The binary is corrupt or otherwise broken in
+		 *  some way, or objtool itself is broken.  Fail the kernel
+		 *  build.
+		 */
+		return ret;
+	}
+
 	return 0;
 }
