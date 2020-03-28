@@ -23,6 +23,10 @@
 
 #include "md_private.h"
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,7,0)
+#include <linux/part_stat.h>
+#endif
+
 /*
  * The following can be used to debug the driver
  */

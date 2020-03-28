@@ -1182,9 +1182,14 @@ static int do_run(mddev_t *mddev)
                         set_capacity(gd, disk->size*2);
 
                         /* alloc our block queue */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,7,0)
+			gd->queue = blk_alloc_queue(md_make_request, NUMA_NO_NODE);
+			gd->queue->queuedata = mddev;
+#else
 			gd->queue = blk_alloc_queue(GFP_KERNEL);
 			gd->queue->queuedata = mddev;
 			blk_queue_make_request(gd->queue, md_make_request);
+#endif
                         blk_queue_io_min(gd->queue, PAGE_SIZE);
                         blk_queue_io_opt(gd->queue, 128*1024);
                         gd->queue->backing_dev_info->ra_pages = (128*1024)/PAGE_SIZE;
@@ -2349,9 +2354,14 @@ static ssize_t md_proc_write(struct file *file, const char *buffer,
 	return (result ? (ssize_t)result : count);
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0)
+static const struct proc_ops md_proc_cmd_ops = {
+	.proc_write          = md_proc_write,
+#else
 static const struct file_operations md_proc_cmd_fops = {
 	.owner          = THIS_MODULE,
 	.write          = md_proc_write,
+#endif
 };
 
 /* Basically the way seq works is this: on open, a PAGE_SIZE buffer is allocated and then our
@@ -2380,12 +2390,20 @@ int md_seq_release(struct inode *inode, struct file *file)
         return single_release(inode, file);
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0)
+static const struct proc_ops md_proc_stat_ops = {
+	.proc_open			= md_seq_open,
+    .proc_read			= seq_read,
+    .proc_lseek			= seq_lseek,
+	.proc_release		= md_seq_release,
+#else
 static const struct file_operations md_proc_stat_fops = {
 	.owner          = THIS_MODULE,
 	.open           = md_seq_open,
-        .read           = seq_read,
-        .llseek         = seq_lseek,
+    .read           = seq_read,
+    .llseek         = seq_lseek,
 	.release        = md_seq_release,
+#endif
 };
 
 /****************************************************************************/
@@ -2430,8 +2448,13 @@ static int __init md_init(void)
 	}
 
 	register_reboot_notifier(&md_notifier);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0)
+        proc_create("mdcmd", S_IRUGO|S_IWUSR, NULL, &md_proc_cmd_ops);
+        proc_create("mdstat", S_IRUGO|S_IWUSR, NULL, &md_proc_stat_ops);
+#else
         proc_create("mdcmd", S_IRUGO|S_IWUSR, NULL, &md_proc_cmd_fops);
         proc_create("mdstat", S_IRUGO|S_IWUSR, NULL, &md_proc_stat_fops);
+#endif
 	return (alloc_mddev(array_dev) ? 0 : -1);
 }
 
