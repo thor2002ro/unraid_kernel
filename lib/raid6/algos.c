@@ -25,6 +25,8 @@ EXPORT_SYMBOL(raid6_empty_zero_page);
 #endif
 #endif
 
+#include <linux/version.h>
+
 struct raid6_calls raid6_call;
 EXPORT_SYMBOL_GPL(raid6_call);
 
@@ -233,9 +235,12 @@ static inline const struct raid6_calls *raid6_choose_gen(
 	return best;
 }
 
-
 static inline const struct raid6_calls *raid6_choose_xor(
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0)
+	void *(*const dptrs)[RAID6_TEST_DISKS], const int disks)
+#else
 	void *(*const dptrs)[(65536/PAGE_SIZE)+2], const int disks)
+#endif
 {
 	unsigned long perf, bestxorperf, j0, j1;
 	int start = (disks>>1)-1, stop = disks-3;	/* work on the second half of the disks */
@@ -270,13 +275,23 @@ static inline const struct raid6_calls *raid6_choose_xor(
 			}
 
 			pr_info("raid6: %-8s xor() %5ld MB/s\n", (*algo)->name,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0)
+				(perf * HZ * (disks-2)) >>
+				(20 - PAGE_SHIFT + RAID6_TIME_JIFFIES_LG2 + 1));
+#else
 				(perf*HZ) >> (20-16+RAID6_TIME_JIFFIES_LG2+1));
+#endif
 		}
 	}
 
 	if (best) {
                 pr_info("raid6: .... xor() %ld MB/s, rmw enabled\n",
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0)
+						(bestxorperf * HZ * (disks-2)) >>
+						(20 - PAGE_SHIFT + RAID6_TIME_JIFFIES_LG2 + 1));
+#else
                         (bestxorperf*HZ) >> (20-16+RAID6_TIME_JIFFIES_LG2+1));
+#endif
 	} else
 		pr_err("raid6: Yikes!  No algorithm found!\n");
 
