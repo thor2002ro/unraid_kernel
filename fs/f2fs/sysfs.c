@@ -15,6 +15,7 @@
 #include "f2fs.h"
 #include "segment.h"
 #include "gc.h"
+#include <trace/events/f2fs.h>
 
 static struct proc_dir_entry *f2fs_proc_root;
 
@@ -749,6 +750,39 @@ static int __maybe_unused segment_bits_seq_show(struct seq_file *seq,
 		seq_putc(seq, '\n');
 	}
 	return 0;
+}
+
+static const unsigned long period_ms = 3000;
+static unsigned long next_period;
+unsigned long long f2fs_prev_iostat[NR_IO_TYPE] = {0};
+
+static DEFINE_SPINLOCK(iostat_lock);
+
+void f2fs_record_iostat(struct f2fs_sb_info *sbi)
+{
+	unsigned long long iostat_diff[NR_IO_TYPE];
+	int i;
+
+	if (time_is_after_jiffies(next_period))
+		return;
+
+	/* Need double check under the lock */
+	spin_lock(&iostat_lock);
+	if (time_is_after_jiffies(next_period)) {
+		spin_unlock(&iostat_lock);
+		return;
+	}
+	next_period = jiffies + msecs_to_jiffies(period_ms);
+	spin_unlock(&iostat_lock);
+
+	spin_lock(&sbi->iostat_lock);
+	for (i = 0; i < NR_IO_TYPE; i++) {
+		iostat_diff[i] = sbi->write_iostat[i] - f2fs_prev_iostat[i];
+		f2fs_prev_iostat[i] = sbi->write_iostat[i];
+	}
+	spin_unlock(&sbi->iostat_lock);
+
+	trace_f2fs_iostat(sbi, iostat_diff);
 }
 
 static int __maybe_unused iostat_info_seq_show(struct seq_file *seq,

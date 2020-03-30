@@ -2999,15 +2999,21 @@ static inline int get_inline_xattr_addrs(struct inode *inode)
 		sizeof((f2fs_inode)->field))			\
 		<= (F2FS_OLD_ATTRIBUTE_SIZE + (extra_isize)))	\
 
+extern unsigned long long f2fs_prev_iostat[NR_IO_TYPE];
+
 static inline void f2fs_reset_iostat(struct f2fs_sb_info *sbi)
 {
 	int i;
 
 	spin_lock(&sbi->iostat_lock);
-	for (i = 0; i < NR_IO_TYPE; i++)
+	for (i = 0; i < NR_IO_TYPE; i++) {
 		sbi->write_iostat[i] = 0;
+		f2fs_prev_iostat[i] = 0;
+	}
 	spin_unlock(&sbi->iostat_lock);
 }
+
+extern void f2fs_record_iostat(struct f2fs_sb_info *sbi);
 
 static inline void f2fs_update_iostat(struct f2fs_sb_info *sbi,
 			enum iostat_type type, unsigned long long io_bytes)
@@ -3022,6 +3028,8 @@ static inline void f2fs_update_iostat(struct f2fs_sb_info *sbi,
 			sbi->write_iostat[APP_WRITE_IO] -
 			sbi->write_iostat[APP_DIRECT_IO];
 	spin_unlock(&sbi->iostat_lock);
+
+	f2fs_record_iostat(sbi);
 }
 
 #define __is_large_section(sbi)		((sbi)->segs_per_sec > 1)
