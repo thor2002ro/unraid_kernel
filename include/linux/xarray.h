@@ -1664,7 +1664,10 @@ static inline void *xas_next_marked(struct xa_state *xas, unsigned long max,
 	entry = xa_entry(xas->xa, node, offset);
 	if (!entry)
 		return xas_find_marked(xas, max, mark);
-	return entry;
+	if (!xa_is_retry(entry))
+		return entry;
+	xas_reset(xas);
+	return xas_find_marked(xas, max, mark);
 }
 
 /*

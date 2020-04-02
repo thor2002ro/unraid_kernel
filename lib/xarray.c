@@ -1182,6 +1182,7 @@ void *xas_find_marked(struct xa_state *xas, unsigned long max, xa_mark_t mark)
 		xas->xa_index = 1;
 		goto out;
 	} else if (xas_top(xas->xa_node)) {
+restart:
 		advance = false;
 		entry = xa_head(xas->xa);
 		xas->xa_node = NULL;
@@ -1234,6 +1235,8 @@ void *xas_find_marked(struct xa_state *xas, unsigned long max, xa_mark_t mark)
 			xas_advance(xas);
 			continue;
 		}
+		if (xa_is_retry(entry))
+			goto restart;
 		if (!xa_is_node(entry))
 			return entry;
 		xas->xa_node = xa_to_node(entry);
