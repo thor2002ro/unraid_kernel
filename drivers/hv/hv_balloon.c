@@ -1702,6 +1702,7 @@ static int balloon_probe(struct hv_device *dev,
 	set_online_page_callback(&hv_online_page);
 	init_completion(&dm_device.ol_waitevent);
 	register_memory_notifier(&hv_memory_nb);
+	init_completion(&dm_device.ol_waitevent);
 #endif
 
 	hv_set_drvdata(dev, &dm_device);
