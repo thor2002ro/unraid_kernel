@@ -1240,7 +1240,7 @@ struct task_struct {
 	int				kcov_sequence;
 
 	/* Collect coverage from softirq context: */
-	bool				kcov_softirq;
+	unsigned int			kcov_softirq;
 #endif
 
 #ifdef CONFIG_MEMCG

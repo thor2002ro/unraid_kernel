@@ -886,7 +886,7 @@ void kcov_remote_start(u64 handle)
 
 	if (in_serving_softirq()) {
 		kcov_remote_softirq_start(t);
-		t->kcov_softirq = true;
+		t->kcov_softirq = 1;
 	}
 	kcov_start(t, kcov, size, area, mode, sequence);
 
@@ -984,7 +984,7 @@ void kcov_remote_stop(void)
 
 	kcov_stop(t);
 	if (in_serving_softirq()) {
-		t->kcov_softirq = false;
+		t->kcov_softirq = 0;
 		kcov_remote_softirq_stop(t);
 	}
 
