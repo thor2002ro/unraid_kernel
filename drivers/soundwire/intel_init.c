@@ -190,7 +190,8 @@ static acpi_status sdw_intel_acpi_cb(acpi_handle handle, u32 level,
  * This scans the namespace and creates SoundWire link controller devices
  * based on the info queried.
  */
-void *sdw_intel_init(acpi_handle *parent_handle, struct sdw_intel_res *res)
+static void *sdw_intel_init(acpi_handle *parent_handle,
+			    struct sdw_intel_res *res)
 {
 	acpi_status status;
 
