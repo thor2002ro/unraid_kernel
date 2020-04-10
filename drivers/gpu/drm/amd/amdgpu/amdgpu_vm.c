@@ -1588,6 +1588,7 @@ static int amdgpu_vm_bo_update_mapping(struct amdgpu_device *adev,
 	params.vm = vm;
 	params.direct = direct;
 	params.pages_addr = pages_addr;
+	params.unlocked = unlocked;
 
 	/* Implicitly sync to command submissions in the same VM before
 	 * unmapping. Sync to moving fences before mapping.
