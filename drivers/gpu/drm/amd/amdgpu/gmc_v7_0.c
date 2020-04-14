@@ -193,10 +193,10 @@ static int gmc_v7_0_mc_load_microcode(struct amdgpu_device *adev)
 	amdgpu_ucode_print_mc_hdr(&hdr->header);
 
 	adev->gmc.fw_version = le32_to_cpu(hdr->header.ucode_version);
-	regs_size = le32_to_cpu(hdr->io_debug_size_bytes) / (4 * 2);
+	regs_size = le32_to_cpu(hdr->io_debug_size_bytes) >> 3;
 	io_mc_regs = (const __le32 *)
 		(adev->gmc.fw->data + le32_to_cpu(hdr->io_debug_array_offset_bytes));
-	ucode_size = le32_to_cpu(hdr->header.ucode_size_bytes) / 4;
+	ucode_size = le32_to_cpu(hdr->header.ucode_size_bytes) >> 2;
 	fw_data = (const __le32 *)
 		(adev->gmc.fw->data + le32_to_cpu(hdr->header.ucode_array_offset_bytes));
 
