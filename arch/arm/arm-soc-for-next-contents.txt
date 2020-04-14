@@ -1,0 +1,201 @@
+arm/soc
+	renesas/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-soc-for-v5.7-tag1
+	omap/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.7/soc-signed
+	omap/pm33xx
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.7/pm33xx-signed
+	broadcom/soc
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.7/soc
+	broadcom/soc-arm64
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.7/soc-arm64
+	sunxi/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-core-for-5.7
+	stm32/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/atorgue/stm32 tags/stm32-soc-for-v5.7-1
+	tegra/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.7-soc
+		contains tegra/dt-bindings
+	tegra/arm-soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.7-arm-core
+	mvebu/soc
+		git://git.infradead.org/linux-mvebu tags/mvebu-arm-5.7-1
+	imx/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-soc-5.7
+	mediatek/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.6-next-soc
+	at91/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-5.7-soc
+	zynq/soc
+		https://github.com/Xilinx/linux-xlnx tags/zynq-soc-for-v5.7
+	zynq/soc-arm64
+		https://github.com/Xilinx/linux-xlnx tags/zynqmp-soc-for-v5.7
+	tegra/cpuidle
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.7-cpuidle
+	patch
+		ARM: iop32x: replace setup_irq() by request_irq()
+		ARM: ep93xx: Replace setup_irq() by request_irq()
+		ARM: spear: replace setup_irq() by request_irq()
+		ARM: cns3xxx: replace setup_irq() by request_irq()
+		ARM: mmp: replace setup_irq() by request_irq()
+
+arm/dt
+	renesas/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-dt-for-v5.7-tag1
+	renesas/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm64-dt-for-v5.7-tag1
+	versatile/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/linusw/linux-integrator tags/versatile-dts-v5.7-1
+	omap/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.7/dt-signed
+	patch
+		arm64: dts: specify console via command line
+	broadcom/devicetree
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.7/devicetree
+	sunxi/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-dt-for-5.7
+	renesas/dt-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-dt-for-v5.7-tag2
+	renesas/dt64-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm64-dt-for-v5.7-tag2
+	renesas/dt-bindings
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-dt-bindings-for-v5.7-tag1
+	stm32/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/atorgue/stm32 tags/stm32-dt-for-v5.7-1
+	tegra/dt-bindings
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.7-dt-bindings
+	tegra/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.7-arm-dt
+	tegra/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.7-arm64-dt
+	mvebu/dt64
+		git://git.infradead.org/linux-mvebu tags/mvebu-dt64-5.7-1
+	ux500/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/linusw/linux-stericsson tags/ux500-dts-v5.7
+	samsung/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-dt-5.7
+	rockchip/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.7-rockchip-dts32-1
+	rockchip/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.7-rockchip-dts64-1
+	amlogic/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/khilman/linux-amlogic tags/amlogic-dt64
+	uniphier/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/masahiroy/linux-uniphier tags/uniphier-dt-v5.7
+	uniphier/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/masahiroy/linux-uniphier tags/uniphier-dt64-v5.7
+	imx/dt-bindings
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-bindings-5.7
+	imx/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-dt-5.7
+	imx/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-dt64-5.7
+	socfpga/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/dinguyen/linux tags/socfpga_dts_update_for_v5.7
+	keystone/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/kristo/linux tags/ti-k3-soc-for-v5.7
+	mediatek/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.6-next-dts64
+	mediatek/dt32
+		git://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.6-next-dts32
+	gemini/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/linusw/linux-nomadik tags/gemini-dts-v5.7
+	at91/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-5.7-dt
+	amlogic/dt64-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/khilman/linux-amlogic tags/amlogic-dt64-2
+	socfpga/dt-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/dinguyen/linux tags/socfpga_dts_update_for_v5.7_part2
+	qcom/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-dts-for-5.7
+	patch
+		arm: dts: calxeda: Basic DT file fixes
+		arm: dts: calxeda: Provide UART clock
+		arm: dts: calxeda: Fix interrupt grouping
+		arm: dts: calxeda: Group port-phys and sgpio-gpio items
+		MAINTAINERS: Update Calxeda Highbank maintainership
+		arm64: dts: Revert "specify console via command line"
+		ARM: dts: ux500: Fix missing node renames
+
+arm/drivers
+	renesas/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-drivers-for-v5.7-tag1
+	hisi/drivers
+		git://github.com/hisilicon/linux-hisi tags/hisi-drivers-for-5.7
+	ti/sysc
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.7/ti-sysc-signed
+	amlogic/driver
+		git://git.kernel.org/pub/scm/linux/kernel/git/khilman/linux-amlogic tags/amlogic-drivers
+	qcom/driver
+		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-drivers-for-5.7
+	imx/driver
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-drivers-5.7
+	omap/ti-sysc-fix
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.7/ti-sysc-fix-signed
+	tegra/firmware
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.7-firmware
+	tegra/memory
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.7-memory
+	fsl/dpaa2
+		git://git.kernel.org/pub/scm/linux/kernel/git/leo/linux tags/soc-fsl-next-v5.7
+	drivers/tee
+		https://git.linaro.org/people/jens.wiklander/linux-tee tags/tee-cleanup-for-5.7
+	drivers/arm-scmi
+		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/scmi-updates-5.7
+
+arm/defconfig
+	renesas/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm64-defconfig-for-v5.7-tag1
+	hisi/defconfig
+		git://github.com/hisilicon/linux-hisi tags/hisi-arm64-defconfig-for-5.7
+	broadcom/defconfig
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.7/defconfig
+	tegra/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.7-arm-defconfig
+	samsung/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-defconfig-5.7
+	qcom/defconfig64
+		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-defconfig-for-5.7
+	qcom/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-defconfig-for-5.7
+	imx/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-defconfig-5.7
+	omap/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.7/defconfig-signed
+	at91/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-5.7-defconfig
+
+arm/newsoc
+
+arm/late
+	omap/sysc-drop-pdata
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.7/ti-sysc-drop-pdata-signed
+		contains ti/sysc
+	omap/sysc-drop-pdata-ti81xx
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.7/ti-sysc-drop-pdata-ti81xx-signed
+	qcom/dt-arm64
+		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-for-5.7
+
+arm/fixes
+	<no branch> (fe8fe7723a3a824790bda681b40efd767e2251a7)
+		git://git.kernel.org/pub/scm/linux/kernel/git/leo/linux tags/soc-fsl-fix-v5.6
+	<no branch> (d9b553b02e691185f8145637c46f9564395936e2)
+		git://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-fixes-for-5.6
+	<no branch> (00cef5e404a6c6e72cbec1fd7a41b01890b8d340)
+		git://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-fixes-for-5.6-2
+	<no branch> (636b45b8efa91db05553840b6c0120d6fa6b94fa)
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-5.6-2
+	patch
+		ARM: dts: exynos: Fix regulator node aliasing on Midas-based boards
+	<no branch> (dfa7ea303f56a3a8b1ed3b91ef35af2da67ca4ee)
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.6/fixes-rc6-signed
+	patch
+		arm64: dts: Fix leftover entry-methods for PSCI
+	<no branch> (55c7c0621078bd73e9d4d2a11eb36e61bc6fe998)
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.6/devicetree-fixes-part2
+	<no branch> (deeabb4c1341a12bf8b599e6a2f4cfa4fd74738c)
+		git://git.kernel.org/pub/scm/linux/kernel/git/narmstrong/linux-oxnas tags/oxnas-arm-soc-dt-fixes-for-5.6
+	<no branch> (36fa3e50085e3858dd506e4431b9abd1bcb1f542)
+		https://git.linaro.org/people/jens.wiklander/linux-tee tags/tee-amdtee-fix2-for-5.6
+	patch
+		soc: samsung: chipid: Fix return value on non-Exynos platforms
