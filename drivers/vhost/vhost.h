@@ -67,9 +67,9 @@ struct vhost_virtqueue {
 	/* The actual ring of buffers. */
 	struct mutex mutex;
 	unsigned int num;
-	struct vring_desc __user *desc;
-	struct vring_avail __user *avail;
-	struct vring_used __user *used;
+	vring_desc_t __user *desc;
+	vring_avail_t __user *avail;
+	vring_used_t __user *used;
 	const struct vhost_iotlb_map *meta_iotlb[VHOST_NUM_ADDRS];
 	struct file *kick;
 	struct eventfd_ctx *call_ctx;
@@ -230,6 +230,33 @@ enum {
 			 (1ULL << VIRTIO_F_ANY_LAYOUT) |
 			 (1ULL << VIRTIO_F_VERSION_1)
 };
+
+/**
+ * vhost_vq_set_backend - Set backend.
+ *
+ * @vq            Virtqueue.
+ * @private_data  The private data.
+ *
+ * Context: Need to call with vq->mutex acquired.
+ */
+static inline void vhost_vq_set_backend(struct vhost_virtqueue *vq,
+					void *private_data)
+{
+	vq->private_data = private_data;
+}
+
+/**
+ * vhost_vq_get_backend - Get backend.
+ *
+ * @vq            Virtqueue.
+ *
+ * Context: Need to call with vq->mutex acquired.
+ * Return: Private data previously set with vhost_vq_set_backend.
+ */
+static inline void *vhost_vq_get_backend(struct vhost_virtqueue *vq)
+{
+	return vq->private_data;
+}
 
 static inline bool vhost_has_feature(struct vhost_virtqueue *vq, int bit)
 {

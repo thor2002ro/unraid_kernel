@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 #define _GNU_SOURCE
 #include <getopt.h>
+#include <limits.h>
 #include <string.h>
 #include <poll.h>
 #include <sys/eventfd.h>
@@ -17,6 +18,9 @@
 #include <linux/virtio.h>
 #include <linux/virtio_ring.h>
 #include "../../drivers/vhost/test.h"
+
+#define RANDOM_BATCH -1
+#define RANDOM_RESET -1
 
 /* Unused */
 void *__kmalloc_fake, *__kfree_ignore_start, *__kfree_ignore_end;
@@ -42,6 +46,9 @@ struct vdev_info {
 	size_t buf_size;
 	struct vhost_memory *mem;
 };
+
+static const struct vhost_vring_file no_backend = { .fd = -1 },
+				     backend = { .fd = 1 };
 
 bool vq_notify(struct virtqueue *vq)
 {
@@ -95,10 +102,10 @@ static void vq_info_add(struct vdev_info *dev, int num)
 	info->idx = dev->nvqs;
 	info->kick = eventfd(0, EFD_NONBLOCK);
 	info->call = eventfd(0, EFD_NONBLOCK);
-	r = posix_memalign(&info->ring, 4096, vring_size(num, 4096));
+	r = posix_memalign(&info->ring, 4096, vring_legacy_size(num, 4096));
 	assert(r >= 0);
-	memset(info->ring, 0, vring_size(num, 4096));
-	vring_init(&info->vring, num, info->ring, 4096);
+	memset(info->ring, 0, vring_legacy_size(num, 4096));
+	vring_legacy_init(&info->vring, num, info->ring, 4096);
 	info->vq = vring_new_virtqueue(info->idx,
 				       info->vring.num, 4096, &dev->vdev,
 				       true, false, info->ring,
@@ -152,41 +159,74 @@ static void wait_for_interrupt(struct vdev_info *dev)
 }
 
 static void run_test(struct vdev_info *dev, struct vq_info *vq,
-		     bool delayed, int bufs)
+		     bool delayed, int batch, int reset_n, int bufs)
 {
 	struct scatterlist sl;
-	long started = 0, completed = 0;
-	long completed_before;
+	long started = 0, completed = 0, next_reset = reset_n;
+	long completed_before, started_before;
 	int r, test = 1;
 	unsigned len;
 	long long spurious = 0;
+	const bool random_batch = batch == RANDOM_BATCH;
 	r = ioctl(dev->control, VHOST_TEST_RUN, &test);
 	assert(r >= 0);
 	for (;;) {
 		virtqueue_disable_cb(vq->vq);
 		completed_before = completed;
+		started_before = started;
 		do {
-			if (started < bufs) {
+			const bool reset = reset_n && completed > next_reset;
+			if (random_batch)
+				batch = (random() % vq->vring.num) + 1;
+
+			while (started < bufs &&
+			       (started - completed) < batch) {
 				sg_init_one(&sl, dev->buf, dev->buf_size);
 				r = virtqueue_add_outbuf(vq->vq, &sl, 1,
 							 dev->buf + started,
 							 GFP_ATOMIC);
-				if (likely(r == 0)) {
-					++started;
-					if (unlikely(!virtqueue_kick(vq->vq)))
+				if (unlikely(r != 0)) {
+					if (r == -ENOSPC &&
+					    started > started_before)
+						r = 0;
+					else
 						r = -1;
+					break;
 				}
-			} else
+
+				++started;
+
+				if (unlikely(!virtqueue_kick(vq->vq))) {
+					r = -1;
+					break;
+				}
+			}
+
+			if (started >= bufs)
 				r = -1;
 
+			if (reset) {
+				r = ioctl(dev->control, VHOST_TEST_SET_BACKEND,
+					  &no_backend);
+				assert(!r);
+			}
+
 			/* Flush out completed bufs if any */
-			if (virtqueue_get_buf(vq->vq, &len)) {
+			while (virtqueue_get_buf(vq->vq, &len)) {
 				++completed;
 				r = 0;
 			}
 
+			if (reset) {
+				r = ioctl(dev->control, VHOST_TEST_SET_BACKEND,
+					  &backend);
+				assert(!r);
+
+                                while (completed > next_reset)
+					next_reset += completed;
+			}
 		} while (r == 0);
-		if (completed == completed_before)
+		if (completed == completed_before && started == started_before)
 			++spurious;
 		assert(completed <= bufs);
 		assert(started <= bufs);
@@ -245,6 +285,16 @@ const struct option longopts[] = {
 		.val = 'd',
 	},
 	{
+		.name = "batch",
+		.val = 'b',
+		.has_arg = required_argument,
+	},
+	{
+		.name = "reset",
+		.val = 'r',
+		.has_arg = optional_argument,
+	},
+	{
 	}
 };
 
@@ -255,6 +305,8 @@ static void help(void)
 		" [--no-event-idx]"
 		" [--no-virtio-1]"
 		" [--delayed-interrupt]"
+		" [--batch=random/N]"
+		" [--reset=random/N]"
 		"\n");
 }
 
@@ -263,6 +315,7 @@ int main(int argc, char **argv)
 	struct vdev_info dev;
 	unsigned long long features = (1ULL << VIRTIO_RING_F_INDIRECT_DESC) |
 		(1ULL << VIRTIO_RING_F_EVENT_IDX) | (1ULL << VIRTIO_F_VERSION_1);
+	long batch = 1, reset = 0;
 	int o;
 	bool delayed = false;
 
@@ -289,6 +342,26 @@ int main(int argc, char **argv)
 		case 'D':
 			delayed = true;
 			break;
+		case 'b':
+			if (0 == strcmp(optarg, "random")) {
+				batch = RANDOM_BATCH;
+			} else {
+				batch = strtol(optarg, NULL, 10);
+				assert(batch > 0);
+				assert(batch < (long)INT_MAX + 1);
+			}
+			break;
+		case 'r':
+			if (!optarg) {
+				reset = 1;
+			} else if (0 == strcmp(optarg, "random")) {
+				reset = RANDOM_RESET;
+			} else {
+				reset = strtol(optarg, NULL, 10);
+				assert(reset >= 0);
+				assert(reset < (long)INT_MAX + 1);
+			}
+			break;
 		default:
 			assert(0);
 			break;
@@ -298,6 +371,6 @@ int main(int argc, char **argv)
 done:
 	vdev_info_init(&dev, features);
 	vq_info_add(&dev, 256);
-	run_test(&dev, &dev.vqs[0], delayed, 0x100000);
+	run_test(&dev, &dev.vqs[0], delayed, batch, reset, 0x100000);
 	return 0;
 }
