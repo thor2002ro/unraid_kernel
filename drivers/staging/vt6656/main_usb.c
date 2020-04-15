@@ -99,7 +99,7 @@ static void vnt_set_options(struct vnt_private *priv)
 	priv->op_mode = NL80211_IFTYPE_UNSPECIFIED;
 	priv->bb_type = BBP_TYPE_DEF;
 	priv->packet_type = priv->bb_type;
-	priv->preamble_type = 0;
+	priv->preamble_type = PREAMBLE_LONG;
 	priv->exist_sw_net_addr = false;
 }
 
@@ -685,15 +685,8 @@ static int vnt_config(struct ieee80211_hw *hw, u32 changed)
 			priv->bb_type = BB_TYPE_11G;
 	}
 
-	if (changed & IEEE80211_CONF_CHANGE_POWER) {
-		if (priv->bb_type == BB_TYPE_11B)
-			priv->current_rate = RATE_1M;
-		else
-			priv->current_rate = RATE_54M;
-
-		vnt_rf_setpower(priv, priv->current_rate,
-				conf->chandef.chan->hw_value);
-	}
+	if (changed & IEEE80211_CONF_CHANGE_POWER)
+		vnt_rf_setpower(priv, conf->chandef.chan);
 
 	return 0;
 }
@@ -721,10 +714,10 @@ static void vnt_bss_info_changed(struct ieee80211_hw *hw,
 	if (changed & BSS_CHANGED_ERP_PREAMBLE) {
 		if (conf->use_short_preamble) {
 			vnt_mac_enable_barker_preamble_mode(priv);
-			priv->preamble_type = true;
+			priv->preamble_type = PREAMBLE_SHORT;
 		} else {
 			vnt_mac_disable_barker_preamble_mode(priv);
-			priv->preamble_type = false;
+			priv->preamble_type = PREAMBLE_LONG;
 		}
 	}
 
@@ -747,9 +740,8 @@ static void vnt_bss_info_changed(struct ieee80211_hw *hw,
 		vnt_update_pre_ed_threshold(priv, false);
 	}
 
-	if (changed & BSS_CHANGED_TXPOWER)
-		vnt_rf_setpower(priv, priv->current_rate,
-				conf->chandef.chan->hw_value);
+	if (changed & (BSS_CHANGED_TXPOWER | BSS_CHANGED_BANDWIDTH))
+		vnt_rf_setpower(priv, conf->chandef.chan);
 
 	if (changed & BSS_CHANGED_BEACON_ENABLED) {
 		dev_dbg(&priv->usb->dev,

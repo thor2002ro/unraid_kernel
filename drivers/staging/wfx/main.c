@@ -133,12 +133,15 @@ static const struct ieee80211_ops wfx_ops = {
 	.remove_interface	= wfx_remove_interface,
 	.config                 = wfx_config,
 	.tx			= wfx_tx,
+	.join_ibss		= wfx_join_ibss,
+	.leave_ibss		= wfx_leave_ibss,
 	.conf_tx		= wfx_conf_tx,
 	.hw_scan		= wfx_hw_scan,
 	.cancel_hw_scan		= wfx_cancel_hw_scan,
+	.start_ap		= wfx_start_ap,
+	.stop_ap		= wfx_stop_ap,
 	.sta_add		= wfx_sta_add,
 	.sta_remove		= wfx_sta_remove,
-	.sta_notify		= wfx_sta_notify,
 	.set_tim		= wfx_set_tim,
 	.set_key		= wfx_set_key,
 	.set_rts_threshold	= wfx_set_rts_threshold,
@@ -268,7 +271,6 @@ static void wfx_free_common(void *data)
 
 	mutex_destroy(&wdev->rx_stats_lock);
 	mutex_destroy(&wdev->conf_mutex);
-	wfx_tx_queues_deinit(wdev);
 	ieee80211_free_hw(wdev->hw);
 }
 
@@ -315,7 +317,7 @@ struct wfx_dev *wfx_init_common(struct device *dev,
 	hw->wiphy->flags |= WIPHY_FLAG_AP_PROBE_RESP_OFFLOAD;
 	hw->wiphy->flags |= WIPHY_FLAG_AP_UAPSD;
 	hw->wiphy->flags &= ~WIPHY_FLAG_PS_ON_BY_DEFAULT;
-	hw->wiphy->max_ap_assoc_sta = WFX_MAX_STA_IN_AP_MODE;
+	hw->wiphy->max_ap_assoc_sta = HIF_LINK_ID_MAX;
 	hw->wiphy->max_scan_ssids = 2;
 	hw->wiphy->max_scan_ie_len = IEEE80211_MAX_DATA_LEN;
 	hw->wiphy->n_iface_combinations = ARRAY_SIZE(wfx_iface_combinations);

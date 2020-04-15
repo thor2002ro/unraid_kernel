@@ -296,7 +296,10 @@ int hif_join(struct wfx_vif *wvif, const struct ieee80211_bss_conf *conf,
 	struct hif_msg *hif;
 	struct hif_req_join *body = wfx_alloc_hif(sizeof(*body), &hif);
 
+	WARN_ON(!conf->beacon_int);
 	WARN_ON(!conf->basic_rates);
+	WARN_ON(sizeof(body->ssid) < ssidlen);
+	WARN(!conf->ibss_joined && !ssidlen, "joining an unknown BSS");
 	body->infrastructure_bss_mode = !conf->ibss_joined;
 	body->short_preamble = conf->use_short_preamble;
 	if (channel && channel->flags & IEEE80211_CHAN_NO_IR)
@@ -308,7 +311,7 @@ int hif_join(struct wfx_vif *wvif, const struct ieee80211_bss_conf *conf,
 	body->basic_rate_set =
 		cpu_to_le32(wfx_rate_mask_to_hw(wvif->wdev, conf->basic_rates));
 	memcpy(body->bssid, conf->bssid, sizeof(body->bssid));
-	if (!conf->ibss_joined && ssid) {
+	if (ssid) {
 		body->ssid_length = cpu_to_le32(ssidlen);
 		memcpy(body->ssid, ssid, ssidlen);
 	}
@@ -428,6 +431,7 @@ int hif_start(struct wfx_vif *wvif, const struct ieee80211_bss_conf *conf,
 	struct hif_msg *hif;
 	struct hif_req_start *body = wfx_alloc_hif(sizeof(*body), &hif);
 
+	WARN_ON(!conf->beacon_int);
 	body->dtim_period = conf->dtim_period;
 	body->short_preamble = conf->use_short_preamble;
 	body->channel_number = cpu_to_le16(channel->hw_value);
