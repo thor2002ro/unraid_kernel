@@ -1182,9 +1182,8 @@ static int do_run(mddev_t *mddev)
                         set_capacity(gd, disk->size*2);
 
                         /* alloc our block queue */
-			gd->queue = blk_alloc_queue(GFP_KERNEL);
+			gd->queue = blk_alloc_queue(md_make_request, NUMA_NO_NODE);
 			gd->queue->queuedata = mddev;
-			blk_queue_make_request(gd->queue, md_make_request);
                         blk_queue_io_min(gd->queue, PAGE_SIZE);
                         blk_queue_io_opt(gd->queue, 128*1024);
                         gd->queue->backing_dev_info->ra_pages = (128*1024)/PAGE_SIZE;
