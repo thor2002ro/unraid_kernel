@@ -24,6 +24,9 @@
 
 #include "power_helpers.h"
 #include "dc/inc/hw/dmcu.h"
+#include "dc/inc/hw/abm.h"
+#include "dc.h"
+#include "core_types.h"
 
 #define DIV_ROUNDUP(a, b) (((a)+((b)/2))/(b))
 
@@ -648,6 +651,24 @@ void fill_iram_v_2_3(struct iram_table_v_2_2 *ram_table, struct dmcu_iram_parame
 			params, ram_table);
 }
 
+bool dmub_init_abm_config(struct abm *abm,
+	struct dmcu_iram_parameters params)
+{
+	unsigned char ram_table[IRAM_SIZE];
+	bool result = false;
+
+	if (abm == NULL)
+		return false;
+
+	memset(&ram_table, 0, sizeof(ram_table));
+
+	fill_iram_v_2_3((struct iram_table_v_2_2 *)ram_table, params);
+	result = abm->funcs->init_abm_config(
+		abm, (char *)(&ram_table), IRAM_RESERVE_AREA_START_V2_2);
+
+	return result;
+}
+
 bool dmcu_load_iram(struct dmcu *dmcu,
 	struct dmcu_iram_parameters params)
 {
@@ -657,15 +678,15 @@ bool dmcu_load_iram(struct dmcu *dmcu,
 	if (dmcu == NULL)
 		return false;
 
-	if (!dmcu->funcs->is_dmcu_initialized(dmcu))
+	if (dmcu && !dmcu->funcs->is_dmcu_initialized(dmcu))
 		return true;
 
 	memset(&ram_table, 0, sizeof(ram_table));
 
 	if (dmcu->dmcu_version.abm_version == 0x24) {
 		fill_iram_v_2_3((struct iram_table_v_2_2 *)ram_table, params);
-		result = dmcu->funcs->load_iram(
-				dmcu, 0, (char *)(&ram_table), IRAM_RESERVE_AREA_START_V2_2);
+			result = dmcu->funcs->load_iram(
+					dmcu, 0, (char *)(&ram_table), IRAM_RESERVE_AREA_START_V2_2);
 	} else if (dmcu->dmcu_version.abm_version == 0x23) {
 		fill_iram_v_2_3((struct iram_table_v_2_2 *)ram_table, params);
 

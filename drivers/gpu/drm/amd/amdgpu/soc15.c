@@ -569,14 +569,10 @@ static int soc15_asic_reset(struct amdgpu_device *adev)
 
 	switch (soc15_asic_reset_method(adev)) {
 		case AMD_RESET_METHOD_BACO:
-			if (!adev->in_suspend)
-				amdgpu_inc_vram_lost(adev);
 			return soc15_asic_baco_reset(adev);
 		case AMD_RESET_METHOD_MODE2:
 			return amdgpu_dpm_mode2_reset(adev);
 		default:
-			if (!adev->in_suspend)
-				amdgpu_inc_vram_lost(adev);
 			return soc15_asic_mode1_reset(adev);
 	}
 }
@@ -712,7 +708,6 @@ int soc15_set_ip_blocks(struct amdgpu_device *adev)
 		adev->df.funcs = &df_v1_7_funcs;
 
 	adev->rev_id = soc15_get_rev_id(adev);
-	adev->nbio.funcs->detect_hw_virt(adev);
 
 	if (amdgpu_sriov_vf(adev))
 		adev->virt.ops = &xgpu_ai_virt_ops;
@@ -1222,7 +1217,7 @@ static int soc15_common_early_init(void *handle)
 			AMD_CG_SUPPORT_IH_CG |
 			AMD_CG_SUPPORT_VCN_MGCG |
 			AMD_CG_SUPPORT_JPEG_MGCG;
-		adev->pg_flags = 0;
+		adev->pg_flags = AMD_PG_SUPPORT_VCN | AMD_PG_SUPPORT_VCN_DPG;
 		adev->external_rev_id = adev->rev_id + 0x32;
 		break;
 	case CHIP_RENOIR:

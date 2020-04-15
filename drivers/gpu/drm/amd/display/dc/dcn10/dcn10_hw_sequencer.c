@@ -1238,7 +1238,7 @@ void dcn10_init_pipes(struct dc *dc, struct dc_state *context)
 
 void dcn10_init_hw(struct dc *dc)
 {
-	int i;
+	int i, j;
 	struct abm *abm = dc->res_pool->abm;
 	struct dmcu *dmcu = dc->res_pool->dmcu;
 	struct dce_hwseq *hws = dc->hwseq;
@@ -1342,8 +1342,21 @@ void dcn10_init_hw(struct dc *dc)
 				/* if any of the displays are lit up turn them off */
 				status = core_link_read_dpcd(dc->links[i], DP_SET_POWER,
 								&dpcd_power_state, sizeof(dpcd_power_state));
-				if (status == DC_OK && dpcd_power_state == DP_POWER_STATE_D0)
+				if (status == DC_OK && dpcd_power_state == DP_POWER_STATE_D0) {
+					/* blank dp stream before power off receiver*/
+					if (dc->links[i]->link_enc->funcs->get_dig_frontend) {
+						unsigned int fe = dc->links[i]->link_enc->funcs->get_dig_frontend(dc->links[i]->link_enc);
+
+						for (j = 0; j < dc->res_pool->stream_enc_count; j++) {
+							if (fe == dc->res_pool->stream_enc[j]->id) {
+								dc->res_pool->stream_enc[j]->funcs->dp_blank(
+											dc->res_pool->stream_enc[j]);
+								break;
+							}
+						}
+					}
 					dp_receiver_power_ctrl(dc->links[i], false);
+				}
 			}
 		}
 	}
@@ -1359,6 +1372,38 @@ void dcn10_init_hw(struct dc *dc)
 		if (dc->res_pool->hubbub->funcs->allow_self_refresh_control)
 			dc->res_pool->hubbub->funcs->allow_self_refresh_control(dc->res_pool->hubbub,
 					!dc->res_pool->hubbub->ctx->dc->debug.disable_stutter);
+	}
+
+	/* In headless boot cases, DIG may be turned
+	 * on which causes HW/SW discrepancies.
+	 * To avoid this, power down hardware on boot
+	 * if DIG is turned on and seamless boot not enabled
+	 */
+	if (dc->config.power_down_display_on_boot) {
+		struct dc_link *edp_link = get_edp_link(dc);
+
+		if (edp_link &&
+				edp_link->link_enc->funcs->is_dig_enabled &&
+				edp_link->link_enc->funcs->is_dig_enabled(edp_link->link_enc) &&
+				dc->hwss.edp_backlight_control &&
+				dc->hwss.power_down &&
+				dc->hwss.edp_power_control) {
+			dc->hwss.edp_backlight_control(edp_link, false);
+			dc->hwss.power_down(dc);
+			dc->hwss.edp_power_control(edp_link, false);
+		} else {
+			for (i = 0; i < dc->link_count; i++) {
+				struct dc_link *link = dc->links[i];
+
+				if (link->link_enc->funcs->is_dig_enabled &&
+						link->link_enc->funcs->is_dig_enabled(link->link_enc) &&
+						dc->hwss.power_down) {
+					dc->hwss.power_down(dc);
+					break;
+				}
+
+			}
+		}
 	}
 
 	for (i = 0; i < res_pool->audio_count; i++) {
