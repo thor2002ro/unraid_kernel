@@ -15,6 +15,7 @@
 #include "f2fs.h"
 #include "segment.h"
 #include "gc.h"
+#include <trace/events/f2fs.h>
 
 static struct proc_dir_entry *f2fs_proc_root;
 
@@ -372,7 +373,6 @@ out:
 		return count;
 	}
 
-
 	if (!strcmp(a->attr.name, "iostat_enable")) {
 		sbi->iostat_enable = !!t;
 		if (!sbi->iostat_enable)
@@ -543,6 +543,7 @@ F2FS_RW_ATTR(F2FS_SBI, f2fs_super_block, extension_list, extension_list);
 F2FS_RW_ATTR(FAULT_INFO_RATE, f2fs_fault_info, inject_rate, inject_rate);
 F2FS_RW_ATTR(FAULT_INFO_TYPE, f2fs_fault_info, inject_type, inject_type);
 #endif
+F2FS_RW_ATTR(F2FS_SBI, f2fs_sb_info, data_io_flag, data_io_flag);
 F2FS_GENERAL_RO_ATTR(dirty_segments);
 F2FS_GENERAL_RO_ATTR(free_segments);
 F2FS_GENERAL_RO_ATTR(lifetime_write_kbytes);
@@ -622,6 +623,7 @@ static struct attribute *f2fs_attrs[] = {
 	ATTR_LIST(inject_rate),
 	ATTR_LIST(inject_type),
 #endif
+	ATTR_LIST(data_io_flag),
 	ATTR_LIST(dirty_segments),
 	ATTR_LIST(free_segments),
 	ATTR_LIST(unusable),
@@ -748,6 +750,39 @@ static int __maybe_unused segment_bits_seq_show(struct seq_file *seq,
 		seq_putc(seq, '\n');
 	}
 	return 0;
+}
+
+static const unsigned long period_ms = 3000;
+static unsigned long next_period;
+unsigned long long f2fs_prev_iostat[NR_IO_TYPE] = {0};
+
+static DEFINE_SPINLOCK(iostat_lock);
+
+void f2fs_record_iostat(struct f2fs_sb_info *sbi)
+{
+	unsigned long long iostat_diff[NR_IO_TYPE];
+	int i;
+
+	if (time_is_after_jiffies(next_period))
+		return;
+
+	/* Need double check under the lock */
+	spin_lock(&iostat_lock);
+	if (time_is_after_jiffies(next_period)) {
+		spin_unlock(&iostat_lock);
+		return;
+	}
+	next_period = jiffies + msecs_to_jiffies(period_ms);
+	spin_unlock(&iostat_lock);
+
+	spin_lock(&sbi->iostat_lock);
+	for (i = 0; i < NR_IO_TYPE; i++) {
+		iostat_diff[i] = sbi->write_iostat[i] - f2fs_prev_iostat[i];
+		f2fs_prev_iostat[i] = sbi->write_iostat[i];
+	}
+	spin_unlock(&sbi->iostat_lock);
+
+	trace_f2fs_iostat(sbi, iostat_diff);
 }
 
 static int __maybe_unused iostat_info_seq_show(struct seq_file *seq,
