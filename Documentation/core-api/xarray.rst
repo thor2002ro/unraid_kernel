@@ -390,12 +390,13 @@ The xas_create_range() function allocates all the necessary memory
 to store every entry in a range.  It will set ENOMEM in the xa_state if
 it cannot allocate memory.
 
-You can use xas_init_marks() to reset the marks on an entry
-to their default state.  This is usually all marks clear, unless the
-XArray is marked with ``XA_FLAGS_TRACK_FREE``, in which case mark 0 is set
-and all other marks are clear.  Replacing one entry with another using
-xas_store() will not reset the marks on that entry; if you want
-the marks reset, you should do that explicitly.
+You can use xas_init_marks() to reset the marks on an entry to their
+default state.  This is usually all marks clear, unless the XArray is
+marked with ``XA_FLAGS_TRACK_FREE``, in which case mark 0 is set and all
+other marks are clear.  Replacing one entry with another using xas_store()
+will not reset the marks on that entry; if you want the marks reset, you
+should do that explicitly.  If you know that the marks are initialised,
+you can use __xas_store() when storing ``NULL``.
 
 The xas_load() will walk the xa_state as close to the entry
 as it can.  If you know the xa_state has already been walked to the

@@ -1491,6 +1491,7 @@ static inline bool xas_retry(struct xa_state *xas, const void *entry)
 
 void *xas_load(struct xa_state *);
 void *xas_store(struct xa_state *, void *entry);
+void *__xas_store(struct xa_state *, void *entry);
 void *xas_find(struct xa_state *, unsigned long max);
 void *xas_find_conflict(struct xa_state *);
 
@@ -1663,7 +1664,10 @@ static inline void *xas_next_marked(struct xa_state *xas, unsigned long max,
 	entry = xa_entry(xas->xa, node, offset);
 	if (!entry)
 		return xas_find_marked(xas, max, mark);
-	return entry;
+	if (!xa_is_retry(entry))
+		return entry;
+	xas_reset(xas);
+	return xas_find_marked(xas, max, mark);
 }
 
 /*
@@ -1785,5 +1789,22 @@ static inline void *xas_next(struct xa_state *xas)
 	xas->xa_offset++;
 	return xa_entry(xas->xa, node, xas->xa_offset);
 }
+
+/**
+ * xas_for_each_contig() - Iterate over contiguous entries in an XArray.
+ * @xas: XArray operation state.
+ * @entry: Entry retrieved from the array.
+ * @max: Maximum index to retrieve from array.
+ *
+ * The loop body will be executed for each contiguous entry in the array
+ * between the current xas position and @max, inclusive.  @entry will
+ * be set to the entry retrieved from the XArray.  It is safe to delete
+ * entries from the array in the loop body.  You should hold either the
+ * RCU lock or the xa_lock while iterating.  If you need to drop the lock,
+ * call xas_pause() first.
+ */
+#define xas_for_each_contig(xas, entry, max) \
+	for (entry = xas.xa_index <= max ? xas_load(xas) : NULL; entry; \
+	     entry = xas.xa_index <= max ? xas_next(xas) : NULL)
 
 #endif /* _LINUX_XARRAY_H */

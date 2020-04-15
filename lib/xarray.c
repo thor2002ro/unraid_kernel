@@ -492,7 +492,6 @@ static void xas_delete_node(struct xa_state *xas)
 
 		if (!parent) {
 			xas->xa->xa_head = NULL;
-			xas->xa_node = XAS_BOUNDS;
 			return;
 		}
 
@@ -754,7 +753,7 @@ static void update_node(struct xa_state *xas, struct xa_node *node,
 }
 
 /**
- * xas_store() - Store this entry in the XArray.
+ * __xas_store() - Store this entry in the XArray without affecting the marks.
  * @xas: XArray operation state.
  * @entry: New entry.
  *
@@ -766,7 +765,7 @@ static void update_node(struct xa_state *xas, struct xa_node *node,
  *
  * Return: The old entry at this index.
  */
-void *xas_store(struct xa_state *xas, void *entry)
+void *__xas_store(struct xa_state *xas, void *entry)
 {
 	struct xa_node *node;
 	void __rcu **slot = &xas->xa->xa_head;
@@ -799,8 +798,6 @@ void *xas_store(struct xa_state *xas, void *entry)
 		if (xas->xa_sibs)
 			xas_squash_marks(xas);
 	}
-	if (!entry)
-		xas_init_marks(xas);
 
 	for (;;) {
 		/*
@@ -837,6 +834,29 @@ void *xas_store(struct xa_state *xas, void *entry)
 
 	update_node(xas, node, count, values);
 	return first;
+}
+EXPORT_SYMBOL_GPL(__xas_store);
+
+/**
+ * xas_store() - Store this entry in the XArray.
+ * @xas: XArray operation state.
+ * @entry: New entry.
+ *
+ * If @xas is operating on a multi-index entry, the entry returned by this
+ * function is essentially meaningless (it may be an internal entry or it
+ * may be %NULL, even if there are non-NULL entries at some of the indices
+ * covered by the range).  This is not a problem for any current users,
+ * and can be changed if needed.
+ *
+ * Return: The old entry at this index.
+ */
+void *xas_store(struct xa_state *xas, void *entry)
+{
+	void *curr = __xas_store(xas, entry);
+
+	if (!entry)
+		xas_init_marks(xas);
+	return curr;
 }
 EXPORT_SYMBOL_GPL(xas_store);
 
@@ -1162,6 +1182,7 @@ void *xas_find_marked(struct xa_state *xas, unsigned long max, xa_mark_t mark)
 		xas->xa_index = 1;
 		goto out;
 	} else if (xas_top(xas->xa_node)) {
+restart:
 		advance = false;
 		entry = xa_head(xas->xa);
 		xas->xa_node = NULL;
@@ -1208,8 +1229,14 @@ void *xas_find_marked(struct xa_state *xas, unsigned long max, xa_mark_t mark)
 		}
 
 		entry = xa_entry(xas->xa, xas->xa_node, xas->xa_offset);
-		if (!entry && !(xa_track_free(xas->xa) && mark == XA_FREE_MARK))
+		if (unlikely(!entry &&
+			     !(xa_track_free(xas->xa) &&
+			       mark == XA_FREE_MARK))) {
+			xas_advance(xas);
 			continue;
+		}
+		if (xa_is_retry(entry))
+			goto restart;
 		if (!xa_is_node(entry))
 			return entry;
 		xas->xa_node = xa_to_node(entry);
