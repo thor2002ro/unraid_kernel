@@ -132,12 +132,6 @@ struct hv_per_cpu_context {
 	 * basis.
 	 */
 	struct tasklet_struct msg_dpc;
-
-	/*
-	 * To optimize the mapping of relid to channel, maintain
-	 * per-cpu list of the channels based on their CPU affinity.
-	 */
-	struct list_head chan_list;
 };
 
 struct hv_context {
@@ -202,6 +196,8 @@ int hv_ringbuffer_read(struct vmbus_channel *channel,
 /* TODO: Need to make this configurable */
 #define MAX_NUM_CHANNELS_SUPPORTED	256
 
+#define MAX_CHANNEL_RELIDS					\
+	max(MAX_NUM_CHANNELS_SUPPORTED, HV_EVENT_FLAGS_COUNT)
 
 enum vmbus_connect_state {
 	DISCONNECTED,
@@ -212,12 +208,13 @@ enum vmbus_connect_state {
 
 #define MAX_SIZE_CHANNEL_MESSAGE	HV_MESSAGE_PAYLOAD_BYTE_COUNT
 
-struct vmbus_connection {
-	/*
-	 * CPU on which the initial host contact was made.
-	 */
-	int connect_cpu;
+/*
+ * The CPU that Hyper-V will interrupt for VMBUS messages, such as
+ * CHANNELMSG_OFFERCHANNEL and CHANNELMSG_RESCIND_CHANNELOFFER.
+ */
+#define VMBUS_CONNECT_CPU	0
 
+struct vmbus_connection {
 	u32 msg_conn_id;
 
 	atomic_t offer_in_progress;
@@ -249,6 +246,9 @@ struct vmbus_connection {
 	/* List of channels */
 	struct list_head chn_list;
 	struct mutex channel_mutex;
+
+	/* Array of channels */
+	struct vmbus_channel **channels;
 
 	/*
 	 * An offer message is handled first on the work_queue, and then
@@ -317,6 +317,7 @@ struct vmbus_channel_message_table_entry {
 	enum vmbus_channel_message_type message_type;
 	enum vmbus_message_handler_type handler_type;
 	void (*message_handler)(struct vmbus_channel_message_header *msg);
+	u32 min_payload_len;
 };
 
 extern const struct vmbus_channel_message_table_entry
@@ -335,6 +336,9 @@ int vmbus_add_channel_kobj(struct hv_device *device_obj,
 			   struct vmbus_channel *channel);
 
 void vmbus_remove_channel_attr_group(struct vmbus_channel *channel);
+
+void vmbus_channel_map_relid(struct vmbus_channel *channel);
+void vmbus_channel_unmap_relid(struct vmbus_channel *channel);
 
 struct vmbus_channel *relid2channel(u32 relid);
 
@@ -374,12 +378,7 @@ static inline void hv_poll_channel(struct vmbus_channel *channel,
 {
 	if (!channel)
 		return;
-
-	if (in_interrupt() && (channel->target_cpu == smp_processor_id())) {
-		cb(channel);
-		return;
-	}
-	smp_call_function_single(channel->target_cpu, cb, channel, true);
+	cb(channel);
 }
 
 enum hvutil_device_state {
