@@ -221,7 +221,8 @@
 				compatible = "maxim,max77620";
 				reg = <0x3c>;
 
-				interrupts = <GIC_SPI 209 IRQ_TYPE_LEVEL_HIGH>;
+				interrupt-parent = <&pmc>;
+				interrupts = <24 IRQ_TYPE_LEVEL_LOW>;
 				#interrupt-cells = <2>;
 				interrupt-controller;
 
@@ -378,6 +379,10 @@
 						regulator-min-microvolt = <1050000>;
 						regulator-max-microvolt = <1050000>;
 					};
+				};
+
+				rtc {
+					wakeup-source;
 				};
 			};
 		};
