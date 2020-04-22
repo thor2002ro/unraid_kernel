@@ -82,8 +82,6 @@ typedef __u32 __bitwise req_flags_t;
 /* set for "ide_preempt" requests and also for requests for which the SCSI
    "quiesce" state must be ignored. */
 #define RQF_PREEMPT		((__force req_flags_t)(1 << 8))
-/* contains copies of user pages */
-#define RQF_COPY_USER		((__force req_flags_t)(1 << 9))
 /* vaguely specified driver internal error.  Ignored by the block layer */
 #define RQF_FAILED		((__force req_flags_t)(1 << 10))
 /* don't warn about errors */
@@ -226,8 +224,6 @@ struct request {
 	unsigned short write_hint;
 	unsigned short ioprio;
 
-	unsigned int extra_len;	/* length of alignment and padding */
-
 	enum mq_rq_state state;
 	refcount_t ref;
 
@@ -290,7 +286,6 @@ struct blk_queue_ctx;
 typedef blk_qc_t (make_request_fn) (struct request_queue *q, struct bio *bio);
 
 struct bio_vec;
-typedef int (dma_drain_needed_fn)(struct request *);
 
 enum blk_eh_timer_return {
 	BLK_EH_DONE,		/* drivers has completed the command */
@@ -399,7 +394,6 @@ struct request_queue {
 	struct rq_qos		*rq_qos;
 
 	make_request_fn		*make_request_fn;
-	dma_drain_needed_fn	*dma_drain_needed;
 
 	const struct blk_mq_ops	*mq_ops;
 
@@ -469,8 +463,6 @@ struct request_queue {
 	 */
 	unsigned long		nr_requests;	/* Max # of requests */
 
-	unsigned int		dma_drain_size;
-	void			*dma_drain_buffer;
 	unsigned int		dma_pad_mask;
 	unsigned int		dma_alignment;
 
@@ -1099,9 +1091,6 @@ extern void disk_stack_limits(struct gendisk *disk, struct block_device *bdev,
 			      sector_t offset);
 extern void blk_queue_stack_limits(struct request_queue *t, struct request_queue *b);
 extern void blk_queue_update_dma_pad(struct request_queue *, unsigned int);
-extern int blk_queue_dma_drain(struct request_queue *q,
-			       dma_drain_needed_fn *dma_drain_needed,
-			       void *buf, unsigned int size);
 extern void blk_queue_segment_boundary(struct request_queue *, unsigned long);
 extern void blk_queue_virt_boundary(struct request_queue *, unsigned long);
 extern void blk_queue_dma_alignment(struct request_queue *, int);
@@ -1138,7 +1127,15 @@ static inline unsigned short blk_rq_nr_discard_segments(struct request *rq)
 	return max_t(unsigned short, rq->nr_phys_segments, 1);
 }
 
-extern int blk_rq_map_sg(struct request_queue *, struct request *, struct scatterlist *);
+int __blk_rq_map_sg(struct request_queue *q, struct request *rq,
+		struct scatterlist *sglist, struct scatterlist **last_sg);
+static inline int blk_rq_map_sg(struct request_queue *q, struct request *rq,
+		struct scatterlist *sglist)
+{
+	struct scatterlist *last_sg = NULL;
+
+	return __blk_rq_map_sg(q, rq, sglist, &last_sg);
+}
 extern void blk_dump_rq_flags(struct request *, char *);
 extern long nr_blockdev_pages(void);
 
