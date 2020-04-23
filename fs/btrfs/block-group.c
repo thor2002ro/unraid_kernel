@@ -916,7 +916,7 @@ int btrfs_remove_block_group(struct btrfs_trans_handle *trans,
 	path = btrfs_alloc_path();
 	if (!path) {
 		ret = -ENOMEM;
-		goto out;
+		goto out_put_group;
 	}
 
 	/*
@@ -954,7 +954,7 @@ int btrfs_remove_block_group(struct btrfs_trans_handle *trans,
 		ret = btrfs_orphan_add(trans, BTRFS_I(inode));
 		if (ret) {
 			btrfs_add_delayed_iput(inode);
-			goto out;
+			goto out_put_group;
 		}
 		clear_nlink(inode);
 		/* One for the block groups ref */
@@ -977,13 +977,13 @@ int btrfs_remove_block_group(struct btrfs_trans_handle *trans,
 
 	ret = btrfs_search_slot(trans, tree_root, &key, path, -1, 1);
 	if (ret < 0)
-		goto out;
+		goto out_put_group;
 	if (ret > 0)
 		btrfs_release_path(path);
 	if (ret == 0) {
 		ret = btrfs_del_item(trans, tree_root, path);
 		if (ret)
-			goto out;
+			goto out_put_group;
 		btrfs_release_path(path);
 	}
 
@@ -1102,9 +1102,9 @@ int btrfs_remove_block_group(struct btrfs_trans_handle *trans,
 
 	ret = remove_block_group_free_space(trans, block_group);
 	if (ret)
-		goto out;
+		goto out_put_group;
 
-	btrfs_put_block_group(block_group);
+	/* Once for the block groups rbtree */
 	btrfs_put_block_group(block_group);
 
 	ret = btrfs_search_slot(trans, root, &key, path, -1, 1);
@@ -1127,6 +1127,10 @@ int btrfs_remove_block_group(struct btrfs_trans_handle *trans,
 		/* once for the tree */
 		free_extent_map(em);
 	}
+
+out_put_group:
+	/* Once for the lookup reference */
+	btrfs_put_block_group(block_group);
 out:
 	if (remove_rsv)
 		btrfs_delayed_refs_rsv_release(fs_info, 1);
@@ -1171,7 +1175,7 @@ struct btrfs_trans_handle *btrfs_start_trans_remove_block_group(
 	free_extent_map(em);
 
 	return btrfs_start_transaction_fallback_global_rsv(fs_info->extent_root,
-							   num_items, 1);
+							   num_items);
 }
 
 /*
@@ -1280,21 +1284,17 @@ static bool clean_pinned_extents(struct btrfs_trans_handle *trans,
 		ret = clear_extent_bits(&prev_trans->pinned_extents, start, end,
 					EXTENT_DIRTY);
 		if (ret)
-			goto err;
+			goto out;
 	}
 
 	ret = clear_extent_bits(&trans->transaction->pinned_extents, start, end,
 				EXTENT_DIRTY);
-	if (ret)
-		goto err;
+out:
 	mutex_unlock(&fs_info->unused_bg_unpin_mutex);
+	if (prev_trans)
+		btrfs_put_transaction(prev_trans);
 
-	return true;
-
-err:
-	mutex_unlock(&fs_info->unused_bg_unpin_mutex);
-	btrfs_dec_block_group_ro(bg);
-	return false;
+	return ret == 0;
 }
 
 /*
@@ -1392,8 +1392,10 @@ void btrfs_delete_unused_bgs(struct btrfs_fs_info *fs_info)
 		 * We could have pending pinned extents for this block group,
 		 * just delete them, we don't care about them anymore.
 		 */
-		if (!clean_pinned_extents(trans, block_group))
+		if (!clean_pinned_extents(trans, block_group)) {
+			btrfs_dec_block_group_ro(block_group);
 			goto end_trans;
+		}
 
 		/*
 		 * At this point, the block_group is read only and should fail
