@@ -160,8 +160,8 @@ typedef struct cistpl_funcid_t {
 } cistpl_funcid_t;
 
 typedef struct cistpl_funce_t {
-    u_char	type;
-    u_char	data[0];
+	u_char	type;
+	u_char	data[];
 } cistpl_funce_t;
 
 /*======================================================================
@@ -245,27 +245,27 @@ typedef struct cistpl_modem_cap_t {
 #define CISTPL_SERIAL_CMD_DMCL		0x40
 
 typedef struct cistpl_data_serv_t {
-    u_char	max_data_0;
-    u_char	max_data_1;
-    u_char	modulation_0;
-    u_char	modulation_1;
-    u_char	error_control;
-    u_char	compression;
-    u_char	cmd_protocol;
-    u_char	escape;
-    u_char	encrypt;
-    u_char	misc_features;
-    u_char	ccitt_code[0];
+	u_char	max_data_0;
+	u_char	max_data_1;
+	u_char	modulation_0;
+	u_char	modulation_1;
+	u_char	error_control;
+	u_char	compression;
+	u_char	cmd_protocol;
+	u_char	escape;
+	u_char	encrypt;
+	u_char	misc_features;
+	u_char	ccitt_code[];
 } cistpl_data_serv_t;
 
 typedef struct cistpl_fax_serv_t {
-    u_char	max_data_0;
-    u_char	max_data_1;
-    u_char	modulation;
-    u_char	encrypt;
-    u_char	features_0;
-    u_char	features_1;
-    u_char	ccitt_code[0];
+	u_char	max_data_0;
+	u_char	max_data_1;
+	u_char	modulation;
+	u_char	encrypt;
+	u_char	features_0;
+	u_char	features_1;
+	u_char	ccitt_code[];
 } cistpl_fax_serv_t;
 
 typedef struct cistpl_voice_serv_t {

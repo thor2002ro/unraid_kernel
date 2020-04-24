@@ -246,11 +246,11 @@ struct configure_cmd_struct
  */
 struct mcsetup_cmd_struct
 {
-  unsigned short cmd_status;
-  unsigned short cmd_cmd;
-  unsigned short cmd_link;
-  unsigned short mc_cnt;		/* number of bytes in the MC-List */
-  unsigned char  mc_list[0][6];  	/* pointer to 6 bytes entries */
+	unsigned short cmd_status;
+	unsigned short cmd_cmd;
+	unsigned short cmd_link;
+	unsigned short mc_cnt;		/* number of bytes in the MC-List */
+	unsigned char  mc_list[][6];	/* pointer to 6 bytes entries */
 };
 
 /*

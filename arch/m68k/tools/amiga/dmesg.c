@@ -30,11 +30,11 @@
 #define SAVEKMSG_MAGIC2	0x4B4D5347	/* 'KMSG' */
 
 struct savekmsg {
-    u_long magic1;	/* SAVEKMSG_MAGIC1 */
-    u_long magic2;	/* SAVEKMSG_MAGIC2 */
-    u_long magicptr;	/* address of magic1 */
-    u_long size;
-    char data[0];
+	u_long magic1;	/* SAVEKMSG_MAGIC1 */
+	u_long magic2;	/* SAVEKMSG_MAGIC2 */
+	u_long magicptr;	/* address of magic1 */
+	u_long size;
+	char data[];
 };
 
 

@@ -235,7 +235,7 @@ struct dfl_feature_platform_data {
 	unsigned long dev_status;
 	void *private;
 	int num;
-	struct dfl_feature features[0];
+	struct dfl_feature features[];
 };
 
 static inline

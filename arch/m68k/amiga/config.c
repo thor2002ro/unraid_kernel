@@ -628,7 +628,7 @@ struct savekmsg {
 	unsigned long magic2;		/* SAVEKMSG_MAGIC2 */
 	unsigned long magicptr;		/* address of magic1 */
 	unsigned long size;
-	char data[0];
+	char data[];
 };
 
 static struct savekmsg *savekmsg;
