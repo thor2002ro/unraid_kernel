@@ -11,6 +11,7 @@
 #include "../../../arch/x86/lib/inat.c"
 #include "../../../arch/x86/lib/insn.c"
 
+#include "../../check.h"
 #include "../../elf.h"
 #include "../../arch.h"
 #include "../../warn.h"
@@ -26,7 +27,7 @@ static unsigned char op_to_cfi_reg[][2] = {
 	{CFI_DI, CFI_R15},
 };
 
-static int is_x86_64(struct elf *elf)
+static int is_x86_64(const struct elf *elf)
 {
 	switch (elf->ehdr.e_machine) {
 	case EM_X86_64:
@@ -66,16 +67,28 @@ bool arch_callee_saved_reg(unsigned char reg)
 	}
 }
 
-int arch_decode_instruction(struct elf *elf, struct section *sec,
+unsigned long arch_dest_rela_offset(int addend)
+{
+	return addend + 4;
+}
+
+unsigned long arch_jump_destination(struct instruction *insn)
+{
+	return insn->offset + insn->len + insn->immediate;
+}
+
+int arch_decode_instruction(const struct elf *elf, const struct section *sec,
 			    unsigned long offset, unsigned int maxlen,
 			    unsigned int *len, enum insn_type *type,
-			    unsigned long *immediate, struct stack_op *op)
+			    unsigned long *immediate,
+			    struct list_head *ops_list)
 {
 	struct insn insn;
 	int x86_64, sign;
 	unsigned char op1, op2, rex = 0, rex_b = 0, rex_r = 0, rex_w = 0,
 		      rex_x = 0, modrm = 0, modrm_mod = 0, modrm_rm = 0,
 		      modrm_reg = 0, sib = 0;
+	struct stack_op *op;
 
 	x86_64 = is_x86_64(elf);
 	if (x86_64 == -1)
@@ -85,7 +98,7 @@ int arch_decode_instruction(struct elf *elf, struct section *sec,
 	insn_get_length(&insn);
 
 	if (!insn_complete(&insn)) {
-		WARN_FUNC("can't decode instruction", sec, offset);
+		WARN("can't decode instruction at %s:0x%lx", sec->name, offset);
 		return -1;
 	}
 
@@ -115,6 +128,10 @@ int arch_decode_instruction(struct elf *elf, struct section *sec,
 
 	if (insn.sib.nbytes)
 		sib = insn.sib.bytes[0];
+
+	op = calloc(1, sizeof(*op));
+	if (!op)
+		return -1;
 
 	switch (op1) {
 
@@ -429,9 +446,19 @@ int arch_decode_instruction(struct elf *elf, struct section *sec,
 		*type = INSN_RETURN;
 		break;
 
+	case 0xcf: /* iret */
+		*type = INSN_EXCEPTION_RETURN;
+
+		/* add $40, %rsp */
+		op->src.type = OP_SRC_ADD;
+		op->src.reg = CFI_SP;
+		op->src.offset = 5*8;
+		op->dest.type = OP_DEST_REG;
+		op->dest.reg = CFI_SP;
+		break;
+
 	case 0xca: /* retf */
 	case 0xcb: /* retf */
-	case 0xcf: /* iret */
 		*type = INSN_CONTEXT_SWITCH;
 		break;
 
@@ -477,10 +504,15 @@ int arch_decode_instruction(struct elf *elf, struct section *sec,
 
 	*immediate = insn.immediate.nbytes ? insn.immediate.value : 0;
 
+	if (*type == INSN_STACK || *type == INSN_EXCEPTION_RETURN)
+		list_add_tail(&op->list, ops_list);
+	else
+		free(op);
+
 	return 0;
 }
 
-void arch_initial_func_cfi_state(struct cfi_state *state)
+void arch_initial_func_cfi_state(struct cfi_init_state *state)
 {
 	int i;
 
