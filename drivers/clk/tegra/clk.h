@@ -866,7 +866,7 @@ void tegra_super_clk_gen5_init(void __iomem *clk_base,
 			void __iomem *pmc_base, struct tegra_clk *tegra_clks,
 			struct tegra_clk_pll_params *pll_params);
 
-#ifdef CONFIG_TEGRA_CLK_EMC
+#ifdef CONFIG_TEGRA124_EMC
 struct clk *tegra_clk_register_emc(void __iomem *base, struct device_node *np,
 				   spinlock_t *lock);
 #else
@@ -906,5 +906,8 @@ void tegra_clk_periph_resume(void);
 
 bool tegra20_clk_emc_driver_available(struct clk_hw *emc_hw);
 struct clk *tegra20_clk_register_emc(void __iomem *ioaddr, bool low_jitter);
+
+struct clk *tegra210_clk_register_emc(struct device_node *np,
+				      void __iomem *regs);
 
 #endif /* TEGRA_CLK_H */
