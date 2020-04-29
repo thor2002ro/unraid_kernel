@@ -34,7 +34,7 @@ struct kmem_cache {
 
 struct memcg_cache_array {
 	struct rcu_head rcu;
-	struct kmem_cache *entries[0];
+	struct kmem_cache *entries[];
 };
 
 /*

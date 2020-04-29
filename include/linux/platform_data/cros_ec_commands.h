@@ -5065,7 +5065,7 @@ struct ec_response_pd_log {
 	uint8_t type;       /* event type : see PD_EVENT_xx below */
 	uint8_t size_port;  /* [7:5] port number [4:0] payload size in bytes */
 	uint16_t data;      /* type-defined data payload */
-	uint8_t payload[0]; /* optional additional data payload: 0..16 bytes */
+	uint8_t payload[]; /* optional additional data payload: 0..16 bytes */
 } __ec_align4;
 
 /* The timestamp is the microsecond counter shifted to get about a ms. */
@@ -5691,7 +5691,7 @@ struct ec_response_fp_encryption_status {
 
 struct ec_response_tp_frame_info {
 	uint32_t n_frames;
-	uint32_t frame_sizes[0];
+	uint32_t frame_sizes[];
 } __ec_align4;
 
 /* Create a snapshot of current frame readings */
