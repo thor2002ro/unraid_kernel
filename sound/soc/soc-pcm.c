@@ -136,7 +136,7 @@ static ssize_t dpcm_state_read_file(struct file *file, char __user *user_buf,
 		return -ENOMEM;
 
 	for_each_pcm_streams(stream)
-		if (snd_soc_dai_stream_valid(fe->cpu_dai, stream))
+		if (snd_soc_dai_stream_valid(asoc_rtd_to_cpu(fe, 0), stream))
 			offset += dpcm_show_state(fe, stream,
 						  buf + offset,
 						  out_count - offset);
@@ -836,10 +836,10 @@ static int soc_pcm_open(struct snd_pcm_substream *substream)
 	soc_pcm_init_runtime_hw(substream);
 
 	if (rtd->num_codecs == 1)
-		codec_dai_name = rtd->codec_dai->name;
+		codec_dai_name = asoc_rtd_to_codec(rtd, 0)->name;
 
 	if (rtd->num_cpus == 1)
-		cpu_dai_name = rtd->cpu_dai->name;
+		cpu_dai_name = asoc_rtd_to_cpu(rtd, 0)->name;
 
 	if (soc_pcm_has_symmetry(substream))
 		runtime->hw.info |= SNDRV_PCM_INFO_JOINT_DUPLEX;
@@ -950,13 +950,10 @@ static int soc_pcm_prepare(struct snd_pcm_substream *substream)
 		}
 	}
 
-	for_each_rtd_dais(rtd, i, dai) {
-		ret = snd_soc_dai_prepare(dai, substream);
-		if (ret < 0) {
-			dev_err(dai->dev,
-				"ASoC: DAI prepare error: %d\n", ret);
-			goto out;
-		}
+	ret = snd_soc_pcm_dai_prepare(substream);
+	if (ret < 0) {
+		dev_err(rtd->dev, "ASoC: DAI prepare error: %d\n", ret);
+		goto out;
 	}
 
 	/* cancel any delayed stream shutdown that is pending */
@@ -1195,7 +1192,6 @@ static int soc_pcm_trigger_start(struct snd_pcm_substream *substream, int cmd)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_component *component;
-	struct snd_soc_dai *dai;
 	int i, ret;
 
 	ret = soc_rtd_trigger(rtd, substream, cmd);
@@ -1208,27 +1204,18 @@ static int soc_pcm_trigger_start(struct snd_pcm_substream *substream, int cmd)
 			return ret;
 	}
 
-	for_each_rtd_dais(rtd, i, dai) {
-		ret = snd_soc_dai_trigger(dai, substream, cmd);
-		if (ret < 0)
-			return ret;
-	}
-
-	return 0;
+	return snd_soc_pcm_dai_trigger(substream, cmd);
 }
 
 static int soc_pcm_trigger_stop(struct snd_pcm_substream *substream, int cmd)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_component *component;
-	struct snd_soc_dai *dai;
 	int i, ret;
 
-	for_each_rtd_dais(rtd, i, dai) {
-		ret = snd_soc_dai_trigger(dai, substream, cmd);
-		if (ret < 0)
-			return ret;
-	}
+	ret = snd_soc_pcm_dai_trigger(substream, cmd);
+	if (ret < 0)
+		return ret;
 
 	for_each_rtd_components(rtd, i, component) {
 		ret = snd_soc_component_trigger(component, substream, cmd);
@@ -1265,21 +1252,6 @@ static int soc_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 	return ret;
 }
 
-static int soc_pcm_bespoke_trigger(struct snd_pcm_substream *substream,
-				   int cmd)
-{
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *dai;
-	int i, ret;
-
-	for_each_rtd_dais(rtd, i, dai) {
-		ret = snd_soc_dai_bespoke_trigger(dai, substream, cmd);
-		if (ret < 0)
-			return ret;
-	}
-
-	return 0;
-}
 /*
  * soc level wrapper for pointer callback
  * If cpu_dai, codec_dai, component driver has the delay callback, then
@@ -1483,7 +1455,7 @@ static bool dpcm_end_walk_at_be(struct snd_soc_dapm_widget *widget,
 int dpcm_path_get(struct snd_soc_pcm_runtime *fe,
 	int stream, struct snd_soc_dapm_widget_list **list)
 {
-	struct snd_soc_dai *cpu_dai = fe->cpu_dai;
+	struct snd_soc_dai *cpu_dai = asoc_rtd_to_cpu(fe, 0);
 	int paths;
 
 	if (fe->num_cpus > 1) {
@@ -1842,7 +1814,7 @@ static void dpcm_runtime_merge_chan(struct snd_pcm_substream *substream,
 		 * DAIs connected to a single CPU DAI, use CPU DAI's directly
 		 */
 		if (be->num_codecs == 1) {
-			codec_stream = snd_soc_dai_get_pcm_stream(be->codec_dais[0], stream);
+			codec_stream = snd_soc_dai_get_pcm_stream(asoc_rtd_to_codec(be, 0), stream);
 
 			*channels_min = max(*channels_min,
 					    codec_stream->channels_min);
@@ -2483,7 +2455,7 @@ static int dpcm_fe_dai_do_trigger(struct snd_pcm_substream *substream, int cmd)
 		dev_dbg(fe->dev, "ASoC: bespoke trigger FE %s cmd %d\n",
 				fe->dai_link->name, cmd);
 
-		ret = soc_pcm_bespoke_trigger(substream, cmd);
+		ret = snd_soc_pcm_dai_bespoke_trigger(substream, cmd);
 		break;
 	default:
 		dev_err(fe->dev, "ASoC: invalid trigger cmd %d for %s\n", cmd,
@@ -2628,7 +2600,7 @@ static int dpcm_run_update_shutdown(struct snd_soc_pcm_runtime *fe, int stream)
 		dev_dbg(fe->dev, "ASoC: bespoke trigger FE %s cmd stop\n",
 				fe->dai_link->name);
 
-		err = soc_pcm_bespoke_trigger(substream, SNDRV_PCM_TRIGGER_STOP);
+		err = snd_soc_pcm_dai_bespoke_trigger(substream, SNDRV_PCM_TRIGGER_STOP);
 		if (err < 0)
 			dev_err(fe->dev,"ASoC: trigger FE failed %d\n", err);
 	} else {
@@ -2706,7 +2678,7 @@ static int dpcm_run_update_startup(struct snd_soc_pcm_runtime *fe, int stream)
 		dev_dbg(fe->dev, "ASoC: bespoke trigger FE %s cmd start\n",
 				fe->dai_link->name);
 
-		ret = soc_pcm_bespoke_trigger(substream, SNDRV_PCM_TRIGGER_START);
+		ret = snd_soc_pcm_dai_bespoke_trigger(substream, SNDRV_PCM_TRIGGER_START);
 		if (ret < 0) {
 			dev_err(fe->dev,"ASoC: bespoke trigger FE failed %d\n", ret);
 			goto hw_free;
@@ -2759,7 +2731,7 @@ static int soc_dpcm_fe_runtime_update(struct snd_soc_pcm_runtime *fe, int new)
 		return 0;
 
 	/* only check active links */
-	if (!fe->cpu_dai->active)
+	if (!asoc_rtd_to_cpu(fe, 0)->active)
 		return 0;
 
 	/* DAPM sync will call this to update DSP paths */
@@ -2769,13 +2741,13 @@ static int soc_dpcm_fe_runtime_update(struct snd_soc_pcm_runtime *fe, int new)
 	for_each_pcm_streams(stream) {
 
 		/* skip if FE doesn't have playback/capture capability */
-		if (!snd_soc_dai_stream_valid(fe->cpu_dai,   stream) ||
-		    !snd_soc_dai_stream_valid(fe->codec_dai, stream))
+		if (!snd_soc_dai_stream_valid(asoc_rtd_to_cpu(fe, 0),   stream) ||
+		    !snd_soc_dai_stream_valid(asoc_rtd_to_codec(fe, 0), stream))
 			continue;
 
 		/* skip if FE isn't currently playing/capturing */
-		if (!fe->cpu_dai->stream_active[stream] ||
-		    !fe->codec_dai->stream_active[stream])
+		if (!asoc_rtd_to_cpu(fe, 0)->stream_active[stream] ||
+		    !asoc_rtd_to_codec(fe, 0)->stream_active[stream])
 			continue;
 
 		paths = dpcm_path_get(fe, stream, &list);
@@ -2931,9 +2903,9 @@ int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num)
 
 		for_each_rtd_codec_dais(rtd, i, codec_dai) {
 			if (rtd->num_cpus == 1) {
-				cpu_dai = rtd->cpu_dais[0];
+				cpu_dai = asoc_rtd_to_cpu(rtd, 0);
 			} else if (rtd->num_cpus == rtd->num_codecs) {
-				cpu_dai = rtd->cpu_dais[i];
+				cpu_dai = asoc_rtd_to_cpu(rtd, i);
 			} else {
 				dev_err(rtd->card->dev,
 					"N cpus to M codecs link is not supported yet\n");
@@ -2980,7 +2952,7 @@ int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num)
 			snprintf(new_name, sizeof(new_name), "%s %s-%d",
 				rtd->dai_link->stream_name,
 				(rtd->num_codecs > 1) ?
-				"multicodec" : rtd->codec_dai->name, num);
+				"multicodec" : asoc_rtd_to_codec(rtd, 0)->name, num);
 
 		ret = snd_pcm_new(rtd->card->snd_card, new_name, num, playback,
 			capture, &pcm);
@@ -3059,8 +3031,8 @@ int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num)
 	pcm->no_device_suspend = true;
 out:
 	dev_info(rtd->card->dev, "%s <-> %s mapping ok\n",
-		 (rtd->num_codecs > 1) ? "multicodec" : rtd->codec_dai->name,
-		 (rtd->num_cpus > 1) ? "multicpu" : rtd->cpu_dai->name);
+		 (rtd->num_codecs > 1) ? "multicodec" : asoc_rtd_to_codec(rtd, 0)->name,
+		 (rtd->num_cpus > 1)   ? "multicpu"   : asoc_rtd_to_cpu(rtd, 0)->name);
 	return ret;
 }
 

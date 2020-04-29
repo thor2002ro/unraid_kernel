@@ -15,9 +15,9 @@
 #include "ops.h"
 
 static int get_ext_windows(struct snd_sof_dev *sdev,
-			   struct sof_ipc_ext_data_hdr *ext_hdr)
+			   const struct sof_ipc_ext_data_hdr *ext_hdr)
 {
-	struct sof_ipc_window *w =
+	const struct sof_ipc_window *w =
 		container_of(ext_hdr, struct sof_ipc_window, ext_hdr);
 
 	if (w->num_windows == 0 || w->num_windows > SOF_IPC_MAX_ELEMS)
@@ -33,11 +33,11 @@ static int get_ext_windows(struct snd_sof_dev *sdev,
 }
 
 static int get_cc_info(struct snd_sof_dev *sdev,
-		       struct sof_ipc_ext_data_hdr *ext_hdr)
+		       const struct sof_ipc_ext_data_hdr *ext_hdr)
 {
 	int ret;
 
-	struct sof_ipc_cc_version *cc =
+	const struct sof_ipc_cc_version *cc =
 		container_of(ext_hdr, struct sof_ipc_cc_version, ext_hdr);
 
 	dev_dbg(sdev->dev, "Firmware info: used compiler %s %d:%d:%d%s used optimization flags %s\n",
@@ -379,12 +379,19 @@ int snd_sof_parse_module_memcpy(struct snd_sof_dev *sdev,
 }
 EXPORT_SYMBOL(snd_sof_parse_module_memcpy);
 
-static int check_header(struct snd_sof_dev *sdev, const struct firmware *fw)
+static int check_header(struct snd_sof_dev *sdev, const struct firmware *fw,
+			size_t fw_offset)
 {
 	struct snd_sof_fw_header *header;
+	size_t fw_size = fw->size - fw_offset;
+
+	if (fw->size < fw_offset) {
+		dev_err(sdev->dev, "error: firmware size must be greater than firmware offset\n");
+		return -EINVAL;
+	}
 
 	/* Read the header information from the data pointer */
-	header = (struct snd_sof_fw_header *)fw->data;
+	header = (struct snd_sof_fw_header *)(fw->data + fw_offset);
 
 	/* verify FW sig */
 	if (strncmp(header->sig, SND_SOF_FW_SIG, SND_SOF_FW_SIG_SIZE) != 0) {
@@ -393,9 +400,9 @@ static int check_header(struct snd_sof_dev *sdev, const struct firmware *fw)
 	}
 
 	/* check size is valid */
-	if (fw->size != header->file_size + sizeof(*header)) {
+	if (fw_size != header->file_size + sizeof(*header)) {
 		dev_err(sdev->dev, "error: invalid filesize mismatch got 0x%zx expected 0x%zx\n",
-			fw->size, header->file_size + sizeof(*header));
+			fw_size, header->file_size + sizeof(*header));
 		return -EINVAL;
 	}
 
@@ -406,7 +413,8 @@ static int check_header(struct snd_sof_dev *sdev, const struct firmware *fw)
 	return 0;
 }
 
-static int load_modules(struct snd_sof_dev *sdev, const struct firmware *fw)
+static int load_modules(struct snd_sof_dev *sdev, const struct firmware *fw,
+			size_t fw_offset)
 {
 	struct snd_sof_fw_header *header;
 	struct snd_sof_mod_hdr *module;
@@ -415,14 +423,15 @@ static int load_modules(struct snd_sof_dev *sdev, const struct firmware *fw)
 	int ret, count;
 	size_t remaining;
 
-	header = (struct snd_sof_fw_header *)fw->data;
+	header = (struct snd_sof_fw_header *)(fw->data + fw_offset);
 	load_module = sof_ops(sdev)->load_module;
 	if (!load_module)
 		return -EINVAL;
 
 	/* parse each module */
-	module = (struct snd_sof_mod_hdr *)((u8 *)(fw->data) + sizeof(*header));
-	remaining = fw->size - sizeof(*header);
+	module = (struct snd_sof_mod_hdr *)(fw->data + fw_offset +
+					    sizeof(*header));
+	remaining = fw->size - sizeof(*header) - fw_offset;
 	/* check for wrap */
 	if (remaining > fw->size) {
 		dev_err(sdev->dev, "error: fw size smaller than header size\n");
@@ -502,7 +511,7 @@ int snd_sof_load_firmware_memcpy(struct snd_sof_dev *sdev)
 		return ret;
 
 	/* make sure the FW header and file is valid */
-	ret = check_header(sdev, plat_data->fw);
+	ret = check_header(sdev, plat_data->fw, plat_data->fw_offset);
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: invalid FW header\n");
 		goto error;
@@ -516,7 +525,7 @@ int snd_sof_load_firmware_memcpy(struct snd_sof_dev *sdev)
 	}
 
 	/* parse and load firmware modules to DSP */
-	ret = load_modules(sdev, plat_data->fw);
+	ret = load_modules(sdev, plat_data->fw, plat_data->fw_offset);
 	if (ret < 0) {
 		dev_err(sdev->dev, "error: invalid FW modules\n");
 		goto error;
