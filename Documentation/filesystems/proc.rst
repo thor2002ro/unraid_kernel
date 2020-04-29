@@ -543,40 +543,8 @@ encoded manner. The codes are the following:
     hg    huge page advise flag
     nh    no huge page advise flag
     mg    mergable advise flag
+    bt  - arm64 BTI guarded page
     ==    =======================================
-
-Note that there is no guarantee that every flag and associated mnemonic will
-be present in all further kernel releases. Things get changed, the flags may
-be vanished or the reverse -- new added. Interpretation of their meaning
-might change in future as well. So each consumer of these flags has to
-follow each specific kernel version for the exact semantic.
-
-This file is only present if the CONFIG_MMU kernel configuration option is
-enabled.
-
-Note: reading /proc/PID/maps or /proc/PID/smaps is inherently racy (consistent
-output can be achieved only in the single read call).
-
-This typically manifests when doing partial reads of these files while the
-memory map is being modified.  Despite the races, we do provide the following
-guarantees:
-
-1) The mapped addresses never go backwards, which implies no two
-   regions will ever overlap.
-2) If there is something at a given vaddr during the entirety of the
-   life of the smaps/maps walk, there will be some output for it.
-
-The /proc/PID/smaps_rollup file includes the same fields as /proc/PID/smaps,
-but their values are the sums of the corresponding values for all mappings of
-the process.  Additionally, it contains these fields:
-
-- Pss_Anon
-- Pss_File
-- Pss_Shmem
-
-They represent the proportional shares of anonymous, file, and shmem pages, as
-described for smaps above.  These fields are omitted in smaps since each
-mapping identifies the type (anon, file, or shmem) of all pages it contains.
 Thus all information in smaps_rollup can be derived from smaps, but at a
 significantly higher cost.
 
