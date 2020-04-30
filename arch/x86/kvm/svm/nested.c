@@ -207,6 +207,10 @@ static bool nested_vmcb_checks(struct vmcb *vmcb)
 	if ((vmcb->save.efer & EFER_SVME) == 0)
 		return false;
 
+	if (((vmcb->save.cr0 & X86_CR0_CD) == 0) &&
+	    (vmcb->save.cr0 & X86_CR0_NW))
+		return false;
+
 	if ((vmcb->control.intercept & (1ULL << INTERCEPT_VMRUN)) == 0)
 		return false;
 
@@ -279,7 +283,7 @@ void enter_svm_guest_mode(struct vcpu_svm *svm, u64 vmcb_gpa,
 	svm->nested.intercept_exceptions = nested_vmcb->control.intercept_exceptions;
 	svm->nested.intercept            = nested_vmcb->control.intercept;
 
-	svm_flush_tlb(&svm->vcpu, true);
+	svm_flush_tlb(&svm->vcpu);
 	svm->vmcb->control.int_ctl = nested_vmcb->control.int_ctl | V_INTR_MASKING_MASK;
 	if (nested_vmcb->control.int_ctl & V_INTR_MASKING_MASK)
 		svm->vcpu.arch.hflags |= HF_VINTR_MASK;
@@ -341,8 +345,12 @@ int nested_svm_vmrun(struct vcpu_svm *svm)
 	struct kvm_host_map map;
 	u64 vmcb_gpa;
 
-	vmcb_gpa = svm->vmcb->save.rax;
+	if (is_smm(&svm->vcpu)) {
+		kvm_queue_exception(&svm->vcpu, UD_VECTOR);
+		return 1;
+	}
 
+	vmcb_gpa = svm->vmcb->save.rax;
 	ret = kvm_vcpu_map(&svm->vcpu, gpa_to_gfn(vmcb_gpa), &map);
 	if (ret == -EINVAL) {
 		kvm_inject_gp(&svm->vcpu, 0);
@@ -780,7 +788,7 @@ static bool nested_exit_on_intr(struct vcpu_svm *svm)
 	return (svm->nested.intercept & 1ULL);
 }
 
-int svm_check_nested_events(struct kvm_vcpu *vcpu)
+static int svm_check_nested_events(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_svm *svm = to_svm(vcpu);
 	bool block_nested_events =
@@ -821,3 +829,7 @@ int nested_svm_exit_special(struct vcpu_svm *svm)
 
 	return NESTED_EXIT_CONTINUE;
 }
+
+struct kvm_x86_nested_ops svm_nested_ops = {
+	.check_events = svm_check_nested_events,
+};

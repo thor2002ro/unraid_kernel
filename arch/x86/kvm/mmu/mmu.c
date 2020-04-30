@@ -78,6 +78,9 @@ module_param_cb(nx_huge_pages_recovery_ratio, &nx_huge_pages_recovery_ratio_ops,
 		&nx_huge_pages_recovery_ratio, 0644);
 __MODULE_PARM_TYPE(nx_huge_pages_recovery_ratio, "uint");
 
+static bool __read_mostly force_flush_and_sync_on_reuse;
+module_param_named(flush_on_reuse, force_flush_and_sync_on_reuse, bool, 0644);
+
 /*
  * When setting this variable to true it enables Two-Dimensional-Paging
  * where the hardware walks 2 page tables:
@@ -2153,10 +2156,6 @@ static int nonpaging_sync_page(struct kvm_vcpu *vcpu,
 	return 0;
 }
 
-static void nonpaging_invlpg(struct kvm_vcpu *vcpu, gva_t gva, hpa_t root)
-{
-}
-
 static void nonpaging_update_pte(struct kvm_vcpu *vcpu,
 				 struct kvm_mmu_page *sp, u64 *spte,
 				 const void *pte)
@@ -2313,7 +2312,7 @@ static void kvm_mmu_flush_or_zap(struct kvm_vcpu *vcpu,
 		return;
 
 	if (local_flush)
-		kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
+		kvm_make_request(KVM_REQ_TLB_FLUSH_CURRENT, vcpu);
 }
 
 #ifdef CONFIG_KVM_MMU_AUDIT
@@ -2520,11 +2519,11 @@ static struct kvm_mmu_page *kvm_mmu_get_page(struct kvm_vcpu *vcpu,
 				break;
 
 			WARN_ON(!list_empty(&invalid_list));
-			kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
+			kvm_make_request(KVM_REQ_TLB_FLUSH_CURRENT, vcpu);
 		}
 
 		if (sp->unsync_children)
-			kvm_make_request(KVM_REQ_MMU_SYNC, vcpu);
+			kvm_make_request(KVM_REQ_TLB_FLUSH_CURRENT, vcpu);
 
 		__clear_sp_write_flooding_count(sp);
 		trace_kvm_mmu_get_page(sp, false);
@@ -3125,7 +3124,7 @@ static int mmu_set_spte(struct kvm_vcpu *vcpu, u64 *sptep,
 	if (set_spte_ret & SET_SPTE_WRITE_PROTECTED_PT) {
 		if (write_fault)
 			ret = RET_PF_EMULATE;
-		kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
+		kvm_make_request(KVM_REQ_TLB_FLUSH_CURRENT, vcpu);
 	}
 
 	if (set_spte_ret & SET_SPTE_NEED_REMOTE_TLB_FLUSH || flush)
@@ -3666,7 +3665,7 @@ void kvm_mmu_free_roots(struct kvm_vcpu *vcpu, struct kvm_mmu *mmu,
 							   &invalid_list);
 			mmu->root_hpa = INVALID_PAGE;
 		}
-		mmu->root_cr3 = 0;
+		mmu->root_pgd = 0;
 	}
 
 	kvm_mmu_commit_zap_page(vcpu->kvm, &invalid_list);
@@ -3723,8 +3722,8 @@ static int mmu_alloc_direct_roots(struct kvm_vcpu *vcpu)
 	} else
 		BUG();
 
-	/* root_cr3 is ignored for direct MMUs. */
-	vcpu->arch.mmu->root_cr3 = 0;
+	/* root_pgd is ignored for direct MMUs. */
+	vcpu->arch.mmu->root_pgd = 0;
 
 	return 0;
 }
@@ -3733,11 +3732,11 @@ static int mmu_alloc_shadow_roots(struct kvm_vcpu *vcpu)
 {
 	struct kvm_mmu_page *sp;
 	u64 pdptr, pm_mask;
-	gfn_t root_gfn, root_cr3;
+	gfn_t root_gfn, root_pgd;
 	int i;
 
-	root_cr3 = vcpu->arch.mmu->get_guest_pgd(vcpu);
-	root_gfn = root_cr3 >> PAGE_SHIFT;
+	root_pgd = vcpu->arch.mmu->get_guest_pgd(vcpu);
+	root_gfn = root_pgd >> PAGE_SHIFT;
 
 	if (mmu_check_root(vcpu, root_gfn))
 		return 1;
@@ -3762,7 +3761,7 @@ static int mmu_alloc_shadow_roots(struct kvm_vcpu *vcpu)
 		++sp->root_count;
 		spin_unlock(&vcpu->kvm->mmu_lock);
 		vcpu->arch.mmu->root_hpa = root;
-		goto set_root_cr3;
+		goto set_root_pgd;
 	}
 
 	/*
@@ -3828,8 +3827,8 @@ static int mmu_alloc_shadow_roots(struct kvm_vcpu *vcpu)
 		vcpu->arch.mmu->root_hpa = __pa(vcpu->arch.mmu->lm_root);
 	}
 
-set_root_cr3:
-	vcpu->arch.mmu->root_cr3 = root_cr3;
+set_root_pgd:
+	vcpu->arch.mmu->root_pgd = root_pgd;
 
 	return 0;
 }
@@ -4083,18 +4082,16 @@ static bool try_async_pf(struct kvm_vcpu *vcpu, bool prefault, gfn_t gfn,
 			 gpa_t cr2_or_gpa, kvm_pfn_t *pfn, bool write,
 			 bool *writable)
 {
-	struct kvm_memory_slot *slot;
+	struct kvm_memory_slot *slot = kvm_vcpu_gfn_to_memslot(vcpu, gfn);
 	bool async;
 
-	/*
-	 * Don't expose private memslots to L2.
-	 */
-	if (is_guest_mode(vcpu) && !kvm_is_visible_gfn(vcpu->kvm, gfn)) {
+	/* Don't expose private memslots to L2. */
+	if (is_guest_mode(vcpu) && !kvm_is_visible_memslot(slot)) {
 		*pfn = KVM_PFN_NOSLOT;
+		*writable = false;
 		return false;
 	}
 
-	slot = kvm_vcpu_gfn_to_memslot(vcpu, gfn);
 	async = false;
 	*pfn = __gfn_to_pfn_memslot(slot, gfn, false, &async, write, writable);
 	if (!async)
@@ -4237,7 +4234,7 @@ static void nonpaging_init_context(struct kvm_vcpu *vcpu,
 	context->page_fault = nonpaging_page_fault;
 	context->gva_to_gpa = nonpaging_gva_to_gpa;
 	context->sync_page = nonpaging_sync_page;
-	context->invlpg = nonpaging_invlpg;
+	context->invlpg = NULL;
 	context->update_pte = nonpaging_update_pte;
 	context->root_level = 0;
 	context->shadow_root_level = PT32E_ROOT_LEVEL;
@@ -4245,51 +4242,50 @@ static void nonpaging_init_context(struct kvm_vcpu *vcpu,
 	context->nx = false;
 }
 
-static inline bool is_root_usable(struct kvm_mmu_root_info *root, gpa_t cr3,
+static inline bool is_root_usable(struct kvm_mmu_root_info *root, gpa_t pgd,
 				  union kvm_mmu_page_role role)
 {
-	return (role.direct || cr3 == root->cr3) &&
+	return (role.direct || pgd == root->pgd) &&
 	       VALID_PAGE(root->hpa) && page_header(root->hpa) &&
 	       role.word == page_header(root->hpa)->role.word;
 }
 
 /*
- * Find out if a previously cached root matching the new CR3/role is available.
+ * Find out if a previously cached root matching the new pgd/role is available.
  * The current root is also inserted into the cache.
  * If a matching root was found, it is assigned to kvm_mmu->root_hpa and true is
  * returned.
  * Otherwise, the LRU root from the cache is assigned to kvm_mmu->root_hpa and
  * false is returned. This root should now be freed by the caller.
  */
-static bool cached_root_available(struct kvm_vcpu *vcpu, gpa_t new_cr3,
+static bool cached_root_available(struct kvm_vcpu *vcpu, gpa_t new_pgd,
 				  union kvm_mmu_page_role new_role)
 {
 	uint i;
 	struct kvm_mmu_root_info root;
 	struct kvm_mmu *mmu = vcpu->arch.mmu;
 
-	root.cr3 = mmu->root_cr3;
+	root.pgd = mmu->root_pgd;
 	root.hpa = mmu->root_hpa;
 
-	if (is_root_usable(&root, new_cr3, new_role))
+	if (is_root_usable(&root, new_pgd, new_role))
 		return true;
 
 	for (i = 0; i < KVM_MMU_NUM_PREV_ROOTS; i++) {
 		swap(root, mmu->prev_roots[i]);
 
-		if (is_root_usable(&root, new_cr3, new_role))
+		if (is_root_usable(&root, new_pgd, new_role))
 			break;
 	}
 
 	mmu->root_hpa = root.hpa;
-	mmu->root_cr3 = root.cr3;
+	mmu->root_pgd = root.pgd;
 
 	return i < KVM_MMU_NUM_PREV_ROOTS;
 }
 
-static bool fast_cr3_switch(struct kvm_vcpu *vcpu, gpa_t new_cr3,
-			    union kvm_mmu_page_role new_role,
-			    bool skip_tlb_flush)
+static bool fast_pgd_switch(struct kvm_vcpu *vcpu, gpa_t new_pgd,
+			    union kvm_mmu_page_role new_role)
 {
 	struct kvm_mmu *mmu = vcpu->arch.mmu;
 
@@ -4299,68 +4295,57 @@ static bool fast_cr3_switch(struct kvm_vcpu *vcpu, gpa_t new_cr3,
 	 * later if necessary.
 	 */
 	if (mmu->shadow_root_level >= PT64_ROOT_4LEVEL &&
-	    mmu->root_level >= PT64_ROOT_4LEVEL) {
-		if (mmu_check_root(vcpu, new_cr3 >> PAGE_SHIFT))
-			return false;
-
-		if (cached_root_available(vcpu, new_cr3, new_role)) {
-			/*
-			 * It is possible that the cached previous root page is
-			 * obsolete because of a change in the MMU generation
-			 * number. However, changing the generation number is
-			 * accompanied by KVM_REQ_MMU_RELOAD, which will free
-			 * the root set here and allocate a new one.
-			 */
-			kvm_make_request(KVM_REQ_LOAD_MMU_PGD, vcpu);
-			if (!skip_tlb_flush) {
-				kvm_make_request(KVM_REQ_MMU_SYNC, vcpu);
-				kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
-			}
-
-			/*
-			 * The last MMIO access's GVA and GPA are cached in the
-			 * VCPU. When switching to a new CR3, that GVA->GPA
-			 * mapping may no longer be valid. So clear any cached
-			 * MMIO info even when we don't need to sync the shadow
-			 * page tables.
-			 */
-			vcpu_clear_mmio_info(vcpu, MMIO_GVA_ANY);
-
-			__clear_sp_write_flooding_count(
-				page_header(mmu->root_hpa));
-
-			return true;
-		}
-	}
+	    mmu->root_level >= PT64_ROOT_4LEVEL)
+		return !mmu_check_root(vcpu, new_pgd >> PAGE_SHIFT) &&
+		       cached_root_available(vcpu, new_pgd, new_role);
 
 	return false;
 }
 
-static void __kvm_mmu_new_cr3(struct kvm_vcpu *vcpu, gpa_t new_cr3,
+static void __kvm_mmu_new_pgd(struct kvm_vcpu *vcpu, gpa_t new_pgd,
 			      union kvm_mmu_page_role new_role,
-			      bool skip_tlb_flush)
+			      bool skip_tlb_flush, bool skip_mmu_sync)
 {
-	if (!fast_cr3_switch(vcpu, new_cr3, new_role, skip_tlb_flush))
-		kvm_mmu_free_roots(vcpu, vcpu->arch.mmu,
-				   KVM_MMU_ROOT_CURRENT);
+	if (!fast_pgd_switch(vcpu, new_pgd, new_role)) {
+		kvm_mmu_free_roots(vcpu, vcpu->arch.mmu, KVM_MMU_ROOT_CURRENT);
+		return;
+	}
+
+	/*
+	 * It's possible that the cached previous root page is obsolete because
+	 * of a change in the MMU generation number. However, changing the
+	 * generation number is accompanied by KVM_REQ_MMU_RELOAD, which will
+	 * free the root set here and allocate a new one.
+	 */
+	kvm_make_request(KVM_REQ_LOAD_MMU_PGD, vcpu);
+
+	if (!skip_mmu_sync || force_flush_and_sync_on_reuse)
+		kvm_make_request(KVM_REQ_MMU_SYNC, vcpu);
+	if (!skip_tlb_flush || force_flush_and_sync_on_reuse)
+		kvm_make_request(KVM_REQ_TLB_FLUSH_CURRENT, vcpu);
+
+	/*
+	 * The last MMIO access's GVA and GPA are cached in the VCPU. When
+	 * switching to a new CR3, that GVA->GPA mapping may no longer be
+	 * valid. So clear any cached MMIO info even when we don't need to sync
+	 * the shadow page tables.
+	 */
+	vcpu_clear_mmio_info(vcpu, MMIO_GVA_ANY);
+
+	__clear_sp_write_flooding_count(page_header(vcpu->arch.mmu->root_hpa));
 }
 
-void kvm_mmu_new_cr3(struct kvm_vcpu *vcpu, gpa_t new_cr3, bool skip_tlb_flush)
+void kvm_mmu_new_pgd(struct kvm_vcpu *vcpu, gpa_t new_pgd, bool skip_tlb_flush,
+		     bool skip_mmu_sync)
 {
-	__kvm_mmu_new_cr3(vcpu, new_cr3, kvm_mmu_calc_root_page_role(vcpu),
-			  skip_tlb_flush);
+	__kvm_mmu_new_pgd(vcpu, new_pgd, kvm_mmu_calc_root_page_role(vcpu),
+			  skip_tlb_flush, skip_mmu_sync);
 }
-EXPORT_SYMBOL_GPL(kvm_mmu_new_cr3);
+EXPORT_SYMBOL_GPL(kvm_mmu_new_pgd);
 
 static unsigned long get_cr3(struct kvm_vcpu *vcpu)
 {
 	return kvm_read_cr3(vcpu);
-}
-
-static void inject_page_fault(struct kvm_vcpu *vcpu,
-			      struct x86_exception *fault)
-{
-	vcpu->arch.mmu->inject_page_fault(vcpu, fault);
 }
 
 static bool sync_mmio_spte(struct kvm_vcpu *vcpu, u64 *sptep, gfn_t gfn,
@@ -4928,7 +4913,7 @@ static void init_kvm_tdp_mmu(struct kvm_vcpu *vcpu)
 	context->mmu_role.as_u64 = new_role.as_u64;
 	context->page_fault = kvm_tdp_page_fault;
 	context->sync_page = nonpaging_sync_page;
-	context->invlpg = nonpaging_invlpg;
+	context->invlpg = NULL;
 	context->update_pte = nonpaging_update_pte;
 	context->shadow_root_level = kvm_x86_ops.get_tdp_level(vcpu);
 	context->direct_map = true;
@@ -5047,7 +5032,7 @@ void kvm_init_shadow_ept_mmu(struct kvm_vcpu *vcpu, bool execonly,
 		kvm_calc_shadow_ept_root_page_role(vcpu, accessed_dirty,
 						   execonly, level);
 
-	__kvm_mmu_new_cr3(vcpu, new_eptp, new_role.base, false);
+	__kvm_mmu_new_pgd(vcpu, new_eptp, new_role.base, true, true);
 
 	if (new_role.as_u64 == context->mmu_role.as_u64)
 		return;
@@ -5095,6 +5080,12 @@ static void init_kvm_nested_mmu(struct kvm_vcpu *vcpu)
 	g_context->get_guest_pgd     = get_cr3;
 	g_context->get_pdptr         = kvm_pdptr_read;
 	g_context->inject_page_fault = kvm_inject_page_fault;
+
+	/*
+	 * L2 page tables are never shadowed, so there is no need to sync
+	 * SPTEs.
+	 */
+	g_context->invlpg            = NULL;
 
 	/*
 	 * Note that arch.mmu->gva_to_gpa translates l2_gpa to l1_gpa using
@@ -5183,7 +5174,7 @@ int kvm_mmu_load(struct kvm_vcpu *vcpu)
 	if (r)
 		goto out;
 	kvm_mmu_load_pgd(vcpu);
-	kvm_x86_ops.tlb_flush(vcpu, true);
+	kvm_x86_ops.tlb_flush_current(vcpu);
 out:
 	return r;
 }
@@ -5497,36 +5488,53 @@ emulate:
 }
 EXPORT_SYMBOL_GPL(kvm_mmu_page_fault);
 
-void kvm_mmu_invlpg(struct kvm_vcpu *vcpu, gva_t gva)
+void kvm_mmu_invalidate_gva(struct kvm_vcpu *vcpu, struct kvm_mmu *mmu,
+			    gva_t gva, hpa_t root_hpa)
 {
-	struct kvm_mmu *mmu = vcpu->arch.mmu;
 	int i;
 
-	/* INVLPG on a * non-canonical address is a NOP according to the SDM.  */
-	if (is_noncanonical_address(gva, vcpu))
+	/* It's actually a GPA for vcpu->arch.guest_mmu.  */
+	if (mmu != &vcpu->arch.guest_mmu) {
+		/* INVLPG on a non-canonical address is a NOP according to the SDM.  */
+		if (is_noncanonical_address(gva, vcpu))
+			return;
+
+		kvm_x86_ops.tlb_flush_gva(vcpu, gva);
+	}
+
+	if (!mmu->invlpg)
 		return;
 
-	mmu->invlpg(vcpu, gva, mmu->root_hpa);
+	if (root_hpa == INVALID_PAGE) {
+		mmu->invlpg(vcpu, gva, mmu->root_hpa);
 
-	/*
-	 * INVLPG is required to invalidate any global mappings for the VA,
-	 * irrespective of PCID. Since it would take us roughly similar amount
-	 * of work to determine whether any of the prev_root mappings of the VA
-	 * is marked global, or to just sync it blindly, so we might as well
-	 * just always sync it.
-	 *
-	 * Mappings not reachable via the current cr3 or the prev_roots will be
-	 * synced when switching to that cr3, so nothing needs to be done here
-	 * for them.
-	 */
-	for (i = 0; i < KVM_MMU_NUM_PREV_ROOTS; i++)
-		if (VALID_PAGE(mmu->prev_roots[i].hpa))
-			mmu->invlpg(vcpu, gva, mmu->prev_roots[i].hpa);
+		/*
+		 * INVLPG is required to invalidate any global mappings for the VA,
+		 * irrespective of PCID. Since it would take us roughly similar amount
+		 * of work to determine whether any of the prev_root mappings of the VA
+		 * is marked global, or to just sync it blindly, so we might as well
+		 * just always sync it.
+		 *
+		 * Mappings not reachable via the current cr3 or the prev_roots will be
+		 * synced when switching to that cr3, so nothing needs to be done here
+		 * for them.
+		 */
+		for (i = 0; i < KVM_MMU_NUM_PREV_ROOTS; i++)
+			if (VALID_PAGE(mmu->prev_roots[i].hpa))
+				mmu->invlpg(vcpu, gva, mmu->prev_roots[i].hpa);
+	} else {
+		mmu->invlpg(vcpu, gva, root_hpa);
+	}
+}
+EXPORT_SYMBOL_GPL(kvm_mmu_invalidate_gva);
 
-	kvm_x86_ops.tlb_flush_gva(vcpu, gva);
+void kvm_mmu_invlpg(struct kvm_vcpu *vcpu, gva_t gva)
+{
+	kvm_mmu_invalidate_gva(vcpu, vcpu->arch.mmu, gva, INVALID_PAGE);
 	++vcpu->stat.invlpg;
 }
 EXPORT_SYMBOL_GPL(kvm_mmu_invlpg);
+
 
 void kvm_mmu_invpcid_gva(struct kvm_vcpu *vcpu, gva_t gva, unsigned long pcid)
 {
@@ -5541,7 +5549,7 @@ void kvm_mmu_invpcid_gva(struct kvm_vcpu *vcpu, gva_t gva, unsigned long pcid)
 
 	for (i = 0; i < KVM_MMU_NUM_PREV_ROOTS; i++) {
 		if (VALID_PAGE(mmu->prev_roots[i].hpa) &&
-		    pcid == kvm_get_pcid(vcpu, mmu->prev_roots[i].cr3)) {
+		    pcid == kvm_get_pcid(vcpu, mmu->prev_roots[i].pgd)) {
 			mmu->invlpg(vcpu, gva, mmu->prev_roots[i].hpa);
 			tlb_flush = true;
 		}
@@ -5695,13 +5703,13 @@ int kvm_mmu_create(struct kvm_vcpu *vcpu)
 	vcpu->arch.walk_mmu = &vcpu->arch.root_mmu;
 
 	vcpu->arch.root_mmu.root_hpa = INVALID_PAGE;
-	vcpu->arch.root_mmu.root_cr3 = 0;
+	vcpu->arch.root_mmu.root_pgd = 0;
 	vcpu->arch.root_mmu.translate_gpa = translate_gpa;
 	for (i = 0; i < KVM_MMU_NUM_PREV_ROOTS; i++)
 		vcpu->arch.root_mmu.prev_roots[i] = KVM_MMU_ROOT_INFO_INVALID;
 
 	vcpu->arch.guest_mmu.root_hpa = INVALID_PAGE;
-	vcpu->arch.guest_mmu.root_cr3 = 0;
+	vcpu->arch.guest_mmu.root_pgd = 0;
 	vcpu->arch.guest_mmu.translate_gpa = translate_gpa;
 	for (i = 0; i < KVM_MMU_NUM_PREV_ROOTS; i++)
 		vcpu->arch.guest_mmu.prev_roots[i] = KVM_MMU_ROOT_INFO_INVALID;
