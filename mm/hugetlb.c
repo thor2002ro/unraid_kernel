@@ -85,7 +85,7 @@ static inline void unlock_or_release_subpool(struct hugepage_subpool *spool)
 	spin_unlock(&spool->lock);
 
 	/* If no pages are used, and no other handles to the subpool
-	 * remain, give up any reservations mased on minimum size and
+	 * remain, give up any reservations based on minimum size and
 	 * free the subpool */
 	if (free) {
 		if (spool->min_hpages != -1)
@@ -473,7 +473,7 @@ out_of_memory:
  *
  * Return the number of new huge pages added to the map.  This number is greater
  * than or equal to zero.  If file_region entries needed to be allocated for
- * this operation and we were not able to allocate, it ruturns -ENOMEM.
+ * this operation and we were not able to allocate, it returns -ENOMEM.
  * region_add of regions of length 1 never allocate file_regions and cannot
  * fail; region_chg will always allocate at least 1 entry and a region_add for
  * 1 page will only require at most 1 entry.
@@ -988,7 +988,7 @@ static bool vma_has_reserves(struct vm_area_struct *vma, long chg)
 		 * We know VM_NORESERVE is not set.  Therefore, there SHOULD
 		 * be a region map for all pages.  The only situation where
 		 * there is no region map is if a hole was punched via
-		 * fallocate.  In this case, there really are no reverves to
+		 * fallocate.  In this case, there really are no reserves to
 		 * use.  This situation is indicated if chg != 0.
 		 */
 		if (chg)
@@ -1519,7 +1519,7 @@ static void prep_compound_gigantic_page(struct page *page, unsigned int order)
 		 * For gigantic hugepages allocated through bootmem at
 		 * boot, it's safer to be consistent with the not-gigantic
 		 * hugepages and clear the PG_reserved bit from all tail pages
-		 * too.  Otherwse drivers using get_user_pages() to access tail
+		 * too.  Otherwise drivers using get_user_pages() to access tail
 		 * pages may get the reference counting wrong if they see
 		 * PG_reserved set on a tail page (despite the head page not
 		 * having PG_reserved set).  Enforcing this consistency between
@@ -4580,7 +4580,7 @@ vm_fault_t hugetlb_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	/*
 	 * entry could be a migration/hwpoison entry at this point, so this
 	 * check prevents the kernel from going below assuming that we have
-	 * a active hugepage in pagecache. This goto expects the 2nd page fault,
+	 * an active hugepage in pagecache. This goto expects the 2nd page fault,
 	 * and is_hugetlb_entry_(migration|hwpoisoned) check will properly
 	 * handle it.
 	 */
