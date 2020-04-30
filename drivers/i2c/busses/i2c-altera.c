@@ -382,23 +382,19 @@ static const struct i2c_algorithm altr_i2c_algo = {
 static int altr_i2c_probe(struct platform_device *pdev)
 {
 	struct altr_i2c_dev *idev = NULL;
-	struct resource *res;
 	int irq, ret;
 
 	idev = devm_kzalloc(&pdev->dev, sizeof(*idev), GFP_KERNEL);
 	if (!idev)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	idev->base = devm_ioremap_resource(&pdev->dev, res);
+	idev->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(idev->base))
 		return PTR_ERR(idev->base);
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(&pdev->dev, "missing interrupt resource\n");
+	if (irq < 0)
 		return irq;
-	}
 
 	idev->i2c_clk = devm_clk_get(&pdev->dev, NULL);
 	if (IS_ERR(idev->i2c_clk)) {
