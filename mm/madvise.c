@@ -1311,9 +1311,12 @@ SYSCALL_DEFINE6(process_madvise, int, which, pid_t, upid,
 }
 
 #ifdef CONFIG_COMPAT
-COMPAT_SYSCALL_DEFINE6(process_madvise, int, which, compat_pid_t, upid,
-		const struct compat_iovec __user *, vec, unsigned long, vlen,
-		int, behavior, unsigned long, flags)
+COMPAT_SYSCALL_DEFINE6(process_madvise, compat_int_t, which,
+			compat_pid_t, upid,
+			const struct compat_iovec __user *, vec,
+			compat_ulong_t, vlen,
+			compat_int_t, behavior,
+			compat_ulong_t, flags)
 
 {
 	ssize_t ret;
