@@ -2758,7 +2758,7 @@ static int io_splice_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 
 static bool io_splice_punt(struct file *file)
 {
-	if (get_pipe_info(file))
+	if (get_pipe_info(file, true))
 		return false;
 	if (!io_file_supports_async(file))
 		return true;
