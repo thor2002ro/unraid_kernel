@@ -156,6 +156,17 @@
 #define IOREMAP_MAX_ORDER	(PMD_SHIFT)
 #endif
 
+/*
+ * Memory hotplug allows new regions of 'System RAM' to be added to the system.
+ * These aren't described as memory by the UEFI memory map, or DT memory node.
+ * If we kexec from one of these regions, the new kernel boots from a location
+ * that isn't described as RAM.
+ *
+ * Give these resources a different name, so unaware kexec doesn't do this by
+ * accident.
+ */
+#define MEMORY_HOTPLUG_RES_NAME "System RAM (hotplug)"
+
 #ifndef __ASSEMBLY__
 extern u64			vabits_actual;
 #define PAGE_END		(_PAGE_END(vabits_actual))

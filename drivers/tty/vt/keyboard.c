@@ -633,6 +633,8 @@ static void k_spec(struct vc_data *vc, unsigned char value, char up_flag)
 	     kbd->kbdmode == VC_OFF) &&
 	     value != KVAL(K_SAK))
 		return;		/* SAK is allowed even in raw mode */
+	if (IS_ENABLED(CONFIG_TWIST_DISABLE_KBD_K_SPEC_HANDLER))
+		return;
 	fn_handler[value](vc);
 }
 

@@ -129,7 +129,6 @@ static void do_shm_rmid(struct ipc_namespace *ns, struct kern_ipc_perm *ipcp)
 void shm_exit_ns(struct ipc_namespace *ns)
 {
 	free_ipcs(ns, &shm_ids(ns), do_shm_rmid);
-	idr_destroy(&ns->ids[IPC_SHM_IDS].ipcs_idr);
 	rhashtable_destroy(&ns->ids[IPC_SHM_IDS].key_ht);
 }
 #endif
@@ -348,34 +347,30 @@ done:
 	up_write(&shm_ids(ns).rwsem);
 }
 
-/* Called with ns->shm_ids(ns).rwsem locked */
-static int shm_try_destroy_orphaned(int id, void *p, void *data)
-{
-	struct ipc_namespace *ns = data;
-	struct kern_ipc_perm *ipcp = p;
-	struct shmid_kernel *shp = container_of(ipcp, struct shmid_kernel, shm_perm);
-
-	/*
-	 * We want to destroy segments without users and with already
-	 * exit'ed originating process.
-	 *
-	 * As shp->* are changed under rwsem, it's safe to skip shp locking.
-	 */
-	if (shp->shm_creator != NULL)
-		return 0;
-
-	if (shm_may_destroy(ns, shp)) {
-		shm_lock_by_ptr(shp);
-		shm_destroy(ns, shp);
-	}
-	return 0;
-}
-
 void shm_destroy_orphaned(struct ipc_namespace *ns)
 {
+	struct kern_ipc_perm *ipcp;
+	unsigned long index;
+
 	down_write(&shm_ids(ns).rwsem);
-	if (shm_ids(ns).in_use)
-		idr_for_each(&shm_ids(ns).ipcs_idr, &shm_try_destroy_orphaned, ns);
+	xa_for_each(&shm_ids(ns).ipcs, index, ipcp) {
+		struct shmid_kernel *shp;
+
+		shp = container_of(ipcp, struct shmid_kernel, shm_perm);
+
+		/*
+		 * We want to destroy segments without users and with already
+		 * exit'ed originating process.  As shp->* are changed under
+		 * rwsem, it's safe to skip shp locking.
+		 */
+		if (shp->shm_creator != NULL)
+			continue;
+
+		if (shm_may_destroy(ns, shp)) {
+			shm_lock_by_ptr(shp);
+			shm_destroy(ns, shp);
+		}
+	}
 	up_write(&shm_ids(ns).rwsem);
 }
 
@@ -860,26 +855,17 @@ static void shm_add_rss_swap(struct shmid_kernel *shp,
 static void shm_get_stat(struct ipc_namespace *ns, unsigned long *rss,
 		unsigned long *swp)
 {
-	int next_id;
-	int total, in_use;
+	struct kern_ipc_perm *ipc;
+	unsigned long index;
 
 	*rss = 0;
 	*swp = 0;
 
-	in_use = shm_ids(ns).in_use;
-
-	for (total = 0, next_id = 0; total < in_use; next_id++) {
-		struct kern_ipc_perm *ipc;
+	xa_for_each(&shm_ids(ns).ipcs, index, ipc) {
 		struct shmid_kernel *shp;
 
-		ipc = idr_find(&shm_ids(ns).ipcs_idr, next_id);
-		if (ipc == NULL)
-			continue;
 		shp = container_of(ipc, struct shmid_kernel, shm_perm);
-
 		shm_add_rss_swap(shp, rss, swp);
-
-		total++;
 	}
 }
 

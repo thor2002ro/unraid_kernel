@@ -1,0 +1,26 @@
+menuconfig TWIST_KERNEL_BEHAVIOR
+	bool "Twist kernel behavior"
+	help
+	  Saying Y here allows modifying kernel behavior via kernel
+	  config options which will become visible by selecting this
+	  config option. Since these kernel config options are intended
+	  for helping e.g. fuzz testing, behavior twisted by this kernel
+	  option might be unstable. Userspace applications should not
+	  count on this option being selected.
+
+if TWIST_KERNEL_BEHAVIOR
+
+config TWIST_FOR_SYZKALLER_TESTING
+       bool "Select all twist options suitable for syzkaller testing"
+       select TWIST_DISABLE_KBD_K_SPEC_HANDLER
+       help
+	 Say N unless you are building kernels for syzkaller's testing.
+
+config TWIST_DISABLE_KBD_K_SPEC_HANDLER
+       bool "Disable k_spec() function in drivers/tty/vt/keyboard.c"
+       help
+	 k_spec() function allows triggering e.g. Ctrl-Alt-Del event.
+	 Such event is annoying for fuzz testing which wants to test
+	 kernel code without rebooting the system.
+
+endif # TWIST_KERNEL_BEHAVIOR

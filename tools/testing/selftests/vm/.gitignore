@@ -8,6 +8,7 @@ compaction_test
 mlock2-tests
 on-fault-limit
 transhuge-stress
+protection_keys
 userfaultfd
 mlock-intersect-test
 mlock-random-test

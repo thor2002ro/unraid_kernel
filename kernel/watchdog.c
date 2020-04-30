@@ -92,6 +92,26 @@ static int __init hardlockup_all_cpu_backtrace_setup(char *str)
 }
 __setup("hardlockup_all_cpu_backtrace=", hardlockup_all_cpu_backtrace_setup);
 # endif /* CONFIG_SMP */
+
+atomic_t hardlockup_detected = ATOMIC_INIT(0);
+
+static inline void flush_hardlockup_messages(void)
+{
+	static atomic_t flushed = ATOMIC_INIT(0);
+
+	/* flush messages from hard lockup detector */
+	if (atomic_read(&hardlockup_detected) != atomic_read(&flushed)) {
+		atomic_set(&flushed, atomic_read(&hardlockup_detected));
+		printk_safe_flush();
+	}
+}
+
+#else /* CONFIG_HARDLOCKUP_DETECTOR */
+
+static inline void flush_hardlockup_messages(void)
+{
+}
+
 #endif /* CONFIG_HARDLOCKUP_DETECTOR */
 
 /*
@@ -369,6 +389,8 @@ static enum hrtimer_restart watchdog_timer_fn(struct hrtimer *hrtimer)
 
 	/* kick the hardlockup detector */
 	watchdog_interrupt_count();
+
+	flush_hardlockup_messages();
 
 	/* kick the softlockup detector */
 	if (completion_done(this_cpu_ptr(&softlockup_completion))) {

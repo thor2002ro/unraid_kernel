@@ -3,13 +3,13 @@
 #define __IPC_NAMESPACE_H__
 
 #include <linux/err.h>
-#include <linux/idr.h>
-#include <linux/rwsem.h>
 #include <linux/notifier.h>
 #include <linux/nsproxy.h>
 #include <linux/ns_common.h>
 #include <linux/refcount.h>
 #include <linux/rhashtable-types.h>
+#include <linux/rwsem.h>
+#include <linux/xarray.h>
 
 struct user_namespace;
 
@@ -17,11 +17,11 @@ struct ipc_ids {
 	int in_use;
 	unsigned short seq;
 	struct rw_semaphore rwsem;
-	struct idr ipcs_idr;
+	struct xarray ipcs;
 	int max_idx;
-	int last_idx;	/* For wrap around detection */
+	int next_idx;
 #ifdef CONFIG_CHECKPOINT_RESTORE
-	int next_id;
+	int restore_id;
 #endif
 	struct rhashtable key_ht;
 };
@@ -67,6 +67,8 @@ struct ipc_namespace {
 	/* user_ns which owns the ipc ns */
 	struct user_namespace *user_ns;
 	struct ucounts *ucounts;
+
+	struct llist_node mnt_llist;
 
 	struct ns_common ns;
 } __randomize_layout;
