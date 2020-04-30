@@ -1445,7 +1445,7 @@ void show_regs(struct pt_regs * regs)
 	printk("NIP ["REG"] %pS\n", regs->nip, (void *)regs->nip);
 	printk("LR ["REG"] %pS\n", regs->link, (void *)regs->link);
 #endif
-	show_stack(current, (unsigned long *) regs->gpr[1]);
+	show_stack(current, (unsigned long *) regs->gpr[1], KERN_DEFAULT);
 	if (!user_mode(regs))
 		show_instructions(regs);
 }
@@ -2048,8 +2048,8 @@ unsigned long get_wchan(struct task_struct *p)
 
 static int kstack_depth_to_print = CONFIG_PRINT_STACK_DEPTH;
 
-void show_stack_loglvl(struct task_struct *tsk, unsigned long *stack,
-		       const char *loglvl)
+void show_stack(struct task_struct *tsk, unsigned long *stack,
+		const char *loglvl)
 {
 	unsigned long sp, ip, lr, newsp;
 	int count = 0;
@@ -2116,11 +2116,6 @@ void show_stack_loglvl(struct task_struct *tsk, unsigned long *stack,
 	} while (count++ < kstack_depth_to_print);
 
 	put_task_stack(tsk);
-}
-
-void show_stack(struct task_struct *tsk, unsigned long *stack)
-{
-	show_stack_loglvl(tsk, stack, KERN_DEFAULT);
 }
 
 #ifdef CONFIG_PPC64

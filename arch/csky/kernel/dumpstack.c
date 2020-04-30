@@ -32,7 +32,7 @@ static void show_trace(unsigned long *stack, const char *loglvl)
 	pr_cont("\n");
 }
 
-void show_stack_loglvl(struct task_struct *task, unsigned long *stack,
+void show_stack(struct task_struct *task, unsigned long *stack,
 		const char *loglvl)
 {
 	if (!stack) {
@@ -47,9 +47,4 @@ void show_stack_loglvl(struct task_struct *task, unsigned long *stack,
 	}
 
 	show_trace(stack, loglvl);
-}
-
-void show_stack(struct task_struct *task, unsigned long *stack)
-{
-	show_stack_loglvl(task, stack, KERN_INFO);
 }
