@@ -342,7 +342,7 @@ static bool check_for_pattern(FILE *fp, char *pattern, char *buf)
 	return false;
 }
 
-static bool check_huge(char *addr)
+static bool check_huge(void *addr)
 {
 	bool thp = false;
 	int ret;
@@ -350,7 +350,8 @@ static bool check_huge(char *addr)
 	char buffer[MAX_LINE_LENGTH];
 	char addr_pattern[MAX_LINE_LENGTH];
 
-	ret = snprintf(addr_pattern, MAX_LINE_LENGTH, "%08llx-", addr);
+	ret = snprintf(addr_pattern, MAX_LINE_LENGTH, "%08lx-",
+		       (unsigned long) addr);
 	if (ret >= MAX_LINE_LENGTH) {
 		printf("%s: Pattern is too long\n", __func__);
 		exit(EXIT_FAILURE);
@@ -365,7 +366,8 @@ static bool check_huge(char *addr)
 	if (!check_for_pattern(fp, addr_pattern, buffer))
 		goto err_out;
 
-	ret = snprintf(addr_pattern, MAX_LINE_LENGTH, "AnonHugePages:%10lld kB", hpage_pmd_size >> 10);
+	ret = snprintf(addr_pattern, MAX_LINE_LENGTH, "AnonHugePages:%10ld kB",
+		       hpage_pmd_size >> 10);
 	if (ret >= MAX_LINE_LENGTH) {
 		printf("%s: Pattern is too long\n", __func__);
 		exit(EXIT_FAILURE);
@@ -395,7 +397,8 @@ static bool check_swap(void *addr, unsigned long size)
 	char buffer[MAX_LINE_LENGTH];
 	char addr_pattern[MAX_LINE_LENGTH];
 
-	ret = snprintf(addr_pattern, MAX_LINE_LENGTH, "%08llx-", addr);
+	ret = snprintf(addr_pattern, MAX_LINE_LENGTH, "%08lx-",
+		       (unsigned long) addr);
 	if (ret >= MAX_LINE_LENGTH) {
 		printf("%s: Pattern is too long\n", __func__);
 		exit(EXIT_FAILURE);
@@ -410,7 +413,8 @@ static bool check_swap(void *addr, unsigned long size)
 	if (!check_for_pattern(fp, addr_pattern, buffer))
 		goto err_out;
 
-	ret = snprintf(addr_pattern, MAX_LINE_LENGTH, "Swap:%19lld kB", size >> 10);
+	ret = snprintf(addr_pattern, MAX_LINE_LENGTH, "Swap:%19ld kB",
+		       size >> 10);
 	if (ret >= MAX_LINE_LENGTH) {
 		printf("%s: Pattern is too long\n", __func__);
 		exit(EXIT_FAILURE);
