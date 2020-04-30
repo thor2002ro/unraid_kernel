@@ -339,6 +339,21 @@ struct attribute_group khugepaged_attr_group = {
 };
 #endif /* CONFIG_SYSFS */
 
+static inline bool exceed_max_ptes_none(unsigned int *nr_ptes)
+{
+	return (++(*nr_ptes) > khugepaged_max_ptes_none);
+}
+
+static inline bool exceed_max_ptes_swap(unsigned int *nr_ptes)
+{
+	return (++(*nr_ptes) > khugepaged_max_ptes_swap);
+}
+
+static inline bool exceed_max_ptes_shared(unsigned int *nr_ptes)
+{
+	return (++(*nr_ptes) > khugepaged_max_ptes_shared);
+}
+
 int hugepage_madvise(struct vm_area_struct *vma,
 		     unsigned long *vm_flags, int advice)
 {
@@ -604,7 +619,7 @@ static int __collapse_huge_page_isolate(struct vm_area_struct *vma,
 		if (pte_none(pteval) || (pte_present(pteval) &&
 				is_zero_pfn(pte_pfn(pteval)))) {
 			if (!userfaultfd_armed(vma) &&
-			    ++none_or_zero <= khugepaged_max_ptes_none) {
+			    !exceed_max_ptes_none(&none_or_zero)) {
 				continue;
 			} else {
 				result = SCAN_EXCEED_NONE_PTE;
@@ -624,7 +639,7 @@ static int __collapse_huge_page_isolate(struct vm_area_struct *vma,
 		VM_BUG_ON_PAGE(!PageAnon(page), page);
 
 		if (page_mapcount(page) > 1 &&
-				++shared > khugepaged_max_ptes_shared) {
+				exceed_max_ptes_shared(&shared)) {
 			result = SCAN_EXCEED_SHARED_PTE;
 			goto out;
 		}
@@ -1234,7 +1249,7 @@ static int khugepaged_scan_pmd(struct mm_struct *mm,
 	     _pte++, _address += PAGE_SIZE) {
 		pte_t pteval = *_pte;
 		if (is_swap_pte(pteval)) {
-			if (++unmapped <= khugepaged_max_ptes_swap) {
+			if (!exceed_max_ptes_swap(&unmapped)) {
 				/*
 				 * Always be strict with uffd-wp
 				 * enabled swap entries.  Please see
@@ -1252,7 +1267,7 @@ static int khugepaged_scan_pmd(struct mm_struct *mm,
 		}
 		if (pte_none(pteval) || is_zero_pfn(pte_pfn(pteval))) {
 			if (!userfaultfd_armed(vma) &&
-			    ++none_or_zero <= khugepaged_max_ptes_none) {
+			    !exceed_max_ptes_none(&none_or_zero)) {
 				continue;
 			} else {
 				result = SCAN_EXCEED_NONE_PTE;
@@ -1286,7 +1301,7 @@ static int khugepaged_scan_pmd(struct mm_struct *mm,
 		}
 
 		if (page_mapcount(page) > 1 &&
-				++shared > khugepaged_max_ptes_shared) {
+				exceed_max_ptes_shared(&shared)) {
 			result = SCAN_EXCEED_SHARED_PTE;
 			goto out_unmap;
 		}
@@ -1961,7 +1976,7 @@ static void khugepaged_scan_file(struct mm_struct *mm,
 			continue;
 
 		if (xa_is_value(page)) {
-			if (++swap > khugepaged_max_ptes_swap) {
+			if (exceed_max_ptes_swap(&swap)) {
 				result = SCAN_EXCEED_SWAP_PTE;
 				break;
 			}
