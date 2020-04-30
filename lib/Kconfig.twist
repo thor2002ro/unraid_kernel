@@ -10,6 +10,12 @@ menuconfig TWIST_KERNEL_BEHAVIOR
 
 if TWIST_KERNEL_BEHAVIOR
 
+config TWIST_FOR_SYZKALLER_TESTING
+       bool "Select all twist options suitable for syzkaller testing"
+       select TWIST_DISABLE_KBD_K_SPEC_HANDLER
+       help
+	 Say N unless you are building kernels for syzkaller's testing.
+
 config TWIST_DISABLE_KBD_K_SPEC_HANDLER
        bool "Disable k_spec() function in drivers/tty/vt/keyboard.c"
        help
