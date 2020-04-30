@@ -5,7 +5,7 @@
 
 int kstack_depth_to_print = 48;
 
-void show_trace(unsigned long *stack)
+static void show_trace(unsigned long *stack, const char *loglvl)
 {
 	unsigned long *stack_end;
 	unsigned long *stack_start;
@@ -17,7 +17,7 @@ void show_trace(unsigned long *stack)
 	stack_end = (unsigned long *) (addr + THREAD_SIZE);
 
 	fp = stack;
-	pr_info("\nCall Trace:");
+	printk("%s\nCall Trace:", loglvl);
 
 	while (fp > stack_start && fp < stack_end) {
 #ifdef CONFIG_STACKTRACE
@@ -32,7 +32,8 @@ void show_trace(unsigned long *stack)
 	pr_cont("\n");
 }
 
-void show_stack(struct task_struct *task, unsigned long *stack)
+void show_stack_loglvl(struct task_struct *task, unsigned long *stack,
+		const char *loglvl)
 {
 	if (!stack) {
 		if (task)
@@ -45,5 +46,10 @@ void show_stack(struct task_struct *task, unsigned long *stack)
 #endif
 	}
 
-	show_trace(stack);
+	show_trace(stack, loglvl);
+}
+
+void show_stack(struct task_struct *task, unsigned long *stack)
+{
+	show_stack_loglvl(task, stack, KERN_INFO);
 }
