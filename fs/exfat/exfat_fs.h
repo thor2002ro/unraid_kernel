@@ -492,8 +492,6 @@ int exfat_nls_to_utf16(struct super_block *sb,
 		struct exfat_uni_name *uniname, int *p_lossy);
 int exfat_create_upcase_table(struct super_block *sb);
 void exfat_free_upcase_table(struct exfat_sb_info *sbi);
-unsigned short exfat_high_surrogate(unicode_t u);
-unsigned short exfat_low_surrogate(unicode_t u);
 
 /* exfat/misc.c */
 void __exfat_fs_error(struct super_block *sb, int report, const char *fmt, ...)
@@ -505,11 +503,18 @@ void __exfat_fs_error(struct super_block *sb, int report, const char *fmt, ...)
 		fmt, ## args)
 void exfat_msg(struct super_block *sb, const char *lv, const char *fmt, ...)
 		__printf(3, 4) __cold;
+#define exfat_err(sb, fmt, ...)						\
+	exfat_msg(sb, KERN_ERR, fmt, ##__VA_ARGS__)
+#define exfat_warn(sb, fmt, ...)					\
+	exfat_msg(sb, KERN_WARNING, fmt, ##__VA_ARGS__)
+#define exfat_info(sb, fmt, ...)					\
+	exfat_msg(sb, KERN_INFO, fmt, ##__VA_ARGS__)
+
 void exfat_get_entry_time(struct exfat_sb_info *sbi, struct timespec64 *ts,
-		u8 tz, __le16 time, __le16 date, u8 time_ms);
+		u8 tz, __le16 time, __le16 date, u8 time_cs);
 void exfat_truncate_atime(struct timespec64 *ts);
 void exfat_set_entry_time(struct exfat_sb_info *sbi, struct timespec64 *ts,
-		u8 *tz, __le16 *time, __le16 *date, u8 *time_ms);
+		u8 *tz, __le16 *time, __le16 *date, u8 *time_cs);
 unsigned short exfat_calc_chksum_2byte(void *data, int len,
 		unsigned short chksum, int type);
 void exfat_update_bh(struct super_block *sb, struct buffer_head *bh, int sync);
