@@ -393,6 +393,9 @@ static noinline void check_cmpxchg(struct xarray *xa)
 	XA_BUG_ON(xa, xa_cmpxchg(xa, 12345678, FIVE, LOTS, GFP_KERNEL) != FIVE);
 	XA_BUG_ON(xa, xa_cmpxchg(xa, 5, FIVE, NULL, GFP_KERNEL) != NULL);
 	XA_BUG_ON(xa, xa_cmpxchg(xa, 5, NULL, FIVE, GFP_KERNEL) != NULL);
+	XA_BUG_ON(xa, xa_insert(xa, 5, FIVE, GFP_KERNEL) != -EBUSY);
+	XA_BUG_ON(xa, xa_cmpxchg(xa, 5, FIVE, NULL, GFP_KERNEL) != FIVE);
+	XA_BUG_ON(xa, xa_insert(xa, 5, FIVE, GFP_KERNEL) == -EBUSY);
 	xa_erase_index(xa, 12345678);
 	xa_erase_index(xa, 5);
 	XA_BUG_ON(xa, !xa_empty(xa));
@@ -567,6 +570,20 @@ static noinline void check_multi_store_3(struct xarray *xa, unsigned long index,
 
 	xa_destroy(xa);
 }
+
+static noinline void check_multi_store_4(struct xarray *xa)
+{
+	XA_BUG_ON(xa, xa_marked(xa, XA_MARK_0));
+
+	xa_store_index(xa, 0, GFP_KERNEL);
+	xa_store_index(xa, 2, GFP_KERNEL);
+	xa_set_mark(xa, 0, XA_MARK_0);
+	xa_set_mark(xa, 2, XA_MARK_0);
+
+	xa_store_order(xa, 0, 2, NULL, GFP_KERNEL);
+	XA_BUG_ON(xa, xa_marked(xa, XA_MARK_0));
+	xa_destroy(xa);
+}
 #endif
 
 static noinline void check_multi_store(struct xarray *xa)
@@ -646,6 +663,9 @@ static noinline void check_multi_store(struct xarray *xa)
 		check_multi_store_3(xa, 0, i);
 		check_multi_store_3(xa, 1UL << i, i);
 	}
+	check_multi_store_4(xa);
+	xa_store_index(xa, 1000, GFP_KERNEL);
+	check_multi_store_4(xa);
 #endif
 }
 

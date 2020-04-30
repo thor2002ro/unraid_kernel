@@ -158,11 +158,7 @@ static void *xan_find_marked(struct xarray *xa, unsigned long *indexp,
 	void *entry;
 
 	rcu_read_lock();
-	do {
-		entry = xas_find_marked(&xas, ULONG_MAX, filter);
-		if (xa_is_zero(entry))
-			break;
-	} while (xas_retry(&xas, entry));
+	entry = xas_find_marked(&xas, ULONG_MAX, filter);
 	rcu_read_unlock();
 
 	if (entry) {
