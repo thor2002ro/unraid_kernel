@@ -210,52 +210,40 @@ static inline int ipc_id_alloc(struct ipc_ids *ids, struct kern_ipc_perm *new)
 	int err;
 
 	if (get_restore_id(ids) < 0) {
-		XA_STATE(xas, &ids->ipcs, 0);
-		int min_idx, max_idx;
+		int max_idx;
 
 		max_idx = max(ids->in_use*3/2, ipc_min_cycle);
 		max_idx = min(max_idx, ipc_mni) - 1;
 
-		xas_lock(&xas);
+		xa_lock(&ids->ipcs);
 
-		min_idx = ids->next_idx;
-		new->seq = ids->seq;
+		err = __xa_alloc_cyclic(&ids->ipcs, &idx, NULL,
+				XA_LIMIT(0, max_idx), &ids->next_idx,
+				GFP_KERNEL);
+		if (err == 1) {
+			ids->seq++;
+			if (ids->seq >= ipcid_seq_max())
+				ids->seq = 0;
+		}
 
-		/* Modified version of __xa_alloc */
-		do {
-			xas.xa_index = min_idx;
-			xas_find_marked(&xas, max_idx, XA_FREE_MARK);
-			if (xas.xa_node == XAS_RESTART && min_idx > 0) {
-				ids->seq++;
-				if (ids->seq >= ipcid_seq_max())
-					ids->seq = 0;
-				new->seq = ids->seq;
-				xas.xa_index = 0;
-				min_idx = 0;
-				xas_find_marked(&xas, max_idx, XA_FREE_MARK);
-			}
-			if (xas.xa_node == XAS_RESTART)
-				xas_set_err(&xas, -ENOSPC);
-			else
-				new->id = (new->seq << ipcmni_seq_shift()) +
-					xas.xa_index;
-			xas_store(&xas, new);
-			xas_clear_mark(&xas, XA_FREE_MARK);
-		} while (__xas_nomem(&xas, GFP_KERNEL));
+		if (err >= 0) {
+			new->seq = ids->seq;
+			new->id = (new->seq << ipcmni_seq_shift()) + idx;
+			/* xa_store contains a write barrier */
+			__xa_store(&ids->ipcs, idx, new, GFP_KERNEL);
+		}
 
-		xas_unlock(&xas);
-		err = xas_error(&xas);
-		idx = xas.xa_index;
+		xa_unlock(&ids->ipcs);
 	} else {
 		new->id = get_restore_id(ids);
 		new->seq = ipcid_to_seqx(new->id);
 		idx = ipcid_to_idx(new->id);
 		err = xa_insert(&ids->ipcs, idx, new, GFP_KERNEL);
-		if (err == -EBUSY)
-			err = -ENOSPC;
 		set_restore_id(ids, -1);
 	}
 
+	if (err == -EBUSY)
+		return -ENOSPC;
 	if (err < 0)
 		return err;
 	return idx;
