@@ -8,8 +8,9 @@
 
 #include <drm/drm_crtc.h>
 #include <drm/drm_crtc_helper.h>
-#include <drm/drm_panel.h>
 #include <drm/drm_of.h>
+#include <drm/drm_panel.h>
+#include <drm/drm_simple_kms_helper.h>
 
 #include "tidss_crtc.h"
 #include "tidss_drv.h"
@@ -55,18 +56,8 @@ static int tidss_encoder_atomic_check(struct drm_encoder *encoder,
 	return 0;
 }
 
-static void tidss_encoder_destroy(struct drm_encoder *encoder)
-{
-	drm_encoder_cleanup(encoder);
-	kfree(encoder);
-}
-
 static const struct drm_encoder_helper_funcs encoder_helper_funcs = {
 	.atomic_check = tidss_encoder_atomic_check,
-};
-
-static const struct drm_encoder_funcs encoder_funcs = {
-	.destroy = tidss_encoder_destroy,
 };
 
 struct drm_encoder *tidss_encoder_create(struct tidss_device *tidss,
@@ -75,18 +66,15 @@ struct drm_encoder *tidss_encoder_create(struct tidss_device *tidss,
 	struct drm_encoder *enc;
 	int ret;
 
-	enc = kzalloc(sizeof(*enc), GFP_KERNEL);
+	enc = devm_kzalloc(tidss->dev, sizeof(*enc), GFP_KERNEL);
 	if (!enc)
 		return ERR_PTR(-ENOMEM);
 
 	enc->possible_crtcs = possible_crtcs;
 
-	ret = drm_encoder_init(&tidss->ddev, enc, &encoder_funcs,
-			       encoder_type, NULL);
-	if (ret < 0) {
-		kfree(enc);
+	ret = drm_simple_encoder_init(&tidss->ddev, enc, encoder_type);
+	if (ret < 0)
 		return ERR_PTR(ret);
-	}
 
 	drm_encoder_helper_add(enc, &encoder_helper_funcs);
 
