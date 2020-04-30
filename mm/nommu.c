@@ -155,7 +155,7 @@ void *__vmalloc_node_range(unsigned long size, unsigned long align,
 		pgprot_t prot, unsigned long vm_flags, int node,
 		const void *caller)
 {
-	return __vmalloc(size, flags);
+	return __vmalloc(size, gfp_mask);
 }
 
 void *__vmalloc_node(unsigned long size, unsigned long align, gfp_t gfp_mask,
