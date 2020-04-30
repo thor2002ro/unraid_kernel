@@ -20,21 +20,8 @@
 /* Maximum physical address for 64-bit kernel with 4-level paging */
 #define MAXMEM_X86_64_4LEVEL (1ull << 46)
 
-static efi_system_table_t *sys_table __efistub_global;
-extern const bool efi_is64;
+const efi_system_table_t *efi_system_table;
 extern u32 image_offset;
-
-__pure efi_system_table_t *efi_system_table(void)
-{
-	return sys_table;
-}
-
-__attribute_const__ bool efi_is_64bit(void)
-{
-	if (IS_ENABLED(CONFIG_EFI_MIXED))
-		return efi_is64;
-	return IS_ENABLED(CONFIG_X86_64);
-}
 
 static efi_status_t
 preserve_pci_rom_image(efi_pci_io_protocol_t *pci, struct pci_setup_rom **__rom)
@@ -227,7 +214,7 @@ static const efi_char16_t apple[] = L"Apple";
 static void setup_quirks(struct boot_params *boot_params)
 {
 	efi_char16_t *fw_vendor = (efi_char16_t *)(unsigned long)
-		efi_table_attr(efi_system_table(), fw_vendor);
+		efi_table_attr(efi_system_table, fw_vendor);
 
 	if (!memcmp(fw_vendor, apple, sizeof(apple))) {
 		if (IS_ENABLED(CONFIG_APPLE_PROPERTIES))
@@ -377,10 +364,10 @@ efi_status_t __efiapi efi_pe_entry(efi_handle_t handle,
 	unsigned long ramdisk_addr;
 	unsigned long ramdisk_size;
 
-	sys_table = sys_table_arg;
+	efi_system_table = sys_table_arg;
 
 	/* Check if we were booted by the EFI firmware */
-	if (sys_table->hdr.signature != EFI_SYSTEM_TABLE_SIGNATURE)
+	if (efi_system_table->hdr.signature != EFI_SYSTEM_TABLE_SIGNATURE)
 		efi_exit(handle, EFI_INVALID_PARAMETER);
 
 	status = efi_bs_call(handle_protocol, handle, &proto, (void **)&image);
@@ -432,7 +419,7 @@ efi_status_t __efiapi efi_pe_entry(efi_handle_t handle,
 		if (status != EFI_SUCCESS)
 			goto fail2;
 
-		if (!noinitrd()) {
+		if (!efi_noinitrd) {
 			status = efi_load_initrd(image, &ramdisk_addr,
 						 &ramdisk_size,
 						 hdr->initrd_addr_max,
@@ -446,7 +433,7 @@ efi_status_t __efiapi efi_pe_entry(efi_handle_t handle,
 		}
 	}
 
-	efi_stub_entry(handle, sys_table, boot_params);
+	efi_stub_entry(handle, sys_table_arg, boot_params);
 	/* not reached */
 
 fail2:
@@ -651,14 +638,14 @@ static efi_status_t exit_boot_func(struct efi_boot_memmap *map,
 				   : EFI32_LOADER_SIGNATURE;
 	memcpy(&p->efi->efi_loader_signature, signature, sizeof(__u32));
 
-	p->efi->efi_systab		= (unsigned long)efi_system_table();
+	p->efi->efi_systab		= (unsigned long)efi_system_table;
 	p->efi->efi_memdesc_size	= *map->desc_size;
 	p->efi->efi_memdesc_version	= *map->desc_ver;
 	p->efi->efi_memmap		= (unsigned long)*map->map;
 	p->efi->efi_memmap_size		= *map->map_size;
 
 #ifdef CONFIG_X86_64
-	p->efi->efi_systab_hi		= (unsigned long)efi_system_table() >> 32;
+	p->efi->efi_systab_hi		= (unsigned long)efi_system_table >> 32;
 	p->efi->efi_memmap_hi		= (unsigned long)*map->map >> 32;
 #endif
 
@@ -719,10 +706,10 @@ unsigned long efi_main(efi_handle_t handle,
 	efi_status_t status;
 	unsigned long cmdline_paddr;
 
-	sys_table = sys_table_arg;
+	efi_system_table = sys_table_arg;
 
 	/* Check if we were booted by the EFI firmware */
-	if (sys_table->hdr.signature != EFI_SYSTEM_TABLE_SIGNATURE)
+	if (efi_system_table->hdr.signature != EFI_SYSTEM_TABLE_SIGNATURE)
 		efi_exit(handle, EFI_INVALID_PARAMETER);
 
 	/*
@@ -792,7 +779,7 @@ unsigned long efi_main(efi_handle_t handle,
 	 * permit an initrd loaded from the LINUX_EFI_INITRD_MEDIA_GUID device
 	 * path to supersede it.
 	 */
-	if (!noinitrd()) {
+	if (!efi_noinitrd) {
 		unsigned long addr, size;
 
 		status = efi_load_initrd_dev_path(&addr, &size, ULONG_MAX);
