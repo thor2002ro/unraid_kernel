@@ -115,7 +115,7 @@ static int proc_ipc_sem_dointvec(struct ctl_table *table, int write,
 
 int ipc_mni = IPCMNI;
 int ipc_mni_shift = IPCMNI_SHIFT;
-int ipc_min_cycle = RADIX_TREE_MAP_SIZE;
+int ipc_min_cycle = XA_CHUNK_SIZE;
 
 static struct ctl_table ipc_kern_table[] = {
 	{
@@ -196,8 +196,8 @@ static struct ctl_table ipc_kern_table[] = {
 #ifdef CONFIG_CHECKPOINT_RESTORE
 	{
 		.procname	= "sem_next_id",
-		.data		= &init_ipc_ns.ids[IPC_SEM_IDS].next_id,
-		.maxlen		= sizeof(init_ipc_ns.ids[IPC_SEM_IDS].next_id),
+		.data		= &init_ipc_ns.ids[IPC_SEM_IDS].restore_id,
+		.maxlen		= sizeof(init_ipc_ns.ids[IPC_SEM_IDS].restore_id),
 		.mode		= 0644,
 		.proc_handler	= proc_ipc_dointvec_minmax,
 		.extra1		= SYSCTL_ZERO,
@@ -205,8 +205,8 @@ static struct ctl_table ipc_kern_table[] = {
 	},
 	{
 		.procname	= "msg_next_id",
-		.data		= &init_ipc_ns.ids[IPC_MSG_IDS].next_id,
-		.maxlen		= sizeof(init_ipc_ns.ids[IPC_MSG_IDS].next_id),
+		.data		= &init_ipc_ns.ids[IPC_MSG_IDS].restore_id,
+		.maxlen		= sizeof(init_ipc_ns.ids[IPC_MSG_IDS].restore_id),
 		.mode		= 0644,
 		.proc_handler	= proc_ipc_dointvec_minmax,
 		.extra1		= SYSCTL_ZERO,
@@ -214,8 +214,8 @@ static struct ctl_table ipc_kern_table[] = {
 	},
 	{
 		.procname	= "shm_next_id",
-		.data		= &init_ipc_ns.ids[IPC_SHM_IDS].next_id,
-		.maxlen		= sizeof(init_ipc_ns.ids[IPC_SHM_IDS].next_id),
+		.data		= &init_ipc_ns.ids[IPC_SHM_IDS].restore_id,
+		.maxlen		= sizeof(init_ipc_ns.ids[IPC_SHM_IDS].restore_id),
 		.mode		= 0644,
 		.proc_handler	= proc_ipc_dointvec_minmax,
 		.extra1		= SYSCTL_ZERO,

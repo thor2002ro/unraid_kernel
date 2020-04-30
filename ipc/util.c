@@ -104,12 +104,20 @@ static const struct rhashtable_params ipc_kht_params = {
 	.automatic_shrinking	= true,
 };
 
+#ifdef CONFIG_CHECKPOINT_RESTORE
+#define set_restore_id(ids, x)	ids->restore_id = x
+#define get_restore_id(ids)	ids->restore_id
+#else
+#define set_restore_id(ids, x)	do { } while (0)
+#define get_restore_id(ids)	(-1)
+#endif
+
 /**
  * ipc_init_ids	- initialise ipc identifiers
  * @ids: ipc identifier set
  *
  * Set up the sequence range to use for the ipc identifier range (limited
- * below ipc_mni) then initialise the keys hashtable and ids idr.
+ * below ipc_mni) then initialise the keys hashtable and ids xarray.
  */
 void ipc_init_ids(struct ipc_ids *ids)
 {
@@ -117,12 +125,10 @@ void ipc_init_ids(struct ipc_ids *ids)
 	ids->seq = 0;
 	init_rwsem(&ids->rwsem);
 	rhashtable_init(&ids->key_ht, &ipc_kht_params);
-	idr_init(&ids->ipcs_idr);
+	xa_init_flags(&ids->ipcs, XA_FLAGS_ALLOC);
 	ids->max_idx = -1;
-	ids->last_idx = -1;
-#ifdef CONFIG_CHECKPOINT_RESTORE
-	ids->next_id = -1;
-#endif
+	ids->next_idx = 0;
+	set_restore_id(ids, -1);
 }
 
 #ifdef CONFIG_PROC_FS
@@ -183,12 +189,12 @@ static struct kern_ipc_perm *ipc_findkey(struct ipc_ids *ids, key_t key)
 }
 
 /*
- * Insert new IPC object into idr tree, and set sequence number and id
+ * Insert new IPC object into xarray, and set sequence number and id
  * in the correct order.
  * Especially:
- * - the sequence number must be set before inserting the object into the idr,
- *   because the sequence number is accessed without a lock.
- * - the id can/must be set after inserting the object into the idr.
+ * - the sequence number must be set before inserting the object into the
+ *   xarray, because the sequence number is accessed without a lock.
+ * - the id can/must be set after inserting the object into the xarray.
  *   All accesses must be done after getting kern_ipc_perm.lock.
  *
  * The caller must own kern_ipc_perm.lock.of the new object.
@@ -198,64 +204,60 @@ static struct kern_ipc_perm *ipc_findkey(struct ipc_ids *ids, key_t key)
  * the sequence number is incremented only when the returned ID is less than
  * the last one.
  */
-static inline int ipc_idr_alloc(struct ipc_ids *ids, struct kern_ipc_perm *new)
+static inline int ipc_id_alloc(struct ipc_ids *ids, struct kern_ipc_perm *new)
 {
-	int idx, next_id = -1;
+	u32 idx;
+	int err;
 
-#ifdef CONFIG_CHECKPOINT_RESTORE
-	next_id = ids->next_id;
-	ids->next_id = -1;
-#endif
-
-	/*
-	 * As soon as a new object is inserted into the idr,
-	 * ipc_obtain_object_idr() or ipc_obtain_object_check() can find it,
-	 * and the lockless preparations for ipc operations can start.
-	 * This means especially: permission checks, audit calls, allocation
-	 * of undo structures, ...
-	 *
-	 * Thus the object must be fully initialized, and if something fails,
-	 * then the full tear-down sequence must be followed.
-	 * (i.e.: set new->deleted, reduce refcount, call_rcu())
-	 */
-
-	if (next_id < 0) { /* !CHECKPOINT_RESTORE or next_id is unset */
-		int max_idx;
+	if (get_restore_id(ids) < 0) {
+		XA_STATE(xas, &ids->ipcs, 0);
+		int min_idx, max_idx;
 
 		max_idx = max(ids->in_use*3/2, ipc_min_cycle);
-		max_idx = min(max_idx, ipc_mni);
+		max_idx = min(max_idx, ipc_mni) - 1;
 
-		/* allocate the idx, with a NULL struct kern_ipc_perm */
-		idx = idr_alloc_cyclic(&ids->ipcs_idr, NULL, 0, max_idx,
-					GFP_NOWAIT);
+		xas_lock(&xas);
 
-		if (idx >= 0) {
-			/*
-			 * idx got allocated successfully.
-			 * Now calculate the sequence number and set the
-			 * pointer for real.
-			 */
-			if (idx <= ids->last_idx) {
+		min_idx = ids->next_idx;
+		new->seq = ids->seq;
+
+		/* Modified version of __xa_alloc */
+		do {
+			xas.xa_index = min_idx;
+			xas_find_marked(&xas, max_idx, XA_FREE_MARK);
+			if (xas.xa_node == XAS_RESTART && min_idx > 0) {
 				ids->seq++;
 				if (ids->seq >= ipcid_seq_max())
 					ids->seq = 0;
+				new->seq = ids->seq;
+				xas.xa_index = 0;
+				min_idx = 0;
+				xas_find_marked(&xas, max_idx, XA_FREE_MARK);
 			}
-			ids->last_idx = idx;
+			if (xas.xa_node == XAS_RESTART)
+				xas_set_err(&xas, -ENOSPC);
+			else
+				new->id = (new->seq << ipcmni_seq_shift()) +
+					xas.xa_index;
+			xas_store(&xas, new);
+			xas_clear_mark(&xas, XA_FREE_MARK);
+		} while (__xas_nomem(&xas, GFP_KERNEL));
 
-			new->seq = ids->seq;
-			/* no need for smp_wmb(), this is done
-			 * inside idr_replace, as part of
-			 * rcu_assign_pointer
-			 */
-			idr_replace(&ids->ipcs_idr, new, idx);
-		}
+		xas_unlock(&xas);
+		err = xas_error(&xas);
+		idx = xas.xa_index;
 	} else {
-		new->seq = ipcid_to_seqx(next_id);
-		idx = idr_alloc(&ids->ipcs_idr, new, ipcid_to_idx(next_id),
-				0, GFP_NOWAIT);
+		new->id = get_restore_id(ids);
+		new->seq = ipcid_to_seqx(new->id);
+		idx = ipcid_to_idx(new->id);
+		err = xa_insert(&ids->ipcs, idx, new, GFP_KERNEL);
+		if (err == -EBUSY)
+			err = -ENOSPC;
+		set_restore_id(ids, -1);
 	}
-	if (idx >= 0)
-		new->id = (new->seq << ipcmni_seq_shift()) + idx;
+
+	if (err < 0)
+		return err;
 	return idx;
 }
 
@@ -278,7 +280,7 @@ int ipc_addid(struct ipc_ids *ids, struct kern_ipc_perm *new, int limit)
 {
 	kuid_t euid;
 	kgid_t egid;
-	int idx, err;
+	int idx;
 
 	/* 1) Initialize the refcount so that ipc_rcu_putref works */
 	refcount_set(&new->refcount, 1);
@@ -289,29 +291,42 @@ int ipc_addid(struct ipc_ids *ids, struct kern_ipc_perm *new, int limit)
 	if (ids->in_use >= limit)
 		return -ENOSPC;
 
-	idr_preload(GFP_KERNEL);
-
+	/*
+	 * 2) Hold the spinlock so that nobody else can access the object
+	 * once they can find it
+	 */
 	spin_lock_init(&new->lock);
-	rcu_read_lock();
 	spin_lock(&new->lock);
-
 	current_euid_egid(&euid, &egid);
 	new->cuid = new->uid = euid;
 	new->gid = new->cgid = egid;
-
 	new->deleted = false;
 
-	idx = ipc_idr_alloc(ids, new);
-	idr_preload_end();
+	idx = ipc_id_alloc(ids, new);
+
+	rcu_read_lock();
+
+	/*
+	 * As soon as a new object is inserted into the XArray,
+	 * ipc_obtain_object_idr() or ipc_obtain_object_check() can find it,
+	 * and the lockless preparations for ipc operations can start.
+	 * This means especially: permission checks, audit calls, allocation
+	 * of undo structures, ...
+	 *
+	 * Thus the object must be fully initialized, and if something fails,
+	 * then the full tear-down sequence must be followed.
+	 * (i.e.: set new->deleted, reduce refcount, call_rcu())
+	 */
 
 	if (idx >= 0 && new->key != IPC_PRIVATE) {
-		err = rhashtable_insert_fast(&ids->key_ht, &new->khtnode,
+		int err = rhashtable_insert_fast(&ids->key_ht, &new->khtnode,
 					     ipc_kht_params);
 		if (err < 0) {
-			idr_remove(&ids->ipcs_idr, idx);
+			xa_erase(&ids->ipcs, idx);
 			idx = err;
 		}
 	}
+
 	if (idx < 0) {
 		new->deleted = true;
 		spin_unlock(&new->lock);
@@ -462,7 +477,7 @@ void ipc_rmid(struct ipc_ids *ids, struct kern_ipc_perm *ipcp)
 {
 	int idx = ipcid_to_idx(ipcp->id);
 
-	idr_remove(&ids->ipcs_idr, idx);
+	xa_erase(&ids->ipcs, idx);
 	ipc_kht_remove(ids, ipcp);
 	ids->in_use--;
 	ipcp->deleted = true;
@@ -472,7 +487,7 @@ void ipc_rmid(struct ipc_ids *ids, struct kern_ipc_perm *ipcp)
 			idx--;
 			if (idx == -1)
 				break;
-		} while (!idr_find(&ids->ipcs_idr, idx));
+		} while (!xa_load(&ids->ipcs, idx));
 		ids->max_idx = idx;
 	}
 }
@@ -595,7 +610,7 @@ struct kern_ipc_perm *ipc_obtain_object_idr(struct ipc_ids *ids, int id)
 	struct kern_ipc_perm *out;
 	int idx = ipcid_to_idx(id);
 
-	out = idr_find(&ids->ipcs_idr, idx);
+	out = xa_load(&ids->ipcs, idx);
 	if (!out)
 		return ERR_PTR(-EINVAL);
 
@@ -754,31 +769,19 @@ struct pid_namespace *ipc_seq_pid_ns(struct seq_file *s)
 static struct kern_ipc_perm *sysvipc_find_ipc(struct ipc_ids *ids, loff_t pos,
 					      loff_t *new_pos)
 {
+	unsigned long index = pos;
 	struct kern_ipc_perm *ipc;
-	int total, id;
-
-	total = 0;
-	for (id = 0; id < pos && total < ids->in_use; id++) {
-		ipc = idr_find(&ids->ipcs_idr, id);
-		if (ipc != NULL)
-			total++;
-	}
 
 	*new_pos = pos + 1;
-	if (total >= ids->in_use)
+	rcu_read_lock();
+	ipc = xa_find(&ids->ipcs, &index, ULONG_MAX, XA_PRESENT);
+	if (!ipc) {
+		rcu_read_unlock();
 		return NULL;
-
-	for (; pos < ipc_mni; pos++) {
-		ipc = idr_find(&ids->ipcs_idr, pos);
-		if (ipc != NULL) {
-			rcu_read_lock();
-			ipc_lock_object(ipc);
-			return ipc;
-		}
 	}
 
-	/* Out of range - return NULL to terminate iteration */
-	return NULL;
+	ipc_lock_object(ipc);
+	return ipc;
 }
 
 static void *sysvipc_proc_next(struct seq_file *s, void *it, loff_t *pos)

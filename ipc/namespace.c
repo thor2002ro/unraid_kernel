@@ -96,22 +96,17 @@ void free_ipcs(struct ipc_namespace *ns, struct ipc_ids *ids,
 	       void (*free)(struct ipc_namespace *, struct kern_ipc_perm *))
 {
 	struct kern_ipc_perm *perm;
-	int next_id;
-	int total, in_use;
+	unsigned long index;
 
 	down_write(&ids->rwsem);
 
-	in_use = ids->in_use;
-
-	for (total = 0, next_id = 0; total < in_use; next_id++) {
-		perm = idr_find(&ids->ipcs_idr, next_id);
-		if (perm == NULL)
-			continue;
+	xa_for_each(&ids->ipcs, index, perm) {
 		rcu_read_lock();
 		ipc_lock_object(perm);
 		free(ns, perm);
-		total++;
 	}
+	BUG_ON(!xa_empty(&ids->ipcs));
+
 	up_write(&ids->rwsem);
 }
 
