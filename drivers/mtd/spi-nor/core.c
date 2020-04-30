@@ -499,7 +499,7 @@ int spi_nor_xread_sr(struct spi_nor *nor, u8 *sr)
  * the flash is ready for new commands.
  * @nor:	pointer to 'struct spi_nor'.
  *
- * Return: 0 on success, -errno otherwise.
+ * Return: 1 if ready, 0 if not ready, -errno on errors.
  */
 static int spi_nor_xsr_ready(struct spi_nor *nor)
 {
@@ -542,7 +542,7 @@ static void spi_nor_clear_sr(struct spi_nor *nor)
  * for new commands.
  * @nor:	pointer to 'struct spi_nor'.
  *
- * Return: 0 on success, -errno otherwise.
+ * Return: 1 if ready, 0 if not ready, -errno on errors.
  */
 static int spi_nor_sr_ready(struct spi_nor *nor)
 {
@@ -606,7 +606,7 @@ static void spi_nor_clear_fsr(struct spi_nor *nor)
  * ready for new commands.
  * @nor:	pointer to 'struct spi_nor'.
  *
- * Return: 0 on success, -errno otherwise.
+ * Return: 1 if ready, 0 if not ready, -errno on errors.
  */
 static int spi_nor_fsr_ready(struct spi_nor *nor)
 {
@@ -640,14 +640,14 @@ static int spi_nor_fsr_ready(struct spi_nor *nor)
 		return -EIO;
 	}
 
-	return nor->bouncebuf[0] & FSR_READY;
+	return !!(nor->bouncebuf[0] & FSR_READY);
 }
 
 /**
  * spi_nor_ready() - Query the flash to see if it is ready for new commands.
  * @nor:	pointer to 'struct spi_nor'.
  *
- * Return: 0 on success, -errno otherwise.
+ * Return: 1 if ready, 0 if not ready, -errno on errors.
  */
 static int spi_nor_ready(struct spi_nor *nor)
 {
@@ -2675,7 +2675,7 @@ static int spi_nor_setup(struct spi_nor *nor,
 /**
  * spi_nor_manufacturer_init_params() - Initialize the flash's parameters and
  * settings based on MFR register and ->default_init() hook.
- * @nor:	pointer to a 'struct spi-nor'.
+ * @nor:	pointer to a 'struct spi_nor'.
  */
 static void spi_nor_manufacturer_init_params(struct spi_nor *nor)
 {
@@ -2690,7 +2690,7 @@ static void spi_nor_manufacturer_init_params(struct spi_nor *nor)
 /**
  * spi_nor_sfdp_init_params() - Initialize the flash's parameters and settings
  * based on JESD216 SFDP standard.
- * @nor:	pointer to a 'struct spi-nor'.
+ * @nor:	pointer to a 'struct spi_nor'.
  *
  * The method has a roll-back mechanism: in case the SFDP parsing fails, the
  * legacy flash parameters and settings will be restored.
@@ -2712,7 +2712,7 @@ static void spi_nor_sfdp_init_params(struct spi_nor *nor)
 /**
  * spi_nor_info_init_params() - Initialize the flash's parameters and settings
  * based on nor->info data.
- * @nor:	pointer to a 'struct spi-nor'.
+ * @nor:	pointer to a 'struct spi_nor'.
  */
 static void spi_nor_info_init_params(struct spi_nor *nor)
 {
@@ -2841,7 +2841,7 @@ static void spi_nor_late_init_params(struct spi_nor *nor)
 
 /**
  * spi_nor_init_params() - Initialize the flash's parameters and settings.
- * @nor:	pointer to a 'struct spi-nor'.
+ * @nor:	pointer to a 'struct spi_nor'.
  *
  * The flash parameters and settings are initialized based on a sequence of
  * calls that are ordered by priority:
