@@ -847,17 +847,12 @@ static inline void memcg_memory_event_mm(struct mm_struct *mm,
 {
 }
 
-static inline unsigned long mem_cgroup_protection(struct mem_cgroup *memcg,
-						  bool in_low_reclaim)
-{
-
-
 static inline void mem_cgroup_calculate_protection(struct mem_cgroup *root,
-						   struct mem_cgroup *memcg);
+						   struct mem_cgroup *memcg)
 {
 }
 
-static inline void mem_cgroup_protection(struct mem_cgroup *memcg,
+static inline unsigned long mem_cgroup_protection(struct mem_cgroup *memcg,
 					 bool in_low_reclaim)
 {
 	return 0;
