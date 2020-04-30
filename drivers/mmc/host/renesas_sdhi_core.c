@@ -237,7 +237,7 @@ static int renesas_sdhi_start_signal_voltage_switch(struct mmc_host *mmc,
 			MMC_SIGNAL_VOLTAGE_330 ? 0 : -EINVAL;
 
 	ret = mmc_regulator_set_vqmmc(host->mmc, ios);
-	if (ret)
+	if (ret < 0)
 		return ret;
 
 	return pinctrl_select_state(priv->pinctrl, pin_state);
@@ -422,20 +422,16 @@ static int renesas_sdhi_prepare_hs400_tuning(struct mmc_host *mmc, struct mmc_io
 	return 0;
 }
 
-#define SH_MOBILE_SDHI_MAX_TAP 3
+#define SH_MOBILE_SDHI_MIN_TAP_ROW 3
 
 static int renesas_sdhi_select_tuning(struct tmio_mmc_host *host)
 {
 	struct renesas_sdhi *priv = host_to_priv(host);
-	unsigned long tap_cnt;  /* counter of tuning success */
-	unsigned long tap_start;/* start position of tuning success */
-	unsigned long tap_end;  /* end position of tuning success */
-	unsigned long ntap;     /* temporary counter of tuning success */
-	unsigned long i;
+	unsigned int tap_start = 0, tap_end = 0, tap_cnt = 0, rs, re, i;
+	unsigned int taps_size = priv->tap_num * 2, min_tap_row;
+	unsigned long *bitmap;
 
 	priv->doing_tune = false;
-
-	/* Clear SCC_RVSREQ */
 	sd_scc_write32(host, priv, SH_MOBILE_SDHI_SCC_RVSREQ, 0);
 
 	/*
@@ -443,42 +439,42 @@ static int renesas_sdhi_select_tuning(struct tmio_mmc_host *host)
 	 * result requiring the tap to be good in both runs before
 	 * considering it for tuning selection.
 	 */
-	for (i = 0; i < priv->tap_num * 2; i++) {
+	for (i = 0; i < taps_size; i++) {
 		int offset = priv->tap_num * (i < priv->tap_num ? 1 : -1);
 
 		if (!test_bit(i, priv->taps))
 			clear_bit(i + offset, priv->taps);
+
+		if (!test_bit(i, priv->smpcmp))
+			clear_bit(i + offset, priv->smpcmp);
 	}
 
 	/*
-	 * Find the longest consecutive run of successful probes.  If that
-	 * is more than SH_MOBILE_SDHI_MAX_TAP probes long then use the
-	 * center index as the tap.
+	 * If all TAP are OK, the sampling clock position is selected by
+	 * identifying the change point of data.
 	 */
-	tap_cnt = 0;
-	ntap = 0;
-	tap_start = 0;
-	tap_end = 0;
-	for (i = 0; i < priv->tap_num * 2; i++) {
-		if (test_bit(i, priv->taps)) {
-			ntap++;
-		} else {
-			if (ntap > tap_cnt) {
-				tap_start = i - ntap;
-				tap_end = i - 1;
-				tap_cnt = ntap;
-			}
-			ntap = 0;
+	if (bitmap_full(priv->taps, taps_size)) {
+		bitmap = priv->smpcmp;
+		min_tap_row = 1;
+	} else {
+		bitmap = priv->taps;
+		min_tap_row = SH_MOBILE_SDHI_MIN_TAP_ROW;
+	}
+
+	/*
+	 * Find the longest consecutive run of successful probes. If that
+	 * is at least SH_MOBILE_SDHI_MIN_TAP_ROW probes long then use the
+	 * center index as the tap, otherwise bail out.
+	 */
+	bitmap_for_each_set_region(bitmap, rs, re, 0, taps_size) {
+		if (re - rs > tap_cnt) {
+			tap_end = re;
+			tap_start = rs;
+			tap_cnt = tap_end - tap_start;
 		}
 	}
 
-	if (ntap > tap_cnt) {
-		tap_start = i - ntap;
-		tap_end = i - 1;
-		tap_cnt = ntap;
-	}
-
-	if (tap_cnt >= SH_MOBILE_SDHI_MAX_TAP)
+	if (tap_cnt >= min_tap_row)
 		priv->tap_set = (tap_start + tap_end) / 2 % priv->tap_num;
 	else
 		return -EIO;
@@ -511,6 +507,7 @@ static int renesas_sdhi_execute_tuning(struct tmio_mmc_host *host, u32 opcode)
 
 	priv->doing_tune = true;
 	bitmap_zero(priv->taps, priv->tap_num * 2);
+	bitmap_zero(priv->smpcmp, priv->tap_num * 2);
 
 	/* Issue CMD19 twice for each tap */
 	for (i = 0; i < 2 * priv->tap_num; i++) {
@@ -519,6 +516,9 @@ static int renesas_sdhi_execute_tuning(struct tmio_mmc_host *host, u32 opcode)
 
 		if (mmc_send_tuning(host->mmc, opcode, NULL) == 0)
 			set_bit(i, priv->taps);
+
+		if (sd_scc_read32(host, priv, SH_MOBILE_SDHI_SCC_SMPCMP) == 0)
+			set_bit(i, priv->smpcmp);
 	}
 
 	return renesas_sdhi_select_tuning(host);
@@ -527,7 +527,7 @@ static int renesas_sdhi_execute_tuning(struct tmio_mmc_host *host, u32 opcode)
 static bool renesas_sdhi_manual_correction(struct tmio_mmc_host *host, bool use_4tap)
 {
 	struct renesas_sdhi *priv = host_to_priv(host);
-	unsigned long new_tap = priv->tap_set;
+	unsigned int new_tap = priv->tap_set;
 	u32 val;
 
 	val = sd_scc_read32(host, priv, SH_MOBILE_SDHI_SCC_RVSREQ);
@@ -933,10 +933,8 @@ int renesas_sdhi_probe(struct platform_device *pdev,
 			goto eirq;
 	}
 
-	dev_info(&pdev->dev, "%s base at 0x%08lx max clock rate %u MHz\n",
-		 mmc_hostname(host->mmc), (unsigned long)
-		 (platform_get_resource(pdev, IORESOURCE_MEM, 0)->start),
-		 host->mmc->f_max / 1000000);
+	dev_info(&pdev->dev, "%s base at %pa, max clock rate %u MHz\n",
+		 mmc_hostname(host->mmc), &res->start, host->mmc->f_max / 1000000);
 
 	return ret;
 
