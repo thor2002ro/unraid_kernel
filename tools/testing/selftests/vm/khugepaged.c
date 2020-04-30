@@ -21,6 +21,7 @@ static unsigned long page_size;
 static int hpage_pmd_nr;
 
 #define THP_SYSFS "/sys/kernel/mm/transparent_hugepage/"
+#define PID_SMAPS "/proc/self/smaps"
 
 enum thp_enabled {
 	THP_ALWAYS,
@@ -330,56 +331,104 @@ static void adjust_settings(void)
 	success("OK");
 }
 
-#define CHECK_HUGE_FMT "sed -ne " \
-	"'/^%lx/,/^AnonHugePages/{/^AnonHugePages:\\s*%ld kB/ q1}' " \
-	"/proc/%d/smaps"
+#define MAX_LINE_LENGTH 500
 
-static bool check_huge(void *p)
+static bool check_for_pattern(FILE *fp, char *pattern, char *buf)
 {
-	char *cmd;
-	int ret;
-
-	ret = asprintf(&cmd, CHECK_HUGE_FMT,
-			(unsigned long)p, hpage_pmd_size >> 10, getpid());
-	if (ret < 0) {
-		perror("asprintf(CHECK_FMT)");
-		exit(EXIT_FAILURE);
+	while (fgets(buf, MAX_LINE_LENGTH, fp) != NULL) {
+		if (!strncmp(buf, pattern, strlen(pattern)))
+			return true;
 	}
-
-	ret = system(cmd);
-	free(cmd);
-	if (ret < 0 || !WIFEXITED(ret)) {
-		perror("system(check_huge)");
-		exit(EXIT_FAILURE);
-	}
-
-	return WEXITSTATUS(ret);
+	return false;
 }
 
-#define CHECK_SWAP_FMT "sed -ne " \
-	"'/^%lx/,/^Swap:/{/^Swap:\\s*%ld kB/ q1}' " \
-	"/proc/%d/smaps"
-
-static bool check_swap(void *p, unsigned long size)
+static bool check_huge(char *addr)
 {
-	char *cmd;
+	bool thp = false;
 	int ret;
+	FILE *fp;
+	char buffer[MAX_LINE_LENGTH];
+	char addr_pattern[MAX_LINE_LENGTH];
 
-	ret = asprintf(&cmd, CHECK_SWAP_FMT,
-			(unsigned long)p, size >> 10, getpid());
-	if (ret < 0) {
-		perror("asprintf(CHECK_SWAP)");
+	ret = snprintf(addr_pattern, MAX_LINE_LENGTH, "%08llx-", addr);
+	if (ret >= MAX_LINE_LENGTH) {
+		printf("%s: Pattern is too long\n", __func__);
 		exit(EXIT_FAILURE);
 	}
 
-	ret = system(cmd);
-	free(cmd);
-	if (ret < 0 || !WIFEXITED(ret)) {
-		perror("system(check_swap)");
+
+	fp = fopen(PID_SMAPS, "r");
+	if (!fp) {
+		printf("%s: Failed to open file %s\n", __func__, PID_SMAPS);
+		exit(EXIT_FAILURE);
+	}
+	if (!check_for_pattern(fp, addr_pattern, buffer))
+		goto err_out;
+
+	ret = snprintf(addr_pattern, MAX_LINE_LENGTH, "AnonHugePages:%10lld kB", hpage_pmd_size >> 10);
+	if (ret >= MAX_LINE_LENGTH) {
+		printf("%s: Pattern is too long\n", __func__);
+		exit(EXIT_FAILURE);
+	}
+	/*
+	 * Fetch the AnonHugePages: in the same block and check whether it got
+	 * the expected number of hugeepages next.
+	 */
+	if (!check_for_pattern(fp, "AnonHugePages:", buffer))
+		goto err_out;
+
+	if (strncmp(buffer, addr_pattern, strlen(addr_pattern)))
+		goto err_out;
+
+	thp = true;
+err_out:
+	fclose(fp);
+	return thp;
+}
+
+
+static bool check_swap(void *addr, unsigned long size)
+{
+	bool swap = false;
+	int ret;
+	FILE *fp;
+	char buffer[MAX_LINE_LENGTH];
+	char addr_pattern[MAX_LINE_LENGTH];
+
+	ret = snprintf(addr_pattern, MAX_LINE_LENGTH, "%08llx-", addr);
+	if (ret >= MAX_LINE_LENGTH) {
+		printf("%s: Pattern is too long\n", __func__);
 		exit(EXIT_FAILURE);
 	}
 
-	return WEXITSTATUS(ret);
+
+	fp = fopen(PID_SMAPS, "r");
+	if (!fp) {
+		printf("%s: Failed to open file %s\n", __func__, PID_SMAPS);
+		exit(EXIT_FAILURE);
+	}
+	if (!check_for_pattern(fp, addr_pattern, buffer))
+		goto err_out;
+
+	ret = snprintf(addr_pattern, MAX_LINE_LENGTH, "Swap:%19lld kB", size >> 10);
+	if (ret >= MAX_LINE_LENGTH) {
+		printf("%s: Pattern is too long\n", __func__);
+		exit(EXIT_FAILURE);
+	}
+	/*
+	 * Fetch the Swap: in the same block and check whether it got
+	 * the expected number of hugeepages next.
+	 */
+	if (!check_for_pattern(fp, "Swap:", buffer))
+		goto err_out;
+
+	if (strncmp(buffer, addr_pattern, strlen(addr_pattern)))
+		goto err_out;
+
+	swap = true;
+err_out:
+	fclose(fp);
+	return swap;
 }
 
 static void *alloc_mapping(void)
