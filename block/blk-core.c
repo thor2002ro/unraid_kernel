@@ -440,6 +440,23 @@ int blk_queue_enter(struct request_queue *q, blk_mq_req_flags_t flags)
 	}
 }
 
+static inline int bio_queue_enter(struct bio *bio)
+{
+	struct request_queue *q = bio->bi_disk->queue;
+	bool nowait = bio->bi_opf & REQ_NOWAIT;
+	int ret;
+
+	ret = blk_queue_enter(q, nowait ? BLK_MQ_REQ_NOWAIT : 0);
+	if (unlikely(ret)) {
+		if (nowait && !blk_queue_dying(q))
+			bio_wouldblock_error(bio);
+		else
+			bio_io_error(bio);
+	}
+
+	return ret;
+}
+
 void blk_queue_exit(struct request_queue *q)
 {
 	percpu_ref_put(&q->q_usage_counter);
@@ -963,12 +980,13 @@ generic_make_request_checks(struct bio *bio)
 	}
 
 	/*
-	 * Various block parts want %current->io_context and lazy ioc
-	 * allocation ends up trading a lot of pain for a small amount of
-	 * memory.  Just allocate it upfront.  This may fail and block
-	 * layer knows how to live with it.
+	 * Various block parts want %current->io_context, so allocate it up
+	 * front rather than dealing with lots of pain to allocate it only
+	 * where needed. This may fail and the block layer knows how to live
+	 * with it.
 	 */
-	create_io_context(GFP_ATOMIC, q->node);
+	if (unlikely(!current->io_context))
+		create_task_io_context(current, GFP_ATOMIC, q->node);
 
 	if (!blkcg_bio_issue_check(q, bio))
 		return false;
@@ -991,28 +1009,13 @@ end_io:
 }
 
 /**
- * generic_make_request - hand a buffer to its device driver for I/O
+ * generic_make_request - re-submit a bio to the block device layer for I/O
  * @bio:  The bio describing the location in memory and on the device.
  *
- * generic_make_request() is used to make I/O requests of block
- * devices. It is passed a &struct bio, which describes the I/O that needs
- * to be done.
- *
- * generic_make_request() does not return any status.  The
- * success/failure status of the request, along with notification of
- * completion, is delivered asynchronously through the bio->bi_end_io
- * function described (one day) else where.
- *
- * The caller of generic_make_request must make sure that bi_io_vec
- * are set to describe the memory buffer, and that bi_dev and bi_sector are
- * set to describe the device address, and the
- * bi_end_io and optionally bi_private are set to describe how
- * completion notification should be signaled.
- *
- * generic_make_request and the drivers it calls may use bi_next if this
- * bio happens to be merged with someone else, and may resubmit the bio to
- * a lower device by calling into generic_make_request recursively, which
- * means the bio should NOT be touched after the call to ->make_request_fn.
+ * This is a version of submit_bio() that shall only be used for I/O that is
+ * resubmitted to lower level drivers by stacking block drivers.  All file
+ * systems and other upper level users of the block layer should use
+ * submit_bio() instead.
  */
 blk_qc_t generic_make_request(struct bio *bio)
 {
@@ -1063,16 +1066,17 @@ blk_qc_t generic_make_request(struct bio *bio)
 	current->bio_list = bio_list_on_stack;
 	do {
 		struct request_queue *q = bio->bi_disk->queue;
-		blk_mq_req_flags_t flags = bio->bi_opf & REQ_NOWAIT ?
-			BLK_MQ_REQ_NOWAIT : 0;
 
-		if (likely(blk_queue_enter(q, flags) == 0)) {
+		if (likely(bio_queue_enter(bio) == 0)) {
 			struct bio_list lower, same;
 
 			/* Create a fresh bio_list for all subordinate requests */
 			bio_list_on_stack[1] = bio_list_on_stack[0];
 			bio_list_init(&bio_list_on_stack[0]);
-			ret = q->make_request_fn(q, bio);
+			if (q->make_request_fn)
+				ret = q->make_request_fn(q, bio);
+			else
+				ret = blk_mq_make_request(q, bio);
 
 			blk_queue_exit(q);
 
@@ -1090,12 +1094,6 @@ blk_qc_t generic_make_request(struct bio *bio)
 			bio_list_merge(&bio_list_on_stack[0], &lower);
 			bio_list_merge(&bio_list_on_stack[0], &same);
 			bio_list_merge(&bio_list_on_stack[0], &bio_list_on_stack[1]);
-		} else {
-			if (unlikely(!blk_queue_dying(q) &&
-					(bio->bi_opf & REQ_NOWAIT)))
-				bio_wouldblock_error(bio);
-			else
-				bio_io_error(bio);
 		}
 		bio = bio_list_pop(&bio_list_on_stack[0]);
 	} while (bio);
@@ -1112,28 +1110,22 @@ EXPORT_SYMBOL(generic_make_request);
  *
  * This function behaves like generic_make_request(), but does not protect
  * against recursion.  Must only be used if the called driver is known
- * to not call generic_make_request (or direct_make_request) again from
- * its make_request function.  (Calling direct_make_request again from
- * a workqueue is perfectly fine as that doesn't recurse).
+ * to be blk-mq based.
  */
 blk_qc_t direct_make_request(struct bio *bio)
 {
 	struct request_queue *q = bio->bi_disk->queue;
-	bool nowait = bio->bi_opf & REQ_NOWAIT;
 	blk_qc_t ret;
 
-	if (!generic_make_request_checks(bio))
-		return BLK_QC_T_NONE;
-
-	if (unlikely(blk_queue_enter(q, nowait ? BLK_MQ_REQ_NOWAIT : 0))) {
-		if (nowait && !blk_queue_dying(q))
-			bio_wouldblock_error(bio);
-		else
-			bio_io_error(bio);
+	if (WARN_ON_ONCE(q->make_request_fn)) {
+		bio_io_error(bio);
 		return BLK_QC_T_NONE;
 	}
-
-	ret = q->make_request_fn(q, bio);
+	if (!generic_make_request_checks(bio))
+		return BLK_QC_T_NONE;
+	if (unlikely(bio_queue_enter(bio)))
+		return BLK_QC_T_NONE;
+	ret = blk_mq_make_request(q, bio);
 	blk_queue_exit(q);
 	return ret;
 }
@@ -1143,17 +1135,17 @@ EXPORT_SYMBOL_GPL(direct_make_request);
  * submit_bio - submit a bio to the block device layer for I/O
  * @bio: The &struct bio which describes the I/O
  *
- * submit_bio() is very similar in purpose to generic_make_request(), and
- * uses that function to do most of the work. Both are fairly rough
- * interfaces; @bio must be presetup and ready for I/O.
+ * submit_bio() is used to submit I/O requests to block devices.  It is passed a
+ * fully set up &struct bio that describes the I/O that needs to be done.  The
+ * bio will be send to the device described by the bi_disk and bi_partno fields.
  *
+ * The success/failure status of the request, along with notification of
+ * completion, is delivered asynchronously through the ->bi_end_io() callback
+ * in @bio.  The bio must NOT be touched by thecaller until ->bi_end_io() has
+ * been called.
  */
 blk_qc_t submit_bio(struct bio *bio)
 {
-	bool workingset_read = false;
-	unsigned long pflags;
-	blk_qc_t ret;
-
 	if (blkcg_punt_bio_submit(bio))
 		return BLK_QC_T_NONE;
 
@@ -1172,8 +1164,6 @@ blk_qc_t submit_bio(struct bio *bio)
 		if (op_is_write(bio_op(bio))) {
 			count_vm_events(PGPGOUT, count);
 		} else {
-			if (bio_flagged(bio, BIO_WORKINGSET))
-				workingset_read = true;
 			task_io_account_read(bio->bi_iter.bi_size);
 			count_vm_events(PGPGIN, count);
 		}
@@ -1189,20 +1179,24 @@ blk_qc_t submit_bio(struct bio *bio)
 	}
 
 	/*
-	 * If we're reading data that is part of the userspace
-	 * workingset, count submission time as memory stall. When the
-	 * device is congested, or the submitting cgroup IO-throttled,
-	 * submission can be a significant part of overall IO time.
+	 * If we're reading data that is part of the userspace workingset, count
+	 * submission time as memory stall.  When the device is congested, or
+	 * the submitting cgroup IO-throttled, submission can be a significant
+	 * part of overall IO time.
 	 */
-	if (workingset_read)
+	if (unlikely(bio_op(bio) == REQ_OP_READ &&
+	    bio_flagged(bio, BIO_WORKINGSET))) {
+		unsigned long pflags;
+		blk_qc_t ret;
+
 		psi_memstall_enter(&pflags);
-
-	ret = generic_make_request(bio);
-
-	if (workingset_read)
+		ret = generic_make_request(bio);
 		psi_memstall_leave(&pflags);
 
-	return ret;
+		return ret;
+	}
+
+	return generic_make_request(bio);
 }
 EXPORT_SYMBOL(submit_bio);
 
@@ -1638,7 +1632,6 @@ int blk_rq_prep_clone(struct request *rq, struct request *rq_src,
 	}
 	rq->nr_phys_segments = rq_src->nr_phys_segments;
 	rq->ioprio = rq_src->ioprio;
-	rq->extra_len = rq_src->extra_len;
 
 	return 0;
 

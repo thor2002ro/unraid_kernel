@@ -713,7 +713,6 @@ int bdev_read_page(struct block_device *bdev, sector_t sector,
 	blk_queue_exit(bdev->bd_queue);
 	return result;
 }
-EXPORT_SYMBOL_GPL(bdev_read_page);
 
 /**
  * bdev_write_page() - Start writing a page to a block device
@@ -758,7 +757,6 @@ int bdev_write_page(struct block_device *bdev, sector_t sector,
 	blk_queue_exit(bdev->bd_queue);
 	return result;
 }
-EXPORT_SYMBOL_GPL(bdev_write_page);
 
 /*
  * pseudo-fs
@@ -881,21 +879,6 @@ static int bdev_set(struct inode *inode, void *data)
 }
 
 static LIST_HEAD(all_bdevs);
-
-/*
- * If there is a bdev inode for this device, unhash it so that it gets evicted
- * as soon as last inode reference is dropped.
- */
-void bdev_unhash_inode(dev_t dev)
-{
-	struct inode *inode;
-
-	inode = ilookup5(blockdev_superblock, hash(dev), bdev_test, &dev);
-	if (inode) {
-		remove_inode_hash(inode);
-		iput(inode);
-	}
-}
 
 struct block_device *bdget(dev_t dev)
 {
@@ -1516,7 +1499,7 @@ int bdev_disk_changed(struct block_device *bdev, bool invalidate)
 	lockdep_assert_held(&bdev->bd_mutex);
 
 rescan:
-	ret = blk_drop_partitions(disk, bdev);
+	ret = blk_drop_partitions(bdev);
 	if (ret)
 		return ret;
 

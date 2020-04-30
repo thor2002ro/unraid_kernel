@@ -508,6 +508,7 @@ void blk_mq_unquiesce_queue(struct request_queue *q);
 void blk_mq_delay_run_hw_queue(struct blk_mq_hw_ctx *hctx, unsigned long msecs);
 void blk_mq_run_hw_queue(struct blk_mq_hw_ctx *hctx, bool async);
 void blk_mq_run_hw_queues(struct request_queue *q, bool async);
+void blk_mq_delay_run_hw_queues(struct request_queue *q, unsigned long msecs);
 void blk_mq_tagset_busy_iter(struct blk_mq_tag_set *tagset,
 		busy_tag_iter_fn *fn, void *priv);
 void blk_mq_tagset_wait_completed_request(struct blk_mq_tag_set *tagset);
@@ -576,5 +577,7 @@ static inline void blk_mq_cleanup_rq(struct request *rq)
 	if (rq->q->mq_ops->cleanup_rq)
 		rq->q->mq_ops->cleanup_rq(rq);
 }
+
+blk_qc_t blk_mq_make_request(struct request_queue *q, struct bio *bio);
 
 #endif

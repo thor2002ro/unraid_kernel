@@ -318,7 +318,6 @@ static struct request *blk_mq_rq_ctx_init(struct blk_mq_alloc_data *data,
 	rq->nr_integrity_segments = 0;
 #endif
 	/* tag was already set */
-	rq->extra_len = 0;
 	WRITE_ONCE(rq->deadline, 0);
 
 	rq->timeout = 0;
@@ -667,15 +666,6 @@ void blk_mq_start_request(struct request *rq)
 	blk_add_timer(rq);
 	WRITE_ONCE(rq->state, MQ_RQ_IN_FLIGHT);
 
-	if (q->dma_drain_size && blk_rq_bytes(rq)) {
-		/*
-		 * Make sure space for the drain appears.  We know we can do
-		 * this because max_hw_segments has been adjusted to be one
-		 * fewer than the device can handle.
-		 */
-		rq->nr_phys_segments++;
-	}
-
 #ifdef CONFIG_BLK_DEV_INTEGRITY
 	if (blk_integrity_rq(rq) && req_op(rq) == REQ_OP_WRITE)
 		q->integrity.profile->prepare_fn(rq);
@@ -695,8 +685,6 @@ static void __blk_mq_requeue_request(struct request *rq)
 	if (blk_mq_request_started(rq)) {
 		WRITE_ONCE(rq->state, MQ_RQ_IDLE);
 		rq->rq_flags &= ~RQF_TIMED_OUT;
-		if (q->dma_drain_size && blk_rq_bytes(rq))
-			rq->nr_phys_segments--;
 	}
 }
 
@@ -1206,6 +1194,7 @@ bool blk_mq_dispatch_rq_list(struct request_queue *q, struct list_head *list,
 	bool no_tag = false;
 	int errors, queued;
 	blk_status_t ret = BLK_STS_OK;
+	bool no_budget_avail = false;
 
 	if (list_empty(list))
 		return false;
@@ -1224,6 +1213,7 @@ bool blk_mq_dispatch_rq_list(struct request_queue *q, struct list_head *list,
 		hctx = rq->mq_hctx;
 		if (!got_budget && !blk_mq_get_dispatch_budget(hctx)) {
 			blk_mq_put_driver_tag(rq);
+			no_budget_avail = true;
 			break;
 		}
 
@@ -1320,13 +1310,15 @@ bool blk_mq_dispatch_rq_list(struct request_queue *q, struct list_head *list,
 		 *
 		 * If driver returns BLK_STS_RESOURCE and SCHED_RESTART
 		 * bit is set, run queue after a delay to avoid IO stalls
-		 * that could otherwise occur if the queue is idle.
+		 * that could otherwise occur if the queue is idle.  We'll do
+		 * similar if we couldn't get budget and SCHED_RESTART is set.
 		 */
 		needs_restart = blk_mq_sched_needs_restart(hctx);
 		if (!needs_restart ||
 		    (no_tag && list_empty_careful(&hctx->dispatch_wait.entry)))
 			blk_mq_run_hw_queue(hctx, true);
-		else if (needs_restart && (ret == BLK_STS_RESOURCE))
+		else if (needs_restart && (ret == BLK_STS_RESOURCE ||
+					   no_budget_avail))
 			blk_mq_delay_run_hw_queue(hctx, BLK_MQ_RESOURCE_DELAY);
 
 		blk_mq_update_dispatch_busy(hctx, true);
@@ -1540,6 +1532,25 @@ void blk_mq_run_hw_queues(struct request_queue *q, bool async)
 	}
 }
 EXPORT_SYMBOL(blk_mq_run_hw_queues);
+
+/**
+ * blk_mq_delay_run_hw_queues - Run all hardware queues asynchronously.
+ * @q: Pointer to the request queue to run.
+ * @msecs: Microseconds of delay to wait before running the queues.
+ */
+void blk_mq_delay_run_hw_queues(struct request_queue *q, unsigned long msecs)
+{
+	struct blk_mq_hw_ctx *hctx;
+	int i;
+
+	queue_for_each_hw_ctx(q, hctx, i) {
+		if (blk_mq_hctx_stopped(hctx))
+			continue;
+
+		blk_mq_delay_run_hw_queue(hctx, msecs);
+	}
+}
+EXPORT_SYMBOL(blk_mq_delay_run_hw_queues);
 
 /**
  * blk_mq_queue_stopped() - check whether one or more hctxs have been stopped
@@ -1973,7 +1984,7 @@ static void blk_add_rq_to_plug(struct blk_plug *plug, struct request *rq)
  *
  * Returns: Request queue cookie.
  */
-static blk_qc_t blk_mq_make_request(struct request_queue *q, struct bio *bio)
+blk_qc_t blk_mq_make_request(struct request_queue *q, struct bio *bio)
 {
 	const int is_sync = op_is_sync(bio->bi_opf);
 	const int is_flush_fua = op_is_flush(bio->bi_opf);
@@ -2085,6 +2096,7 @@ static blk_qc_t blk_mq_make_request(struct request_queue *q, struct bio *bio)
 
 	return cookie;
 }
+EXPORT_SYMBOL_GPL(blk_mq_make_request); /* only for request based dm */
 
 void blk_mq_free_rqs(struct blk_mq_tag_set *set, struct blk_mq_tags *tags,
 		     unsigned int hctx_idx)
@@ -2944,7 +2956,6 @@ struct request_queue *blk_mq_init_allocated_queue(struct blk_mq_tag_set *set,
 	INIT_LIST_HEAD(&q->requeue_list);
 	spin_lock_init(&q->requeue_lock);
 
-	q->make_request_fn = blk_mq_make_request;
 	q->nr_requests = set->queue_depth;
 
 	/*
