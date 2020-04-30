@@ -497,7 +497,11 @@ int __weak arch_get_memory_phys_device(unsigned long start_pfn)
 	return 0;
 }
 
-/* A reference for the returned memory block device is acquired. */
+/*
+ * A reference for the returned memory block device is acquired.
+ *
+ * Called under device_hotplug_lock.
+ */
 static struct memory_block *find_memory_block_by_id(unsigned long block_id)
 {
 	struct memory_block *mem;
@@ -508,6 +512,9 @@ static struct memory_block *find_memory_block_by_id(unsigned long block_id)
 	return mem;
 }
 
+/*
+ * Called under device_hotplug_lock.
+ */
 struct memory_block *find_memory_block(struct mem_section *section)
 {
 	unsigned long block_id = base_memory_block_id(__section_nr(section));
@@ -761,6 +768,8 @@ void __init memory_dev_init(void)
  *
  * In case func() returns an error, walking is aborted and the error is
  * returned.
+ *
+ * Called under device_hotplug_lock.
  */
 int walk_memory_blocks(unsigned long start, unsigned long size,
 		       void *arg, walk_memory_blocks_func_t func)
