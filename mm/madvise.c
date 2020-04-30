@@ -1212,7 +1212,7 @@ SYSCALL_DEFINE3(madvise, unsigned long, start, size_t, len_in, int, behavior)
 	return do_madvise(current, current->mm, start, len_in, behavior);
 }
 
-static int do_process_madvise(struct task_struct *target_task,
+static int process_madvise_vec(struct task_struct *target_task,
 		struct mm_struct *mm, struct iov_iter *iter, int behavior)
 {
 	struct iovec iovec;
@@ -1230,17 +1230,14 @@ static int do_process_madvise(struct task_struct *target_task,
 	return ret;
 }
 
-SYSCALL_DEFINE6(process_madvise, int, which, pid_t, upid,
-		const struct iovec __user *, vec, unsigned long, vlen,
-		int, behavior, unsigned long, flags)
+ssize_t do_process_madvise(int which, pid_t upid, struct iov_iter *iter,
+				int behavior, unsigned long flags)
 {
 	ssize_t ret;
 	struct pid *pid;
 	struct task_struct *task;
 	struct mm_struct *mm;
-	struct iovec iovstack[UIO_FASTIOV];
-	struct iovec *iov = iovstack;
-	struct iov_iter iter;
+	size_t total_len = iov_iter_count(iter);
 
 	if (flags != 0)
 		return -EINVAL;
@@ -1284,15 +1281,10 @@ SYSCALL_DEFINE6(process_madvise, int, which, pid_t, upid,
 		goto release_task;
 	}
 
-	ret = import_iovec(READ, vec, vlen, ARRAY_SIZE(iovstack), &iov, &iter);
-	if (ret >= 0) {
-		size_t total_len = iov_iter_count(&iter);
+	ret = process_madvise_vec(task, mm, iter, behavior);
+	if (ret >= 0)
+		ret = total_len - iov_iter_count(iter);
 
-		ret = do_process_madvise(task, mm, &iter, behavior);
-		if (ret >= 0)
-			ret = total_len - iov_iter_count(&iter);
-		kfree(iov);
-	}
 	mmput(mm);
 release_task:
 	put_task_struct(task);
@@ -1300,3 +1292,41 @@ put_pid:
 	put_pid(pid);
 	return ret;
 }
+
+SYSCALL_DEFINE6(process_madvise, int, which, pid_t, upid,
+		const struct iovec __user *, vec, unsigned long, vlen,
+		int, behavior, unsigned long, flags)
+{
+	ssize_t ret;
+	struct iovec iovstack[UIO_FASTIOV];
+	struct iovec *iov = iovstack;
+	struct iov_iter iter;
+
+	ret = import_iovec(READ, vec, vlen, ARRAY_SIZE(iovstack), &iov, &iter);
+	if (ret >= 0) {
+		ret = do_process_madvise(which, upid, &iter, behavior, flags);
+		kfree(iov);
+	}
+	return ret;
+}
+
+#ifdef CONFIG_COMPAT
+COMPAT_SYSCALL_DEFINE6(process_madvise, int, which, compat_pid_t, upid,
+		const struct compat_iovec __user *, vec, unsigned long, vlen,
+		int, behavior, unsigned long, flags)
+
+{
+	ssize_t ret;
+	struct iovec iovstack[UIO_FASTIOV];
+	struct iovec *iov = iovstack;
+	struct iov_iter iter;
+
+	ret = compat_import_iovec(READ, vec, vlen, ARRAY_SIZE(iovstack),
+				&iov, &iter);
+	if (ret >= 0) {
+		ret = do_process_madvise(which, upid, &iter, behavior, flags);
+		kfree(iov);
+	}
+	return ret;
+}
+#endif

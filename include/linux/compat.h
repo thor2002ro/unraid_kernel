@@ -820,6 +820,9 @@ asmlinkage long compat_sys_pwritev64v2(unsigned long fd,
 		unsigned long vlen, loff_t pos, rwf_t flags);
 #endif
 
+asmlinkage ssize_t compat_sys_process_madvise(int which,
+		compat_pid_t upid, const struct compat_iovec __user *vec,
+		unsigned long vlen, int behavior, unsigned long flags);
 
 /*
  * Deprecated system calls which are still defined in
