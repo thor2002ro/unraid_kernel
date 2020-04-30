@@ -1040,9 +1040,9 @@ static void program_timing_sync(
 				status->timing_sync_info.master = false;
 
 		}
-		/* remove any other pipes with plane as they have already been synced */
+		/* remove any other pipes without plane as they have already been synced */
 		for (j = j + 1; j < group_size; j++) {
-			if (pipe_set[j]->plane_state) {
+			if (!pipe_set[j]->plane_state) {
 				group_size--;
 				pipe_set[j] = pipe_set[group_size];
 				j--;
@@ -2210,7 +2210,9 @@ static void commit_planes_do_stream_update(struct dc *dc,
 
 				if (should_program_abm) {
 					if (*stream_update->abm_level == ABM_LEVEL_IMMEDIATE_DISABLE) {
-						pipe_ctx->stream_res.abm->funcs->set_abm_immediate_disable(pipe_ctx->stream_res.abm);
+						pipe_ctx->stream_res.abm->funcs->set_abm_immediate_disable(
+								pipe_ctx->stream_res.abm,
+								pipe_ctx->stream->link->panel_cntl->inst);
 					} else {
 						pipe_ctx->stream_res.abm->funcs->set_abm_level(
 							pipe_ctx->stream_res.abm, stream->abm_level);
