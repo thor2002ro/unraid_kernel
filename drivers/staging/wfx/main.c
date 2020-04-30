@@ -106,7 +106,7 @@ static const struct ieee80211_supported_band wfx_band_2ghz = {
 		.ampdu_density = IEEE80211_HT_MPDU_DENSITY_NONE,
 		.mcs = {
 			.rx_mask = { 0xFF }, // MCS0 to MCS7
-			.rx_highest = 65,
+			.rx_highest = cpu_to_le16(72),
 			.tx_params = IEEE80211_HT_MCS_TX_DEFINED,
 		},
 	},
@@ -133,15 +133,19 @@ static const struct ieee80211_ops wfx_ops = {
 	.remove_interface	= wfx_remove_interface,
 	.config                 = wfx_config,
 	.tx			= wfx_tx,
+	.join_ibss		= wfx_join_ibss,
+	.leave_ibss		= wfx_leave_ibss,
 	.conf_tx		= wfx_conf_tx,
 	.hw_scan		= wfx_hw_scan,
 	.cancel_hw_scan		= wfx_cancel_hw_scan,
+	.start_ap		= wfx_start_ap,
+	.stop_ap		= wfx_stop_ap,
 	.sta_add		= wfx_sta_add,
 	.sta_remove		= wfx_sta_remove,
-	.sta_notify		= wfx_sta_notify,
 	.set_tim		= wfx_set_tim,
 	.set_key		= wfx_set_key,
 	.set_rts_threshold	= wfx_set_rts_threshold,
+	.set_default_unicast_key = wfx_set_default_unicast_key,
 	.bss_info_changed	= wfx_bss_info_changed,
 	.prepare_multicast	= wfx_prepare_multicast,
 	.configure_filter	= wfx_configure_filter,
@@ -268,7 +272,6 @@ static void wfx_free_common(void *data)
 
 	mutex_destroy(&wdev->rx_stats_lock);
 	mutex_destroy(&wdev->conf_mutex);
-	wfx_tx_queues_deinit(wdev);
 	ieee80211_free_hw(wdev->hw);
 }
 
@@ -286,7 +289,6 @@ struct wfx_dev *wfx_init_common(struct device *dev,
 
 	SET_IEEE80211_DEV(hw, dev);
 
-	ieee80211_hw_set(hw, NEED_DTIM_BEFORE_ASSOC);
 	ieee80211_hw_set(hw, TX_AMPDU_SETUP_IN_HW);
 	ieee80211_hw_set(hw, AMPDU_AGGREGATION);
 	ieee80211_hw_set(hw, CONNECTION_MONITOR);
@@ -315,7 +317,7 @@ struct wfx_dev *wfx_init_common(struct device *dev,
 	hw->wiphy->flags |= WIPHY_FLAG_AP_PROBE_RESP_OFFLOAD;
 	hw->wiphy->flags |= WIPHY_FLAG_AP_UAPSD;
 	hw->wiphy->flags &= ~WIPHY_FLAG_PS_ON_BY_DEFAULT;
-	hw->wiphy->max_ap_assoc_sta = WFX_MAX_STA_IN_AP_MODE;
+	hw->wiphy->max_ap_assoc_sta = HIF_LINK_ID_MAX;
 	hw->wiphy->max_scan_ssids = 2;
 	hw->wiphy->max_scan_ie_len = IEEE80211_MAX_DATA_LEN;
 	hw->wiphy->n_iface_combinations = ARRAY_SIZE(wfx_iface_combinations);
@@ -339,6 +341,8 @@ struct wfx_dev *wfx_init_common(struct device *dev,
 	mutex_init(&wdev->conf_mutex);
 	mutex_init(&wdev->rx_stats_lock);
 	init_completion(&wdev->firmware_ready);
+	INIT_DELAYED_WORK(&wdev->cooling_timeout_work,
+			  wfx_cooling_timeout_work);
 	wfx_init_hif_cmd(&wdev->hif_cmd);
 	wfx_tx_queues_init(wdev);
 

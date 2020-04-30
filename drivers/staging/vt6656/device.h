@@ -73,6 +73,10 @@
 
 #define DEVICE_VERSION			"mac80211"
 
+#define FIRMWARE_VERSION		0x133		/* version 1.51 */
+#define FIRMWARE_NAME			"vntwusb.fw"
+#define FIRMWARE_CHUNK_SIZE		0x400
+
 #define CONFIG_PATH			"/etc/vntconfiguration.dat"
 
 #define MAX_UINTS			8
@@ -344,7 +348,6 @@ struct vnt_private {
 	u8 ofdm_pwr_tbl[14];
 	u8 ofdm_a_pwr_tbl[42];
 
-	u16 current_rate;
 	u16 tx_rate_fb0;
 	u16 tx_rate_fb1;
 

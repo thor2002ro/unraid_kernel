@@ -91,7 +91,7 @@ int wfx_cmd_send(struct wfx_dev *wdev, struct hif_msg *request, void *reply,
 	if (!ret) {
 		dev_err(wdev->dev, "chip did not answer\n");
 		wfx_pending_dump_old_frames(wdev, 3000);
-		wdev->chip_frozen = 1;
+		wdev->chip_frozen = true;
 		reinit_completion(&wdev->hif_cmd.done);
 		ret = -ETIMEDOUT;
 	} else {
@@ -296,7 +296,10 @@ int hif_join(struct wfx_vif *wvif, const struct ieee80211_bss_conf *conf,
 	struct hif_msg *hif;
 	struct hif_req_join *body = wfx_alloc_hif(sizeof(*body), &hif);
 
+	WARN_ON(!conf->beacon_int);
 	WARN_ON(!conf->basic_rates);
+	WARN_ON(sizeof(body->ssid) < ssidlen);
+	WARN(!conf->ibss_joined && !ssidlen, "joining an unknown BSS");
 	body->infrastructure_bss_mode = !conf->ibss_joined;
 	body->short_preamble = conf->use_short_preamble;
 	if (channel && channel->flags & IEEE80211_CHAN_NO_IR)
@@ -308,7 +311,7 @@ int hif_join(struct wfx_vif *wvif, const struct ieee80211_bss_conf *conf,
 	body->basic_rate_set =
 		cpu_to_le32(wfx_rate_mask_to_hw(wvif->wdev, conf->basic_rates));
 	memcpy(body->bssid, conf->bssid, sizeof(body->bssid));
-	if (!conf->ibss_joined && ssid) {
+	if (ssid) {
 		body->ssid_length = cpu_to_le32(ssidlen);
 		memcpy(body->ssid, ssid, ssidlen);
 	}
@@ -318,17 +321,15 @@ int hif_join(struct wfx_vif *wvif, const struct ieee80211_bss_conf *conf,
 	return ret;
 }
 
-int hif_set_bss_params(struct wfx_vif *wvif,
-		       const struct hif_req_set_bss_params *arg)
+int hif_set_bss_params(struct wfx_vif *wvif, int aid, int beacon_lost_count)
 {
 	int ret;
 	struct hif_msg *hif;
-	struct hif_req_set_bss_params *body = wfx_alloc_hif(sizeof(*body),
-							    &hif);
+	struct hif_req_set_bss_params *body =
+		wfx_alloc_hif(sizeof(*body), &hif);
 
-	memcpy(body, arg, sizeof(*body));
-	cpu_to_le16s(&body->aid);
-	cpu_to_le32s(&body->operational_rate_set);
+	body->aid = cpu_to_le16(aid);
+	body->beacon_lost_count = beacon_lost_count;
 	wfx_fill_header(hif, wvif->id, HIF_REQ_ID_SET_BSS_PARAMS,
 			sizeof(*body));
 	ret = wfx_cmd_send(wvif->wdev, hif, NULL, 0, false);
@@ -428,6 +429,7 @@ int hif_start(struct wfx_vif *wvif, const struct ieee80211_bss_conf *conf,
 	struct hif_msg *hif;
 	struct hif_req_start *body = wfx_alloc_hif(sizeof(*body), &hif);
 
+	WARN_ON(!conf->beacon_int);
 	body->dtim_period = conf->dtim_period;
 	body->short_preamble = conf->use_short_preamble;
 	body->channel_number = cpu_to_le16(channel->hw_value);

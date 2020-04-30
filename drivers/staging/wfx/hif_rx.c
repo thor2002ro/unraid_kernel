@@ -158,26 +158,37 @@ static int hif_event_indication(struct wfx_dev *wdev,
 {
 	struct wfx_vif *wvif = wdev_to_wvif(wdev, hif->interface);
 	const struct hif_ind_event *body = buf;
-	struct wfx_hif_event *event;
-	int first;
 
-	WARN_ON(!wvif);
-	if (!wvif)
+	if (!wvif) {
+		dev_warn(wdev->dev, "received event for non-existent vif\n");
 		return 0;
+	}
 
-	event = kzalloc(sizeof(*event), GFP_KERNEL);
-	if (!event)
-		return -ENOMEM;
-
-	memcpy(&event->evt, body, sizeof(struct hif_ind_event));
-	spin_lock(&wvif->event_queue_lock);
-	first = list_empty(&wvif->event_queue);
-	list_add_tail(&event->link, &wvif->event_queue);
-	spin_unlock(&wvif->event_queue_lock);
-
-	if (first)
-		schedule_work(&wvif->event_handler_work);
-
+	switch (body->event_id) {
+	case HIF_EVENT_IND_RCPI_RSSI:
+		wfx_event_report_rssi(wvif, body->event_data.rcpi_rssi);
+		break;
+	case HIF_EVENT_IND_BSSLOST:
+		schedule_delayed_work(&wvif->beacon_loss_work, 0);
+		break;
+	case HIF_EVENT_IND_BSSREGAINED:
+		cancel_delayed_work(&wvif->beacon_loss_work);
+		dev_dbg(wdev->dev, "ignore BSSREGAINED indication\n");
+		break;
+	case HIF_EVENT_IND_PS_MODE_ERROR:
+		dev_warn(wdev->dev, "error while processing power save request: %d\n",
+			 body->event_data.ps_mode_error);
+		if (body->event_data.ps_mode_error ==
+		    HIF_PS_ERROR_AP_NOT_RESP_TO_POLL) {
+			wvif->bss_not_support_ps_poll = true;
+			schedule_work(&wvif->update_pm_work);
+		}
+		break;
+	default:
+		dev_warn(wdev->dev, "unhandled event indication: %.2x\n",
+			 body->event_id);
+		break;
+	}
 	return 0;
 }
 
@@ -224,53 +235,21 @@ static int hif_suspend_resume_indication(struct wfx_dev *wdev,
 	struct wfx_vif *wvif = wdev_to_wvif(wdev, hif->interface);
 	const struct hif_ind_suspend_resume_tx *body = buf;
 
-	WARN_ON(!wvif);
-	WARN(!body->suspend_resume_flags.bc_mc_only, "unsupported suspend/resume notification");
-	if (body->suspend_resume_flags.resume)
-		wfx_suspend_resume_mc(wvif, STA_NOTIFY_AWAKE);
-	else
-		wfx_suspend_resume_mc(wvif, STA_NOTIFY_SLEEP);
-
-	return 0;
-}
-
-static int hif_error_indication(struct wfx_dev *wdev,
-				const struct hif_msg *hif, const void *buf)
-{
-	const struct hif_ind_error *body = buf;
-	u8 *pRollback = (u8 *) body->data;
-	u32 *pStatus = (u32 *) body->data;
-
-	switch (body->type) {
-	case HIF_ERROR_FIRMWARE_ROLLBACK:
-		dev_err(wdev->dev,
-			"asynchronous error: firmware rollback error %d\n",
-			*pRollback);
-		break;
-	case HIF_ERROR_FIRMWARE_DEBUG_ENABLED:
-		dev_err(wdev->dev, "asynchronous error: firmware debug feature enabled\n");
-		break;
-	case HIF_ERROR_OUTDATED_SESSION_KEY:
-		dev_err(wdev->dev, "asynchronous error: secure link outdated key: %#.8x\n",
-			*pStatus);
-		break;
-	case HIF_ERROR_INVALID_SESSION_KEY:
-		dev_err(wdev->dev, "asynchronous error: invalid session key\n");
-		break;
-	case HIF_ERROR_OOR_VOLTAGE:
-		dev_err(wdev->dev, "asynchronous error: out-of-range overvoltage: %#.8x\n",
-			*pStatus);
-		break;
-	case HIF_ERROR_PDS_VERSION:
-		dev_err(wdev->dev,
-			"asynchronous error: wrong PDS payload or version: %#.8x\n",
-			*pStatus);
-		break;
-	default:
-		dev_err(wdev->dev, "asynchronous error: unknown (%d)\n",
-			body->type);
-		break;
+	if (body->suspend_resume_flags.bc_mc_only) {
+		WARN_ON(!wvif);
+		if (body->suspend_resume_flags.resume)
+			wfx_suspend_resume_mc(wvif, STA_NOTIFY_AWAKE);
+		else
+			wfx_suspend_resume_mc(wvif, STA_NOTIFY_SLEEP);
+	} else {
+		WARN(body->peer_sta_set, "misunderstood indication");
+		WARN(hif->interface != 2, "misunderstood indication");
+		if (body->suspend_resume_flags.resume)
+			wfx_suspend_hot_dev(wdev, STA_NOTIFY_AWAKE);
+		else
+			wfx_suspend_hot_dev(wdev, STA_NOTIFY_SLEEP);
 	}
+
 	return 0;
 }
 
@@ -304,14 +283,89 @@ static int hif_generic_indication(struct wfx_dev *wdev,
 	}
 }
 
+static const struct {
+	int val;
+	const char *str;
+	bool has_param;
+} hif_errors[] = {
+	{ HIF_ERROR_FIRMWARE_ROLLBACK,
+		"rollback status" },
+	{ HIF_ERROR_FIRMWARE_DEBUG_ENABLED,
+		"debug feature enabled" },
+	{ HIF_ERROR_PDS_PAYLOAD,
+		"PDS version is not supported" },
+	{ HIF_ERROR_PDS_TESTFEATURE,
+		"PDS ask for an unknown test mode" },
+	{ HIF_ERROR_OOR_VOLTAGE,
+		"out-of-range power supply voltage", true },
+	{ HIF_ERROR_OOR_TEMPERATURE,
+		"out-of-range temperature", true },
+	{ HIF_ERROR_SLK_REQ_DURING_KEY_EXCHANGE,
+		"secure link does not expect request during key exchange" },
+	{ HIF_ERROR_SLK_SESSION_KEY,
+		"secure link session key is invalid" },
+	{ HIF_ERROR_SLK_OVERFLOW,
+		"secure link overflow" },
+	{ HIF_ERROR_SLK_WRONG_ENCRYPTION_STATE,
+		"secure link messages list does not match message encryption" },
+	{ HIF_ERROR_HIF_BUS_FREQUENCY_TOO_LOW,
+		"bus clock is too slow (<1kHz)" },
+	{ HIF_ERROR_HIF_RX_DATA_TOO_LARGE,
+		"HIF message too large" },
+	// Following errors only exists in old firmware versions:
+	{ HIF_ERROR_HIF_TX_QUEUE_FULL,
+		"HIF messages queue is full" },
+	{ HIF_ERROR_HIF_BUS,
+		"HIF bus" },
+	{ HIF_ERROR_SLK_MULTI_TX_UNSUPPORTED,
+		"secure link does not support multi-tx confirmations" },
+	{ HIF_ERROR_SLK_OUTDATED_SESSION_KEY,
+		"secure link session key is outdated" },
+	{ HIF_ERROR_SLK_DECRYPTION,
+		"secure link params (nonce or tag) mismatch" },
+};
+
+static int hif_error_indication(struct wfx_dev *wdev,
+				const struct hif_msg *hif, const void *buf)
+{
+	const struct hif_ind_error *body = buf;
+	int type = le32_to_cpu(body->type);
+	int param = (s8)body->data[0];
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(hif_errors); i++)
+		if (type == hif_errors[i].val)
+			break;
+	if (i < ARRAY_SIZE(hif_errors))
+		if (hif_errors[i].has_param)
+			dev_err(wdev->dev, "asynchronous error: %s: %d\n",
+				hif_errors[i].str, param);
+		else
+			dev_err(wdev->dev, "asynchronous error: %s\n",
+				hif_errors[i].str);
+	else
+		dev_err(wdev->dev, "asynchronous error: unknown: %08x\n", type);
+	print_hex_dump(KERN_INFO, "hif: ", DUMP_PREFIX_OFFSET,
+		       16, 1, hif, hif->len, false);
+	wdev->chip_frozen = true;
+
+	return 0;
+};
+
 static int hif_exception_indication(struct wfx_dev *wdev,
 				    const struct hif_msg *hif, const void *buf)
 {
-	size_t len = hif->len - 4; // drop header
+	const struct hif_ind_exception *body = buf;
+	int type = le32_to_cpu(body->type);
 
-	dev_err(wdev->dev, "firmware exception\n");
-	print_hex_dump_bytes("Dump: ", DUMP_PREFIX_NONE, buf, len);
-	wdev->chip_frozen = 1;
+	if (type == 4)
+		dev_err(wdev->dev, "firmware assert %d\n",
+			le32_to_cpup((__le32 *)body->data));
+	else
+		dev_err(wdev->dev, "firmware exception\n");
+	print_hex_dump(KERN_INFO, "hif: ", DUMP_PREFIX_OFFSET,
+		       16, 1, hif, hif->len, false);
+	wdev->chip_frozen = true;
 
 	return -1;
 }
