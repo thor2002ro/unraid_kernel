@@ -18,6 +18,7 @@ it.
 
    kernel-api
    workqueue
+   printk-basics
    printk-formats
    symbol-namespaces
 
@@ -34,6 +35,7 @@ Library functionality that is used throughout the kernel.
    xarray
    idr
    circular-buffers
+   rbtree
    generic-radix-tree
    packing
    timekeeping
