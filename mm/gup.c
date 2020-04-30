@@ -722,7 +722,7 @@ static struct page *follow_p4d_mask(struct vm_area_struct *vma,
 	return follow_pud_mask(vma, address, p4d, flags, ctx);
 }
 
-/*
+/**
  * follow_page_mask - look up a page descriptor from a user-virtual address
  * @vma: vm_area_struct mapping @address
  * @address: virtual address to look up
