@@ -42,6 +42,10 @@
 #include "internal.h"
 #include "shuffle.h"
 
+#ifndef MEMORY_HOTPLUG_RES_NAME
+#define MEMORY_HOTPLUG_RES_NAME "System RAM"
+#endif
+
 /*
  * online_page_callback contains pointer to current page onlining function.
  * Initially it is generic_online_page(). If it is required it could be
@@ -102,7 +106,7 @@ static struct resource *register_memory_resource(u64 start, u64 size)
 {
 	struct resource *res;
 	unsigned long flags =  IORESOURCE_SYSTEM_RAM | IORESOURCE_BUSY;
-	char *resource_name = "System RAM";
+	char *resource_name = MEMORY_HOTPLUG_RES_NAME;
 
 	/*
 	 * Make sure value parsed from 'mem=' only restricts memory adding
