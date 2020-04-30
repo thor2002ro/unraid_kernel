@@ -1140,7 +1140,7 @@ struct mem_section_usage {
 	DECLARE_BITMAP(subsection_map, SUBSECTIONS_PER_SECTION);
 #endif
 	/* See declaration of similar field in struct zone */
-	unsigned long pageblock_flags[0];
+	unsigned long pageblock_flags[];
 };
 
 void subsection_map_init(unsigned long pfn, unsigned long nr_pages);
