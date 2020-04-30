@@ -1230,8 +1230,8 @@ static int process_madvise_vec(struct task_struct *target_task,
 	return ret;
 }
 
-ssize_t do_process_madvise(int which, pid_t upid, struct iov_iter *iter,
-				int behavior, unsigned long flags)
+static ssize_t do_process_madvise(int which, pid_t upid, struct iov_iter *iter,
+				       int behavior, unsigned long flags)
 {
 	ssize_t ret;
 	struct pid *pid;
