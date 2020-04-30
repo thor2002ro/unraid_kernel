@@ -75,6 +75,8 @@
 #define R8169_TX_RING_BYTES	(NUM_TX_DESC * sizeof(struct TxDesc))
 #define R8169_RX_RING_BYTES	(NUM_RX_DESC * sizeof(struct RxDesc))
 
+#define OCP_STD_PHY_BASE	0xa400
+
 #define RTL_CFG_NO_GBIT	1
 
 /* write/read MMIO register */
@@ -386,10 +388,12 @@ enum rtl_register_content {
 	/* rx_mode_bits */
 	AcceptErr	= 0x20,
 	AcceptRunt	= 0x10,
+#define RX_CONFIG_ACCEPT_ERR_MASK	0x30
 	AcceptBroadcast	= 0x08,
 	AcceptMulticast	= 0x04,
 	AcceptMyPhys	= 0x02,
 	AcceptAllPhys	= 0x01,
+#define RX_CONFIG_ACCEPT_OK_MASK	0x0f
 #define RX_CONFIG_ACCEPT_MASK		0x3f
 
 	/* TxConfigBits */
@@ -846,8 +850,6 @@ static void r8168_mac_ocp_modify(struct rtl8169_private *tp, u32 reg, u16 mask,
 
 	r8168_mac_ocp_write(tp, reg, (data & ~mask) | set);
 }
-
-#define OCP_STD_PHY_BASE	0xa400
 
 static void r8168g_mdio_write(struct rtl8169_private *tp, int reg, int value)
 {
@@ -1497,19 +1499,15 @@ static netdev_features_t rtl8169_fix_features(struct net_device *dev,
 	return features;
 }
 
-static int rtl8169_set_features(struct net_device *dev,
-				netdev_features_t features)
+static void rtl_set_rx_config_features(struct rtl8169_private *tp,
+				       netdev_features_t features)
 {
-	struct rtl8169_private *tp = netdev_priv(dev);
-	u32 rx_config;
+	u32 rx_config = RTL_R32(tp, RxConfig);
 
-	rtl_lock_work(tp);
-
-	rx_config = RTL_R32(tp, RxConfig);
 	if (features & NETIF_F_RXALL)
-		rx_config |= (AcceptErr | AcceptRunt);
+		rx_config |= RX_CONFIG_ACCEPT_ERR_MASK;
 	else
-		rx_config &= ~(AcceptErr | AcceptRunt);
+		rx_config &= ~RX_CONFIG_ACCEPT_ERR_MASK;
 
 	if (rtl_is_8125(tp)) {
 		if (features & NETIF_F_HW_VLAN_CTAG_RX)
@@ -1519,6 +1517,16 @@ static int rtl8169_set_features(struct net_device *dev,
 	}
 
 	RTL_W32(tp, RxConfig, rx_config);
+}
+
+static int rtl8169_set_features(struct net_device *dev,
+				netdev_features_t features)
+{
+	struct rtl8169_private *tp = netdev_priv(dev);
+
+	rtl_lock_work(tp);
+
+	rtl_set_rx_config_features(tp, features);
 
 	if (features & NETIF_F_RXCSUM)
 		tp->cp_cmd |= RxChkSum;
@@ -2391,8 +2399,6 @@ static void rtl_pll_power_up(struct rtl8169_private *tp)
 	}
 
 	phy_resume(tp->phydev);
-	/* give MAC/PHY some time to resume */
-	msleep(20);
 }
 
 static void rtl_init_rxcfg(struct rtl8169_private *tp)
@@ -2411,8 +2417,7 @@ static void rtl_init_rxcfg(struct rtl8169_private *tp)
 		RTL_W32(tp, RxConfig, RX128_INT_EN | RX_MULTI_EN | RX_DMA_BURST | RX_EARLY_OFF);
 		break;
 	case RTL_GIGA_MAC_VER_60 ... RTL_GIGA_MAC_VER_61:
-		RTL_W32(tp, RxConfig, RX_FETCH_DFLT_8125 | RX_VLAN_8125 |
-				      RX_DMA_BURST);
+		RTL_W32(tp, RxConfig, RX_FETCH_DFLT_8125 | RX_DMA_BURST);
 		break;
 	default:
 		RTL_W32(tp, RxConfig, RX128_INT_EN | RX_DMA_BURST);
@@ -2679,14 +2684,11 @@ static void rtl_set_rx_mode(struct net_device *dev)
 		}
 	}
 
-	if (dev->features & NETIF_F_RXALL)
-		rx_mode |= (AcceptErr | AcceptRunt);
-
 	RTL_W32(tp, MAR0 + 4, mc_filter[1]);
 	RTL_W32(tp, MAR0 + 0, mc_filter[0]);
 
 	tmp = RTL_R32(tp, RxConfig);
-	RTL_W32(tp, RxConfig, (tmp & ~RX_CONFIG_ACCEPT_MASK) | rx_mode);
+	RTL_W32(tp, RxConfig, (tmp & ~RX_CONFIG_ACCEPT_OK_MASK) | rx_mode);
 }
 
 DECLARE_RTL_COND(rtl_csiar_cond)
@@ -3844,7 +3846,6 @@ static void rtl_hw_start(struct  rtl8169_private *tp)
 {
 	rtl_unlock_config_regs(tp);
 
-	tp->cp_cmd &= CPCMD_MASK;
 	RTL_W16(tp, CPlusCmd, tp->cp_cmd);
 
 	if (tp->mac_version <= RTL_GIGA_MAC_VER_06)
@@ -3866,6 +3867,7 @@ static void rtl_hw_start(struct  rtl8169_private *tp)
 	RTL_W8(tp, ChipCmd, CmdTxEnb | CmdRxEnb);
 	rtl_init_rxcfg(tp);
 	rtl_set_tx_config_registers(tp);
+	rtl_set_rx_config_features(tp, tp->dev->features);
 	rtl_set_rx_mode(tp->dev);
 	rtl_irq_enable(tp);
 }
@@ -3879,12 +3881,6 @@ static int rtl8169_change_mtu(struct net_device *dev, int new_mtu)
 	rtl_jumbo_config(tp);
 
 	return 0;
-}
-
-static inline void rtl8169_make_unusable_by_asic(struct RxDesc *desc)
-{
-	desc->addr = cpu_to_le64(0x0badbadbadbadbadull);
-	desc->opts1 &= ~cpu_to_le32(DescOwn | RsvdMask);
 }
 
 static inline void rtl8169_mark_to_asic(struct RxDesc *desc)
@@ -3934,13 +3930,9 @@ static void rtl8169_rx_clear(struct rtl8169_private *tp)
 			       R8169_RX_BUF_SIZE, DMA_FROM_DEVICE);
 		__free_pages(tp->Rx_databuff[i], get_order(R8169_RX_BUF_SIZE));
 		tp->Rx_databuff[i] = NULL;
-		rtl8169_make_unusable_by_asic(tp->RxDescArray + i);
+		tp->RxDescArray[i].addr = 0;
+		tp->RxDescArray[i].opts1 = 0;
 	}
-}
-
-static inline void rtl8169_mark_as_last_descriptor(struct RxDesc *desc)
-{
-	desc->opts1 |= cpu_to_le32(RingEnd);
 }
 
 static int rtl8169_rx_fill(struct rtl8169_private *tp)
@@ -3958,7 +3950,8 @@ static int rtl8169_rx_fill(struct rtl8169_private *tp)
 		tp->Rx_databuff[i] = data;
 	}
 
-	rtl8169_mark_as_last_descriptor(tp->RxDescArray + NUM_RX_DESC - 1);
+	/* mark as last descriptor in the ring */
+	tp->RxDescArray[NUM_RX_DESC - 1].opts1 |= cpu_to_le32(RingEnd);
 
 	return 0;
 }
@@ -4124,25 +4117,20 @@ static bool rtl8169_tso_csum_v2(struct rtl8169_private *tp,
 				struct sk_buff *skb, u32 *opts)
 {
 	u32 transport_offset = (u32)skb_transport_offset(skb);
-	u32 mss = skb_shinfo(skb)->gso_size;
+	struct skb_shared_info *shinfo = skb_shinfo(skb);
+	u32 mss = shinfo->gso_size;
 
 	if (mss) {
-		switch (vlan_get_protocol(skb)) {
-		case htons(ETH_P_IP):
+		if (shinfo->gso_type & SKB_GSO_TCPV4) {
 			opts[0] |= TD1_GTSENV4;
-			break;
-
-		case htons(ETH_P_IPV6):
+		} else if (shinfo->gso_type & SKB_GSO_TCPV6) {
 			if (skb_cow_head(skb, 0))
 				return false;
 
 			tcp_v6_gso_csum_prep(skb);
 			opts[0] |= TD1_GTSENV6;
-			break;
-
-		default:
+		} else {
 			WARN_ON_ONCE(1);
-			break;
 		}
 
 		opts[0] |= transport_offset << GTTCPHO_SHIFT;
@@ -4262,8 +4250,8 @@ static netdev_tx_t rtl8169_start_xmit(struct sk_buff *skb,
 
 	txd_first->opts1 |= cpu_to_le32(DescOwn | FirstFrag);
 
-	/* Force all memory writes to complete before notifying device */
-	wmb();
+	/* rtl_tx needs to see descriptor changes before updated tp->cur_tx */
+	smp_wmb();
 
 	tp->cur_tx += frags + 1;
 
@@ -4308,6 +4296,37 @@ err_stop_0:
 	return NETDEV_TX_BUSY;
 }
 
+static unsigned int rtl_last_frag_len(struct sk_buff *skb)
+{
+	struct skb_shared_info *info = skb_shinfo(skb);
+	unsigned int nr_frags = info->nr_frags;
+
+	if (!nr_frags)
+		return UINT_MAX;
+
+	return skb_frag_size(info->frags + nr_frags - 1);
+}
+
+/* Workaround for hw issues with TSO on RTL8168evl */
+static netdev_features_t rtl8168evl_fix_tso(struct sk_buff *skb,
+					    netdev_features_t features)
+{
+	/* IPv4 header has options field */
+	if (vlan_get_protocol(skb) == htons(ETH_P_IP) &&
+	    ip_hdrlen(skb) > sizeof(struct iphdr))
+		features &= ~NETIF_F_ALL_TSO;
+
+	/* IPv4 TCP header has options field */
+	else if (skb_shinfo(skb)->gso_type & SKB_GSO_TCPV4 &&
+		 tcp_hdrlen(skb) > sizeof(struct tcphdr))
+		features &= ~NETIF_F_ALL_TSO;
+
+	else if (rtl_last_frag_len(skb) <= 6)
+		features &= ~NETIF_F_ALL_TSO;
+
+	return features;
+}
+
 static netdev_features_t rtl8169_features_check(struct sk_buff *skb,
 						struct net_device *dev,
 						netdev_features_t features)
@@ -4316,6 +4335,9 @@ static netdev_features_t rtl8169_features_check(struct sk_buff *skb,
 	struct rtl8169_private *tp = netdev_priv(dev);
 
 	if (skb_is_gso(skb)) {
+		if (tp->mac_version == RTL_GIGA_MAC_VER_34)
+			features = rtl8168evl_fix_tso(skb, features);
+
 		if (transport_offset > GTTCPHO_MAX &&
 		    rtl_chip_supports_csum_v2(tp))
 			features &= ~NETIF_F_ALL_TSO;
@@ -5164,20 +5186,19 @@ static int r8169_mdio_register(struct rtl8169_private *tp)
 	new_bus->read = r8169_mdio_read_reg;
 	new_bus->write = r8169_mdio_write_reg;
 
-	ret = mdiobus_register(new_bus);
+	ret = devm_mdiobus_register(new_bus);
 	if (ret)
 		return ret;
 
 	tp->phydev = mdiobus_get_phy(new_bus, 0);
 	if (!tp->phydev) {
-		mdiobus_unregister(new_bus);
 		return -ENODEV;
 	} else if (!tp->phydev->drv) {
 		/* Most chip versions fail with the genphy driver.
 		 * Therefore ensure that the dedicated PHY driver is loaded.
 		 */
-		dev_err(&pdev->dev, "realtek.ko not loaded, maybe it needs to be added to initramfs?\n");
-		mdiobus_unregister(new_bus);
+		dev_err(&pdev->dev, "no dedicated PHY driver found for PHY ID 0x%08x, maybe realtek.ko needs to be added to initramfs?\n",
+			tp->phydev->phy_id);
 		return -EUNATCH;
 	}
 
@@ -5189,8 +5210,6 @@ static int r8169_mdio_register(struct rtl8169_private *tp)
 
 static void rtl_hw_init_8168g(struct rtl8169_private *tp)
 {
-	tp->ocp_base = OCP_STD_PHY_BASE;
-
 	RTL_W32(tp, MISC, RTL_R32(tp, MISC) | RXDV_GATED_EN);
 
 	if (!rtl_udelay_loop_wait_high(tp, &rtl_txcfg_empty_cond, 100, 42))
@@ -5215,8 +5234,6 @@ static void rtl_hw_init_8168g(struct rtl8169_private *tp)
 
 static void rtl_hw_init_8125(struct rtl8169_private *tp)
 {
-	tp->ocp_base = OCP_STD_PHY_BASE;
-
 	RTL_W32(tp, MISC, RTL_R32(tp, MISC) | RXDV_GATED_EN);
 
 	if (!rtl_udelay_loop_wait_high(tp, &rtl_rxtx_empty_cond, 100, 42))
@@ -5353,6 +5370,7 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	tp->msg_enable = netif_msg_init(debug.msg_enable, R8169_MSG_DEFAULT);
 	tp->supports_gmii = ent->driver_data == RTL_CFG_NO_GBIT ? 0 : 1;
 	tp->eee_adv = -1;
+	tp->ocp_base = OCP_STD_PHY_BASE;
 
 	/* Get the *optional* external "ether_clk" used on some boards */
 	rc = rtl_get_ether_clk(tp);
@@ -5408,7 +5426,7 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	tp->mac_version = chipset;
 
-	tp->cp_cmd = RTL_R16(tp, CPlusCmd);
+	tp->cp_cmd = RTL_R16(tp, CPlusCmd) & CPCMD_MASK;
 
 	if (sizeof(dma_addr_t) > 4 && tp->mac_version >= RTL_GIGA_MAC_VER_18 &&
 	    !dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64)))
@@ -5443,14 +5461,9 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	dev->hw_features = NETIF_F_IP_CSUM | NETIF_F_RXCSUM |
 			   NETIF_F_HW_VLAN_CTAG_TX | NETIF_F_HW_VLAN_CTAG_RX;
-	dev->vlan_features = NETIF_F_SG | NETIF_F_IP_CSUM | NETIF_F_TSO |
-		NETIF_F_HIGHDMA;
+	dev->vlan_features = NETIF_F_SG | NETIF_F_IP_CSUM | NETIF_F_TSO;
 	dev->priv_flags |= IFF_LIVE_ADDR_CHANGE;
 
-	tp->cp_cmd |= RxChkSum;
-	/* RTL8125 uses register RxConfig for VLAN offloading config */
-	if (!rtl_is_8125(tp))
-		tp->cp_cmd |= RxVlan;
 	/*
 	 * Pretend we are using VLANs; This bypasses a nasty bug where
 	 * Interrupts stop flowing on high load on 8110SCd controllers.
@@ -5482,6 +5495,9 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	dev->hw_features |= NETIF_F_RXALL;
 	dev->hw_features |= NETIF_F_RXFCS;
 
+	/* configure chip for default features */
+	rtl8169_set_features(dev, dev->features);
+
 	jumbo_max = rtl_jumbo_max(tp);
 	if (jumbo_max)
 		dev->max_mtu = jumbo_max;
@@ -5507,7 +5523,7 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	rc = register_netdev(dev);
 	if (rc)
-		goto err_mdio_unregister;
+		return rc;
 
 	netif_info(tp, probe, dev, "%s, %pM, XID %03x, IRQ %d\n",
 		   rtl_chip_infos[chipset].name, dev->dev_addr, xid,
@@ -5526,10 +5542,6 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 		pm_runtime_put_sync(&pdev->dev);
 
 	return 0;
-
-err_mdio_unregister:
-	mdiobus_unregister(tp->phydev->mdio.bus);
-	return rc;
 }
 
 static struct pci_driver rtl8169_pci_driver = {

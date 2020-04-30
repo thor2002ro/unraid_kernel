@@ -19,8 +19,8 @@ ret=0
 ksft_skip=4
 
 # all tests in this script. Can be overridden with -t option
-IPV4_TESTS="ipv4_fcnal ipv4_grp_fcnal ipv4_withv6_fcnal ipv4_fcnal_runtime"
-IPV6_TESTS="ipv6_fcnal ipv6_grp_fcnal ipv6_fcnal_runtime"
+IPV4_TESTS="ipv4_fcnal ipv4_grp_fcnal ipv4_withv6_fcnal ipv4_fcnal_runtime ipv4_compat_mode"
+IPV6_TESTS="ipv6_fcnal ipv6_grp_fcnal ipv6_fcnal_runtime ipv6_compat_mode"
 
 ALL_TESTS="basic ${IPV4_TESTS} ${IPV6_TESTS}"
 TESTS="${ALL_TESTS}"
@@ -150,31 +150,31 @@ setup()
 	$IP li add veth1 type veth peer name veth2
 	$IP li set veth1 up
 	$IP addr add 172.16.1.1/24 dev veth1
-	$IP -6 addr add 2001:db8:91::1/64 dev veth1
+	$IP -6 addr add 2001:db8:91::1/64 dev veth1 nodad
 
 	$IP li add veth3 type veth peer name veth4
 	$IP li set veth3 up
 	$IP addr add 172.16.2.1/24 dev veth3
-	$IP -6 addr add 2001:db8:92::1/64 dev veth3
+	$IP -6 addr add 2001:db8:92::1/64 dev veth3 nodad
 
 	$IP li set veth2 netns peer up
 	ip -netns peer addr add 172.16.1.2/24 dev veth2
-	ip -netns peer -6 addr add 2001:db8:91::2/64 dev veth2
+	ip -netns peer -6 addr add 2001:db8:91::2/64 dev veth2 nodad
 
 	$IP li set veth4 netns peer up
 	ip -netns peer addr add 172.16.2.2/24 dev veth4
-	ip -netns peer -6 addr add 2001:db8:92::2/64 dev veth4
+	ip -netns peer -6 addr add 2001:db8:92::2/64 dev veth4 nodad
 
 	ip -netns remote li add veth5 type veth peer name veth6
 	ip -netns remote li set veth5 up
 	ip -netns remote addr add dev veth5 172.16.101.1/24
-	ip -netns remote addr add dev veth5 2001:db8:101::1/64
+	ip -netns remote -6 addr add dev veth5 2001:db8:101::1/64 nodad
 	ip -netns remote ro add 172.16.0.0/22 via 172.16.101.2
 	ip -netns remote -6 ro add 2001:db8:90::/40 via 2001:db8:101::2
 
 	ip -netns remote li set veth6 netns peer up
 	ip -netns peer addr add dev veth6 172.16.101.2/24
-	ip -netns peer addr add dev veth6 2001:db8:101::2/64
+	ip -netns peer -6 addr add dev veth6 2001:db8:101::2/64 nodad
 	set +e
 }
 
@@ -248,9 +248,36 @@ check_route6()
 	local expected="$2"
 	local out
 
-	out=$($IP -6 route ls match ${pfx} 2>/dev/null)
+	out=$($IP -6 route ls match ${pfx} 2>/dev/null | sed -e 's/pref medium//')
 
 	check_output "${out}" "${expected}"
+}
+
+start_ip_monitor()
+{
+	local mtype=$1
+
+	# start the monitor in the background
+	tmpfile=`mktemp /var/run/nexthoptestXXX`
+	mpid=`($IP monitor $mtype > $tmpfile & echo $!) 2>/dev/null`
+	sleep 0.2
+	echo "$mpid $tmpfile"
+}
+
+stop_ip_monitor()
+{
+	local mpid=$1
+	local tmpfile=$2
+	local el=$3
+
+	# check the monitor results
+	kill $mpid
+	lines=`wc -l $tmpfile | cut "-d " -f1`
+	test $lines -eq $el
+	rc=$?
+	rm -rf $tmpfile
+
+	return $rc
 }
 
 ################################################################################
@@ -423,8 +450,6 @@ ipv6_fcnal_runtime()
 	echo "IPv6 functional runtime"
 	echo "-----------------------"
 
-	sleep 5
-
 	#
 	# IPv6 - the basics
 	#
@@ -481,12 +506,12 @@ ipv6_fcnal_runtime()
 	run_cmd "$IP -6 nexthop add id 85 dev veth1"
 	run_cmd "$IP ro replace 2001:db8:101::1/128 nhid 85"
 	log_test $? 0 "IPv6 route with device only nexthop"
-	check_route6 "2001:db8:101::1" "2001:db8:101::1 nhid 85 dev veth1 metric 1024 pref medium"
+	check_route6 "2001:db8:101::1" "2001:db8:101::1 nhid 85 dev veth1 metric 1024"
 
 	run_cmd "$IP nexthop add id 123 group 81/85"
 	run_cmd "$IP ro replace 2001:db8:101::1/128 nhid 123"
 	log_test $? 0 "IPv6 multipath route with nexthop mix - dev only + gw"
-	check_route6 "2001:db8:101::1" "2001:db8:101::1 nhid 123 metric 1024 nexthop via 2001:db8:91::2 dev veth1 weight 1 nexthop dev veth1 weight 1 pref medium"
+	check_route6 "2001:db8:101::1" "2001:db8:101::1 nhid 123 metric 1024 nexthop via 2001:db8:91::2 dev veth1 weight 1 nexthop dev veth1 weight 1"
 
 	#
 	# IPv6 route with v4 nexthop - not allowed
@@ -866,6 +891,11 @@ ipv4_fcnal_runtime()
 		$IP neigh sh | grep 'dev veth1'
 	fi
 
+	run_cmd "$IP ro del 172.16.101.1/32 via inet6 ${lladdr} dev veth1"
+	run_cmd "$IP -4 ro add default via inet6 ${lladdr} dev veth1"
+	run_cmd "ip netns exec me ping -c1 -w1 172.16.101.1"
+	log_test $? 0 "IPv4 default route with IPv6 gateway"
+
 	#
 	# MPLS as an example of LWT encap
 	#
@@ -878,6 +908,173 @@ ipv4_fcnal_runtime()
 	log_test $? 0 "IPv4 route with MPLS encap and v6 gateway"
 	check_nexthop "id 52" "id 52 encap mpls 102 via 2001:db8:91::2 dev veth1 scope link"
 	log_test $? 0 "IPv4 route with MPLS encap, v6 gw - check"
+}
+
+sysctl_nexthop_compat_mode_check()
+{
+	local sysctlname="net.ipv4.nexthop_compat_mode"
+	local lprefix=$1
+
+	IPE="ip netns exec me"
+
+	$IPE sysctl -q $sysctlname 2>&1 >/dev/null
+	if [ $? -ne 0 ]; then
+		echo "SKIP: kernel lacks nexthop compat mode sysctl control"
+		return $ksft_skip
+	fi
+
+	out=$($IPE sysctl $sysctlname 2>/dev/null)
+	log_test $? 0 "$lprefix default nexthop compat mode check"
+	check_output "${out}" "$sysctlname = 1"
+}
+
+sysctl_nexthop_compat_mode_set()
+{
+	local sysctlname="net.ipv4.nexthop_compat_mode"
+	local mode=$1
+	local lprefix=$2
+
+	IPE="ip netns exec me"
+
+	out=$($IPE sysctl -w $sysctlname=$mode)
+	log_test $? 0 "$lprefix set compat mode - $mode"
+	check_output "${out}" "net.ipv4.nexthop_compat_mode = $mode"
+}
+
+ipv6_compat_mode()
+{
+	local rc
+
+	echo
+	echo "IPv6 nexthop api compat mode test"
+	echo "--------------------------------"
+
+	sysctl_nexthop_compat_mode_check "IPv6"
+	if [ $? -eq $ksft_skip ]; then
+		return $ksft_skip
+	fi
+
+	run_cmd "$IP nexthop add id 62 via 2001:db8:91::2 dev veth1"
+	run_cmd "$IP nexthop add id 63 via 2001:db8:91::3 dev veth1"
+	run_cmd "$IP nexthop add id 122 group 62/63"
+	ipmout=$(start_ip_monitor route)
+
+	run_cmd "$IP -6 ro add 2001:db8:101::1/128 nhid 122"
+	# route add notification should contain expanded nexthops
+	stop_ip_monitor $ipmout 3
+	log_test $? 0 "IPv6 compat mode on - route add notification"
+
+	# route dump should contain expanded nexthops
+	check_route6 "2001:db8:101::1" "2001:db8:101::1 nhid 122 metric 1024 pref medium nexthop via 2001:db8:91::2 dev veth1 weight 1 nexthop via 2001:db8:91::3 dev veth1 weight 1"
+	log_test $? 0 "IPv6 compat mode on - route dump"
+
+	# change in nexthop group should generate route notification
+	run_cmd "$IP nexthop add id 64 via 2001:db8:91::4 dev veth1"
+	ipmout=$(start_ip_monitor route)
+	run_cmd "$IP nexthop replace id 122 group 62/64"
+	stop_ip_monitor $ipmout 3
+
+	log_test $? 0 "IPv6 compat mode on - nexthop change"
+
+	# set compat mode off
+	sysctl_nexthop_compat_mode_set 0 "IPv6"
+
+	run_cmd "$IP -6 ro del 2001:db8:101::1/128 nhid 122"
+
+	run_cmd "$IP nexthop add id 62 via 2001:db8:91::2 dev veth1"
+	run_cmd "$IP nexthop add id 63 via 2001:db8:91::3 dev veth1"
+	run_cmd "$IP nexthop add id 122 group 62/63"
+	ipmout=$(start_ip_monitor route)
+
+	run_cmd "$IP -6 ro add 2001:db8:101::1/128 nhid 122"
+	# route add notification should not contain expanded nexthops
+	stop_ip_monitor $ipmout 1
+	log_test $? 0 "IPv6 compat mode off - route add notification"
+
+	# route dump should not contain expanded nexthops
+	check_route6 "2001:db8:101::1" "2001:db8:101::1 nhid 122 metric 1024 pref medium"
+	log_test $? 0 "IPv6 compat mode off - route dump"
+
+	# change in nexthop group should not generate route notification
+	run_cmd "$IP nexthop add id 64 via 2001:db8:91::4 dev veth1"
+	ipmout=$(start_ip_monitor route)
+	run_cmd "$IP nexthop replace id 122 group 62/64"
+	stop_ip_monitor $ipmout 0
+	log_test $? 0 "IPv6 compat mode off - nexthop change"
+
+	# nexthop delete should not generate route notification
+	ipmout=$(start_ip_monitor route)
+	run_cmd "$IP nexthop del id 122"
+	stop_ip_monitor $ipmout 0
+	log_test $? 0 "IPv6 compat mode off - nexthop delete"
+
+	# set compat mode back on
+	sysctl_nexthop_compat_mode_set 1 "IPv6"
+}
+
+ipv4_compat_mode()
+{
+	local rc
+
+	echo
+	echo "IPv4 nexthop api compat mode"
+	echo "----------------------------"
+
+	sysctl_nexthop_compat_mode_check "IPv4"
+	if [ $? -eq $ksft_skip ]; then
+		return $ksft_skip
+	fi
+
+	run_cmd "$IP nexthop add id 21 via 172.16.1.2 dev veth1"
+	run_cmd "$IP nexthop add id 22 via 172.16.1.2 dev veth1"
+	run_cmd "$IP nexthop add id 122 group 21/22"
+	ipmout=$(start_ip_monitor route)
+
+	run_cmd "$IP ro add 172.16.101.1/32 nhid 122"
+	stop_ip_monitor $ipmout 3
+
+	# route add notification should contain expanded nexthops
+	log_test $? 0 "IPv4 compat mode on - route add notification"
+
+	# route dump should contain expanded nexthops
+	check_route "172.16.101.1" "172.16.101.1 nhid 122 nexthop via 172.16.1.2 dev veth1 weight 1 nexthop via 172.16.1.2 dev veth1 weight 1"
+	log_test $? 0 "IPv4 compat mode on - route dump"
+
+	# change in nexthop group should generate route notification
+	run_cmd "$IP nexthop add id 23 via 172.16.1.3 dev veth1"
+	ipmout=$(start_ip_monitor route)
+	run_cmd "$IP nexthop replace id 122 group 21/23"
+	stop_ip_monitor $ipmout 3
+	log_test $? 0 "IPv4 compat mode on - nexthop change"
+
+	sysctl_nexthop_compat_mode_set 0 "IPv4"
+
+	# cleanup
+	run_cmd "$IP ro del 172.16.101.1/32 nhid 122"
+
+	ipmout=$(start_ip_monitor route)
+	run_cmd "$IP ro add 172.16.101.1/32 nhid 122"
+	stop_ip_monitor $ipmout 1
+	# route add notification should not contain expanded nexthops
+	log_test $? 0 "IPv4 compat mode off - route add notification"
+
+	# route dump should not contain expanded nexthops
+	check_route "172.16.101.1" "172.16.101.1 nhid 122"
+	log_test $? 0 "IPv4 compat mode off - route dump"
+
+	# change in nexthop group should not generate route notification
+	ipmout=$(start_ip_monitor route)
+	run_cmd "$IP nexthop replace id 122 group 21/22"
+	stop_ip_monitor $ipmout 0
+	log_test $? 0 "IPv4 compat mode off - nexthop change"
+
+	# nexthop delete should not generate route notification
+	ipmout=$(start_ip_monitor route)
+	run_cmd "$IP nexthop del id 122"
+	stop_ip_monitor $ipmout 0
+	log_test $? 0 "IPv4 compat mode off - nexthop delete"
+
+	sysctl_nexthop_compat_mode_set 1 "IPv4"
 }
 
 basic()
