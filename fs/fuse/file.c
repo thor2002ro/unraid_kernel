@@ -924,7 +924,8 @@ static void fuse_readahead(struct readahead_control *rac)
 	if (is_bad_inode(inode))
 		return;
 
-	max_pages = min(fc->max_pages, fc->max_read / PAGE_SIZE);
+	max_pages = min_t(unsigned int, fc->max_pages,
+			fc->max_read / PAGE_SIZE);
 
 	for (;;) {
 		struct fuse_io_args *ia;
