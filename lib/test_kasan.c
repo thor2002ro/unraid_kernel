@@ -645,6 +645,7 @@ static noinline void __init kasan_memcmp(void)
 	if (!ptr)
 		return;
 
+	memset(arr, 0, sizeof(arr));
 	kasan_int_result = memcmp(ptr, arr, size + 1);
 	kfree(ptr);
 }
