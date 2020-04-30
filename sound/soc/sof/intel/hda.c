@@ -135,10 +135,8 @@ static int hda_sdw_acpi_scan(struct snd_sof_dev *sdev)
 	hdev = sdev->pdata->hw_pdata;
 
 	ret = sdw_intel_acpi_scan(handle, &hdev->info);
-	if (ret < 0) {
-		dev_err(sdev->dev, "%s failed\n", __func__);
+	if (ret < 0)
 		return -EINVAL;
-	}
 
 	return 0;
 }
@@ -281,6 +279,10 @@ static bool hda_use_msi = IS_ENABLED(CONFIG_PCI);
 module_param_named(use_msi, hda_use_msi, bool, 0444);
 MODULE_PARM_DESC(use_msi, "SOF HDA use PCI MSI mode");
 #endif
+
+static char *hda_model;
+module_param(hda_model, charp, 0444);
+MODULE_PARM_DESC(hda_model, "Use the given HDA board model.");
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 static int hda_dmic_num = -1;
@@ -503,7 +505,7 @@ static int hda_init(struct snd_sof_dev *sdev)
 	mutex_init(&hbus->prepare_mutex);
 	hbus->pci = pci;
 	hbus->mixer_assigned = -1;
-	hbus->modelname = "sofbus";
+	hbus->modelname = hda_model;
 
 	/* initialise hdac bus */
 	bus->addr = pci_resource_start(pci, 0);
@@ -604,7 +606,7 @@ static int hda_init_caps(struct snd_sof_dev *sdev)
 	/* scan SoundWire capabilities exposed by DSDT */
 	ret = hda_sdw_acpi_scan(sdev);
 	if (ret < 0) {
-		dev_dbg(sdev->dev, "skipping SoundWire, ACPI scan error\n");
+		dev_dbg(sdev->dev, "skipping SoundWire, not detected with ACPI scan\n");
 		goto skip_soundwire;
 	}
 
@@ -1007,6 +1009,10 @@ static int hda_generic_machine_select(struct snd_sof_dev *sdev)
 							idisp_str, dmic_str);
 			if (!tplg_filename)
 				return -EINVAL;
+
+			dev_info(bus->dev,
+				 "DMICs detected in NHLT tables: %d\n",
+				 dmic_num);
 
 			pdata->machine = hda_mach;
 			pdata->tplg_filename = tplg_filename;
