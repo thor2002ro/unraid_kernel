@@ -1,21 +1,15 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * ICSWX api
- *
- * Copyright (C) 2015 IBM Corp.
- *
- * This provides the Initiate Coprocessor Store Word Indexed (ICSWX)
- * instruction.  This instruction is used to communicate with PowerPC
- * coprocessors.  This also provides definitions of the structures used
- * to communicate with the coprocessor.
- *
- * The RFC02130: Coprocessor Architecture document is the reference for
- * everything in this file unless otherwise noted.
- */
-#ifndef _ARCH_POWERPC_INCLUDE_ASM_ICSWX_H_
-#define _ARCH_POWERPC_INCLUDE_ASM_ICSWX_H_
+#ifndef __CRB_H
+#define __CRB_H
+#include <linux/types.h>
+#include "nx.h"
 
-#include <asm/ppc-opcode.h> /* for PPC_ICSWX */
+/* CCW 842 CI/FC masks
+ * NX P8 workbook, section 4.3.1, figure 4-6
+ * "CI/FC Boundary by NX CT type"
+ */
+#define CCW_CI_842              (0x00003ff8)
+#define CCW_FC_842              (0x00000007)
 
 /* Chapter 6.5.8 Coprocessor-Completion Block (CCB) */
 
@@ -36,7 +30,7 @@
 struct coprocessor_completion_block {
 	__be64 value;
 	__be64 address;
-} __packed __aligned(CCB_ALIGN);
+} __aligned(CCB_ALIGN);
 
 
 /* Chapter 6.5.7 Coprocessor-Status Block (CSB) */
@@ -65,10 +59,7 @@ struct coprocessor_completion_block {
 #define CSB_CC_WR_PROTECTION	(16)
 #define CSB_CC_UNKNOWN_CODE	(17)
 #define CSB_CC_ABORT		(18)
-#define CSB_CC_EXCEED_BYTE_COUNT	(19)	/* P9 or later */
 #define CSB_CC_TRANSPORT	(20)
-#define CSB_CC_INVALID_CRB	(21)	/* P9 or later */
-#define CSB_CC_INVALID_DDE	(30)	/* P9 or later */
 #define CSB_CC_SEGMENTED_DDL	(31)
 #define CSB_CC_PROGRESS_POINT	(32)
 #define CSB_CC_DDE_OVERFLOW	(33)
@@ -82,13 +73,13 @@ struct coprocessor_completion_block {
 #define CSB_ALIGN		CSB_SIZE
 
 struct coprocessor_status_block {
-	u8 flags;
-	u8 cs;
-	u8 cc;
-	u8 ce;
+	__u8 flags;
+	__u8 cs;
+	__u8 cc;
+	__u8 ce;
 	__be32 count;
 	__be64 address;
-} __packed __aligned(CSB_ALIGN);
+} __aligned(CSB_ALIGN);
 
 
 /* Chapter 6.5.10 Data-Descriptor List (DDL)
@@ -102,28 +93,18 @@ struct coprocessor_status_block {
 
 struct data_descriptor_entry {
 	__be16 flags;
-	u8 count;
-	u8 index;
+	__u8 count;
+	__u8 index;
 	__be32 length;
 	__be64 address;
-} __packed __aligned(DDE_ALIGN);
+} __aligned(DDE_ALIGN);
 
-/* 4.3.2 NX-stamped Fault CRB */
-
-#define NX_STAMP_ALIGN          (0x10)
-
-struct nx_fault_stamp {
-	__be64 fault_storage_addr;
-	__be16 reserved;
-	__u8   flags;
-	__u8   fault_status;
-	__be32 pswid;
-} __packed __aligned(NX_STAMP_ALIGN);
 
 /* Chapter 6.5.2 Coprocessor-Request Block (CRB) */
 
 #define CRB_SIZE		(0x80)
 #define CRB_ALIGN		(0x100) /* Errata: requires 256 alignment */
+
 
 /* Coprocessor Status Block field
  *   ADDRESS	address of CSB
@@ -146,15 +127,16 @@ struct coprocessor_request_block {
 
 	struct coprocessor_completion_block ccb;
 
-	union {
-		struct nx_fault_stamp nx;
-		u8 reserved[16];
-	} stamp;
-
-	u8 reserved[32];
+	__u8 reserved[48];
 
 	struct coprocessor_status_block csb;
-} __packed;
+} __aligned(CRB_ALIGN);
+
+#define crb_csb_addr(c)         __be64_to_cpu(c->csb_addr)
+#define crb_nx_fault_addr(c)    __be64_to_cpu(c->stamp.nx.fault_storage_addr)
+#define crb_nx_flags(c)         c->stamp.nx.flags
+#define crb_nx_fault_status(c)  c->stamp.nx.fault_status
+#define crb_nx_pswid(c)		c->stamp.nx.pswid
 
 
 /* RFC02167 Initiate Coprocessor Instructions document
@@ -165,36 +147,9 @@ struct coprocessor_request_block {
  * The CCW must be converted to BE before passing to icswx()
  */
 
-#define CCW_PS			(0xff000000)
-#define CCW_CT			(0x00ff0000)
-#define CCW_CD			(0x0000ffff)
-#define CCW_CL			(0x0000c000)
+#define CCW_PS                  (0xff000000)
+#define CCW_CT                  (0x00ff0000)
+#define CCW_CD                  (0x0000ffff)
+#define CCW_CL                  (0x0000c000)
 
-
-/* RFC02167 Initiate Coprocessor Instructions document
- * Chapter 8.2.1 Initiate Coprocessor Store Word Indexed (ICSWX)
- * Chapter 8.2.4.1 Condition Register 0
- */
-
-#define ICSWX_INITIATED		(0x8)
-#define ICSWX_BUSY		(0x4)
-#define ICSWX_REJECTED		(0x2)
-#define ICSWX_XERS0		(0x1)	/* undefined or set from XERSO. */
-
-static inline int icswx(__be32 ccw, struct coprocessor_request_block *crb)
-{
-	__be64 ccw_reg = ccw;
-	u32 cr;
-
-	__asm__ __volatile__(
-	PPC_ICSWX(%1,0,%2) "\n"
-	"mfcr %0\n"
-	: "=r" (cr)
-	: "r" (ccw_reg), "r" (crb)
-	: "cr0", "memory");
-
-	return (int)((cr >> 28) & 0xf);
-}
-
-
-#endif /* _ARCH_POWERPC_INCLUDE_ASM_ICSWX_H_ */
+#endif
