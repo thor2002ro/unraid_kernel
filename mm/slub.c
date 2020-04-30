@@ -2093,6 +2093,20 @@ static void deactivate_slab(struct kmem_cache *s, struct page *page,
 		void *prior;
 		unsigned long counters;
 
+		if ((s->flags & SLAB_CONSISTENCY_CHECKS) &&
+		    !check_valid_pointer(s, page, nextfree)) {
+			/*
+			 * If 'nextfree' is invalid, it is possible that
+			 * the object at 'freelist' is already corrupted.
+			 * Therefore, all objects starting at 'freelist'
+			 * are isolated.
+			 */
+			object_err(s, page, freelist, "Freechain corrupt");
+			freelist = NULL;
+			slab_fix(s, "Isolate corrupted freechain");
+			break;
+		}
+
 		do {
 			prior = page->freelist;
 			counters = page->counters;
