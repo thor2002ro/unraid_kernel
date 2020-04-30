@@ -1239,7 +1239,7 @@ void kthread_use_mm(struct mm_struct *mm)
 EXPORT_SYMBOL_GPL(kthread_use_mm);
 
 /**
- * kthread_use_mm - reverse the effect of kthread_use_mm()
+ * kthread_unuse_mm - reverse the effect of kthread_use_mm()
  * @mm: address space to operate on
  */
 void kthread_unuse_mm(struct mm_struct *mm)
