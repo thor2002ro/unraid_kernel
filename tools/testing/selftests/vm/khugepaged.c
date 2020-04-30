@@ -961,7 +961,7 @@ static void collapse_max_ptes_shared()
 		else
 			fail("Fail");
 
-		if (wait_for_scan("Do not collapse with max_ptes_shared exeeded", p))
+		if (wait_for_scan("Do not collapse with max_ptes_shared exceeded", p))
 			fail("Timeout");
 		else if (!check_huge(p))
 			success("OK");
