@@ -1,0 +1,13 @@
+menuconfig TWIST_KERNEL_BEHAVIOR
+	bool "Twist kernel behavior"
+	help
+	  Saying Y here allows modifying kernel behavior via kernel
+	  config options which will become visible by selecting this
+	  config option. Since these kernel config options are intended
+	  for helping e.g. fuzz testing, behavior twisted by this kernel
+	  option might be unstable. Userspace applications should not
+	  count on this option being selected.
+
+if TWIST_KERNEL_BEHAVIOR
+
+endif # TWIST_KERNEL_BEHAVIOR
