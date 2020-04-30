@@ -2721,8 +2721,6 @@ static int memcg_alloc_cache_id(void)
 
 	id = ida_simple_get(&memcg_cache_ida,
 			    0, MEMCG_CACHES_MAX_SIZE, GFP_KERNEL);
-	if (id == -ENOSPC)
-		return -EBUSY;
 	if (id < 0)
 		return id;
 
@@ -5004,10 +5002,6 @@ static struct mem_cgroup *mem_cgroup_alloc(void)
 	memcg->id.id = idr_alloc(&mem_cgroup_idr, NULL,
 				 1, MEM_CGROUP_ID_MAX,
 				 GFP_KERNEL);
-	if (memcg->id.id == -ENOSPC) {
-		error = -EBUSY;
-		goto fail;
-	}
 	if (memcg->id.id < 0) {
 		error = memcg->id.id;
 		goto fail;
