@@ -699,8 +699,7 @@ config DEBUG_VM_PGTABLE
 	depends on MMU
 	depends on !IA64 && !ARM
 	depends on ARCH_HAS_DEBUG_VM_PGTABLE || EXPERT
-	default n if !ARCH_HAS_DEBUG_VM_PGTABLE
-	default y if DEBUG_VM
+	default y if ARCH_HAS_DEBUG_VM_PGTABLE && DEBUG_VM
 	help
 	  This option provides a debug method which can be used to test
 	  architecture page table helper functions on various platforms in

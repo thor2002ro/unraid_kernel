@@ -30,18 +30,6 @@
 #include <asm/pgalloc.h>
 #include <asm/pgtable.h>
 
-/*
- * Basic operations
- *
- * mkold(entry)			= An old and not a young entry
- * mkyoung(entry)		= A young and not an old entry
- * mkdirty(entry)		= A dirty and not a clean entry
- * mkclean(entry)		= A clean and not a dirty entry
- * mkwrite(entry)		= A write and not a write protected entry
- * wrprotect(entry)		= A write protected and not a write entry
- * pxx_bad(entry)		= A mapped and non-table entry
- * pxx_same(entry1, entry2)	= Both entries hold the exact same value
- */
 #define VMFLAGS	(VM_READ|VM_WRITE|VM_EXEC)
 
 /*
@@ -107,13 +95,13 @@ static void __init pud_basic_tests(unsigned long pfn, pgprot_t prot)
 	 */
 	WARN_ON(!pud_bad(pud_mkhuge(pud)));
 }
-#else
+#else  /* !CONFIG_HAVE_ARCH_TRANSPARENT_HUGEPAGE_PUD */
 static void __init pud_basic_tests(unsigned long pfn, pgprot_t prot) { }
-#endif
-#else
+#endif /* CONFIG_HAVE_ARCH_TRANSPARENT_HUGEPAGE_PUD */
+#else  /* !CONFIG_TRANSPARENT_HUGEPAGE */
 static void __init pmd_basic_tests(unsigned long pfn, pgprot_t prot) { }
 static void __init pud_basic_tests(unsigned long pfn, pgprot_t prot) { }
-#endif
+#endif /* CONFIG_TRANSPARENT_HUGEPAGE */
 
 static void __init p4d_basic_tests(unsigned long pfn, pgprot_t prot)
 {
@@ -163,13 +151,13 @@ static void __init pud_populate_tests(struct mm_struct *mm, pud_t *pudp,
 	pud = READ_ONCE(*pudp);
 	WARN_ON(pud_bad(pud));
 }
-#else
+#else  /* !__PAGETABLE_PUD_FOLDED */
 static void __init pud_clear_tests(struct mm_struct *mm, pud_t *pudp) { }
 static void __init pud_populate_tests(struct mm_struct *mm, pud_t *pudp,
 				      pmd_t *pmdp)
 {
 }
-#endif
+#endif /* PAGETABLE_PUD_FOLDED */
 
 #ifndef __PAGETABLE_P4D_FOLDED
 static void __init p4d_clear_tests(struct mm_struct *mm, p4d_t *p4dp)
@@ -237,7 +225,7 @@ static void __init pgd_populate_tests(struct mm_struct *mm, pgd_t *pgdp,
 	pgd = READ_ONCE(*pgdp);
 	WARN_ON(pgd_bad(pgd));
 }
-#else
+#else  /* !__PAGETABLE_P4D_FOLDED */
 static void __init p4d_clear_tests(struct mm_struct *mm, p4d_t *p4dp) { }
 static void __init pgd_clear_tests(struct mm_struct *mm, pgd_t *pgdp) { }
 static void __init p4d_populate_tests(struct mm_struct *mm, p4d_t *p4dp,
@@ -248,7 +236,7 @@ static void __init pgd_populate_tests(struct mm_struct *mm, pgd_t *pgdp,
 				      p4d_t *p4dp)
 {
 }
-#endif
+#endif /* PAGETABLE_P4D_FOLDED */
 
 static void __init pte_clear_tests(struct mm_struct *mm, pte_t *ptep,
 				   unsigned long vaddr)
@@ -301,7 +289,7 @@ static unsigned long __init get_random_vaddr(void)
 	return random_vaddr;
 }
 
-void __init debug_vm_pgtable(void)
+static int __init debug_vm_pgtable(void)
 {
 	struct mm_struct *mm;
 	pgd_t *pgdp;
@@ -322,7 +310,7 @@ void __init debug_vm_pgtable(void)
 	mm = mm_alloc();
 	if (!mm) {
 		pr_err("mm_struct allocation failed\n");
-		return;
+		return 1;
 	}
 
 	/*
@@ -389,4 +377,6 @@ void __init debug_vm_pgtable(void)
 	mm_dec_nr_pmds(mm);
 	mm_dec_nr_ptes(mm);
 	mmdrop(mm);
+	return 0;
 }
+late_initcall(debug_vm_pgtable);
