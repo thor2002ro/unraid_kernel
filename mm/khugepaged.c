@@ -559,6 +559,17 @@ void __khugepaged_exit(struct mm_struct *mm)
 static void release_pte_page(struct page *page)
 {
 	mod_node_page_state(page_pgdat(page),
+		NR_ISOLATED_ANON + page_is_file_lru(page), -compound_nr(page));
+	ClearPageActive(page);
+	ClearPageUnevictable(page);
+	unlock_page(page);
+	/* Drop refcount from isolate */
+	put_page(page);
+}
+
+static void release_pte_page_to_lru(struct page *page)
+{
+	mod_node_page_state(page_pgdat(page),
 			NR_ISOLATED_ANON + page_is_file_lru(page),
 			-compound_nr(page));
 	unlock_page(page);
@@ -576,12 +587,12 @@ static void release_pte_pages(pte_t *pte, pte_t *_pte,
 		page = pte_page(pteval);
 		if (!pte_none(pteval) && !is_zero_pfn(pte_pfn(pteval)) &&
 				!PageCompound(page))
-			release_pte_page(page);
+			release_pte_page_to_lru(page);
 	}
 
 	list_for_each_entry_safe(page, tmp, compound_pagelist, lru) {
 		list_del(&page->lru);
-		release_pte_page(page);
+		release_pte_page_to_lru(page);
 	}
 }
 
