@@ -64,4 +64,9 @@ void dump_mm(const struct mm_struct *mm);
 #define VM_BUG_ON_PGFLAGS(cond, page) BUILD_BUG_ON_INVALID(cond)
 #endif
 
+#ifdef CONFIG_DEBUG_VM_PGTABLE
+void debug_vm_pgtable(void);
+#else
+static inline void debug_vm_pgtable(void) { }
+#endif
 #endif
