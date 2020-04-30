@@ -10,4 +10,11 @@ menuconfig TWIST_KERNEL_BEHAVIOR
 
 if TWIST_KERNEL_BEHAVIOR
 
+config TWIST_DISABLE_KBD_K_SPEC_HANDLER
+       bool "Disable k_spec() function in drivers/tty/vt/keyboard.c"
+       help
+	 k_spec() function allows triggering e.g. Ctrl-Alt-Del event.
+	 Such event is annoying for fuzz testing which wants to test
+	 kernel code without rebooting the system.
+
 endif # TWIST_KERNEL_BEHAVIOR
