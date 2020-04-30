@@ -534,7 +534,7 @@ static void collapse_max_ptes_none(void)
 	p = alloc_mapping();
 
 	fill_memory(p, 0, (hpage_pmd_nr - max_ptes_none - 1) * page_size);
-	if (wait_for_scan("Do not collapse with max_ptes_none exeeded", p))
+	if (wait_for_scan("Do not collapse with max_ptes_none exceeded", p))
 		fail("Timeout");
 	else if (check_huge(p))
 		fail("Fail");
@@ -573,7 +573,7 @@ static void collapse_swapin_single_pte(void)
 		goto out;
 	}
 
-	if (wait_for_scan("Collapse with swaping in single PTE entry", p))
+	if (wait_for_scan("Collapse with swapping in single PTE entry", p))
 		fail("Timeout");
 	else if (check_huge(p))
 		success("OK");
@@ -604,7 +604,7 @@ static void collapse_max_ptes_swap(void)
 		goto out;
 	}
 
-	if (wait_for_scan("Do not collapse with max_ptes_swap exeeded", p))
+	if (wait_for_scan("Do not collapse with max_ptes_swap exceeded", p))
 		fail("Timeout");
 	else if (check_huge(p))
 		fail("Fail");
@@ -651,14 +651,14 @@ static void collapse_single_pte_entry_compound(void)
 		fail("Fail");
 	madvise(p, hpage_pmd_size, MADV_NOHUGEPAGE);
 
-	printf("Split huge page leaving single PTE mapping compount page...");
+	printf("Split huge page leaving single PTE mapping compound page...");
 	madvise(p + page_size, hpage_pmd_size - page_size, MADV_DONTNEED);
 	if (!check_huge(p))
 		success("OK");
 	else
 		fail("Fail");
 
-	if (wait_for_scan("Collapse PTE table with single PTE mapping compount page", p))
+	if (wait_for_scan("Collapse PTE table with single PTE mapping compound page", p))
 		fail("Timeout");
 	else if (check_huge(p))
 		success("OK");
@@ -682,7 +682,7 @@ static void collapse_full_of_compound(void)
 	else
 		fail("Fail");
 
-	printf("Split huge page leaving single PTE page table full of compount pages...");
+	printf("Split huge page leaving single PTE page table full of compound pages...");
 	madvise(p, page_size, MADV_NOHUGEPAGE);
 	madvise(p, hpage_pmd_size, MADV_NOHUGEPAGE);
 	if (!check_huge(p))
