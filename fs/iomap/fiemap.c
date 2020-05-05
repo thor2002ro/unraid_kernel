@@ -110,7 +110,7 @@ iomap_bmap_actor(struct inode *inode, loff_t pos, loff_t length,
 {
 	sector_t *bno = data, addr;
 
-	if (iomap->type == IOMAP_MAPPED) {
+	if (iomap->type == IOMAP_MAPPED || iomap->type == IOMAP_UNWRITTEN) {
 		addr = (pos - iomap->offset + iomap->addr) >> inode->i_blkbits;
 		*bno = addr;
 	}
