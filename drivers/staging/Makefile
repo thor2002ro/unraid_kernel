@@ -52,3 +52,4 @@ obj-$(CONFIG_QLGE)		+= qlge/
 obj-$(CONFIG_WFX)		+= wfx/
 
 obj-y		+= CoreFreq/
+obj-y		+= r8125-9.003.05/
