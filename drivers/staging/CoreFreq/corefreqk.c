@@ -11537,7 +11537,7 @@ void Policy_Aggregate_Turbo(void)
     }
 }
 
-static int CoreFreqK_SetBoost(int state)
+static int CoreFreqK_SetBoost(struct cpufreq_policy *policy, int state)
 {
 	Controller_Stop(1);
 	TurboBoost_Enable = (state != 0);
