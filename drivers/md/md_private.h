@@ -66,7 +66,7 @@ extern void (*raid6_xor_syndrome)(int, int, int, size_t, void **);
  */
 #define MD_MAJOR_VERSION                2
 #define MD_MINOR_VERSION                9
-#define MD_PATCHLEVEL_VERSION           14
+#define MD_PATCHLEVEL_VERSION           13 // 13 for unraid 6.8, 14 for 6.9
 
 /****************************************************************************/
 /* 'md_p.h' holds the 'physical' layout of RAID devices */
