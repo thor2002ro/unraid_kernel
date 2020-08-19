@@ -176,6 +176,13 @@ struct fuse_inode {
 	/** Lock to protect write related fields */
 	spinlock_t lock;
 
+	/**
+	 * Can't take inode lock in fault path (leads to circular dependency).
+	 * Introduce another semaphore which can be taken in fault path and
+	 * then other filesystem paths can take this to block faults.
+	 */
+	struct rw_semaphore i_mmap_sem;
+
 	/*
 	 * Semaphore to protect modifications to dmap_tree
 	 */
@@ -1151,5 +1158,7 @@ node_to_dmap(struct interval_tree_node *node)
 
 	return container_of(node, struct fuse_dax_mapping, itn);
 }
+
+int fuse_break_dax_layouts(struct inode *inode, u64 dmap_start, u64 dmap_end);
 
 #endif /* _FS_FUSE_I_H */

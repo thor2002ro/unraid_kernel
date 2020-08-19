@@ -446,22 +446,34 @@ int fuse_open_common(struct inode *inode, struct file *file, bool isdir)
 	bool is_wb_truncate = (file->f_flags & O_TRUNC) &&
 			  fc->atomic_o_trunc &&
 			  fc->writeback_cache;
+	bool dax_truncate = (file->f_flags & O_TRUNC) &&
+			  fc->atomic_o_trunc && IS_DAX(inode);
 
 	err = generic_file_open(inode, file);
 	if (err)
 		return err;
 
-	if (is_wb_truncate) {
+	if (is_wb_truncate || dax_truncate) {
 		inode_lock(inode);
 		fuse_set_nowrite(inode);
 	}
 
-	err = fuse_do_open(fc, get_node_id(inode), file, isdir);
+	if (dax_truncate) {
+		down_write(&get_fuse_inode(inode)->i_mmap_sem);
+		err = fuse_break_dax_layouts(inode, 0, 0);
+		if (err)
+			goto out;
+	}
 
+	err = fuse_do_open(fc, get_node_id(inode), file, isdir);
 	if (!err)
 		fuse_finish_open(inode, file);
 
-	if (is_wb_truncate) {
+out:
+	if (dax_truncate)
+		up_write(&get_fuse_inode(inode)->i_mmap_sem);
+
+	if (is_wb_truncate | dax_truncate) {
 		fuse_release_nowrite(inode);
 		inode_unlock(inode);
 	}
@@ -2013,6 +2025,47 @@ static const struct iomap_ops fuse_iomap_ops = {
 	.iomap_end = fuse_iomap_end,
 };
 
+static void fuse_wait_dax_page(struct inode *inode)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	up_write(&fi->i_mmap_sem);
+	schedule();
+	down_write(&fi->i_mmap_sem);
+}
+
+/* Should be called with fi->i_mmap_sem lock held exclusively */
+static int __fuse_break_dax_layouts(struct inode *inode, bool *retry,
+				    loff_t start, loff_t end)
+{
+	struct page *page;
+
+	page = dax_layout_busy_page_range(inode->i_mapping, start, end);
+	if (!page)
+		return 0;
+
+	*retry = true;
+	return ___wait_var_event(&page->_refcount,
+			atomic_read(&page->_refcount) == 1, TASK_INTERRUPTIBLE,
+			0, 0, fuse_wait_dax_page(inode));
+}
+
+/* dmap_end == 0 leads to unmapping of whole file */
+int fuse_break_dax_layouts(struct inode *inode, u64 dmap_start,
+				  u64 dmap_end)
+{
+	bool	retry;
+	int	ret;
+
+	do {
+		retry = false;
+		ret = __fuse_break_dax_layouts(inode, &retry, dmap_start,
+					       dmap_end);
+	} while (ret == 0 && retry);
+
+	return ret;
+}
+
 static ssize_t fuse_dax_read_iter(struct kiocb *iocb, struct iov_iter *to)
 {
 	struct inode *inode = file_inode(iocb->ki_filp);
@@ -2891,10 +2944,18 @@ static vm_fault_t __fuse_dax_fault(struct vm_fault *vmf,
 	if (write)
 		sb_start_pagefault(sb);
 
+	/*
+	 * We need to serialize against not only truncate but also against
+	 * fuse dax memory range reclaim. While a range is being reclaimed,
+	 * we do not want any read/write/mmap to make progress and try
+	 * to populate page cache or access memory we are trying to free.
+	 */
+	down_read(&get_fuse_inode(inode)->i_mmap_sem);
 	ret = dax_iomap_fault(vmf, pe_size, &pfn, NULL, &fuse_iomap_ops);
 
 	if (ret & VM_FAULT_NEEDDSYNC)
 		ret = dax_finish_sync_fault(vmf, pe_size, pfn);
+	up_read(&get_fuse_inode(inode)->i_mmap_sem);
 
 	if (write)
 		sb_end_pagefault(sb);
@@ -3813,6 +3874,8 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 	bool lock_inode = !(mode & FALLOC_FL_KEEP_SIZE) ||
 			   (mode & FALLOC_FL_PUNCH_HOLE);
 
+	bool block_faults = IS_DAX(inode) && lock_inode;
+
 	if (mode & ~(FALLOC_FL_KEEP_SIZE | FALLOC_FL_PUNCH_HOLE))
 		return -EOPNOTSUPP;
 
@@ -3821,6 +3884,13 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 
 	if (lock_inode) {
 		inode_lock(inode);
+		if (block_faults) {
+			down_write(&fi->i_mmap_sem);
+			err = fuse_break_dax_layouts(inode, 0, 0);
+			if (err)
+				goto out;
+		}
+
 		if (mode & FALLOC_FL_PUNCH_HOLE) {
 			loff_t endbyte = offset + length - 1;
 
@@ -3869,6 +3939,9 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 out:
 	if (!(mode & FALLOC_FL_KEEP_SIZE))
 		clear_bit(FUSE_I_SIZE_UNSTABLE, &fi->state);
+
+	if (block_faults)
+		up_write(&fi->i_mmap_sem);
 
 	if (lock_inode)
 		inode_unlock(inode);
