@@ -47,6 +47,11 @@
 /** Number of dentries for each connection in the control filesystem */
 #define FUSE_CTL_NUM_DENTRIES 5
 
+/* Default memory range size, 2MB */
+#define FUSE_DAX_SZ	(2*1024*1024)
+#define FUSE_DAX_SHIFT	(21)
+#define FUSE_DAX_PAGES	(FUSE_DAX_SZ/PAGE_SIZE)
+
 /** List of active connections */
 extern struct list_head fuse_conn_list;
 
@@ -61,6 +66,18 @@ extern unsigned max_user_congthresh;
 struct fuse_forget_link {
 	struct fuse_forget_one forget_one;
 	struct fuse_forget_link *next;
+};
+
+/** Translation information for file offsets to DAX window offsets */
+struct fuse_dax_mapping {
+	/* Will connect in fc->free_ranges to keep track of free memory */
+	struct list_head list;
+
+	/** Position in DAX window */
+	u64 window_offset;
+
+	/** Length of mapping, in bytes */
+	loff_t length;
 };
 
 /** FUSE inode */
@@ -762,6 +779,12 @@ struct fuse_conn {
 
 	/** DAX device, non-NULL if DAX is supported */
 	struct dax_device *dax_dev;
+
+	/*
+	 * DAX Window Free Ranges
+	 */
+	long nr_free_ranges;
+	struct list_head free_ranges;
 };
 
 static inline struct fuse_conn *get_fuse_conn_super(struct super_block *sb)
