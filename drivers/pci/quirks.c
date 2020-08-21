@@ -3584,6 +3584,14 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_CAVIUM, 0xa100, quirk_no_bus_reset);
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_YYE, PCI_DEVICE_ID_YYE_MOZART_395S,
 			 quirk_no_bus_reset);
 
+/*
+ * Radeon RX Vega and Navi devices break on bus reset. Oi...
+ * This is *not a real workaround* - disabling bus reset
+ * for your GPU may have unintended consequences.
+ */
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x687f, quirk_no_bus_reset);
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaaf8, quirk_no_bus_reset);
+
 static void quirk_no_pm_reset(struct pci_dev *dev)
 {
 	/*
