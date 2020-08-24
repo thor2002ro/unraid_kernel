@@ -449,6 +449,8 @@ struct sched_entity {
 	/* For load-balancing: */
 	struct load_weight		load;
 	struct rb_node			run_node;
+	struct sched_entity* 		next;
+	struct sched_entity* 		prev;
 	struct list_head		group_node;
 	unsigned int			on_rq;
 

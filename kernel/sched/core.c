@@ -3425,31 +3425,8 @@ static struct rq *finish_task_switch(struct task_struct *prev)
 
 #ifdef CONFIG_SMP
 
-/* rq->lock is NOT held, but preemption is disabled */
-static void __balance_callback(struct rq *rq)
-{
-	struct callback_head *head, *next;
-	void (*func)(struct rq *rq);
-	unsigned long flags;
-
-	raw_spin_lock_irqsave(&rq->lock, flags);
-	head = rq->balance_callback;
-	rq->balance_callback = NULL;
-	while (head) {
-		func = (void (*)(struct rq *))head->func;
-		next = head->next;
-		head->next = NULL;
-		head = next;
-
-		func(rq);
-	}
-	raw_spin_unlock_irqrestore(&rq->lock, flags);
-}
-
 static inline void balance_callback(struct rq *rq)
 {
-	if (unlikely(rq->balance_callback))
-		__balance_callback(rq);
 }
 
 #else
@@ -3785,7 +3762,6 @@ void scheduler_tick(void)
 
 #ifdef CONFIG_SMP
 	rq->idle_balance = idle_cpu(cpu);
-	trigger_load_balance(rq);
 #endif
 }
 
@@ -6797,6 +6773,8 @@ void __init sched_init(void)
 {
 	unsigned long ptr = 0;
 	int i;
+
+	printk(KERN_INFO "Cachy CPU scheduler v5.8 by Hamad Al Marri. Thanks to my wife Sarah for her patience.");
 
 	wait_bit_init();
 
