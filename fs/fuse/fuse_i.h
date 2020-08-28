@@ -31,7 +31,6 @@
 #include <linux/pid_namespace.h>
 #include <linux/refcount.h>
 #include <linux/user_namespace.h>
-#include <linux/interval_tree.h>
 
 /** Default max number of pages that can be used in a single read request */
 #define FUSE_DEFAULT_MAX_PAGES_PER_REQ 32
@@ -47,14 +46,6 @@
 
 /** Number of dentries for each connection in the control filesystem */
 #define FUSE_CTL_NUM_DENTRIES 5
-
-/*
- * Default memory range size.  A power of 2 so it agrees with common FUSE_INIT
- * map_alignment values 4KB and 64KB.
- */
-#define FUSE_DAX_SZ	(2*1024*1024)
-#define FUSE_DAX_SHIFT	(21)
-#define FUSE_DAX_PAGES	(FUSE_DAX_SZ/PAGE_SIZE)
 
 /** List of active connections */
 extern struct list_head fuse_conn_list;
@@ -165,14 +156,12 @@ struct fuse_inode {
 	 */
 	struct rw_semaphore i_mmap_sem;
 
+#ifdef CONFIG_FUSE_DAX
 	/*
-	 * Semaphore to protect modifications to dmap_tree
+	 * Dax specific inode data
 	 */
-	struct rw_semaphore i_dmap_sem;
-
-	/** Sorted rb tree of struct fuse_dax_mapping elements */
-	struct rb_root_cached dmap_tree;
-	unsigned long nr_dmaps;
+	struct fuse_inode_dax *dax;
+#endif
 };
 
 /** FUSE inode state bits */
@@ -785,26 +774,10 @@ struct fuse_conn {
 	/** List of device instances belonging to this connection */
 	struct list_head devices;
 
-	/** DAX device, non-NULL if DAX is supported */
-	struct dax_device *dax_dev;
-
-	/* List of memory ranges which are busy */
-	unsigned long nr_busy_ranges;
-	struct list_head busy_ranges;
-
-	/* Worker to free up memory ranges */
-	struct delayed_work dax_free_work;
-
-	/* Wait queue for a dax range to become free */
-	wait_queue_head_t dax_range_waitq;
-
-	/*
-	 * DAX Window Free Ranges
-	 */
-	long nr_free_ranges;
-	struct list_head free_ranges;
-
-	unsigned long nr_ranges;
+#ifdef CONFIG_FUSE_DAX
+	/* Dax specific conn data */
+	struct fuse_conn_dax *dax;
+#endif
 };
 
 static inline struct fuse_conn *get_fuse_conn_super(struct super_block *sb)
@@ -1142,18 +1115,21 @@ unsigned int fuse_len_args(unsigned int numargs, struct fuse_arg *args);
  */
 u64 fuse_get_unique(struct fuse_iqueue *fiq);
 void fuse_free_conn(struct fuse_conn *fc);
-void fuse_dax_free_mem_worker(struct work_struct *work);
-void fuse_cleanup_inode_mappings(struct inode *inode);
 
 /* dax.c */
 
+#define FUSE_IS_DAX(inode) (IS_ENABLED(CONFIG_FUSE_DAX) && IS_DAX(inode))
+
 ssize_t fuse_dax_read_iter(struct kiocb *iocb, struct iov_iter *to);
 ssize_t fuse_dax_write_iter(struct kiocb *iocb, struct iov_iter *from);
-int fuse_dax_writepages(struct address_space *mapping,
-			struct writeback_control *wbc);
 int fuse_dax_mmap(struct file *file, struct vm_area_struct *vma);
-int fuse_break_dax_layouts(struct inode *inode, u64 dmap_start, u64 dmap_end);
-int fuse_dax_mem_range_init(struct fuse_conn *fc, struct dax_device *dax_dev);
-void fuse_free_dax_mem_ranges(struct fuse_conn *fc);
+int fuse_dax_break_layouts(struct inode *inode, u64 dmap_start, u64 dmap_end);
+int fuse_dax_conn_alloc(struct fuse_conn *fc, struct dax_device *dax_dev);
+void fuse_dax_conn_free(struct fuse_conn *fc);
+bool fuse_dax_inode_alloc(struct super_block *sb, struct fuse_inode *fi);
+void fuse_dax_inode_init(struct inode *inode);
+void fuse_dax_inode_cleanup(struct inode *inode);
+bool fuse_dax_check_alignment(struct fuse_conn *fc, unsigned int map_alignment);
+void fuse_dax_cancel_work(struct fuse_conn *fc);
 
 #endif /* _FS_FUSE_I_H */

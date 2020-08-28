@@ -1516,10 +1516,10 @@ int fuse_do_setattr(struct dentry *dentry, struct iattr *attr,
 		is_truncate = true;
 	}
 
-	if (IS_DAX(inode) && is_truncate) {
+	if (FUSE_IS_DAX(inode) && is_truncate) {
 		down_write(&fi->i_mmap_sem);
 		fault_blocked = true;
-		err = fuse_break_dax_layouts(inode, 0, 0);
+		err = fuse_dax_break_layouts(inode, 0, 0);
 		if (err) {
 			up_write(&fi->i_mmap_sem);
 			return err;

@@ -84,18 +84,23 @@ static struct inode *fuse_alloc_inode(struct super_block *sb)
 	fi->attr_version = 0;
 	fi->orig_ino = 0;
 	fi->state = 0;
-	fi->nr_dmaps = 0;
 	mutex_init(&fi->mutex);
 	init_rwsem(&fi->i_mmap_sem);
-	init_rwsem(&fi->i_dmap_sem);
 	spin_lock_init(&fi->lock);
 	fi->forget = fuse_alloc_forget();
-	if (!fi->forget) {
-		kmem_cache_free(fuse_inode_cachep, fi);
-		return NULL;
-	}
+	if (!fi->forget)
+		goto out_free;
+
+	if (IS_ENABLED(CONFIG_FUSE_DAX) && !fuse_dax_inode_alloc(sb, fi))
+		goto out_free_forget;
 
 	return &fi->inode;
+
+out_free_forget:
+	kfree(fi->forget);
+out_free:
+	kmem_cache_free(fuse_inode_cachep, fi);
+	return NULL;
 }
 
 static void fuse_free_inode(struct inode *inode)
@@ -115,10 +120,9 @@ static void fuse_evict_inode(struct inode *inode)
 	clear_inode(inode);
 	if (inode->i_sb->s_flags & SB_ACTIVE) {
 		struct fuse_conn *fc = get_fuse_conn(inode);
-		if (IS_DAX(inode)) {
-			fuse_cleanup_inode_mappings(inode);
-			WARN_ON(fi->nr_dmaps);
-		}
+
+		if (FUSE_IS_DAX(inode))
+			fuse_dax_inode_cleanup(inode);
 		fuse_queue_forget(fc, fi->forget, fi->nodeid, fi->nlookup);
 		fi->forget = NULL;
 	}
@@ -594,8 +598,10 @@ static int fuse_show_options(struct seq_file *m, struct dentry *root)
 		if (sb->s_bdev && sb->s_blocksize != FUSE_DEFAULT_BLKSIZE)
 			seq_printf(m, ",blksize=%lu", sb->s_blocksize);
 	}
-	if (fc->dax_dev)
+#ifdef CONFIG_FUSE_DAX
+	if (fc->dax)
 		seq_puts(m, ",dax");
+#endif
 
 	return 0;
 }
@@ -636,7 +642,6 @@ void fuse_conn_init(struct fuse_conn *fc, struct user_namespace *user_ns,
 	refcount_set(&fc->count, 1);
 	atomic_set(&fc->dev_count, 1);
 	init_waitqueue_head(&fc->blocked_waitq);
-	init_waitqueue_head(&fc->dax_range_waitq);
 	fuse_iqueue_init(&fc->iq, fiq_ops, fiq_priv);
 	INIT_LIST_HEAD(&fc->bg_queue);
 	INIT_LIST_HEAD(&fc->entry);
@@ -654,9 +659,6 @@ void fuse_conn_init(struct fuse_conn *fc, struct user_namespace *user_ns,
 	fc->pid_ns = get_pid_ns(task_active_pid_ns(current));
 	fc->user_ns = get_user_ns(user_ns);
 	fc->max_pages = FUSE_DEFAULT_MAX_PAGES_PER_REQ;
-	INIT_LIST_HEAD(&fc->free_ranges);
-	INIT_LIST_HEAD(&fc->busy_ranges);
-	INIT_DELAYED_WORK(&fc->dax_free_work, fuse_dax_free_mem_worker);
 }
 EXPORT_SYMBOL_GPL(fuse_conn_init);
 
@@ -665,8 +667,8 @@ void fuse_conn_put(struct fuse_conn *fc)
 	if (refcount_dec_and_test(&fc->count)) {
 		struct fuse_iqueue *fiq = &fc->iq;
 
-		if (fc->dax_dev)
-			fuse_free_dax_mem_ranges(fc);
+		if (IS_ENABLED(CONFIG_FUSE_DAX))
+			fuse_dax_conn_free(fc);
 		if (fiq->ops->release)
 			fiq->ops->release(fiq);
 		put_pid_ns(fc->pid_ns);
@@ -983,10 +985,9 @@ static void process_init_reply(struct fuse_conn *fc, struct fuse_args *args,
 					min_t(unsigned int, FUSE_MAX_MAX_PAGES,
 					max_t(unsigned int, arg->max_pages, 1));
 			}
-			if ((arg->flags & FUSE_MAP_ALIGNMENT) &&
-			    (FUSE_DAX_SZ % (1ul << arg->map_alignment))) {
-				pr_err("FUSE: map_alignment %u incompatible with dax mem range size %u\n",
-				       arg->map_alignment, FUSE_DAX_SZ);
+			if (IS_ENABLED(CONFIG_FUSE_DAX) &&
+			    arg->flags & FUSE_MAP_ALIGNMENT &&
+			    !fuse_dax_check_alignment(fc, arg->map_alignment)) {
 				ok = false;
 			}
 		} else {
@@ -1032,7 +1033,7 @@ void fuse_send_init(struct fuse_conn *fc)
 		FUSE_PARALLEL_DIROPS | FUSE_HANDLE_KILLPRIV | FUSE_POSIX_ACL |
 		FUSE_ABORT_ERROR | FUSE_MAX_PAGES | FUSE_CACHE_SYMLINKS |
 		FUSE_NO_OPENDIR_SUPPORT | FUSE_EXPLICIT_INVAL_DATA |
-		FUSE_MAP_ALIGNMENT;
+		(IS_ENABLED(CONFIG_FUSE_DAX) * FUSE_MAP_ALIGNMENT);
 	ia->args.opcode = FUSE_INIT;
 	ia->args.in_numargs = 1;
 	ia->args.in_args[0].size = sizeof(ia->in);
@@ -1204,19 +1205,17 @@ int fuse_fill_super_common(struct super_block *sb, struct fuse_fs_context *ctx)
 	if (sb->s_user_ns != &init_user_ns)
 		sb->s_xattr = fuse_no_acl_xattr_handlers;
 
-	if (ctx->dax_dev) {
-		err = fuse_dax_mem_range_init(fc, ctx->dax_dev);
-		if (err) {
-			pr_debug("fuse_dax_mem_range_init() returned %d\n", err);
-			goto err_free_ranges;
-		}
+	if (IS_ENABLED(CONFIG_FUSE_DAX)) {
+		err = fuse_dax_conn_alloc(fc, ctx->dax_dev);
+		if (err)
+			goto err;
 	}
 
 	if (ctx->fudptr) {
 		err = -ENOMEM;
 		fud = fuse_dev_alloc_install(fc);
 		if (!fud)
-			goto err_free_ranges;
+			goto err_free_dax;
 	}
 
 	fc->dev = sb->s_dev;
@@ -1239,7 +1238,6 @@ int fuse_fill_super_common(struct super_block *sb, struct fuse_fs_context *ctx)
 	fc->destroy = ctx->destroy;
 	fc->no_control = ctx->no_control;
 	fc->no_force_umount = ctx->no_force_umount;
-	fc->dax_dev = ctx->dax_dev;
 
 	err = -ENOMEM;
 	root = fuse_get_root_inode(sb, ctx->rootmode);
@@ -1272,9 +1270,9 @@ int fuse_fill_super_common(struct super_block *sb, struct fuse_fs_context *ctx)
  err_dev_free:
 	if (fud)
 		fuse_dev_free(fud);
- err_free_ranges:
-	if (ctx->dax_dev)
-		fuse_free_dax_mem_ranges(fc);
+ err_free_dax:
+	if (IS_ENABLED(CONFIG_FUSE_DAX))
+		fuse_dax_conn_free(fc);
  err:
 	return err;
 }

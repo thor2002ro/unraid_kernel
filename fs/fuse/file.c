@@ -224,7 +224,7 @@ int fuse_open_common(struct inode *inode, struct file *file, bool isdir)
 			  fc->atomic_o_trunc &&
 			  fc->writeback_cache;
 	bool dax_truncate = (file->f_flags & O_TRUNC) &&
-			  fc->atomic_o_trunc && IS_DAX(inode);
+			  fc->atomic_o_trunc && FUSE_IS_DAX(inode);
 
 	err = generic_file_open(inode, file);
 	if (err)
@@ -237,7 +237,7 @@ int fuse_open_common(struct inode *inode, struct file *file, bool isdir)
 
 	if (dax_truncate) {
 		down_write(&get_fuse_inode(inode)->i_mmap_sem);
-		err = fuse_break_dax_layouts(inode, 0, 0);
+		err = fuse_dax_break_layouts(inode, 0, 0);
 		if (err)
 			goto out;
 	}
@@ -1558,7 +1558,7 @@ static ssize_t fuse_file_read_iter(struct kiocb *iocb, struct iov_iter *to)
 	if (is_bad_inode(file_inode(file)))
 		return -EIO;
 
-	if (IS_DAX(inode))
+	if (FUSE_IS_DAX(inode))
 		return fuse_dax_read_iter(iocb, to);
 
 	if (ff->open_flags & FOPEN_DIRECT_IO)
@@ -1576,7 +1576,7 @@ static ssize_t fuse_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	if (is_bad_inode(file_inode(file)))
 		return -EIO;
 
-	if (IS_DAX(inode))
+	if (FUSE_IS_DAX(inode))
 		return fuse_dax_write_iter(iocb, from);
 
 	if (ff->open_flags & FOPEN_DIRECT_IO)
@@ -2340,7 +2340,7 @@ static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)
 	struct fuse_file *ff = file->private_data;
 
 	/* DAX mmap is superior to direct_io mmap */
-	if (IS_DAX(file_inode(file)))
+	if (FUSE_IS_DAX(file_inode(file)))
 		return fuse_dax_mmap(file, vma);
 
 	if (ff->open_flags & FOPEN_DIRECT_IO) {
@@ -3235,7 +3235,7 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 	bool lock_inode = !(mode & FALLOC_FL_KEEP_SIZE) ||
 			   (mode & FALLOC_FL_PUNCH_HOLE);
 
-	bool block_faults = IS_DAX(inode) && lock_inode;
+	bool block_faults = FUSE_IS_DAX(inode) && lock_inode;
 
 	if (mode & ~(FALLOC_FL_KEEP_SIZE | FALLOC_FL_PUNCH_HOLE))
 		return -EOPNOTSUPP;
@@ -3247,7 +3247,7 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 		inode_lock(inode);
 		if (block_faults) {
 			down_write(&fi->i_mmap_sem);
-			err = fuse_break_dax_layouts(inode, 0, 0);
+			err = fuse_dax_break_layouts(inode, 0, 0);
 			if (err)
 				goto out;
 		}
@@ -3467,17 +3467,9 @@ static const struct address_space_operations fuse_file_aops  = {
 	.write_end	= fuse_write_end,
 };
 
-static const struct address_space_operations fuse_dax_file_aops  = {
-	.writepages	= fuse_dax_writepages,
-	.direct_IO	= noop_direct_IO,
-	.set_page_dirty	= noop_set_page_dirty,
-	.invalidatepage	= noop_invalidatepage,
-};
-
 void fuse_init_file_inode(struct inode *inode)
 {
 	struct fuse_inode *fi = get_fuse_inode(inode);
-	struct fuse_conn *fc = get_fuse_conn(inode);
 
 	inode->i_fop = &fuse_file_operations;
 	inode->i_data.a_ops = &fuse_file_aops;
@@ -3487,10 +3479,7 @@ void fuse_init_file_inode(struct inode *inode)
 	fi->writectr = 0;
 	init_waitqueue_head(&fi->page_waitq);
 	fi->writepages = RB_ROOT;
-	fi->dmap_tree = RB_ROOT_CACHED;
 
-	if (fc->dax_dev) {
-		inode->i_flags |= S_DAX;
-		inode->i_data.a_ops = &fuse_dax_file_aops;
-	}
+	if (IS_ENABLED(CONFIG_VIRTIO_FS_DAX))
+		fuse_dax_inode_init(inode);
 }

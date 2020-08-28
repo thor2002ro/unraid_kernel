@@ -806,7 +806,7 @@ static int virtio_fs_setup_dax(struct virtio_device *vdev, struct virtio_fs *fs)
 	struct dev_pagemap *pgmap;
 	bool have_cache;
 
-	if (!IS_ENABLED(CONFIG_DAX_DRIVER))
+	if (!IS_ENABLED(CONFIG_FUSE_DAX))
 		return 0;
 
 	/* Get cache region */
@@ -1347,7 +1347,8 @@ static void virtio_kill_sb(struct super_block *sb)
 	/* Stop dax worker. Soon evict_inodes() will be called which will
 	 * free all memory ranges belonging to all inodes.
 	 */
-	cancel_delayed_work_sync(&fc->dax_free_work);
+	if (IS_ENABLED(CONFIG_FUSE_DAX))
+		fuse_dax_cancel_work(fc);
 
 	/* Stop forget queue. Soon destroy will be sent */
 	spin_lock(&fsvq->lock);
