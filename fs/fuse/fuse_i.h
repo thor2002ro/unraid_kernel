@@ -56,16 +56,6 @@
 #define FUSE_DAX_SHIFT	(21)
 #define FUSE_DAX_PAGES	(FUSE_DAX_SZ/PAGE_SIZE)
 
-/* Number of ranges reclaimer will try to free in one invocation */
-#define FUSE_DAX_RECLAIM_CHUNK		(10)
-
-/*
- * Dax memory reclaim threshold in percetage of total ranges. When free
- * number of free ranges drops below this threshold, reclaim can trigger
- * Default is 20%
- */
-#define FUSE_DAX_RECLAIM_THRESHOLD	(20)
-
 /** List of active connections */
 extern struct list_head fuse_conn_list;
 
@@ -80,33 +70,6 @@ extern unsigned max_user_congthresh;
 struct fuse_forget_link {
 	struct fuse_forget_one forget_one;
 	struct fuse_forget_link *next;
-};
-
-/** Translation information for file offsets to DAX window offsets */
-struct fuse_dax_mapping {
-	/* Pointer to inode where this memory range is mapped */
-	struct inode *inode;
-
-	/* Will connect in fc->free_ranges to keep track of free memory */
-	struct list_head list;
-
-	/* For interval tree in file/inode */
-	struct interval_tree_node itn;
-
-	/* Will connect in fc->busy_ranges to keep track busy memory */
-	struct list_head busy_list;
-
-	/** Position in DAX window */
-	u64 window_offset;
-
-	/** Length of mapping, in bytes */
-	loff_t length;
-
-	/* Is this mapping read-only or read-write */
-	bool writable;
-
-	/* reference count when the mapping is used by dax iomap. */
-	refcount_t refcnt;
 };
 
 /** FUSE inode */
@@ -1182,15 +1145,15 @@ void fuse_free_conn(struct fuse_conn *fc);
 void fuse_dax_free_mem_worker(struct work_struct *work);
 void fuse_cleanup_inode_mappings(struct inode *inode);
 
-static inline struct fuse_dax_mapping *
-node_to_dmap(struct interval_tree_node *node)
-{
-	if (!node)
-		return NULL;
+/* dax.c */
 
-	return container_of(node, struct fuse_dax_mapping, itn);
-}
-
+ssize_t fuse_dax_read_iter(struct kiocb *iocb, struct iov_iter *to);
+ssize_t fuse_dax_write_iter(struct kiocb *iocb, struct iov_iter *from);
+int fuse_dax_writepages(struct address_space *mapping,
+			struct writeback_control *wbc);
+int fuse_dax_mmap(struct file *file, struct vm_area_struct *vma);
 int fuse_break_dax_layouts(struct inode *inode, u64 dmap_start, u64 dmap_end);
+int fuse_dax_mem_range_init(struct fuse_conn *fc, struct dax_device *dax_dev);
+void fuse_free_dax_mem_ranges(struct fuse_conn *fc);
 
 #endif /* _FS_FUSE_I_H */

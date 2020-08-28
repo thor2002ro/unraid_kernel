@@ -23,8 +23,6 @@
 #include <linux/exportfs.h>
 #include <linux/posix_acl.h>
 #include <linux/pid_namespace.h>
-#include <linux/dax.h>
-#include <linux/pfn_t.h>
 
 MODULE_AUTHOR("Miklos Szeredi <miklos@szeredi.hu>");
 MODULE_DESCRIPTION("Filesystem in Userspace");
@@ -628,81 +626,6 @@ static void fuse_pqueue_init(struct fuse_pqueue *fpq)
 	fpq->connected = 1;
 }
 
-static void fuse_free_dax_mem_ranges(struct list_head *mem_list)
-{
-	struct fuse_dax_mapping *range, *temp;
-
-	/* Free All allocated elements */
-	list_for_each_entry_safe(range, temp, mem_list, list) {
-		list_del(&range->list);
-		if (!list_empty(&range->busy_list))
-			list_del(&range->busy_list);
-		kfree(range);
-	}
-}
-
-#ifdef CONFIG_FS_DAX
-static int fuse_dax_mem_range_init(struct fuse_conn *fc,
-				   struct dax_device *dax_dev)
-{
-	long nr_pages, nr_ranges;
-	void *kaddr;
-	pfn_t pfn;
-	struct fuse_dax_mapping *range;
-	LIST_HEAD(mem_ranges);
-	phys_addr_t phys_addr;
-	int ret, id;
-	size_t dax_size = -1;
-	unsigned long i;
-
-	id = dax_read_lock();
-	nr_pages = dax_direct_access(dax_dev, 0, PHYS_PFN(dax_size), &kaddr,
-					&pfn);
-	dax_read_unlock(id);
-	if (nr_pages < 0) {
-		pr_debug("dax_direct_access() returned %ld\n", nr_pages);
-		return nr_pages;
-	}
-
-	phys_addr = pfn_t_to_phys(pfn);
-	nr_ranges = nr_pages/FUSE_DAX_PAGES;
-	pr_debug("%s: dax mapped %ld pages. nr_ranges=%ld\n",
-		__func__, nr_pages, nr_ranges);
-
-	for (i = 0; i < nr_ranges; i++) {
-		range = kzalloc(sizeof(struct fuse_dax_mapping), GFP_KERNEL);
-		ret = -ENOMEM;
-		if (!range)
-			goto out_err;
-
-		/* TODO: This offset only works if virtio-fs driver is not
-		 * having some memory hidden at the beginning. This needs
-		 * better handling
-		 */
-		range->window_offset = i * FUSE_DAX_SZ;
-		range->length = FUSE_DAX_SZ;
-		INIT_LIST_HEAD(&range->busy_list);
-		refcount_set(&range->refcnt, 1);
-		list_add_tail(&range->list, &mem_ranges);
-	}
-
-	list_replace_init(&mem_ranges, &fc->free_ranges);
-	fc->nr_free_ranges = nr_ranges;
-	fc->nr_ranges = nr_ranges;
-	return 0;
-out_err:
-	/* Free All allocated elements */
-	fuse_free_dax_mem_ranges(&mem_ranges);
-	return ret;
-}
-#else /* !CONFIG_FS_DAX */
-static inline int fuse_dax_mem_range_init(struct fuse_conn *fc,
-					  struct dax_device *dax_dev)
-{
-	return 0;
-}
-#endif /* CONFIG_FS_DAX */
-
 void fuse_conn_init(struct fuse_conn *fc, struct user_namespace *user_ns,
 		    const struct fuse_iqueue_ops *fiq_ops, void *fiq_priv)
 {
@@ -743,7 +666,7 @@ void fuse_conn_put(struct fuse_conn *fc)
 		struct fuse_iqueue *fiq = &fc->iq;
 
 		if (fc->dax_dev)
-			fuse_free_dax_mem_ranges(&fc->free_ranges);
+			fuse_free_dax_mem_ranges(fc);
 		if (fiq->ops->release)
 			fiq->ops->release(fiq);
 		put_pid_ns(fc->pid_ns);
@@ -1351,7 +1274,7 @@ int fuse_fill_super_common(struct super_block *sb, struct fuse_fs_context *ctx)
 		fuse_dev_free(fud);
  err_free_ranges:
 	if (ctx->dax_dev)
-		fuse_free_dax_mem_ranges(&fc->free_ranges);
+		fuse_free_dax_mem_ranges(fc);
  err:
 	return err;
 }
