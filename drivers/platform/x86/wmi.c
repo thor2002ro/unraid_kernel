@@ -1127,7 +1127,8 @@ static int wmi_create_device(struct device *wmi_bus_dev,
 	wblock->dev.dev.bus = &wmi_bus_type;
 	wblock->dev.dev.parent = wmi_bus_dev;
 
-	dev_set_name(&wblock->dev.dev, "%pUL", &wblock->gblock.guid);
+	dev_set_name(&wblock->dev.dev, "%s-%pUL",
+		     dev_name(&wblock->acpi_device->dev), &wblock->gblock.guid);
 
 	device_initialize(&wblock->dev.dev);
 
