@@ -1,0 +1,11 @@
+.*cmd
+.*.swp
+*.o
+*.ko
+*.mod*
+Module.symvers
+modules.order
+corefreq-gui
+corefreq-cli
+corefreqd
+*.keep
