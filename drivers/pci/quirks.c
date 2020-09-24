@@ -3584,6 +3584,125 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_CAVIUM, 0xa100, quirk_no_bus_reset);
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_YYE, PCI_DEVICE_ID_YYE_MOZART_395S,
 			 quirk_no_bus_reset);
 
+/*
+ * Radeon devices break on bus reset. Oi...
+ * This is *not a real workaround* - disabling bus reset
+ * for your GPU may have unintended consequences.
+ */
+
+	/* AMD Audio Devices from hda_intel driver */
+	/* AMD HDMI */
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x0002, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x1308, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x157a, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x15b3, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x793b, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x7919, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x960f, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x970f, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x9840, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaa00, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaa08, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaa10, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaa18, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaa20, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaa28, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaa30, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaa38, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaa40, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaa48, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaa50, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaa58, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaa60, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaa68, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaa80, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaa88, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaa90, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaa98, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x9902, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaaa0, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaaa8, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaab0, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaac0, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaac8, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaad8, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaae0, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaae8, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaaf0, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xaaf8, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xab00, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xab08, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xab10, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xab18, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xab20, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xab28, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0xab38, quirk_no_bus_reset);
+
+	/* AMD GPU Devices from amdgpu driver */
+	/* Polaris11 */
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x67E0, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x67E3, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x67E8, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x67EB, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x67EF, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x67FF, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x67E1, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x67E7, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x67E9, quirk_no_bus_reset);
+	/* Polaris10 */
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x67C0, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x67C1, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x67C2, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x67C4, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x67C7, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x67D0, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x67DF, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x67C8, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x67C9, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x67CA, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x67CC, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x67CF, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x6FDF, quirk_no_bus_reset);
+	/* Polaris12 */
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x6980, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x6981, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x6985, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x6986, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x6987, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x6995, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x6997, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x699F, quirk_no_bus_reset);
+	/* Vega 10 */
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x6860, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x6861, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x6862, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x6863, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x6864, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x6867, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x6868, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x6869, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x686a, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x686b, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x686c, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x686d, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x686e, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x686f, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x687f, quirk_no_bus_reset);
+	/* Vega 12 */
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x69A0, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x69A1, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x69A2, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x69A3, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x69AF, quirk_no_bus_reset);
+	/* Vega 20 */
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x66A0, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x66A1, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x66A2, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x66A3, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x66A4, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x66A7, quirk_no_bus_reset);
+	DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, 0x66AF, quirk_no_bus_reset);
+
 static void quirk_no_pm_reset(struct pci_dev *dev)
 {
 	/*
