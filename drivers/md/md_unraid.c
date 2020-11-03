@@ -495,51 +495,126 @@ enum {
 #define ATA_STAT_DRQ            (1 << 3)
 #define ATA_STAT_ERR            (1 << 0)
 
-int sgio_drive_cmd(struct block_device *bdev, unsigned char ata_op)
+// int sgio_drive_cmd(struct block_device *bdev, unsigned char ata_op)
+// {
+// 	unsigned char cdb[SG_ATA_16_LEN];
+// 	unsigned char sb[32], status;
+// 	sg_io_hdr_t sghdr;
+// 	int ret;
+	
+// 	memset(&cdb, 0, sizeof(cdb));
+// 	cdb[0] = SG_ATA_16;
+// 	cdb[1] = SG_ATA_PROTO_NON_DATA;
+// 	cdb[2] = SG_CDB2_CHECK_COND;
+// 	cdb[13] = ATA_USING_LBA;
+// 	cdb[14] = ata_op;
+
+// 	memset(&sb, 0, sizeof(sb));
+
+// 	memset(&sghdr, 0, sizeof(sg_io_hdr_t));
+// 	sghdr.interface_id = 'S';
+// 	sghdr.mx_sb_len = sizeof(sb);
+// 	sghdr.dxfer_direction = SG_DXFER_NONE;
+// 	sghdr.dxfer_len = 0;
+// 	sghdr.dxferp = NULL;
+// 	sghdr.cmd_len = SG_ATA_16_LEN;
+// 	sghdr.cmdp = cdb;
+// 	sghdr.sbp = sb;
+// 	sghdr.timeout = 30 * 1000; /* 30 sec */
+	
+// 	ret = ioctl_by_bdev(bdev, SG_IO, (unsigned long)&sghdr);
+// 	if (ret)
+// 		return ret;
+
+// 	if (sghdr.status && (sghdr.status != SG_CHECK_CONDITION))
+// 		return -EBADE;
+	
+// 	if (sghdr.host_status)
+// 		return -EBADE;
+	
+// 	if (sghdr.driver_status && (sghdr.driver_status != SG_DRIVER_SENSE))
+// 		return -EBADE;
+
+// 	status = sb[8 + 13];
+// 	if (status & (ATA_STAT_ERR | ATA_STAT_DRQ))
+// 		return -EIO;
+	
+// 	return 0;
+// }
+
+static char *envp[] = {
+        "HOME=/",
+        "TERM=linux",
+        "PATH=/sbin:/bin:/usr/sbin:/usr/bin:/lib64:/usr/lib64", NULL};
+
+static int disk_hdparm(struct block_device *bdev, unsigned char ata_op)
 {
-	unsigned char cdb[SG_ATA_16_LEN];
-	unsigned char sb[32], status;
-	sg_io_hdr_t sghdr;
-	int ret;
+	int err;
+	char *hddparm_arg;
+	//char userprog[] = "/usr/bin/logger";
+	char userprog[] = "/sbin/hdparm";
+	char prefix[10] = "";
+	char *argv[] = { NULL, NULL, NULL, NULL };
+	char name[BDEVNAME_SIZE];
 	
-	memset(&cdb, 0, sizeof(cdb));
-	cdb[0] = SG_ATA_16;
-	cdb[1] = SG_ATA_PROTO_NON_DATA;
-	cdb[2] = SG_CDB2_CHECK_COND;
-	cdb[13] = ATA_USING_LBA;
-	cdb[14] = ata_op;
+	if (ata_op == ATA_OP_SETIDLE1) {
+	   hddparm_arg = "--idle-immediate";
+	}
+	else if(ata_op == ATA_OP_STANDBYNOW1) {
+	   hddparm_arg = "-y";
+	}
+	else {
+	   // statement(s)
+	}
+	
+	snprintf(prefix, sizeof(prefix), "/dev/%s", bdevname(bdev, name));
 
-	memset(&sb, 0, sizeof(sb));
+	argv[0] = userprog;
+	argv[1] = hddparm_arg;
+	argv[2] = prefix;
 
-	memset(&sghdr, 0, sizeof(sg_io_hdr_t));
-	sghdr.interface_id = 'S';
-	sghdr.mx_sb_len = sizeof(sb);
-	sghdr.dxfer_direction = SG_DXFER_NONE;
-	sghdr.dxfer_len = 0;
-	sghdr.dxferp = NULL;
-	sghdr.cmd_len = SG_ATA_16_LEN;
-	sghdr.cmdp = cdb;
-	sghdr.sbp = sb;
-	sghdr.timeout = 30 * 1000; /* 30 sec */
-	
-	ret = ioctl_by_bdev(bdev, SG_IO, (unsigned long)&sghdr);
-	if (ret)
-		return ret;
 
-	if (sghdr.status && (sghdr.status != SG_CHECK_CONDITION))
-		return -EBADE;
-	
-	if (sghdr.host_status)
-		return -EBADE;
-	
-	if (sghdr.driver_status && (sghdr.driver_status != SG_DRIVER_SENSE))
-		return -EBADE;
+	printk("-----spindown helper-----");
+	printk("arg0: %s arg1: %s arg2: %s", argv[0], argv[1], argv[2]);
 
-	status = sb[8 + 13];
-	if (status & (ATA_STAT_ERR | ATA_STAT_DRQ))
-		return -EIO;
+	err = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
 	
-	return 0;
+  return err;
+}
+
+static int disk_sg_start(struct block_device *bdev, unsigned char ata_op)
+{
+	int err;
+	char *hddparm_arg;
+	//char userprog[] = "/usr/bin/logger";
+	char userprog[] = "/usr/bin/sg_start";
+	char prefix[10] = "";
+	char *argv[] = { NULL, NULL, NULL, NULL };
+	char name[BDEVNAME_SIZE];
+
+	if (ata_op == ATA_OP_SETIDLE1) {
+	   hddparm_arg = "--start";
+	}
+	else if(ata_op == ATA_OP_STANDBYNOW1) {
+	   hddparm_arg = "--stop";
+	}
+	else {
+	   // statement(s)
+	}
+	
+	snprintf(prefix, sizeof(prefix), "/dev/%s", bdevname(bdev, name));
+
+	argv[0] = userprog;
+	argv[1] = hddparm_arg;
+	argv[2] = prefix;
+
+
+	printk("-----spindown helper-----");
+	printk("arg0: %s arg1: %s arg2: %s", argv[0], argv[1], argv[2]);
+
+	err = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
+	
+  return err;
 }
 
 /* Simplified: only supports non-data transfer operations (e.g., spinup, spindown)
@@ -556,14 +631,15 @@ static int do_drive_cmd(mdk_rdev_t *rdev, int unit, unsigned char ata_op)
 	}
 	
 	/* try SG_IO first */
-	err = sgio_drive_cmd(bdev, ata_op);
-	if (err == -EINVAL || err == -ENODEV || err == -EBADE) {
+	//err = sgio_drive_cmd(bdev, ata_op);
+	//if (err == -EINVAL || err == -ENODEV || err == -EBADE) {
 		/* try legacy ioctl */
-		unsigned char args[4] = {0,0,0,0};
-		args[0] = ata_op;
+		//unsigned char args[4] = {0,0,0,0};
+		//args[0] = ata_op;
+	err = disk_hdparm(bdev, ata_op);
 
-		err = ioctl_by_bdev(bdev, HDIO_DRIVE_CMD, (unsigned long)&args);
-	}
+		//err = ioctl_by_bdev(bdev, HDIO_DRIVE_CMD, (unsigned long)&args);
+	//}
 	if (err)
 		printk("md: do_drive_cmd: disk%d: ATA_OP %x ioctl error: %d\n", unit, ata_op, err);
 
