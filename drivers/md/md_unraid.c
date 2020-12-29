@@ -483,65 +483,6 @@ enum {
 	ATA_OP_FLUSHCACHE               = 0xe7,
 };
 
-/* Following code based on hdparm.c, sgio.c and sgio.h */
-#include <scsi/sg.h>
-#define SG_ATA_16               0x85
-#define SG_ATA_16_LEN           16
-#define SG_ATA_PROTO_NON_DATA   (3 << 1)
-#define SG_CDB2_CHECK_COND      (1 << 5)
-#define SG_CHECK_CONDITION      0x02
-#define SG_DRIVER_SENSE         0x08
-#define ATA_USING_LBA           (1 << 6)
-#define ATA_STAT_DRQ            (1 << 3)
-#define ATA_STAT_ERR            (1 << 0)
-
-// int sgio_drive_cmd(struct block_device *bdev, unsigned char ata_op)
-// {
-// 	unsigned char cdb[SG_ATA_16_LEN];
-// 	unsigned char sb[32], status;
-// 	sg_io_hdr_t sghdr;
-// 	int ret;
-	
-// 	memset(&cdb, 0, sizeof(cdb));
-// 	cdb[0] = SG_ATA_16;
-// 	cdb[1] = SG_ATA_PROTO_NON_DATA;
-// 	cdb[2] = SG_CDB2_CHECK_COND;
-// 	cdb[13] = ATA_USING_LBA;
-// 	cdb[14] = ata_op;
-
-// 	memset(&sb, 0, sizeof(sb));
-
-// 	memset(&sghdr, 0, sizeof(sg_io_hdr_t));
-// 	sghdr.interface_id = 'S';
-// 	sghdr.mx_sb_len = sizeof(sb);
-// 	sghdr.dxfer_direction = SG_DXFER_NONE;
-// 	sghdr.dxfer_len = 0;
-// 	sghdr.dxferp = NULL;
-// 	sghdr.cmd_len = SG_ATA_16_LEN;
-// 	sghdr.cmdp = cdb;
-// 	sghdr.sbp = sb;
-// 	sghdr.timeout = 30 * 1000; /* 30 sec */
-	
-// 	ret = ioctl_by_bdev(bdev, SG_IO, (unsigned long)&sghdr);
-// 	if (ret)
-// 		return ret;
-
-// 	if (sghdr.status && (sghdr.status != SG_CHECK_CONDITION))
-// 		return -EBADE;
-	
-// 	if (sghdr.host_status)
-// 		return -EBADE;
-	
-// 	if (sghdr.driver_status && (sghdr.driver_status != SG_DRIVER_SENSE))
-// 		return -EBADE;
-
-// 	status = sb[8 + 13];
-// 	if (status & (ATA_STAT_ERR | ATA_STAT_DRQ))
-// 		return -EIO;
-	
-// 	return 0;
-// }
-
 static char *envp[] = {
         "HOME=/",
         "TERM=linux",
@@ -582,41 +523,6 @@ static int disk_hdparm(struct block_device *bdev, unsigned char ata_op)
   return err;
 }
 
-static int disk_sg_start(struct block_device *bdev, unsigned char ata_op)
-{
-	int err;
-	char *hddparm_arg;
-	//char userprog[] = "/usr/bin/logger";
-	char userprog[] = "/usr/bin/sg_start";
-	char prefix[10] = "";
-	char *argv[] = { NULL, NULL, NULL, NULL };
-	char name[BDEVNAME_SIZE];
-
-	if (ata_op == ATA_OP_SETIDLE1) {
-	   hddparm_arg = "--start";
-	}
-	else if(ata_op == ATA_OP_STANDBYNOW1) {
-	   hddparm_arg = "--stop";
-	}
-	else {
-	   // statement(s)
-	}
-	
-	snprintf(prefix, sizeof(prefix), "/dev/%s", bdevname(bdev, name));
-
-	argv[0] = userprog;
-	argv[1] = hddparm_arg;
-	argv[2] = prefix;
-
-
-	printk("-----spindown helper-----");
-	printk("arg0: %s arg1: %s arg2: %s", argv[0], argv[1], argv[2]);
-
-	err = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
-	
-  return err;
-}
-
 /* Simplified: only supports non-data transfer operations (e.g., spinup, spindown)
  */
 static int do_drive_cmd(mdk_rdev_t *rdev, int unit, unsigned char ata_op)
@@ -630,16 +536,8 @@ static int do_drive_cmd(mdk_rdev_t *rdev, int unit, unsigned char ata_op)
 		return err;
 	}
 	
-	/* try SG_IO first */
-	//err = sgio_drive_cmd(bdev, ata_op);
-	//if (err == -EINVAL || err == -ENODEV || err == -EBADE) {
-		/* try legacy ioctl */
-		//unsigned char args[4] = {0,0,0,0};
-		//args[0] = ata_op;
 	err = disk_hdparm(bdev, ata_op);
 
-		//err = ioctl_by_bdev(bdev, HDIO_DRIVE_CMD, (unsigned long)&args);
-	//}
 	if (err)
 		printk("md: do_drive_cmd: disk%d: ATA_OP %x ioctl error: %d\n", unit, ata_op, err);
 
@@ -929,8 +827,6 @@ static int import_slot(dev_t array_dev, int slot, char *name,
 					rdev->status = DISK_NP_DSBL;
 					mark_disk_disabled(disk);
 					mddev->num_disabled++;
-					/* record (cleared) disk information */
-					record_disk_info(disk, rdev);
 				}
 			}
 			else if (!same_disk_info(disk, rdev, 0)) {
@@ -941,8 +837,6 @@ static int import_slot(dev_t array_dev, int slot, char *name,
 				}
 				else {
 					rdev->status = DISK_INVALID;
-					/* record (new) disk information */
-					record_disk_info(disk, rdev);
 				}
 			}
 			else if (!disk_valid(disk)) {
@@ -1063,49 +957,6 @@ static int import_slot(dev_t array_dev, int slot, char *name,
 	return 0;
 }
 
-/****************************************************************************/
-/* Array run/stop. */
-
-static int md_open(struct block_device *bdev, fmode_t mode)
-
-{
-	mddev_t *mddev = bdev->bd_disk->private_data;
-
-	if (!mddev) {
-		printk("md_open: no mddev\n");
-		return -ENODEV;
-	}
-
-	/* increment the usage count */
-	atomic_inc(&mddev->active);
-	return 0;
-}
-
-static void md_release(struct gendisk *gd, fmode_t mode)
-{
-	mddev_t *mddev = gd->private_data;
-
-	if (!mddev) {
-		printk("md_release: no mddev\n");
-		return;
-	}
-
-	/* decrement the usage count */
-	atomic_dec(&mddev->active);
-}
-
-static struct block_device_operations md_fops =
-{
-	.owner          = THIS_MODULE,
-	.submit_bio 	= md_submit_bio,
-	.open           = md_open,
-	.release        = md_release,
-//	.ioctl          = md_ioctl,
-//	.getgeo         = md_getgeo,
-//	.media_changed  = md_media_changed,
-//	.revalidate_disk= md_revalidate,
-};
-
 /* called on read error, with device_lock held */
 void md_read_error(mddev_t *mddev, int disk_number, sector_t sector)
 {
@@ -1171,14 +1022,12 @@ int md_write_error(mddev_t *mddev, int disk_number, sector_t sector)
 	return update_sb;
 }
 
-blk_qc_t md_submit_bio(struct bio *bi)
+static blk_qc_t md_submit_bio(struct bio *bi)
 {
 	mddev_t *mddev = bi->bi_disk->private_data;
 	int unit = bi->bi_disk->first_minor;
 	mdp_disk_t *disk = &mddev->sb.disks[unit];
 	unsigned long spinup_group;
-
-	blk_queue_split(&bi);
 
 	/* verify this unit is active */
 	if (!disk_active(disk)) {
@@ -1186,6 +1035,8 @@ blk_qc_t md_submit_bio(struct bio *bi)
 		return BLK_QC_T_NONE;
 	}
 	
+	blk_queue_split(&bi);
+
 	/* check if we need to spinup other disks in this disk's spinup group */
 	spinup_group = mddev->rdev[unit].spinup_group;
 	if (spinup_group) {
@@ -1209,6 +1060,46 @@ blk_qc_t md_submit_bio(struct bio *bi)
 
 	return unraid_make_request(mddev, unit, bi);
 }
+
+static int md_open(struct block_device *bdev, fmode_t mode)
+
+{
+	mddev_t *mddev = bdev->bd_disk->private_data;
+
+	if (!mddev) {
+		printk("md_open: no mddev\n");
+		return -ENODEV;
+	}
+
+	/* increment the usage count */
+	atomic_inc(&mddev->active);
+	return 0;
+}
+
+static void md_release(struct gendisk *gd, fmode_t mode)
+{
+	mddev_t *mddev = gd->private_data;
+
+	if (!mddev) {
+		printk("md_release: no mddev\n");
+		return;
+	}
+
+	/* decrement the usage count */
+	atomic_dec(&mddev->active);
+}
+
+static struct block_device_operations md_fops =
+{
+	.owner          = THIS_MODULE,
+	.submit_bio 	= md_submit_bio,
+	.open           = md_open,
+	.release        = md_release,
+//	.ioctl          = md_ioctl,
+//	.getgeo         = md_getgeo,
+//	.media_changed  = md_media_changed,
+//	.revalidate_disk= md_revalidate,
+};
 
 static int do_run(mddev_t *mddev)
 {
@@ -1261,7 +1152,6 @@ static int do_run(mddev_t *mddev)
 			/* alloc our block queue */
 			gd->queue = blk_alloc_queue(NUMA_NO_NODE);
 			gd->queue->queuedata = mddev;
-
 			blk_queue_io_min(gd->queue, PAGE_SIZE);
 			blk_queue_io_opt(gd->queue, 128*1024);
 			gd->queue->backing_dev_info->ra_pages = (128*1024)/PAGE_SIZE;
@@ -1440,6 +1330,7 @@ static void md_do_recovery(mddev_t *mddev, unsigned long unused)
 	sb->sync_exit = 0;
 	md_update_sb(mddev);
 
+        /* execute resync */
 	sb->sync_exit = md_do_sync(mddev);
 	sb->stime2 = get_seconds();
 
@@ -1487,6 +1378,8 @@ static int start_array(dev_t array_dev, char *state)
 	mddev_t *mddev = dev_to_mddev(array_dev);
 	mdp_super_t *sb;
 	int err;
+
+        int update_sb = 0;
 
 	if (mddev->private) {
 		printk("md: start_array: already started\n");
@@ -1572,6 +1465,8 @@ static int start_array(dev_t array_dev, char *state)
 			if (disk_active(disk) && !is_parity_idx(i))
 				sb->num_disks = i+2;
 		}
+
+                update_sb++;
 	}
 	else
 	if (mddev->state == DISABLE_DISK) {
@@ -1595,6 +1490,8 @@ static int start_array(dev_t array_dev, char *state)
 				record_disk_info(disk, rdev);
 
 				mddev->num_missing--;
+
+                                update_sb++;
 			}
 		}
 	}
@@ -1636,6 +1533,8 @@ static int start_array(dev_t array_dev, char *state)
 				disk->size = rdev->size;
 
 				mddev->num_wrong--;
+
+                                update_sb++;
 			}
 			else
 			if (rdev->status == DISK_DSBL_NEW) {
@@ -1651,6 +1550,8 @@ static int start_array(dev_t array_dev, char *state)
 				disk->size = rdev->size;
 
 				mddev->num_replaced--;
+
+                                update_sb++;
 			}
 		}
 	}
@@ -1663,9 +1564,11 @@ static int start_array(dev_t array_dev, char *state)
 			mdp_disk_t *disk = &sb->disks[i];
 			mdk_rdev_t *rdev = &mddev->rdev[i];
 
-			if (rdev->status == DISK_NP_DSBL) {
+                        if ((rdev->status == DISK_NP_DSBL) && !same_disk_info(disk, rdev, 1)) {
 				/* record (clear) disk information */
 				record_disk_info(disk, rdev);
+
+                                update_sb++;
 			}
 		}
 	}
@@ -1692,6 +1595,8 @@ static int start_array(dev_t array_dev, char *state)
 				/* record disk information */
 				record_disk_info(disk, rdev);
 				disk->size = rdev->size;
+
+                                update_sb++;
 			}
 		}
 	}
@@ -1703,11 +1608,12 @@ static int start_array(dev_t array_dev, char *state)
 		return err;
 	}
 
-	/* commit the superblock */
-	mark_sb_unclean(sb);
-	md_update_sb(mddev);
-
 	mddev->state = STARTED;
+
+	/* commit the superblock */
+        if (update_sb)
+                md_update_sb(mddev);
+
 	return 0;
 }
 
@@ -1741,12 +1647,6 @@ static int stop_array(dev_t array_dev, int notifier)
 	do_stop(mddev);
 	mddev->state = STOPPED;
 
-	/* since array is cleanly stopped, no need to check parity upon next start */
-	if (!notifier) {
-		mark_sb_clean(&mddev->sb);
-		md_update_sb(mddev);
-	}
-
 	return 0;
 }
 
@@ -1756,7 +1656,7 @@ static int stop_array(dev_t array_dev, int notifier)
  * "CORRECT", or
  * "NOCORRECT".
  */
-static int check_array(dev_t array_dev, char *option)
+static int check_array(dev_t array_dev, char *option, unsigned long long offset)
 {
 	mddev_t *mddev = dev_to_mddev(array_dev);
 	int recovery_option, recovery_resume;
@@ -1782,6 +1682,11 @@ static int check_array(dev_t array_dev, char *option)
 		printk("md: check_array: invalid option: %s\n", option);
 		return -EINVAL;
 	}
+        /* validate offset */
+        if (offset >= (mddev->recovery_size*2) || (offset%8)) {
+		printk("md: check_array: invalid offset %llu\n", offset);
+		return -EINVAL;
+	}
 
 	/* if recovery already running, just exit */
 	if (mddev->recovery_running)
@@ -1794,7 +1699,7 @@ static int check_array(dev_t array_dev, char *option)
 	}
 	else {
 		mddev->recovery_option = recovery_option;
-		mddev->curr_resync = 0;
+                mddev->curr_resync = offset;
 		mddev->sb.sync_errs = 0;
 	}
 
@@ -1894,20 +1799,6 @@ static int set_spinup_group_array(dev_t array_dev, int slot, unsigned long spinu
 	mddev_t *mddev = dev_to_mddev(array_dev);
 
 	mddev->rdev[slot].spinup_group = spinup_group;
-	return 0;
-}
-
-/* Clear array statistics.
- */
-static int clear_array(dev_t array_dev)
-{
-	mddev_t *mddev = dev_to_mddev(array_dev);
-	int i;
-
-	for (i = 0; i < MD_SB_DISKS; i++) {
-		mddev->rdev[i].errors = 0;
-	}
-
 	return 0;
 }
 
@@ -2099,8 +1990,6 @@ static void status_disk(struct seq_file *seq, mdp_disk_t *disk, mdk_rdev_t *rdev
 	seq_printf(seq, "rdevId.%d=%s\n", number, rdev->id);
 
 	seq_printf(seq, "rdevNumErrors.%d=%lu\n", number, rdev->errors);
-	seq_printf(seq, "rdevLastIO.%d=%lu\n", number, rdev->last_io);
-	seq_printf(seq, "rdevSpinupGroup.%d=%lu\n", number, rdev->spinup_group);
 }
 	
 static int md_status(struct seq_file *seq, dev_t array_dev)
@@ -2358,11 +2247,16 @@ static ssize_t md_proc_write(struct file *file, const char *buffer,
 	if (!strcmp("check", token)){
 		dev_t array_dev = MKDEV(MAJOR_NR,0);
 		char *option = "CORRECT";
+		unsigned long long offset = 0;
 		
-		if ((token = get_token(&bufp, delim)) != NULL)
+		if ((token = get_token(&bufp, delim)) != NULL) {
 			option = token;
+                        if ((token = get_token(&bufp, delim)) != NULL) {
+                                offset = simple_strtoull(token, &temp, 10);
+                        }
+                }
 		
-		result = check_array(array_dev, option);
+		result = check_array(array_dev, option, offset);
 	}
 	else
 	if (!strcmp("nocheck", token)){
@@ -2383,12 +2277,6 @@ static ssize_t md_proc_write(struct file *file, const char *buffer,
 			label = token;
 		
 		result = label_array(array_dev, label);
-	}
-	else
-	if (!strcmp("clear", token)){
-		dev_t array_dev = MKDEV(MAJOR_NR,0);
-		
-		result = clear_array(array_dev);
 	}
 	else
 	if (!strcmp("dump", token)) {
