@@ -301,11 +301,6 @@ extern void md_sync_done(mddev_t *mddev, sector_t sector, int count);
 
 extern struct workqueue_struct *md_wq; 
 
-extern blk_qc_t md_submit_bio(struct bio *bi);
-
-extern int ioctl_by_bdev(struct block_device *, unsigned, unsigned long);
-
-
 /****************************************************************************/
 /* unraid */
 
