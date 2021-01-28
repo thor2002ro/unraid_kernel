@@ -69,6 +69,14 @@ enum cpufreq_value {
 	SCALING_MIN_FREQ,
 	SCALING_MAX_FREQ,
 	STATS_NUM_TRANSITIONS,
+	AMD_PSTATE_HIGHEST_PERF,
+	AMD_PSTATE_NOMINAL_PERF,
+	AMD_PSTATE_LOWEST_NONLINEAR_PERF,
+	AMD_PSTATE_LOWEST_PERF,
+	AMD_PSTATE_MAX_FREQ,
+	AMD_PSTATE_NOMINAL_FREQ,
+	AMD_PSTATE_LOWEST_NONLINEAR_FREQ,
+	AMD_PSTATE_MIN_FREQ,
 	MAX_CPUFREQ_VALUE_READ_FILES
 };
 
@@ -80,7 +88,15 @@ static const char *cpufreq_value_files[MAX_CPUFREQ_VALUE_READ_FILES] = {
 	[SCALING_CUR_FREQ] = "scaling_cur_freq",
 	[SCALING_MIN_FREQ] = "scaling_min_freq",
 	[SCALING_MAX_FREQ] = "scaling_max_freq",
-	[STATS_NUM_TRANSITIONS] = "stats/total_trans"
+	[STATS_NUM_TRANSITIONS] = "stats/total_trans",
+	[AMD_PSTATE_HIGHEST_PERF] = "amd_pstate_highest_perf",
+	[AMD_PSTATE_NOMINAL_PERF] = "amd_pstate_nominal_perf",
+	[AMD_PSTATE_LOWEST_NONLINEAR_PERF] = "amd_pstate_lowest_nonlinear_perf",
+	[AMD_PSTATE_LOWEST_PERF] = "amd_pstate_lowest_perf",
+	[AMD_PSTATE_MAX_FREQ] = "amd_pstate_max_freq",
+	[AMD_PSTATE_NOMINAL_FREQ] = "amd_pstate_nominal_freq",
+	[AMD_PSTATE_LOWEST_NONLINEAR_FREQ] = "amd_pstate_lowest_nonlinear_freq",
+	[AMD_PSTATE_MIN_FREQ] = "amd_pstate_min_freq"
 };
 
 
@@ -773,4 +789,30 @@ void cpufreq_put_stats(struct cpufreq_stats *any)
 unsigned long cpufreq_get_transitions(unsigned int cpu)
 {
 	return sysfs_cpufreq_get_one_value(cpu, STATS_NUM_TRANSITIONS);
+}
+
+int amd_pstate_boost_support(unsigned int cpu)
+{
+	unsigned int highest_perf, nominal_perf;
+
+	highest_perf = sysfs_cpufreq_get_one_value(cpu, AMD_PSTATE_HIGHEST_PERF);
+	nominal_perf = sysfs_cpufreq_get_one_value(cpu, AMD_PSTATE_NOMINAL_PERF);
+
+	return highest_perf > nominal_perf ? 1 : 0;
+}
+
+int amd_pstate_boost_enabled(unsigned int cpu)
+{
+	unsigned int cpuinfo_max, amd_pstate_max;
+
+	cpuinfo_max = sysfs_cpufreq_get_one_value(cpu, CPUINFO_MAX_FREQ);
+	amd_pstate_max = sysfs_cpufreq_get_one_value(cpu, AMD_PSTATE_MAX_FREQ);
+
+	return cpuinfo_max == amd_pstate_max ? 1 : 0;
+}
+
+unsigned amd_pstate_get_data(unsigned int cpu, enum amd_pstate_param param)
+{
+	return sysfs_cpufreq_get_one_value(cpu,
+					   param + AMD_PSTATE_HIGHEST_PERF);
 }

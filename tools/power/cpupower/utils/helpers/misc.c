@@ -10,6 +10,7 @@
 #if defined(__i386__) || defined(__x86_64__)
 
 #include "cpupower_intern.h"
+#include "cpufreq.h"
 
 #define MSR_AMD_HWCR	0xc0010015
 
@@ -39,6 +40,12 @@ int cpufreq_has_boost_support(unsigned int cpu, int *support, int *active,
 			if (ret)
 				return ret;
 		}
+	} if ((cpupower_cpu_info.caps & CPUPOWER_CAP_AMD_PSTATE) &&
+	      amd_pstate_boost_support(cpu)) {
+		*support = 1;
+
+		if (amd_pstate_boost_enabled(cpu))
+			*active = 1;
 	} else if (cpupower_cpu_info.caps & CPUPOWER_CAP_INTEL_IDA)
 		*support = *active = 1;
 	return 0;
@@ -81,6 +88,26 @@ int cpupower_intel_set_perf_bias(unsigned int cpu, unsigned int val)
 		return -1;
 
 	return 0;
+}
+
+unsigned long cpupower_amd_pstate_enabled(unsigned int cpu)
+{
+	char linebuf[MAX_LINE_LEN];
+	char path[SYSFS_PATH_MAX];
+	unsigned long val;
+	char *endp;
+
+	snprintf(path, sizeof(path),
+		 PATH_TO_CPU "cpu%u/cpufreq/is_amd_pstate_enabled", cpu);
+
+	if (cpupower_read_sysfs(path, linebuf, MAX_LINE_LEN) == 0)
+		return 0;
+
+	val = strtoul(linebuf, &endp, 0);
+	if (endp == linebuf || errno == ERANGE)
+		return 0;
+
+	return val;
 }
 
 #endif /* #if defined(__i386__) || defined(__x86_64__) */

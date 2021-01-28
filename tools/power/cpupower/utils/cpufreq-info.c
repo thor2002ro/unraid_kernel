@@ -183,9 +183,30 @@ static int get_boost_mode_x86(unsigned int cpu)
 	printf(_("    Supported: %s\n"), support ? _("yes") : _("no"));
 	printf(_("    Active: %s\n"), active ? _("yes") : _("no"));
 
-	if ((cpupower_cpu_info.vendor == X86_VENDOR_AMD &&
-	     cpupower_cpu_info.family >= 0x10) ||
-	     cpupower_cpu_info.vendor == X86_VENDOR_HYGON) {
+	if (cpupower_cpu_info.vendor == X86_VENDOR_AMD &&
+	    cpupower_cpu_info.caps & CPUPOWER_CAP_AMD_PSTATE) {
+		printf(_("    AMD PSTATE Highest Performance: %u. Maximum Frequency: "),
+		       amd_pstate_get_data(cpu, HIGHEST_PERF));
+		print_speed(amd_pstate_get_data(cpu, MAX_FREQ));
+		printf(".\n");
+
+		printf(_("    AMD PSTATE Nominal Performance: %u. Nominal Frequency: "),
+		       amd_pstate_get_data(cpu, NOMINAL_PERF));
+		print_speed(amd_pstate_get_data(cpu, NOMINAL_FREQ));
+		printf(".\n");
+
+		printf(_("    AMD PSTATE Lowest Non-linear Performance: %u. Lowest Non-linear Frequency: "),
+		       amd_pstate_get_data(cpu, LOWEST_NONLINEAR_PERF));
+		print_speed(amd_pstate_get_data(cpu, LOWEST_NONLINEAR_FREQ));
+		printf(".\n");
+
+		printf(_("    AMD PSTATE Lowest Performance: %u. Lowest Frequency: "),
+		       amd_pstate_get_data(cpu, LOWEST_PERF));
+		print_speed(amd_pstate_get_data(cpu, MIN_FREQ));
+		printf(".\n");
+	} else if ((cpupower_cpu_info.vendor == X86_VENDOR_AMD &&
+		    cpupower_cpu_info.family >= 0x10) ||
+		   cpupower_cpu_info.vendor == X86_VENDOR_HYGON) {
 		ret = decode_pstates(cpu, b_states, pstates, &pstate_no);
 		if (ret)
 			return ret;
