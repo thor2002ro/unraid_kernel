@@ -1632,7 +1632,7 @@ static void handle_stripe(struct stripe_head *sh)
 		submit_bio_noacct(bi);
 		
 		/* record I/O time */
-		rdev->last_io = get_seconds();
+		rdev->last_io = ktime_get_real_seconds();
 	}
 }
 
@@ -1676,7 +1676,7 @@ static void submit_flush_bio(flush_stripe_t *flush_stripe, struct bio *bi, mdk_r
 	bi->bi_opf = REQ_OP_WRITE | REQ_PREFLUSH;
 	atomic_inc(&flush_stripe->flush_pending);
 	submit_bio(bi);
-	rdev->last_io = get_seconds();
+	rdev->last_io = ktime_get_real_seconds();
 }
 
 static void handle_flush(mddev_t *mddev, int unit, struct bio *bi)
@@ -1741,8 +1741,8 @@ blk_qc_t unraid_make_request(mddev_t *mddev, int unit, struct bio *bi)
 	
 	/* update statistics */
 	part_stat_lock();
-	part_stat_inc(&mddev->gendisk[unit]->part0, ios[rw]);
-	part_stat_add(&mddev->gendisk[unit]->part0, sectors[rw], bio_sectors(bi));
+	part_stat_inc(mddev->gendisk[unit]->part0, ios[rw]);
+	part_stat_add(mddev->gendisk[unit]->part0, sectors[rw], bio_sectors(bi));
 	part_stat_unlock();
 	
 	stripe_sector = STRIPE_SECTOR(bi->bi_iter.bi_sector);
