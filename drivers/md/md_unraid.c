@@ -237,7 +237,7 @@ static void init_sb(mdp_super_t *sb)
 	sb->minor_version = MD_MINOR_VERSION;
 	sb->patch_version = MD_PATCHLEVEL_VERSION;
 
-	sb->ctime = get_seconds();
+	sb->ctime = ktime_get_real_seconds();
 }
 	
 /* calculate the superblock checksum */
@@ -371,7 +371,7 @@ int md_update_sb(mddev_t *mddev)
 	mutex_lock(&mddev->sb_sem);
 
 	/* record generation info */
-	mddev->sb.utime = get_seconds();
+	mddev->sb.utime = ktime_get_real_seconds();
 	mddev->sb.events++;
 
 	/* calculate checksum */
@@ -924,8 +924,8 @@ int md_write_error(mddev_t *mddev, int disk_number, sector_t sector)
 
 static blk_qc_t md_submit_bio(struct bio *bi)
 {
-        mddev_t *mddev = bi->bi_disk->private_data;
-        int unit = bi->bi_disk->first_minor;
+        mddev_t *mddev = bi->bi_bdev->bd_disk->private_data;
+        int unit = bi->bi_bdev->bd_disk->first_minor;
         mdp_disk_t *disk = &mddev->sb.disks[unit];
 
         /* verify this unit is active */
@@ -1204,14 +1204,14 @@ static void md_do_recovery(mddev_t *mddev, unsigned long unused)
 	mddev->recovery_running = mddev->recovery_size*2; /* count of sectors */
 
         /* record start of resync */
-        sb->stime = get_seconds();
+        sb->stime = ktime_get_real_seconds();
         sb->stime2 = 0;
         sb->sync_exit = 0;
 	md_update_sb(mddev);
 
         /* execute resync */
 	sb->sync_exit = md_do_sync(mddev);
-        sb->stime2 = get_seconds();
+        sb->stime2 = ktime_get_real_seconds();
 
 	if (sb->sync_exit == 0) {
                 int i;
