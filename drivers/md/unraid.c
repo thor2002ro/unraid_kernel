@@ -1737,8 +1737,8 @@ blk_qc_t unraid_make_request(mddev_t *mddev, int unit, struct bio *bi)
 
 	/* update statistics */
 		part_stat_lock();
-		part_stat_inc(&mddev->gendisk[unit]->part0, ios[rw]);
-		part_stat_add(&mddev->gendisk[unit]->part0, sectors[rw], bio_sectors(bi));
+		part_stat_inc(mddev->gendisk[unit]->part0, ios[rw]);
+		part_stat_add(mddev->gendisk[unit]->part0, sectors[rw], bio_sectors(bi));
 		part_stat_unlock();
 
 	stripe_sector = STRIPE_SECTOR(bi->bi_iter.bi_sector);
