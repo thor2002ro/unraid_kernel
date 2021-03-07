@@ -237,7 +237,7 @@ static void init_sb(mdp_super_t *sb)
 	sb->minor_version = MD_MINOR_VERSION;
 	sb->patch_version = MD_PATCHLEVEL_VERSION;
 
-	sb->ctime = get_seconds();
+	sb->ctime = ktime_get_real_seconds();
 }
 	
 /* calculate the superblock checksum */
@@ -371,7 +371,7 @@ int md_update_sb(mddev_t *mddev)
 	mutex_lock(&mddev->sb_sem);
 
 	/* record generation info */
-	mddev->sb.utime = get_seconds();
+	mddev->sb.utime = ktime_get_real_seconds();
 	mddev->sb.events++;
 
 	/* calculate checksum */
@@ -464,7 +464,7 @@ static int import_device(mdk_rdev_t *rdev, char *name,
 
 	/* disk is present, set last_io time as "now" and create spinup thread */
 	rdev->status = DISK_OK;
-	rdev->last_io = get_seconds();
+	rdev->last_io = ktime_get_real_seconds();
 	rdev->spinup_thread = md_register_thread(md_do_spinup, mddev, unit, "spinupd");
 	if (!rdev->spinup_thread)
 		printk("md: bug: couldn't allocate spinupd\n");
@@ -655,7 +655,7 @@ static void md_do_spinup(mddev_t *mddev, unsigned long slot)
 	dprintk("md: disk%d: spinup thread running\n", unit);
 
 	/* record last_io time as "now" */
-	rdev->last_io = get_seconds();
+	rdev->last_io = ktime_get_real_seconds();
 
 	do_drive_cmd(rdev, unit, ATA_OP_SETIDLE1);
 	return;
@@ -1173,8 +1173,8 @@ int md_write_error(mddev_t *mddev, int disk_number, sector_t sector)
 
 blk_qc_t md_submit_bio(struct bio *bi)
 {
-	mddev_t *mddev = bi->bi_disk->private_data;
-	int unit = bi->bi_disk->first_minor;
+	mddev_t *mddev = bi->bi_bdev->bd_disk->private_data;
+	int unit = bi->bi_bdev->bd_disk->first_minor;
 	mdp_disk_t *disk = &mddev->sb.disks[unit];
 	unsigned long spinup_group;
 
@@ -1198,7 +1198,7 @@ blk_qc_t md_submit_bio(struct bio *bi)
 					
 				/* if spundown, kick spinup thread */
 				if (rdev->last_io == 0) {
-					rdev->last_io = get_seconds();
+					rdev->last_io = ktime_get_real_seconds();
 					md_wakeup_thread(rdev->spinup_thread);
 				}
 			}
@@ -1435,13 +1435,13 @@ static void md_do_recovery(mddev_t *mddev, unsigned long unused)
 	mddev->recovery_running = mddev->recovery_size*2; /* count of sectors */
 
 	/* record start of resync */
-	sb->stime = get_seconds();
+	sb->stime = ktime_get_real_seconds();
 	sb->stime2 = 0;
 	sb->sync_exit = 0;
 	md_update_sb(mddev);
 
 	sb->sync_exit = md_do_sync(mddev);
-	sb->stime2 = get_seconds();
+	sb->stime2 = ktime_get_real_seconds();
 
 	if (sb->sync_exit == 0) {
 		int i;
@@ -1881,7 +1881,7 @@ static int spinup_array(dev_t array_dev, int slot)
 	mddev_t *mddev = dev_to_mddev(array_dev);
 
 	/* record I/O access & kick the spinup thread */
-	mddev->rdev[slot].last_io = get_seconds();
+	mddev->rdev[slot].last_io = ktime_get_real_seconds();
 	md_wakeup_thread(mddev->rdev[slot].spinup_thread);
 
 	return 0;
