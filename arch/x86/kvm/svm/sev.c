@@ -28,20 +28,8 @@
 
 #define __ex(x) __kvm_handle_fault_on_reboot(x)
 
-#ifdef CONFIG_KVM_AMD_SEV
-/* enable/disable SEV support */
-static bool sev_enabled = true;
-module_param_named(sev, sev_enabled, bool, 0444);
-
-/* enable/disable SEV-ES support */
-static bool sev_es_enabled = true;
-module_param_named(sev_es, sev_es_enabled, bool, 0444);
-#else
-#define sev_enabled false
-#define sev_es_enabled false
-#endif /* CONFIG_KVM_AMD_SEV */
-
 static u8 sev_enc_bit;
+static int sev_flush_asids(void);
 static DECLARE_RWSEM(sev_deactivate_lock);
 static DEFINE_MUTEX(sev_bitmap_lock);
 unsigned int max_sev_asid;
@@ -57,14 +45,9 @@ struct enc_region {
 	unsigned long size;
 };
 
-static int sev_flush_asids(int min_asid, int max_asid)
+static int sev_flush_asids(void)
 {
-	int ret, pos, error = 0;
-
-	/* Check if there are any ASIDs to reclaim before performing a flush */
-	pos = find_next_bit(sev_reclaim_asid_bitmap, max_sev_asid, min_asid);
-	if (pos >= max_asid)
-		return -EBUSY;
+	int ret, error = 0;
 
 	/*
 	 * DEACTIVATE will clear the WBINVD indicator causing DF_FLUSH to fail,
@@ -86,7 +69,14 @@ static int sev_flush_asids(int min_asid, int max_asid)
 /* Must be called with the sev_bitmap_lock held */
 static bool __sev_recycle_asids(int min_asid, int max_asid)
 {
-	if (sev_flush_asids(min_asid, max_asid))
+	int pos;
+
+	/* Check if there are any ASIDs to reclaim before performing a flush */
+	pos = find_next_bit(sev_reclaim_asid_bitmap, max_sev_asid, min_asid);
+	if (pos >= max_asid)
+		return false;
+
+	if (sev_flush_asids())
 		return false;
 
 	/* The flush process will flush all reclaimable SEV and SEV-ES ASIDs */
@@ -216,7 +206,7 @@ e_free:
 
 static int sev_es_guest_init(struct kvm *kvm, struct kvm_sev_cmd *argp)
 {
-	if (!sev_es_enabled)
+	if (!sev_es)
 		return -ENOTTY;
 
 	to_kvm_svm(kvm)->sev_info.es_active = true;
@@ -1125,7 +1115,7 @@ int svm_mem_enc_op(struct kvm *kvm, void __user *argp)
 	struct kvm_sev_cmd sev_cmd;
 	int r;
 
-	if (!sev_enabled)
+	if (!svm_sev_enabled() || !sev)
 		return -ENOTTY;
 
 	if (!argp)
@@ -1330,13 +1320,9 @@ void sev_vm_destroy(struct kvm *kvm)
 
 void __init sev_hardware_setup(void)
 {
-#ifdef CONFIG_KVM_AMD_SEV
 	unsigned int eax, ebx, ecx, edx;
 	bool sev_es_supported = false;
 	bool sev_supported = false;
-
-	if (!sev_enabled)
-		goto out;
 
 	/* Does the CPU support SEV? */
 	if (!boot_cpu_has(X86_FEATURE_SEV))
@@ -1350,7 +1336,8 @@ void __init sev_hardware_setup(void)
 
 	/* Maximum number of encrypted guests supported simultaneously */
 	max_sev_asid = ecx;
-	if (!max_sev_asid)
+
+	if (!svm_sev_enabled())
 		goto out;
 
 	/* Minimum ASID value that should be used for SEV guest */
@@ -1362,17 +1349,14 @@ void __init sev_hardware_setup(void)
 		goto out;
 
 	sev_reclaim_asid_bitmap = bitmap_zalloc(max_sev_asid, GFP_KERNEL);
-	if (!sev_reclaim_asid_bitmap) {
-		bitmap_free(sev_asid_bitmap);
-		sev_asid_bitmap = NULL;
+	if (!sev_reclaim_asid_bitmap)
 		goto out;
-	}
 
 	pr_info("SEV supported: %u ASIDs\n", max_sev_asid - min_sev_asid + 1);
 	sev_supported = true;
 
 	/* SEV-ES support requested? */
-	if (!sev_es_enabled)
+	if (!sev_es)
 		goto out;
 
 	/* Does the CPU support SEV-ES? */
@@ -1387,33 +1371,19 @@ void __init sev_hardware_setup(void)
 	sev_es_supported = true;
 
 out:
-	sev_enabled = sev_supported;
-	sev_es_enabled = sev_es_supported;
-#endif
+	sev = sev_supported;
+	sev_es = sev_es_supported;
 }
 
 void sev_hardware_teardown(void)
 {
-	if (!sev_enabled)
+	if (!svm_sev_enabled())
 		return;
-
-	/* No need to take sev_bitmap_lock, all VMs have been destroyed. */
-	sev_flush_asids(0, max_sev_asid);
 
 	bitmap_free(sev_asid_bitmap);
 	bitmap_free(sev_reclaim_asid_bitmap);
-}
 
-int sev_cpu_init(struct svm_cpu_data *sd)
-{
-	if (!sev_enabled)
-		return 0;
-
-	sd->sev_vmcbs = kcalloc(max_sev_asid + 1, sizeof(void *), GFP_KERNEL);
-	if (!sd->sev_vmcbs)
-		return -ENOMEM;
-
-	return 0;
+	sev_flush_asids();
 }
 
 /*
