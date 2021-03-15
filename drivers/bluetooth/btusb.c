@@ -4281,6 +4281,7 @@ static int btusb_setup_qca(struct hci_dev *hdev)
 			return 0;
 
 		bt_dev_err(hdev, "don't support firmware rome 0x%x", ver_rom);
+		if (ver_rom & ~0xffffU) return 0;
 		return -ENODEV;
 	}
 
