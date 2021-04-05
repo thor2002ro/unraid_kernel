@@ -498,21 +498,6 @@ static bool irq_domain_is_nomap(struct irq_domain *domain)
 	       (domain->flags & IRQ_DOMAIN_FLAG_NO_MAP);
 }
 
-static void irq_domain_clear_mapping(struct irq_domain *domain,
-				     irq_hw_number_t hwirq)
-{
-	if (irq_domain_is_nomap(domain))
-		return;
-
-	if (hwirq < domain->revmap_size) {
-		domain->revmap[hwirq] = NULL;
-	} else {
-		mutex_lock(&domain->revmap_tree_mutex);
-		radix_tree_delete(&domain->revmap_tree, hwirq);
-		mutex_unlock(&domain->revmap_tree_mutex);
-	}
-}
-
 static void irq_domain_set_mapping(struct irq_domain *domain,
 				   irq_hw_number_t hwirq,
 				   struct irq_data *irq_data)
@@ -527,6 +512,12 @@ static void irq_domain_set_mapping(struct irq_domain *domain,
 		radix_tree_insert(&domain->revmap_tree, hwirq, irq_data);
 		mutex_unlock(&domain->revmap_tree_mutex);
 	}
+}
+
+static void irq_domain_clear_mapping(struct irq_domain *domain,
+				     irq_hw_number_t hwirq)
+{
+	irq_domain_set_mapping(domain, hwirq, NULL);
 }
 
 static void irq_domain_disassociate(struct irq_domain *domain, unsigned int irq)
