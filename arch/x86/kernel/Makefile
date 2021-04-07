@@ -30,6 +30,9 @@ KASAN_SANITIZE_stacktrace.o				:= n
 KASAN_SANITIZE_paravirt.o				:= n
 KASAN_SANITIZE_sev.o					:= n
 
+# Cannot write to profiling regions before the page tables are set up.
+PGO_PROFILE_head$(BITS).o				:= n
+
 # With some compiler versions the generated code results in boot hangs, caused
 # by several compilation units. To be safe, disable all instrumentation.
 KCSAN_SANITIZE := n
