@@ -728,13 +728,13 @@ int __page_mapcount(struct page *page)
 }
 EXPORT_SYMBOL_GPL(__page_mapcount);
 
-void copy_huge_page(struct page *dst, struct page *src)
+void folio_copy(struct folio *dst, struct folio *src)
 {
-	unsigned i, nr = compound_nr(src);
+	unsigned i, nr = folio_nr_pages(src);
 
 	for (i = 0; i < nr; i++) {
 		cond_resched();
-		copy_highpage(nth_page(dst, i), nth_page(src, i));
+		copy_highpage(folio_page(dst, i), folio_page(src, i));
 	}
 }
 
