@@ -24,7 +24,6 @@ struct pci_vpd {
 	unsigned int	len;
 	u16		flag;
 	u8		cap;
-	unsigned int	busy:1;
 	unsigned int	valid:1;
 };
 
@@ -130,22 +129,14 @@ static int pci_vpd_wait(struct pci_dev *dev)
 	u16 status;
 	int ret;
 
-	if (!vpd->busy)
-		return 0;
-
 	do {
 		ret = pci_user_read_config_word(dev, vpd->cap + PCI_VPD_ADDR,
 						&status);
 		if (ret < 0)
 			return ret;
 
-		if ((status & PCI_VPD_ADDR_F) == vpd->flag) {
-			vpd->busy = 0;
+		if ((status & PCI_VPD_ADDR_F) == vpd->flag)
 			return 0;
-		}
-
-		if (fatal_signal_pending(current))
-			return -EINTR;
 
 		if (time_after(jiffies, timeout))
 			break;
@@ -163,7 +154,7 @@ static ssize_t pci_vpd_read(struct pci_dev *dev, loff_t pos, size_t count,
 			    void *arg)
 {
 	struct pci_vpd *vpd = dev->vpd;
-	int ret;
+	int ret = 0;
 	loff_t end = pos + count;
 	u8 *buf = arg;
 
@@ -189,19 +180,19 @@ static ssize_t pci_vpd_read(struct pci_dev *dev, loff_t pos, size_t count,
 	if (mutex_lock_killable(&vpd->lock))
 		return -EINTR;
 
-	ret = pci_vpd_wait(dev);
-	if (ret < 0)
-		goto out;
-
 	while (pos < end) {
 		u32 val;
 		unsigned int i, skip;
+
+		if (fatal_signal_pending(current)) {
+			ret = -EINTR;
+			break;
+		}
 
 		ret = pci_user_write_config_word(dev, vpd->cap + PCI_VPD_ADDR,
 						 pos & ~3);
 		if (ret < 0)
 			break;
-		vpd->busy = 1;
 		vpd->flag = PCI_VPD_ADDR_F;
 		ret = pci_vpd_wait(dev);
 		if (ret < 0)
@@ -221,7 +212,7 @@ static ssize_t pci_vpd_read(struct pci_dev *dev, loff_t pos, size_t count,
 			val >>= 8;
 		}
 	}
-out:
+
 	mutex_unlock(&vpd->lock);
 	return ret ? ret : count;
 }
@@ -251,10 +242,6 @@ static ssize_t pci_vpd_write(struct pci_dev *dev, loff_t pos, size_t count,
 	if (mutex_lock_killable(&vpd->lock))
 		return -EINTR;
 
-	ret = pci_vpd_wait(dev);
-	if (ret < 0)
-		goto out;
-
 	while (pos < end) {
 		u32 val;
 
@@ -271,7 +258,6 @@ static ssize_t pci_vpd_write(struct pci_dev *dev, loff_t pos, size_t count,
 		if (ret < 0)
 			break;
 
-		vpd->busy = 1;
 		vpd->flag = 0;
 		ret = pci_vpd_wait(dev);
 		if (ret < 0)
@@ -279,7 +265,7 @@ static ssize_t pci_vpd_write(struct pci_dev *dev, loff_t pos, size_t count,
 
 		pos += sizeof(u32);
 	}
-out:
+
 	mutex_unlock(&vpd->lock);
 	return ret ? ret : count;
 }
@@ -342,7 +328,6 @@ void pci_vpd_init(struct pci_dev *dev)
 		vpd->ops = &pci_vpd_ops;
 	mutex_init(&vpd->lock);
 	vpd->cap = cap;
-	vpd->busy = 0;
 	vpd->valid = 0;
 	dev->vpd = vpd;
 }
