@@ -36,7 +36,6 @@ config NDS32
 	select HAVE_REGS_AND_STACK_ACCESS_API
 	select HAVE_PERF_EVENTS
 	select IRQ_DOMAIN
-	select LOCKDEP_SUPPORT
 	select MODULES_USE_ELF_RELA
 	select OF
 	select OF_EARLY_FLATTREE
@@ -63,6 +62,9 @@ config GENERIC_HWEIGHT
 config GENERIC_LOCKBREAK
 	def_bool y
 	depends on PREEMPTION
+
+config LOCKDEP_SUPPORT
+	def_bool y
 
 config TRACE_IRQFLAGS_SUPPORT
 	def_bool y
