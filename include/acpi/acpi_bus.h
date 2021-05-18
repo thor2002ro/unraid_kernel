@@ -13,7 +13,7 @@
 #include <linux/property.h>
 
 /* TBD: Make dynamic */
-#define ACPI_MAX_HANDLES	10
+#define ACPI_MAX_HANDLES	32
 struct acpi_handle_list {
 	u32 count;
 	acpi_handle handles[ACPI_MAX_HANDLES];
