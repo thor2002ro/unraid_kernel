@@ -818,6 +818,47 @@ static int ext4_ioctl_get_es_cache(struct file *filp, unsigned long arg)
 	return error;
 }
 
+static int ext4_ioctl_checkpoint(struct file *filp, unsigned long arg)
+{
+	int err = 0;
+	__u32 flags = 0;
+	unsigned int flush_flags = 0;
+	struct super_block *sb = file_inode(filp)->i_sb;
+
+	if (copy_from_user(&flags, (__u32 __user *)arg,
+				sizeof(__u32)))
+		return -EFAULT;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	/* check for invalid bits set */
+	if ((flags & ~EXT4_IOC_CHECKPOINT_FLAG_VALID) ||
+				((flags & JBD2_JOURNAL_FLUSH_DISCARD) &&
+				(flags & JBD2_JOURNAL_FLUSH_ZEROOUT)))
+		return -EINVAL;
+
+	if (!EXT4_SB(sb)->s_journal)
+		return -ENODEV;
+
+	if (flags & EXT4_IOC_CHECKPOINT_FLAG_DRY_RUN)
+		return 0;
+
+	if (flags & EXT4_IOC_CHECKPOINT_FLAG_DISCARD)
+		flush_flags |= JBD2_JOURNAL_FLUSH_DISCARD;
+
+	if (flags & EXT4_IOC_CHECKPOINT_FLAG_ZEROOUT) {
+		flush_flags |= JBD2_JOURNAL_FLUSH_ZEROOUT;
+		pr_info_ratelimited("warning: checkpointing journal with EXT4_IOC_CHECKPOINT_FLAG_ZEROOUT can be slow");
+	}
+
+	jbd2_journal_lock_updates(EXT4_SB(sb)->s_journal);
+	err = jbd2_journal_flush(EXT4_SB(sb)->s_journal, flush_flags);
+	jbd2_journal_unlock_updates(EXT4_SB(sb)->s_journal);
+
+	return err;
+}
+
 static long __ext4_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	struct inode *inode = file_inode(filp);
@@ -1325,6 +1366,9 @@ out:
 		return fsverity_ioctl_read_metadata(filp,
 						    (const void __user *)arg);
 
+	case EXT4_IOC_CHECKPOINT:
+		return ext4_ioctl_checkpoint(filp, arg);
+
 	default:
 		return -ENOTTY;
 	}
@@ -1413,6 +1457,7 @@ long ext4_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case EXT4_IOC_GET_ES_CACHE:
 	case FS_IOC_FSGETXATTR:
 	case FS_IOC_FSSETXATTR:
+	case EXT4_IOC_CHECKPOINT:
 		break;
 	default:
 		return -ENOIOCTLCMD;
