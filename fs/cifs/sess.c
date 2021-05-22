@@ -74,6 +74,50 @@ bool is_ses_using_iface(struct cifs_ses *ses, struct cifs_server_iface *iface)
 	return false;
 }
 
+unsigned int
+cifs_ses_get_chan_index(struct cifs_ses *ses,
+		   struct TCP_Server_Info *server)
+{
+	unsigned int i;
+
+	for (i = 0; i < ses->chan_count; i++) {
+		if (ses->chans[i].server == server)
+			return i;
+	}
+
+	/* If we didn't find the channel, it is likely a bug */
+	WARN_ON(1);
+	return 0;
+}
+
+void cifs_chan_set_need_reconnect(struct cifs_ses *ses,
+			     struct TCP_Server_Info *server)
+{
+	unsigned int chan_index = cifs_ses_get_chan_index(ses, server);
+
+	set_bit(chan_index, &ses->chans_need_reconnect);
+	cifs_dbg(FYI, "Set reconnect bitmask for chan %u; now 0x%lx\n",
+		 chan_index, ses->chans_need_reconnect);
+}
+
+void cifs_chan_clear_need_reconnect(struct cifs_ses *ses,
+			       struct TCP_Server_Info *server)
+{
+	unsigned int chan_index = cifs_ses_get_chan_index(ses, server);
+
+	clear_bit(chan_index, &ses->chans_need_reconnect);
+	cifs_dbg(FYI, "Cleared reconnect bitmask for chan %u; now 0x%lx\n",
+		 chan_index, ses->chans_need_reconnect);
+}
+
+bool cifs_chan_needs_reconnect(struct cifs_ses *ses,
+			    struct TCP_Server_Info *server)
+{
+	unsigned int chan_index = cifs_ses_get_chan_index(ses, server);
+
+	return CIFS_CHAN_NEEDS_RECONNECT(ses, chan_index);
+}
+
 /* returns number of channels added */
 int cifs_try_adding_channels(struct cifs_sb_info *cifs_sb, struct cifs_ses *ses)
 {
@@ -182,6 +226,7 @@ cifs_ses_add_channel(struct cifs_sb_info *cifs_sb, struct cifs_ses *ses,
 		     struct cifs_server_iface *iface)
 {
 	struct cifs_chan *chan;
+	struct TCP_Server_Info *chan_server;
 	struct smb3_fs_context ctx = {NULL};
 	static const char unc_fmt[] = "\\%s\\foo";
 	char unc[sizeof(unc_fmt)+SERVER_NAME_LEN_WITH_NULL] = {0};
@@ -253,18 +298,23 @@ cifs_ses_add_channel(struct cifs_sb_info *cifs_sb, struct cifs_ses *ses,
 	       SMB2_CLIENT_GUID_SIZE);
 	ctx.use_client_guid = true;
 
-	mutex_lock(&ses->session_mutex);
+	/* Indicate ses->server as the primary server */
+	chan_server = cifs_get_tcp_session(&ctx, ses->server);
 
+	mutex_lock(&ses->session_mutex);
 	chan = ses->binding_chan = &ses->chans[ses->chan_count];
-	chan->server = cifs_get_tcp_session(&ctx);
+	chan->server = chan_server;
 	if (IS_ERR(chan->server)) {
 		rc = PTR_ERR(chan->server);
 		chan->server = NULL;
 		goto out;
 	}
-	spin_lock(&cifs_tcp_ses_lock);
-	chan->server->is_channel = true;
-	spin_unlock(&cifs_tcp_ses_lock);
+
+	ses->chan_count++;
+	atomic_set(&ses->chan_seq, 0);
+
+	/* Mark this channel as needing connect/setup */
+	cifs_chan_set_need_reconnect(ses, chan->server);
 
 	/*
 	 * We need to allocate the server crypto now as we will need
@@ -296,11 +346,13 @@ cifs_ses_add_channel(struct cifs_sb_info *cifs_sb, struct cifs_ses *ses,
 	 * ses to the new server.
 	 */
 
-	ses->chan_count++;
-	atomic_set(&ses->chan_seq, 0);
 out:
 	ses->binding = false;
 	ses->binding_chan = NULL;
+
+	if (rc && chan->server)
+		ses->chan_count--;
+
 	mutex_unlock(&ses->session_mutex);
 
 	if (rc && chan->server)
@@ -929,9 +981,14 @@ sess_establish_session(struct sess_data *sess_data)
 	mutex_unlock(&ses->server->srv_mutex);
 
 	cifs_dbg(FYI, "CIFS session established successfully\n");
+	if (ses->binding)
+		cifs_chan_clear_need_reconnect(ses, ses->binding_chan->server);
+	else
+		cifs_chan_clear_need_reconnect(ses, ses->server);
+	/* keep existing ses state if binding */
 	spin_lock(&GlobalMid_Lock);
-	ses->status = CifsGood;
-	ses->need_reconnect = false;
+	if (!ses->binding)
+		ses->status = CifsGood;
 	spin_unlock(&GlobalMid_Lock);
 
 	return 0;

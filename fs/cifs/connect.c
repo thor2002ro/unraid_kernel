@@ -176,7 +176,7 @@ static inline int reconn_setup_dfs_targets(struct cifs_sb_info *cifs_sb,
  * cifs tcp session reconnection
  *
  * mark tcp session as reconnecting so temporarily locked
- * mark all smb sessions as reconnecting for tcp session
+ * update all smb sessions about reconnect of this tcp session
  * reconnect tcp session
  * wake up waiters on reconnection? - (not needed currently)
  */
@@ -184,6 +184,7 @@ int
 cifs_reconnect(struct TCP_Server_Info *server)
 {
 	int rc = 0;
+	struct TCP_Server_Info *pserver;
 	struct list_head *tmp, *tmp2;
 	struct cifs_ses *ses;
 	struct cifs_tcon *tcon;
@@ -195,6 +196,9 @@ cifs_reconnect(struct TCP_Server_Info *server)
 	struct dfs_cache_tgt_list tgt_list = {0};
 	struct dfs_cache_tgt_iterator *tgt_it = NULL;
 #endif
+
+	/* If server is a channel, select the primary channel */
+	pserver = CIFS_SERVER_IS_CHAN(server) ? server->primary_server : server;
 
 	spin_lock(&GlobalMid_Lock);
 	server->nr_targets = 1;
@@ -246,16 +250,30 @@ cifs_reconnect(struct TCP_Server_Info *server)
 		and the tid bad so they are not used until reconnected */
 	cifs_dbg(FYI, "%s: marking sessions and tcons for reconnect\n",
 		 __func__);
+
 	spin_lock(&cifs_tcp_ses_lock);
-	list_for_each(tmp, &server->smb_ses_list) {
+	list_for_each(tmp, &pserver->smb_ses_list) {
 		ses = list_entry(tmp, struct cifs_ses, smb_ses_list);
-		ses->need_reconnect = true;
+
+		/*
+		 * we're having to pick this mutex within a spinlock
+		 * Make sure that we don't sleep too much.
+		 */
+		mutex_lock(&ses->session_mutex);
+		cifs_chan_set_need_reconnect(ses, server);
+
+		/* If all channels need reconnect, then tcon needs reconnect */
+		if (!CIFS_ALL_CHANS_NEED_RECONNECT(ses))
+			goto skip_tcon_reconnect;
+
 		list_for_each(tmp2, &ses->tcon_list) {
 			tcon = list_entry(tmp2, struct cifs_tcon, tcon_list);
 			tcon->need_reconnect = true;
 		}
 		if (ses->tcon_ipc)
 			ses->tcon_ipc->need_reconnect = true;
+skip_tcon_reconnect:
+		mutex_unlock(&ses->session_mutex);
 	}
 	spin_unlock(&cifs_tcp_ses_lock);
 
@@ -1243,7 +1261,7 @@ cifs_find_tcp_session(struct smb3_fs_context *ctx)
 		 * Skip ses channels since they're only handled in lower layers
 		 * (e.g. cifs_send_recv).
 		 */
-		if (server->is_channel || !match_server(server, ctx))
+		if (CIFS_SERVER_IS_CHAN(server) || !match_server(server, ctx))
 			continue;
 
 		++server->srv_count;
@@ -1270,6 +1288,10 @@ cifs_put_tcp_session(struct TCP_Server_Info *server, int from_reconnect)
 
 	list_del_init(&server->tcp_ses_list);
 	spin_unlock(&cifs_tcp_ses_lock);
+
+	/* For secondary channels, we pick up ref-count on the primary server */
+	if (CIFS_SERVER_IS_CHAN(server))
+		cifs_put_tcp_session(server->primary_server, from_reconnect);
 
 	cancel_delayed_work_sync(&server->echo);
 
@@ -1301,7 +1323,8 @@ cifs_put_tcp_session(struct TCP_Server_Info *server, int from_reconnect)
 }
 
 struct TCP_Server_Info *
-cifs_get_tcp_session(struct smb3_fs_context *ctx)
+cifs_get_tcp_session(struct smb3_fs_context *ctx,
+		     struct TCP_Server_Info *primary_server)
 {
 	struct TCP_Server_Info *tcp_ses = NULL;
 	int rc;
@@ -1328,6 +1351,10 @@ cifs_get_tcp_session(struct smb3_fs_context *ctx)
 		goto out_err_crypto_release;
 	}
 
+	if (primary_server) {
+		++primary_server->srv_count;
+		tcp_ses->primary_server = primary_server;
+	}
 	tcp_ses->conn_id = atomic_inc_return(&tcpSesNextId);
 	tcp_ses->noblockcnt = ctx->rootfs;
 	tcp_ses->noblocksnd = ctx->noblocksnd || ctx->rootfs;
@@ -1443,6 +1470,8 @@ out_err_crypto_release:
 
 out_err:
 	if (tcp_ses) {
+		if (CIFS_SERVER_IS_CHAN(tcp_ses))
+			cifs_put_tcp_session(tcp_ses->primary_server, false);
 		if (!IS_ERR(tcp_ses->hostname))
 			kfree(tcp_ses->hostname);
 		if (tcp_ses->ssocket)
@@ -1818,7 +1847,7 @@ cifs_get_smb_ses(struct TCP_Server_Info *server, struct smb3_fs_context *ctx)
 			free_xid(xid);
 			return ERR_PTR(rc);
 		}
-		if (ses->need_reconnect) {
+		if (cifs_chan_needs_reconnect(ses, server)) {
 			cifs_dbg(FYI, "Session needs reconnect\n");
 			rc = cifs_setup_session(xid, ses,
 						ctx->local_nls);
@@ -1880,6 +1909,7 @@ cifs_get_smb_ses(struct TCP_Server_Info *server, struct smb3_fs_context *ctx)
 	ses->chans[0].server = server;
 	ses->chan_count = 1;
 	ses->chan_max = ctx->multichannel ? ctx->max_channels:1;
+	ses->chans_need_reconnect = 1;
 
 	rc = cifs_negotiate_protocol(xid, ses);
 	if (!rc)
@@ -2802,7 +2832,7 @@ static int mount_get_conns(struct smb3_fs_context *ctx, struct cifs_sb_info *cif
 	*xid = get_xid();
 
 	/* get a reference to a tcp session */
-	server = cifs_get_tcp_session(ctx);
+	server = cifs_get_tcp_session(ctx, NULL);
 	if (IS_ERR(server)) {
 		rc = PTR_ERR(server);
 		return rc;

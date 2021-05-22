@@ -283,7 +283,7 @@ static int cifs_debug_data_proc_show(struct seq_file *m, void *v)
 				    tcp_ses_list);
 
 		/* channel info will be printed as a part of sessions below */
-		if (server->is_channel)
+		if (CIFS_SERVER_IS_CHAN(server))
 			continue;
 
 		c++;

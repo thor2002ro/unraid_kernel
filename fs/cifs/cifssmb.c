@@ -195,8 +195,12 @@ cifs_reconnect_tcon(struct cifs_tcon *tcon, int smb_command)
 		retries = server->nr_targets;
 	}
 
-	if (!ses->need_reconnect && !tcon->need_reconnect)
+	if (!cifs_chan_needs_reconnect(ses, server) && !tcon->need_reconnect)
 		return 0;
+
+	cifs_dbg(FYI, "sess reconnect mask: 0x%lx, tcon reconnect: %d",
+		 tcon->ses->chans_need_reconnect,
+		 tcon->need_reconnect);
 
 	nls_codepage = load_nls_default();
 
@@ -217,8 +221,19 @@ cifs_reconnect_tcon(struct cifs_tcon *tcon, int smb_command)
 		goto out;
 	}
 
+	/* Recheck after acquire mutex */
+	if (!cifs_chan_needs_reconnect(ses, server)) {
+		/* this just means that we only need to tcon */
+		if (tcon->need_reconnect)
+			goto skip_sess_setup;
+
+		rc = -EHOSTDOWN;
+		mutex_unlock(&ses->session_mutex);
+		goto out;
+	}
+
 	rc = cifs_negotiate_protocol(0, ses);
-	if (rc == 0 && ses->need_reconnect)
+	if (!rc)
 		rc = cifs_setup_session(0, ses, nls_codepage);
 
 	/* do we need to reconnect tcon? */
@@ -227,6 +242,7 @@ cifs_reconnect_tcon(struct cifs_tcon *tcon, int smb_command)
 		goto out;
 	}
 
+skip_sess_setup:
 	cifs_mark_open_files_invalid(tcon);
 	rc = cifs_tree_connect(0, tcon, nls_codepage);
 	mutex_unlock(&ses->session_mutex);
@@ -366,7 +382,8 @@ static int
 smb_init_no_reconnect(int smb_command, int wct, struct cifs_tcon *tcon,
 			void **request_buf, void **response_buf)
 {
-	if (tcon->ses->need_reconnect || tcon->need_reconnect)
+	if (cifs_chan_needs_reconnect(tcon->ses, tcon->ses->server) ||
+	    tcon->need_reconnect)
 		return -EHOSTDOWN;
 
 	return __smb_init(smb_command, wct, tcon, request_buf, response_buf);
@@ -717,7 +734,7 @@ CIFSSMBTDis(const unsigned int xid, struct cifs_tcon *tcon)
 	 * the tcon is no longer on the list, so no need to take lock before
 	 * checking this.
 	 */
-	if ((tcon->need_reconnect) || (tcon->ses->need_reconnect))
+	if ((tcon->need_reconnect) || CIFS_ALL_CHANS_NEED_RECONNECT(tcon->ses))
 		return 0;
 
 	rc = small_smb_init(SMB_COM_TREE_DISCONNECT, 0, tcon,
@@ -813,7 +830,7 @@ CIFSSMBLogoff(const unsigned int xid, struct cifs_ses *ses)
 		return -EIO;
 
 	mutex_lock(&ses->session_mutex);
-	if (ses->need_reconnect)
+	if (CIFS_ALL_CHANS_NEED_RECONNECT(ses))
 		goto session_already_dead; /* no need to send SMBlogoff if uid
 					      already closed due to reconnect */
 	rc = small_smb_init(SMB_COM_LOGOFF_ANDX, 2, NULL, (void **)&pSMB);
