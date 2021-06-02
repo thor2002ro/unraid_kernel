@@ -418,9 +418,6 @@ static void show_pwq(struct pool_workqueue *pwq);
  * This must be called either with wq->mutex held or RCU read locked.
  * If the pwq needs to be used beyond the locking in effect, the caller is
  * responsible for guaranteeing that the pwq stays online.
- *
- * The if/else clause exists only for the lockdep assertion and can be
- * ignored.
  */
 #define for_each_pwq(pwq, wq)						\
 	list_for_each_entry_rcu((pwq), &(wq)->pwqs, pwqs_node,		\
