@@ -3209,7 +3209,7 @@ EXPORT_SYMBOL(flush_delayed_work);
  */
 bool flush_rcu_work(struct rcu_work *rwork)
 {
-	if (test_bit(WORK_STRUCT_PENDING_BIT, work_data_bits(&rwork->work))) {
+	if (work_pending(&rwork->work)) {
 		rcu_barrier();
 		flush_work(&rwork->work);
 		return true;
