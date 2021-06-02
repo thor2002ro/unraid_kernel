@@ -1839,7 +1839,7 @@ cifs_get_smb_ses(struct TCP_Server_Info *server, struct smb3_fs_context *ctx)
 			 ses->status);
 
 		mutex_lock(&ses->session_mutex);
-		rc = cifs_negotiate_protocol(xid, ses);
+		rc = cifs_negotiate_protocol(xid, ses, server);
 		if (rc) {
 			mutex_unlock(&ses->session_mutex);
 			/* problem -- put our ses reference */
@@ -1849,7 +1849,7 @@ cifs_get_smb_ses(struct TCP_Server_Info *server, struct smb3_fs_context *ctx)
 		}
 		if (cifs_chan_needs_reconnect(ses, server)) {
 			cifs_dbg(FYI, "Session needs reconnect\n");
-			rc = cifs_setup_session(xid, ses,
+			rc = cifs_setup_session(xid, ses, server,
 						ctx->local_nls);
 			if (rc) {
 				mutex_unlock(&ses->session_mutex);
@@ -1911,9 +1911,9 @@ cifs_get_smb_ses(struct TCP_Server_Info *server, struct smb3_fs_context *ctx)
 	ses->chan_max = ctx->multichannel ? ctx->max_channels:1;
 	ses->chans_need_reconnect = 1;
 
-	rc = cifs_negotiate_protocol(xid, ses);
+	rc = cifs_negotiate_protocol(xid, ses, server);
 	if (!rc)
-		rc = cifs_setup_session(xid, ses, ctx->local_nls);
+		rc = cifs_setup_session(xid, ses, server, ctx->local_nls);
 
 	/* each channel uses a different signing key */
 	memcpy(ses->chans[0].signkey, ses->smb3signingkey,
@@ -3784,10 +3784,10 @@ cifs_umount(struct cifs_sb_info *cifs_sb)
 }
 
 int
-cifs_negotiate_protocol(const unsigned int xid, struct cifs_ses *ses)
+cifs_negotiate_protocol(const unsigned int xid, struct cifs_ses *ses,
+			struct TCP_Server_Info *server)
 {
 	int rc = 0;
-	struct TCP_Server_Info *server = cifs_ses_server(ses);
 
 	if (!server->ops->need_neg || !server->ops->negotiate)
 		return -ENOSYS;
@@ -3796,7 +3796,7 @@ cifs_negotiate_protocol(const unsigned int xid, struct cifs_ses *ses)
 	if (!server->ops->need_neg(server))
 		return 0;
 
-	rc = server->ops->negotiate(xid, ses);
+	rc = server->ops->negotiate(xid, ses, server);
 	if (rc == 0) {
 		spin_lock(&GlobalMid_Lock);
 		if (server->tcpStatus == CifsNeedNegotiate)
@@ -3811,12 +3811,12 @@ cifs_negotiate_protocol(const unsigned int xid, struct cifs_ses *ses)
 
 int
 cifs_setup_session(const unsigned int xid, struct cifs_ses *ses,
+		   struct TCP_Server_Info *server,
 		   struct nls_table *nls_info)
 {
 	int rc = -ENOSYS;
-	struct TCP_Server_Info *server = cifs_ses_server(ses);
 
-	if (!ses->binding) {
+	if (CIFS_ALL_CHANS_NEED_RECONNECT(ses)) {
 		ses->capabilities = server->capabilities;
 		if (!linuxExtEnabled)
 			ses->capabilities &= (~server->vals->cap_unix);
@@ -3834,7 +3834,7 @@ cifs_setup_session(const unsigned int xid, struct cifs_ses *ses,
 		 server->sec_mode, server->capabilities, server->timeAdj);
 
 	if (server->ops->sess_setup)
-		rc = server->ops->sess_setup(xid, ses, nls_info);
+		rc = server->ops->sess_setup(xid, ses, server, nls_info);
 
 	if (rc)
 		cifs_server_dbg(VFS, "Send error in SessSetup = %d\n", rc);
