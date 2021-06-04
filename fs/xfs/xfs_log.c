@@ -2226,6 +2226,52 @@ release_iclog:
 }
 
 /*
+ * Write log vectors into a single iclog which is guaranteed by the caller
+ * to have enough space to write the entire log vector into. Return the number
+ * of log vectors written into the iclog.
+ */
+static int
+xlog_write_single(
+	struct xfs_log_vec	*log_vector,
+	struct xlog_ticket	*ticket,
+	struct xlog_in_core	*iclog,
+	uint32_t		log_offset,
+	uint32_t		len)
+{
+	struct xfs_log_vec	*lv;
+	void			*ptr;
+	int			index = 0;
+	int			record_cnt = 0;
+
+	ASSERT(log_offset + len <= iclog->ic_size);
+
+	ptr = iclog->ic_datap + log_offset;
+	for (lv = log_vector; lv; lv = lv->lv_next) {
+		/*
+		 * Ordered log vectors have no regions to write so this
+		 * loop will naturally skip them.
+		 */
+		for (index = 0; index < lv->lv_niovecs; index++) {
+			struct xfs_log_iovec	*reg = &lv->lv_iovecp[index];
+			struct xlog_op_header	*ophdr = reg->i_addr;
+
+			ASSERT(reg->i_len % sizeof(int32_t) == 0);
+			ASSERT((unsigned long)ptr % sizeof(int32_t) == 0);
+
+			ophdr->oh_tid = cpu_to_be32(ticket->t_tid);
+			ophdr->oh_len = cpu_to_be32(reg->i_len -
+						sizeof(struct xlog_op_header));
+			memcpy(ptr, reg->i_addr, reg->i_len);
+			xlog_write_adv_cnt(&ptr, &len, &log_offset, reg->i_len);
+			record_cnt++;
+		}
+	}
+	ASSERT(len == 0);
+	return record_cnt;
+}
+
+
+/*
  * Write some region out to in-core log
  *
  * This will be called when writing externally provided regions or when
@@ -2305,16 +2351,25 @@ xlog_write(
 			return error;
 
 		ASSERT(log_offset <= iclog->ic_size - 1);
-		ptr = iclog->ic_datap + log_offset;
 
 		/* Start_lsn is the first lsn written to. */
 		if (start_lsn && !*start_lsn)
 			*start_lsn = be64_to_cpu(iclog->ic_header.h_lsn);
 
+		/* If this is a single iclog write, go fast... */
+		if (!contwr && lv == log_vector) {
+			record_cnt = xlog_write_single(lv, ticket, iclog,
+						log_offset, len);
+			len = 0;
+			data_cnt = len;
+			break;
+		}
+
 		/*
 		 * This loop writes out as many regions as can fit in the amount
 		 * of space which was allocated by xlog_state_get_iclog_space().
 		 */
+		ptr = iclog->ic_datap + log_offset;
 		while (lv && (!lv->lv_niovecs || index < lv->lv_niovecs)) {
 			struct xfs_log_iovec	*reg;
 			struct xlog_op_header	*ophdr;
