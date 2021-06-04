@@ -863,8 +863,7 @@ xlog_write_unmount_record(
 	 */
 	if (log->l_targ != log->l_mp->m_ddev_targp)
 		blkdev_issue_flush(log->l_targ->bt_bdev);
-	return xlog_write(log, &vec, ticket, NULL, NULL, XLOG_UNMOUNT_TRANS,
-				reg.i_len);
+	return xlog_write(log, &vec, ticket, NULL, NULL, reg.i_len);
 }
 
 /*
@@ -1588,8 +1587,7 @@ xlog_commit_record(
 
 	/* account for space used by record data */
 	ticket->t_curr_res -= reg.i_len;
-	error = xlog_write(log, &vec, ticket, lsn, iclog, XLOG_COMMIT_TRANS,
-				reg.i_len);
+	error = xlog_write(log, &vec, ticket, lsn, iclog, reg.i_len);
 	if (error)
 		xfs_force_shutdown(log->l_mp, SHUTDOWN_LOG_IO_ERROR);
 	return error;
@@ -2399,7 +2397,6 @@ xlog_write(
 	struct xlog_ticket	*ticket,
 	xfs_lsn_t		*start_lsn,
 	struct xlog_in_core	**commit_iclog,
-	uint			optype,
 	uint32_t		len)
 {
 	struct xlog_in_core	*iclog = NULL;
@@ -2431,7 +2428,6 @@ xlog_write(
 		if (!lv)
 			break;
 
-		ASSERT(!(optype & (XLOG_COMMIT_TRANS | XLOG_UNMOUNT_TRANS)));
 		lv = xlog_write_partial(log, lv, ticket, &iclog, &log_offset,
 					&len, &record_cnt, &data_cnt);
 		if (IS_ERR_OR_NULL(lv)) {
@@ -2449,12 +2445,10 @@ xlog_write(
 	 */
 	spin_lock(&log->l_icloglock);
 	xlog_state_finish_copy(log, iclog, record_cnt, 0);
-	if (commit_iclog) {
-		ASSERT(optype & XLOG_COMMIT_TRANS);
+	if (commit_iclog)
 		*commit_iclog = iclog;
-	} else {
+	else
 		error = xlog_state_release_iclog(log, iclog);
-	}
 	spin_unlock(&log->l_icloglock);
 
 	return error;

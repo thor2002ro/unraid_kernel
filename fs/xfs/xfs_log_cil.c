@@ -907,7 +907,7 @@ xlog_cil_push_work(
 	 * write head.
 	 */
 	error = xlog_write(log, &lvhdr, ctx->ticket, &ctx->start_lsn, NULL,
-				XLOG_START_TRANS, num_bytes);
+				num_bytes);
 	if (error)
 		goto out_abort_free_ticket;
 
