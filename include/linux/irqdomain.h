@@ -31,8 +31,7 @@
 #define _LINUX_IRQDOMAIN_H
 
 #include <linux/types.h>
-#include <linux/irq.h>
-#include <linux/irqdesc.h>
+#include <linux/irqhandler.h>
 #include <linux/of.h>
 #include <linux/mutex.h>
 #include <linux/radix-tree.h>
@@ -42,6 +41,7 @@ struct fwnode_handle;
 struct irq_domain;
 struct irq_chip;
 struct irq_data;
+struct irq_desc;
 struct cpumask;
 struct seq_file;
 struct irq_affinity_desc;
