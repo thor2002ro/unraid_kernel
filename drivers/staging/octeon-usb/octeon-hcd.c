@@ -50,6 +50,7 @@
 #include <linux/module.h>
 #include <linux/usb/hcd.h>
 #include <linux/prefetch.h>
+#include <linux/irqdomain.h>
 #include <linux/dma-mapping.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
