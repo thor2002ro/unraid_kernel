@@ -234,17 +234,14 @@ static unsigned long prf_buffer_size(void)
  */
 static int prf_serialize(struct prf_private_data *p, size_t buf_size)
 {
-	int err = 0;
 	void *buffer;
 
 	/* get buffer size, again. */
 	p->size = prf_buffer_size();
 
 	/* check for unlikely overflow. */
-	if (p->size > buf_size) {
-		err = -EAGAIN;
-		goto out;
-	}
+	if (p->size > buf_size)
+		return -EAGAIN;
 
 	buffer = p->buffer;
 
@@ -256,8 +253,7 @@ static int prf_serialize(struct prf_private_data *p, size_t buf_size)
 
 	prf_serialize_values(&buffer);
 
-out:
-	return err;
+	return 0;
 }
 
 /* open() implementation for PGO. Creates a copy of the profiling data set. */
@@ -266,52 +262,47 @@ static int prf_open(struct inode *inode, struct file *file)
 	struct prf_private_data *data;
 	unsigned long flags;
 	size_t buf_size;
-	int err = 0;
+	int err = -EINVAL;
 
 	data = kzalloc(sizeof(*data), GFP_KERNEL);
-	if (!data) {
-		err = -ENOMEM;
-		goto out_free;
-	}
+	if (!data)
+		return -ENOMEM;
 
-	/* get initial buffer size */
+	/* Get initial buffer size. */
 	flags = prf_lock();
 	data->size = prf_buffer_size();
 	prf_unlock(flags);
 
 	do {
-		if (data->buffer)
-			vfree(data->buffer);
+		vfree(data->buffer);
 
-		/* allocate, round up to page size. */
+		/* Allocate, round up to page size. */
 		buf_size = PAGE_ALIGN(data->size);
 		data->buffer = vzalloc(buf_size);
 
 		if (!data->buffer) {
 			err = -ENOMEM;
-			goto out_free;
+			break;
 		}
 
 		/*
-		 * try serialize and get actual
-		 * data length in data->size
+		 * Try serialize and get actual
+		 * data length in data->size.
 		 */
 		flags = prf_lock();
 		err = prf_serialize(data, buf_size);
 		prf_unlock(flags);
-		/* in unlikely case, try again. */
+		/* In unlikely case, try again. */
 	} while (err == -EAGAIN);
 
-	if (err)
-		goto out_free;
+	if (err < 0) {
+		if (data)
+			vfree(data->buffer);
+		kfree(data);
+	} else {
+		file->private_data = data;
+	}
 
-	file->private_data = data;
-	return 0;
-
-out_free:
-	if (data)
-		vfree(data->buffer);
-	kfree(data);
 	return err;
 }
 
