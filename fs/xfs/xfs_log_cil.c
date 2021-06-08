@@ -95,6 +95,11 @@ xlog_cil_pcp_aggregate(
 		ctx->ticket->t_unit_res += cilpcp->space_reserved;
 		cilpcp->space_reserved = 0;
 
+		if (!list_empty(&cilpcp->busy_extents)) {
+			list_splice_init(&cilpcp->busy_extents,
+					&ctx->busy_extents);
+		}
+
 		/*
 		 * We're in the middle of switching cil contexts.  Reset the
 		 * counter we use to detect when the current context is nearing
@@ -529,6 +534,9 @@ xlog_cil_insert_items(
 		atomic_add(cilpcp->space_used, &ctx->space_used);
 		cilpcp->space_used = 0;
 	}
+	/* attach the transaction to the CIL if it has any busy extents */
+	if (!list_empty(&tp->t_busy))
+		list_splice_init(&tp->t_busy, &cilpcp->busy_extents);
 	put_cpu_ptr(cilpcp);
 
 	/*
@@ -568,9 +576,6 @@ xlog_cil_insert_items(
 			list_move_tail(&lip->li_cil, &cil->xc_cil);
 	}
 
-	/* attach the transaction to the CIL if it has any busy extents */
-	if (!list_empty(&tp->t_busy))
-		list_splice_init(&tp->t_busy, &ctx->busy_extents);
 	spin_unlock(&cil->xc_cil_lock);
 
 	if (tp->t_ticket->t_curr_res < 0)
@@ -1451,6 +1456,10 @@ xlog_cil_pcp_dead(
 			ctx->ticket->t_curr_res += cilpcp->space_reserved;
 			ctx->ticket->t_unit_res += cilpcp->space_reserved;
 		}
+		if (!list_empty(&cilpcp->busy_extents)) {
+			list_splice_init(&cilpcp->busy_extents,
+					&ctx->busy_extents);
+		}
 
 		cilpcp->space_used = 0;
 		cilpcp->space_reserved = 0;
@@ -1490,7 +1499,9 @@ static void __percpu *
 xlog_cil_pcp_alloc(
 	struct xfs_cil		*cil)
 {
+	struct xlog_cil_pcp	*cilpcp;
 	void __percpu		*pcp;
+	int			cpu;
 
 	pcp = alloc_percpu(struct xlog_cil_pcp);
 	if (!pcp)
@@ -1499,6 +1510,11 @@ xlog_cil_pcp_alloc(
 	if (xlog_cil_pcp_hpadd(cil) < 0) {
 		free_percpu(pcp);
 		return NULL;
+	}
+
+	for_each_possible_cpu(cpu) {
+		cilpcp = per_cpu_ptr(pcp, cpu);
+		INIT_LIST_HEAD(&cilpcp->busy_extents);
 	}
 	return pcp;
 }
