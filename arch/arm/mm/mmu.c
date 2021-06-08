@@ -1121,31 +1121,32 @@ void __init debug_ll_io_init(void)
 }
 #endif
 
-static void * __initdata vmalloc_min =
-	(void *)(VMALLOC_END - (240 << 20) - VMALLOC_OFFSET);
+static unsigned long __initdata vmalloc_size = 240 * SZ_1M;
 
 /*
  * vmalloc=size forces the vmalloc area to be exactly 'size'
  * bytes. This can be used to increase (or decrease) the vmalloc
- * area - the default is 240m.
+ * area - the default is 240MiB.
  */
 static int __init early_vmalloc(char *arg)
 {
 	unsigned long vmalloc_reserve = memparse(arg, NULL);
+	unsigned long vmalloc_max;
 
 	if (vmalloc_reserve < SZ_16M) {
 		vmalloc_reserve = SZ_16M;
-		pr_warn("vmalloc area too small, limiting to %luMB\n",
+		pr_warn("vmalloc area is too small, limiting to %luMiB\n",
 			vmalloc_reserve >> 20);
 	}
 
-	if (vmalloc_reserve > VMALLOC_END - (PAGE_OFFSET + SZ_32M)) {
-		vmalloc_reserve = VMALLOC_END - (PAGE_OFFSET + SZ_32M);
-		pr_warn("vmalloc area is too big, limiting to %luMB\n",
+	vmalloc_max = VMALLOC_END - (PAGE_OFFSET + SZ_32M + VMALLOC_OFFSET);
+	if (vmalloc_reserve > vmalloc_max) {
+		vmalloc_reserve = vmalloc_max;
+		pr_warn("vmalloc area is too big, limiting to %luMiB\n",
 			vmalloc_reserve >> 20);
 	}
 
-	vmalloc_min = (void *)(VMALLOC_END - vmalloc_reserve);
+	vmalloc_size = vmalloc_reserve;
 	return 0;
 }
 early_param("vmalloc", early_vmalloc);
@@ -1165,7 +1166,8 @@ void __init adjust_lowmem_bounds(void)
 	 * and may itself be outside the valid range for which phys_addr_t
 	 * and therefore __pa() is defined.
 	 */
-	vmalloc_limit = (u64)(uintptr_t)vmalloc_min - PAGE_OFFSET + PHYS_OFFSET;
+	vmalloc_limit = (u64)VMALLOC_END - vmalloc_size - VMALLOC_OFFSET -
+			PAGE_OFFSET + PHYS_OFFSET;
 
 	/*
 	 * The first usable region must be PMD aligned. Mark its start
@@ -1246,7 +1248,7 @@ void __init adjust_lowmem_bounds(void)
 	memblock_set_current_limit(memblock_limit);
 }
 
-static inline void prepare_page_table(void)
+static __init void prepare_page_table(void)
 {
 	unsigned long addr;
 	phys_addr_t end;
