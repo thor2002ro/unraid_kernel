@@ -91,6 +91,10 @@ xlog_cil_pcp_aggregate(
 	for_each_online_cpu(cpu) {
 		cilpcp = per_cpu_ptr(cil->xc_pcp, cpu);
 
+		ctx->ticket->t_curr_res += cilpcp->space_reserved;
+		ctx->ticket->t_unit_res += cilpcp->space_reserved;
+		cilpcp->space_reserved = 0;
+
 		/*
 		 * We're in the middle of switching cil contexts.  Reset the
 		 * counter we use to detect when the current context is nearing
@@ -516,6 +520,7 @@ xlog_cil_insert_items(
 	 * based on how close we are to the hard limit.
 	 */
 	cilpcp = get_cpu_ptr(cil->xc_pcp);
+	cilpcp->space_reserved += ctx_res;
 	cilpcp->space_used += len;
 	if (space_used >= XLOG_CIL_SPACE_LIMIT(log) ||
 	    cilpcp->space_used >
@@ -525,10 +530,6 @@ xlog_cil_insert_items(
 		cilpcp->space_used = 0;
 	}
 	put_cpu_ptr(cilpcp);
-
-	spin_lock(&cil->xc_cil_lock);
-	ctx->ticket->t_unit_res += ctx_res;
-	ctx->ticket->t_curr_res += ctx_res;
 
 	/*
 	 * If we've overrun the reservation, dump the tx details before we move
@@ -551,6 +552,7 @@ xlog_cil_insert_items(
 	 * We do this here so we only need to take the CIL lock once during
 	 * the transaction commit.
 	 */
+	spin_lock(&cil->xc_cil_lock);
 	list_for_each_entry(lip, &tp->t_items, li_trans) {
 
 		/* Skip items which aren't dirty in this transaction. */
@@ -1438,12 +1440,20 @@ xlog_cil_pcp_dead(
 	spin_lock(&xlog_cil_pcp_lock);
 	list_for_each_entry_safe(cil, n, &xlog_cil_pcp_list, xc_pcp_list) {
 		struct xlog_cil_pcp	*cilpcp = per_cpu_ptr(cil->xc_pcp, cpu);
+		struct xfs_cil_ctx	*ctx;
 
 		spin_unlock(&xlog_cil_pcp_lock);
 		down_write(&cil->xc_ctx_lock);
+		ctx = cil->xc_ctx;
 
-		atomic_add(cilpcp->space_used, &cil->xc_ctx->space_used);
+		atomic_add(cilpcp->space_used, &ctx->space_used);
+		if (ctx->ticket) {
+			ctx->ticket->t_curr_res += cilpcp->space_reserved;
+			ctx->ticket->t_unit_res += cilpcp->space_reserved;
+		}
+
 		cilpcp->space_used = 0;
+		cilpcp->space_reserved = 0;
 
 		up_write(&cil->xc_ctx_lock);
 		spin_lock(&xlog_cil_pcp_lock);
