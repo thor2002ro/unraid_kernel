@@ -257,7 +257,7 @@ static noinstr unsigned long rcu_dynticks_inc(int incby)
 {
 	struct rcu_data *rdp = this_cpu_ptr(&rcu_data);
 	int seq;
-	
+
 	seq = READ_ONCE(rdp->dynticks) + incby;
 	smp_store_release(&rdp->dynticks, seq);
 	smp_mb();  // Fundamental RCU ordering guarantee.
