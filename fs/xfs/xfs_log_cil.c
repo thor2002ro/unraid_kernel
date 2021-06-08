@@ -72,6 +72,7 @@ xlog_cil_ctx_alloc(void)
 	ctx = kmem_zalloc(sizeof(*ctx), KM_NOFS);
 	INIT_LIST_HEAD(&ctx->committing);
 	INIT_LIST_HEAD(&ctx->busy_extents);
+	INIT_LIST_HEAD(&ctx->log_items);
 	INIT_WORK(&ctx->push_work, xlog_cil_push_work);
 	return ctx;
 }
@@ -99,6 +100,8 @@ xlog_cil_pcp_aggregate(
 			list_splice_init(&cilpcp->busy_extents,
 					&ctx->busy_extents);
 		}
+		if (!list_empty(&cilpcp->log_items))
+			list_splice_init(&cilpcp->log_items, &ctx->log_items);
 
 		/*
 		 * We're in the middle of switching cil contexts.  Reset the
@@ -481,10 +484,9 @@ xlog_cil_insert_items(
 	/*
 	 * We need to take the CIL checkpoint unit reservation on the first
 	 * commit into the CIL. Test the XLOG_CIL_EMPTY bit first so we don't
-	 * unnecessarily do an atomic op in the fast path here. We don't need to
-	 * hold the xc_cil_lock here to clear the XLOG_CIL_EMPTY bit as we are
-	 * under the xc_ctx_lock here and that needs to be held exclusively to
-	 * reset the XLOG_CIL_EMPTY bit.
+	 * unnecessarily do an atomic op in the fast path here. We can clear the
+	 * XLOG_CIL_EMPTY bit as we are under the xc_ctx_lock here and that
+	 * needs to be held exclusively to reset the XLOG_CIL_EMPTY bit.
 	 */
 	if (test_bit(XLOG_CIL_EMPTY, &cil->xc_flags) &&
 	    test_and_clear_bit(XLOG_CIL_EMPTY, &cil->xc_flags))
@@ -538,6 +540,24 @@ xlog_cil_insert_items(
 	/* attach the transaction to the CIL if it has any busy extents */
 	if (!list_empty(&tp->t_busy))
 		list_splice_init(&tp->t_busy, &cilpcp->busy_extents);
+	/*
+	 * Now update the order of everything modified in the transaction
+	 * and insert items into the CIL if they aren't already there.
+	 * We do this here so we only need to take the CIL lock once during
+	 * the transaction commit.
+	 */
+	order = atomic_inc_return(&ctx->order_id);
+	list_for_each_entry(lip, &tp->t_items, li_trans) {
+
+		/* Skip items which aren't dirty in this transaction. */
+		if (!test_bit(XFS_LI_DIRTY, &lip->li_flags))
+			continue;
+
+		lip->li_order_id = order;
+		if (!list_empty(&lip->li_cil))
+			continue;
+		list_add_tail(&lip->li_cil, &cilpcp->log_items);
+	}
 	put_cpu_ptr(cilpcp);
 
 	/*
@@ -555,28 +575,6 @@ xlog_cil_insert_items(
 		xfs_warn(log->l_mp, "  ctx ticket: %d bytes", ctx_res);
 		xlog_print_trans(tp);
 	}
-
-	/*
-	 * Now update the order of everything modified in the transaction
-	 * and insert items into the CIL if they aren't already there.
-	 * We do this here so we only need to take the CIL lock once during
-	 * the transaction commit.
-	 */
-	order = atomic_inc_return(&ctx->order_id);
-	spin_lock(&cil->xc_cil_lock);
-	list_for_each_entry(lip, &tp->t_items, li_trans) {
-
-		/* Skip items which aren't dirty in this transaction. */
-		if (!test_bit(XFS_LI_DIRTY, &lip->li_flags))
-			continue;
-
-		lip->li_order_id = order;
-		if (!list_empty(&lip->li_cil))
-			continue;
-		list_add_tail(&lip->li_cil, &cil->xc_cil);
-	}
-
-	spin_unlock(&cil->xc_cil_lock);
 
 	if (tp->t_ticket->t_curr_res < 0)
 		xfs_force_shutdown(log->l_mp, SHUTDOWN_LOG_IO_ERROR);
@@ -920,18 +918,12 @@ xlog_cil_push_work(
 
 	xlog_cil_pcp_aggregate(cil, ctx);
 
-	/*
-	 * Pull all the log vectors off the items in the CIL, and remove the
-	 * items from the CIL. We don't need the CIL lock here because it's only
-	 * needed on the transaction commit side which is currently locked out
-	 * by the flush lock.
-	 */
-	list_sort(NULL, &cil->xc_cil, xlog_cil_order_cmp);
-	lv = NULL;
-	while (!list_empty(&cil->xc_cil)) {
+	list_sort(NULL, &ctx->log_items, xlog_cil_order_cmp);
+
+	while (!list_empty(&ctx->log_items)) {
 		struct xfs_log_item	*item;
 
-		item = list_first_entry(&cil->xc_cil,
+		item = list_first_entry(&ctx->log_items,
 					struct xfs_log_item, li_cil);
 		list_del_init(&item->li_cil);
 		item->li_order_id = 0;
@@ -1124,7 +1116,6 @@ xlog_cil_push_background(
 	 * The cil won't be empty because we are called while holding the
 	 * context lock so whatever we added to the CIL will still be there.
 	 */
-	ASSERT(!list_empty(&cil->xc_cil));
 	ASSERT(!test_bit(XLOG_CIL_EMPTY, &cil->xc_flags));
 
 	/*
@@ -1482,6 +1473,8 @@ xlog_cil_pcp_dead(
 			list_splice_init(&cilpcp->busy_extents,
 					&ctx->busy_extents);
 		}
+		if (!list_empty(&cilpcp->log_items))
+			list_splice_init(&cilpcp->log_items, &ctx->log_items);
 
 		cilpcp->space_used = 0;
 		cilpcp->space_reserved = 0;
@@ -1537,6 +1530,7 @@ xlog_cil_pcp_alloc(
 	for_each_possible_cpu(cpu) {
 		cilpcp = per_cpu_ptr(pcp, cpu);
 		INIT_LIST_HEAD(&cilpcp->busy_extents);
+		INIT_LIST_HEAD(&cilpcp->log_items);
 	}
 	return pcp;
 }
@@ -1573,9 +1567,7 @@ xlog_cil_init(
 		return -ENOMEM;
 	}
 
-	INIT_LIST_HEAD(&cil->xc_cil);
 	INIT_LIST_HEAD(&cil->xc_committing);
-	spin_lock_init(&cil->xc_cil_lock);
 	spin_lock_init(&cil->xc_push_lock);
 	init_waitqueue_head(&cil->xc_push_wait);
 	init_rwsem(&cil->xc_ctx_lock);
@@ -1600,7 +1592,6 @@ xlog_cil_destroy(
 		kmem_free(cil->xc_ctx);
 	}
 
-	ASSERT(list_empty(&cil->xc_cil));
 	ASSERT(test_bit(XLOG_CIL_EMPTY, &cil->xc_flags));
 	xlog_cil_pcp_free(cil, cil->xc_pcp);
 	kmem_free(cil);
