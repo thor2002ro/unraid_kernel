@@ -218,7 +218,7 @@ struct xfs_cil_ctx {
 	xfs_lsn_t		start_lsn;	/* first LSN of chkpt commit */
 	xfs_lsn_t		commit_lsn;	/* chkpt commit record lsn */
 	struct xlog_ticket	*ticket;	/* chkpt ticket */
-	int			space_used;	/* aggregate size of regions */
+	atomic_t		space_used;	/* aggregate size of regions */
 	struct list_head	busy_extents;	/* busy extents in chkpt */
 	struct xfs_log_vec	*lv_chain;	/* logvecs being pushed */
 	struct list_head	iclog_entry;
@@ -231,6 +231,7 @@ struct xfs_cil_ctx {
  * Per-cpu CIL tracking items
  */
 struct xlog_cil_pcp {
+	uint32_t		space_used;
 	struct list_head	busy_extents;
 	struct list_head	log_items;
 };
