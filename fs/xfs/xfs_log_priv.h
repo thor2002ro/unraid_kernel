@@ -133,37 +133,20 @@ enum xlog_iclog_state {
 
 #define XLOG_COVER_OPS		5
 
-/* Ticket reservation region accounting */ 
-#define XLOG_TIC_LEN_MAX	15
-
-/*
- * Reservation region
- * As would be stored in xfs_log_iovec but without the i_addr which
- * we don't care about.
- */
-typedef struct xlog_res {
-	uint	r_len;	/* region length		:4 */
-	uint	r_type;	/* region's transaction type	:4 */
-} xlog_res_t;
+#define XLOG_ICL_NEED_FLUSH	(1 << 0)	/* iclog needs REQ_PREFLUSH */
+#define XLOG_ICL_NEED_FUA	(1 << 1)	/* iclog needs REQ_FUA */
 
 typedef struct xlog_ticket {
-	struct list_head   t_queue;	 /* reserve/write queue */
-	struct task_struct *t_task;	 /* task that owns this ticket */
-	xlog_tid_t	   t_tid;	 /* transaction identifier	 : 4  */
-	atomic_t	   t_ref;	 /* ticket reference count       : 4  */
-	int		   t_curr_res;	 /* current reservation in bytes : 4  */
-	int		   t_unit_res;	 /* unit reservation in bytes    : 4  */
-	char		   t_ocnt;	 /* original count		 : 1  */
-	char		   t_cnt;	 /* current count		 : 1  */
-	char		   t_clientid;	 /* who does this belong to;	 : 1  */
-	char		   t_flags;	 /* properties of reservation	 : 1  */
-
-        /* reservation array fields */
-	uint		   t_res_num;                    /* num in array : 4 */
-	uint		   t_res_num_ophdrs;		 /* num op hdrs  : 4 */
-	uint		   t_res_arr_sum;		 /* array sum    : 4 */
-	uint		   t_res_o_flow;		 /* sum overflow : 4 */
-	xlog_res_t	   t_res_arr[XLOG_TIC_LEN_MAX];  /* array of res : 8 * 15 */ 
+	struct list_head	t_queue;	/* reserve/write queue */
+	struct task_struct	*t_task;	/* task that owns this ticket */
+	xlog_tid_t		t_tid;		/* transaction identifier */
+	atomic_t		t_ref;		/* ticket reference count */
+	int			t_curr_res;	/* current reservation */
+	int			t_unit_res;	/* unit reservation */
+	char			t_ocnt;		/* original count */
+	char			t_cnt;		/* current count */
+	char			t_flags;	/* properties of reservation */
+	int			t_iclog_hdrs;	/* iclog hdrs in t_curr_res */
 } xlog_ticket_t;
 
 /*
@@ -201,6 +184,7 @@ typedef struct xlog_in_core {
 	u32			ic_size;
 	u32			ic_offset;
 	enum xlog_iclog_state	ic_state;
+	unsigned int		ic_flags;
 	char			*ic_datap;	/* pointer to iclog data */
 
 	/* Callback structures need their own cacheline */
@@ -230,17 +214,29 @@ struct xfs_cil;
 
 struct xfs_cil_ctx {
 	struct xfs_cil		*cil;
-	xfs_lsn_t		sequence;	/* chkpt sequence # */
+	xfs_csn_t		sequence;	/* chkpt sequence # */
 	xfs_lsn_t		start_lsn;	/* first LSN of chkpt commit */
 	xfs_lsn_t		commit_lsn;	/* chkpt commit record lsn */
 	struct xlog_ticket	*ticket;	/* chkpt ticket */
-	int			nvecs;		/* number of regions */
-	int			space_used;	/* aggregate size of regions */
+	atomic_t		space_used;	/* aggregate size of regions */
 	struct list_head	busy_extents;	/* busy extents in chkpt */
-	struct xfs_log_vec	*lv_chain;	/* logvecs being pushed */
+	struct list_head	log_items;	/* log items in chkpt */
+	struct list_head	lv_chain;	/* logvecs being pushed */
 	struct list_head	iclog_entry;
 	struct list_head	committing;	/* ctx committing list */
 	struct work_struct	discard_endio_work;
+	struct work_struct	push_work;
+	atomic_t		order_id;
+};
+
+/*
+ * Per-cpu CIL tracking items
+ */
+struct xlog_cil_pcp {
+	uint32_t		space_used;
+	uint32_t		space_reserved;
+	struct list_head	busy_extents;
+	struct list_head	log_items;
 };
 
 /*
@@ -261,20 +257,28 @@ struct xfs_cil_ctx {
  */
 struct xfs_cil {
 	struct xlog		*xc_log;
-	struct list_head	xc_cil;
-	spinlock_t		xc_cil_lock;
+	unsigned long		xc_flags;
+	atomic_t		xc_iclog_hdrs;
 
 	struct rw_semaphore	xc_ctx_lock ____cacheline_aligned_in_smp;
 	struct xfs_cil_ctx	*xc_ctx;
 
 	spinlock_t		xc_push_lock ____cacheline_aligned_in_smp;
-	xfs_lsn_t		xc_push_seq;
+	xfs_csn_t		xc_push_seq;
+	bool			xc_push_commit_stable;
 	struct list_head	xc_committing;
 	wait_queue_head_t	xc_commit_wait;
-	xfs_lsn_t		xc_current_sequence;
-	struct work_struct	xc_push_work;
+	xfs_csn_t		xc_current_sequence;
 	wait_queue_head_t	xc_push_wait;	/* background push throttle */
+
+	void __percpu		*xc_pcp;	/* percpu CIL structures */
+#ifdef CONFIG_HOTPLUG_CPU
+	struct list_head	xc_pcp_list;
+#endif
 } ____cacheline_aligned_in_smp;
+
+/* xc_flags bit values */
+#define	XLOG_CIL_EMPTY		1
 
 /*
  * The amount of log space we allow the CIL to aggregate is difficult to size.
@@ -436,6 +440,8 @@ struct xlog {
 #endif
 	/* log recovery lsn tracking (for buffer submission */
 	xfs_lsn_t		l_recovery_lsn;
+
+	uint32_t		l_iclog_roundoff;/* padding roundoff */
 };
 
 #define XLOG_BUF_CANCEL_BUCKET(log, blkno) \
@@ -458,13 +464,8 @@ extern __le32	 xlog_cksum(struct xlog *log, struct xlog_rec_header *rhead,
 			    char *dp, int size);
 
 extern kmem_zone_t *xfs_log_ticket_zone;
-struct xlog_ticket *
-xlog_ticket_alloc(
-	struct xlog	*log,
-	int		unit_bytes,
-	int		count,
-	char		client,
-	bool		permanent);
+struct xlog_ticket *xlog_ticket_alloc(struct xlog *log, int unit_bytes,
+		int count, bool permanent);
 
 static inline void
 xlog_write_adv_cnt(void **ptr, int *len, int *off, size_t bytes)
@@ -476,14 +477,19 @@ xlog_write_adv_cnt(void **ptr, int *len, int *off, size_t bytes)
 
 void	xlog_print_tic_res(struct xfs_mount *mp, struct xlog_ticket *ticket);
 void	xlog_print_trans(struct xfs_trans *);
-int	xlog_write(struct xlog *log, struct xfs_log_vec *log_vector,
+int	xlog_write(struct xlog *log, struct list_head *lv_chain,
 		struct xlog_ticket *tic, xfs_lsn_t *start_lsn,
-		struct xlog_in_core **commit_iclog, uint flags,
-		bool need_start_rec);
+		struct xlog_in_core **commit_iclog, uint32_t len);
 int	xlog_commit_record(struct xlog *log, struct xlog_ticket *ticket,
 		struct xlog_in_core **iclog, xfs_lsn_t *lsn);
+
 void	xfs_log_ticket_ungrant(struct xlog *log, struct xlog_ticket *ticket);
 void	xfs_log_ticket_regrant(struct xlog *log, struct xlog_ticket *ticket);
+
+void xlog_state_switch_iclogs(struct xlog *log, struct xlog_in_core *iclog,
+		int eventual_size);
+int xlog_state_release_iclog(struct xlog *xlog, struct xlog_in_core *iclog,
+		struct xlog_ticket *ticket);
 
 /*
  * When we crack an atomic LSN, we sample it first so that the value will not
@@ -547,19 +553,19 @@ int	xlog_cil_init(struct xlog *log);
 void	xlog_cil_init_post_recovery(struct xlog *log);
 void	xlog_cil_destroy(struct xlog *log);
 bool	xlog_cil_empty(struct xlog *log);
+void	xlog_cil_commit(struct xlog *log, struct xfs_trans *tp,
+			xfs_csn_t *commit_seq, bool regrant);
 
 /*
  * CIL force routines
  */
-xfs_lsn_t
-xlog_cil_force_lsn(
-	struct xlog *log,
-	xfs_lsn_t sequence);
+void xlog_cil_flush(struct xlog *log);
+xfs_lsn_t xlog_cil_force_seq(struct xlog *log, xfs_csn_t sequence);
 
 static inline void
 xlog_cil_force(struct xlog *log)
 {
-	xlog_cil_force_lsn(log, log->l_cilp->xc_current_sequence);
+	xlog_cil_force_seq(log, log->l_cilp->xc_current_sequence);
 }
 
 /*
@@ -581,6 +587,8 @@ xlog_wait(
 	schedule();
 	remove_wait_queue(wq, &wait);
 }
+
+int xlog_wait_on_iclog(struct xlog_in_core *iclog);
 
 /*
  * The LSN is valid so long as it is behind the current LSN. If it isn't, this
@@ -632,5 +640,14 @@ xlog_valid_lsn(
 
 	return valid;
 }
+
+/*
+ * CIL CPU dead notifier
+ */
+#ifdef CONFIG_HOTPLUG_CPU
+void xlog_cil_pcp_dead(unsigned int cpu);
+#else
+static inline void xlog_cil_pcp_dead(unsigned int cpu) {}
+#endif /* CONFIG_HOTPLUG_CPU */
 
 #endif	/* __XFS_LOG_PRIV_H__ */
