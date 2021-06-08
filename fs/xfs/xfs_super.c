@@ -2127,6 +2127,7 @@ static int
 xfs_cpu_dead(
 	unsigned int		cpu)
 {
+	xlog_cil_pcp_dead(cpu);
 	return 0;
 }
 
