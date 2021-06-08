@@ -461,7 +461,8 @@ uintptr_t load_pa, load_sz;
 #endif
 
 #ifdef CONFIG_XIP_KERNEL
-uintptr_t xiprom, xiprom_sz;
+static uintptr_t xiprom __initdata;
+static uintptr_t xiprom_sz __initdata;
 #define xiprom_sz      (*((uintptr_t *)XIP_FIXUP(&xiprom_sz)))
 #define xiprom         (*((uintptr_t *)XIP_FIXUP(&xiprom)))
 
