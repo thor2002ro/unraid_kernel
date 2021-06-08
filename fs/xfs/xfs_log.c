@@ -848,6 +848,9 @@ xlog_write_unmount_record(
 		.lv_niovecs = 1,
 		.lv_iovecp = &reg,
 	};
+	LIST_HEAD(lv_chain);
+	INIT_LIST_HEAD(&vec.lv_list);
+	list_add(&vec.lv_list, &lv_chain);
 
 	BUILD_BUG_ON((sizeof(struct xlog_op_header) +
 		      sizeof(struct xfs_unmount_log_format)) !=
@@ -863,7 +866,7 @@ xlog_write_unmount_record(
 	 */
 	if (log->l_targ != log->l_mp->m_ddev_targp)
 		blkdev_issue_flush(log->l_targ->bt_bdev);
-	return xlog_write(log, &vec, ticket, NULL, NULL, reg.i_len);
+	return xlog_write(log, &lv_chain, ticket, NULL, NULL, reg.i_len);
 }
 
 /*
@@ -1581,13 +1584,16 @@ xlog_commit_record(
 		.lv_iovecp = &reg,
 	};
 	int	error;
+	LIST_HEAD(lv_chain);
+	INIT_LIST_HEAD(&vec.lv_list);
+	list_add(&vec.lv_list, &lv_chain);
 
 	if (XLOG_FORCED_SHUTDOWN(log))
 		return -EIO;
 
 	/* account for space used by record data */
 	ticket->t_curr_res -= reg.i_len;
-	error = xlog_write(log, &vec, ticket, lsn, iclog, reg.i_len);
+	error = xlog_write(log, &lv_chain, ticket, lsn, iclog, reg.i_len);
 	if (error)
 		xfs_force_shutdown(log->l_mp, SHUTDOWN_LOG_IO_ERROR);
 	return error;
@@ -2118,6 +2124,7 @@ xlog_print_trans(
  */
 static struct xfs_log_vec *
 xlog_write_single(
+	struct list_head	*lv_chain,
 	struct xfs_log_vec	*log_vector,
 	struct xlog_ticket	*ticket,
 	struct xlog_in_core	*iclog,
@@ -2134,7 +2141,9 @@ xlog_write_single(
 		iclog->ic_state == XLOG_STATE_WANT_SYNC);
 
 	ptr = iclog->ic_datap + *log_offset;
-	for (lv = log_vector; lv; lv = lv->lv_next) {
+	for (lv = log_vector;
+	     !list_entry_is_head(lv, lv_chain, lv_list);
+	     lv = list_next_entry(lv, lv_list)) {
 		/*
 		 * If the entire log vec does not fit in the iclog, punt it to
 		 * the partial copy loop which can handle this case.
@@ -2163,6 +2172,8 @@ xlog_write_single(
 			*data_cnt += reg->i_len;
 		}
 	}
+	if (list_entry_is_head(lv, lv_chain, lv_list))
+		lv = NULL;
 	ASSERT(*len == 0 || lv);
 	return lv;
 }
@@ -2208,6 +2219,7 @@ xlog_write_get_more_iclog_space(
 static struct xfs_log_vec *
 xlog_write_partial(
 	struct xlog		*log,
+	struct list_head	*lv_chain,
 	struct xfs_log_vec	*log_vector,
 	struct xlog_ticket	*ticket,
 	struct xlog_in_core	**iclogp,
@@ -2347,7 +2359,10 @@ xlog_write_partial(
 	 * the caller so it can go back to fast path copying.
 	 */
 	*iclogp = iclog;
-	return lv->lv_next;
+	lv = list_next_entry(lv, lv_list);
+	if (list_entry_is_head(lv, lv_chain, lv_list))
+		return NULL;
+	return lv;
 }
 
 /*
@@ -2393,14 +2408,14 @@ xlog_write_partial(
 int
 xlog_write(
 	struct xlog		*log,
-	struct xfs_log_vec	*log_vector,
+	struct list_head	*lv_chain,
 	struct xlog_ticket	*ticket,
 	xfs_lsn_t		*start_lsn,
 	struct xlog_in_core	**commit_iclog,
 	uint32_t		len)
 {
 	struct xlog_in_core	*iclog = NULL;
-	struct xfs_log_vec	*lv = log_vector;
+	struct xfs_log_vec	*lv;
 	int			record_cnt = 0;
 	int			data_cnt = 0;
 	int			error = 0;
@@ -2422,14 +2437,16 @@ xlog_write(
 	if (start_lsn)
 		*start_lsn = be64_to_cpu(iclog->ic_header.h_lsn);
 
+	lv = list_first_entry_or_null(lv_chain, struct xfs_log_vec, lv_list);
 	while (lv) {
-		lv = xlog_write_single(lv, ticket, iclog, &log_offset,
+		lv = xlog_write_single(lv_chain, lv, ticket, iclog, &log_offset,
 					&len, &record_cnt, &data_cnt);
 		if (!lv)
 			break;
 
-		lv = xlog_write_partial(log, lv, ticket, &iclog, &log_offset,
-					&len, &record_cnt, &data_cnt);
+		lv = xlog_write_partial(log, lv_chain, lv, ticket, &iclog,
+					&log_offset, &len, &record_cnt,
+					&data_cnt);
 		if (IS_ERR_OR_NULL(lv)) {
 			error = PTR_ERR_OR_ZERO(lv);
 			break;
