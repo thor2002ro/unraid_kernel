@@ -3752,7 +3752,7 @@ static int calculate_sizes(struct kmem_cache *s, int forced_order)
 	 * can't use that portion for writing the freepointer, so
 	 * s->offset must be limited within this for the general case.
 	 */
-	freepointer_area = size;
+	freepointer_area = s->object_size;
 
 #ifdef CONFIG_SLUB_DEBUG
 	/*
@@ -3799,7 +3799,7 @@ static int calculate_sizes(struct kmem_cache *s, int forced_order)
 		 */
 		s->offset = size;
 		size += sizeof(void *);
-	} else if (freepointer_area > sizeof(void *)) {
+	} else if (freepointer_area > 2 * sizeof(void *)) {
 		/*
 		 * Store freelist pointer near middle of object to keep
 		 * it away from the edges of the object to avoid small
