@@ -1,0 +1,24 @@
+arm/soc
+
+arm/dt
+
+arm/drivers
+
+arm/defconfig
+
+arm/late
+
+arm/fixes
+	<no branch> (b73eb6b3b91ff7d76cff5f8c7ab92fe0c51e3829)
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-5.13
+	<no branch> (4cce442ffe5448ef572adc8b3abe7001b398e709)
+		https://git.kernel.org/pub/scm/linux/kernel/git/amlogic/linux tags/amlogic-fixes-v5.13-rc1
+	<no branch> (db8e712e06874e37a1fdb9bb011618811fc96dbd)
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.13/fixes-sata
+	<no branch> (bae989c4bc53f861cc1b706aab0194703e9907a8)
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.13/fixes-pm
+	<no branch> (673c7aa2436bfc857b92417f3e590a297c586dde)
+		git://git.linaro.org/people/jens.wiklander/linux-tee tags/optee-fix-for-v5.13
+	<no branch> (cab12badfc99f93c1dccf192dd150f94b687a27c)
+		git://git.kernel.org/pub/scm/linux/kernel/git/nmenon/linux tags/ti-k3-dt-fixes-for-v5.13
+
