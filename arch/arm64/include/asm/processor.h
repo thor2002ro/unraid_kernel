@@ -257,8 +257,6 @@ void set_task_sctlr_el1(u64 sctlr);
 extern struct task_struct *cpu_switch_to(struct task_struct *prev,
 					 struct task_struct *next);
 
-asmlinkage void arm64_preempt_schedule_irq(void);
-
 #define task_pt_regs(p) \
 	((struct pt_regs *)(THREAD_SIZE + task_stack_page(p)) - 1)
 
@@ -329,13 +327,13 @@ long get_tagged_addr_ctrl(struct task_struct *task);
  * of header definitions for the use of task_stack_page.
  */
 
-#define current_top_of_stack()							\
-({										\
-	struct stack_info _info;						\
-	BUG_ON(!on_accessible_stack(current, current_stack_pointer, &_info));	\
-	_info.high;								\
+#define current_top_of_stack()								\
+({											\
+	struct stack_info _info;							\
+	BUG_ON(!on_accessible_stack(current, current_stack_pointer, 1, &_info));	\
+	_info.high;									\
 })
-#define on_thread_stack()	(on_task_stack(current, current_stack_pointer, NULL))
+#define on_thread_stack()	(on_task_stack(current, current_stack_pointer, 1, NULL))
 
 #endif /* __ASSEMBLY__ */
 #endif /* __ASM_PROCESSOR_H */
