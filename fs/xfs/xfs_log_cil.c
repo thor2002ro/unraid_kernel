@@ -838,6 +838,7 @@ xlog_cil_push_work(
 	struct bio		bio;
 	DECLARE_COMPLETION_ONSTACK(bdev_flush);
 	bool			push_commit_stable;
+	struct xlog_ticket	*ticket;
 
 	new_ctx = xlog_cil_ctx_alloc();
 	new_ctx->ticket = xlog_cil_ticket_alloc(log);
@@ -1044,12 +1045,10 @@ restart:
 	if (error)
 		goto out_abort_free_ticket;
 
-	xfs_log_ticket_ungrant(log, ctx->ticket);
-
 	spin_lock(&commit_iclog->ic_callback_lock);
 	if (commit_iclog->ic_state == XLOG_STATE_IOERROR) {
 		spin_unlock(&commit_iclog->ic_callback_lock);
-		goto out_abort;
+		goto out_abort_free_ticket;
 	}
 	ASSERT_ALWAYS(commit_iclog->ic_state == XLOG_STATE_ACTIVE ||
 		      commit_iclog->ic_state == XLOG_STATE_WANT_SYNC);
@@ -1065,6 +1064,15 @@ restart:
 	ctx->commit_lsn = commit_lsn;
 	wake_up_all(&cil->xc_commit_wait);
 	spin_unlock(&cil->xc_push_lock);
+
+	/*
+	 * Pull the ticket off the ctx so we can ungrant it after releasing the
+	 * commit_iclog. The ctx may be freed by the time we return from
+	 * releasing the commit_iclog (i.e. checkpoint has been completed and
+	 * callback run) so we can't reference the ctx after the call to
+	 * xlog_state_release_iclog().
+	 */
+	ticket = ctx->ticket;
 
 	/*
 	 * If the checkpoint spans multiple iclogs, wait for all previous
@@ -1092,8 +1100,10 @@ restart:
 	commit_iclog->ic_flags |= XLOG_ICL_NEED_FUA;
 	if (push_commit_stable && commit_iclog->ic_state == XLOG_STATE_ACTIVE)
 		xlog_state_switch_iclogs(log, commit_iclog, 0);
-	xlog_state_release_iclog(log, commit_iclog);
+	xlog_state_release_iclog(log, commit_iclog, ticket);
 	spin_unlock(&log->l_icloglock);
+
+	xfs_log_ticket_ungrant(log, ticket);
 	return;
 
 out_skip:
@@ -1104,7 +1114,6 @@ out_skip:
 
 out_abort_free_ticket:
 	xfs_log_ticket_ungrant(log, ctx->ticket);
-out_abort:
 	ASSERT(XLOG_FORCED_SHUTDOWN(log));
 	xlog_cil_committed(ctx);
 }
