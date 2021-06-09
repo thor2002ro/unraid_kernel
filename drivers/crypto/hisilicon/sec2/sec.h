@@ -38,7 +38,10 @@ struct sec_aead_req {
 
 /* SEC request of Crypto */
 struct sec_req {
-	struct sec_sqe sec_sqe;
+	union {
+		struct sec_sqe sec_sqe;
+		struct sec_sqe3 sec_sqe3;
+	};
 	struct sec_ctx *ctx;
 	struct sec_qp_ctx *qp_ctx;
 
@@ -94,6 +97,10 @@ struct sec_cipher_ctx {
 	u8 c_mode;
 	u8 c_alg;
 	u8 c_key_len;
+
+	/* add software support */
+	bool fallback;
+	struct crypto_sync_skcipher *fbtfm;
 };
 
 /* SEC queue context which defines queue's relatives */
@@ -137,6 +144,7 @@ struct sec_ctx {
 	bool pbuf_supported;
 	struct sec_cipher_ctx c_ctx;
 	struct sec_auth_ctx a_ctx;
+	u8 type_supported;
 	struct device *dev;
 };
 

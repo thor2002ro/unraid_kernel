@@ -188,6 +188,8 @@ struct hisi_qm_err_ini {
 	void (*clear_dev_hw_err_status)(struct hisi_qm *qm, u32 err_sts);
 	void (*open_axi_master_ooo)(struct hisi_qm *qm);
 	void (*close_axi_master_ooo)(struct hisi_qm *qm);
+	void (*open_sva_prefetch)(struct hisi_qm *qm);
+	void (*close_sva_prefetch)(struct hisi_qm *qm);
 	void (*log_dev_hw_err)(struct hisi_qm *qm, u32 err_sts);
 	void (*err_info_init)(struct hisi_qm *qm);
 };
@@ -248,6 +250,7 @@ struct hisi_qm {
 	struct workqueue_struct *wq;
 	struct work_struct work;
 	struct work_struct rst_work;
+	struct work_struct cmd_process;
 
 	const char *algs;
 	bool use_sva;
