@@ -64,8 +64,6 @@ extern void smb2_echo_request(struct work_struct *work);
 extern __le32 smb2_get_lease_state(struct cifsInodeInfo *cinode);
 extern bool smb2_is_valid_oplock_break(char *buffer,
 				       struct TCP_Server_Info *srv);
-extern struct cifs_ses *smb2_find_smb_ses(struct TCP_Server_Info *server,
-					  __u64 ses_id);
 extern int smb3_handle_read_data(struct TCP_Server_Info *server,
 				 struct mid_q_entry *mid);
 
@@ -138,8 +136,11 @@ extern void smb2_set_related(struct smb_rqst *rqst);
  * SMB2 Worker functions - most of protocol specific implementation details
  * are contained within these calls.
  */
-extern int SMB2_negotiate(const unsigned int xid, struct cifs_ses *ses);
+extern int SMB2_negotiate(const unsigned int xid,
+			  struct cifs_ses *ses,
+			  struct TCP_Server_Info *server);
 extern int SMB2_sess_setup(const unsigned int xid, struct cifs_ses *ses,
+			   struct TCP_Server_Info *server,
 			   const struct nls_table *nls_cp);
 extern int SMB2_logoff(const unsigned int xid, struct cifs_ses *ses);
 extern int SMB2_tcon(const unsigned int xid, struct cifs_ses *ses,
@@ -291,6 +292,7 @@ extern void smb2_copy_fs_info_to_kstatfs(
 	 struct kstatfs *kst);
 extern int smb311_crypto_shash_allocate(struct TCP_Server_Info *server);
 extern int smb311_update_preauth_hash(struct cifs_ses *ses,
+				      struct TCP_Server_Info *server,
 				      struct kvec *iov, int nvec);
 extern int smb2_query_info_compound(const unsigned int xid,
 				    struct cifs_tcon *tcon,

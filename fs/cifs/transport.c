@@ -1055,16 +1055,17 @@ struct TCP_Server_Info *cifs_pick_channel(struct cifs_ses *ses)
 	if (!ses)
 		return NULL;
 
-	if (!ses->binding) {
-		/* round robin */
-		if (ses->chan_count > 1) {
-			index = (uint)atomic_inc_return(&ses->chan_seq);
-			index %= ses->chan_count;
-		}
-		return ses->chans[index].server;
-	} else {
-		return cifs_ses_server(ses);
+	/* round robin */
+pick_another:
+	if (ses->chan_count > 1 &&
+	    !CIFS_ALL_CHANS_NEED_RECONNECT(ses)) {
+		index = (uint)atomic_inc_return(&ses->chan_seq);
+		index %= ses->chan_count;
+
+		if (CIFS_CHAN_NEEDS_RECONNECT(ses, index))
+			goto pick_another;
 	}
+	return ses->chans[index].server;
 }
 
 int
@@ -1198,8 +1199,7 @@ compound_send_recv(const unsigned int xid, struct cifs_ses *ses,
 	 */
 	if ((ses->status == CifsNew) || (optype & CIFS_NEG_OP) || (optype & CIFS_SESS_OP)) {
 		mutex_lock(&server->srv_mutex);
-		smb311_update_preauth_hash(ses, rqst[0].rq_iov,
-					   rqst[0].rq_nvec);
+		smb311_update_preauth_hash(ses, server, rqst[0].rq_iov, rqst[0].rq_nvec);
 		mutex_unlock(&server->srv_mutex);
 	}
 
@@ -1270,7 +1270,7 @@ compound_send_recv(const unsigned int xid, struct cifs_ses *ses,
 			.iov_len = resp_iov[0].iov_len
 		};
 		mutex_lock(&server->srv_mutex);
-		smb311_update_preauth_hash(ses, &iov, 1);
+		smb311_update_preauth_hash(ses, server, &iov, 1);
 		mutex_unlock(&server->srv_mutex);
 	}
 

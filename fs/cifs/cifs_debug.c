@@ -283,7 +283,7 @@ static int cifs_debug_data_proc_show(struct seq_file *m, void *v)
 				    tcp_ses_list);
 
 		/* channel info will be printed as a part of sessions below */
-		if (server->is_channel)
+		if (CIFS_SERVER_IS_CHAN(server))
 			continue;
 
 		c++;
@@ -424,11 +424,17 @@ skip_rdma:
 				   from_kuid(&init_user_ns, ses->linux_uid),
 				   from_kuid(&init_user_ns, ses->cred_uid));
 
+			if (CIFS_CHAN_NEEDS_RECONNECT(ses, 0))
+				seq_puts(m, "\tPrimary channel: DISCONNECTED ");
+
 			if (ses->chan_count > 1) {
 				seq_printf(m, "\n\n\tExtra Channels: %zu ",
 					   ses->chan_count-1);
-				for (j = 1; j < ses->chan_count; j++)
+				for (j = 1; j < ses->chan_count; j++) {
 					cifs_dump_channel(m, j, &ses->chans[j]);
+					if (CIFS_CHAN_NEEDS_RECONNECT(ses, j))
+						seq_puts(m, "\tDISCONNECTED ");
+				}
 			}
 
 			seq_puts(m, "\n\n\tShares: ");
