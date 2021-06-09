@@ -822,12 +822,10 @@ static int ufs_mtk_post_link(struct ufs_hba *hba)
 	/* enable unipro clock gating feature */
 	ufs_mtk_cfg_unipro_cg(hba, true);
 
-	/* configure auto-hibern8 timer to 10ms */
-	if (ufshcd_is_auto_hibern8_supported(hba)) {
-		ufshcd_auto_hibern8_update(hba,
-			FIELD_PREP(UFSHCI_AHIBERN8_TIMER_MASK, 10) |
-			FIELD_PREP(UFSHCI_AHIBERN8_SCALE_MASK, 3));
-	}
+	/* will be configured during probe hba */
+	if (ufshcd_is_auto_hibern8_supported(hba))
+		hba->ahit = FIELD_PREP(UFSHCI_AHIBERN8_TIMER_MASK, 10) |
+			FIELD_PREP(UFSHCI_AHIBERN8_SCALE_MASK, 3);
 
 	ufs_mtk_setup_clk_gating(hba);
 
@@ -857,6 +855,9 @@ static int ufs_mtk_link_startup_notify(struct ufs_hba *hba,
 static int ufs_mtk_device_reset(struct ufs_hba *hba)
 {
 	struct arm_smccc_res res;
+
+	/* disable hba before device reset */
+	ufshcd_hba_stop(hba);
 
 	ufs_mtk_device_reset_ctrl(0, res);
 
@@ -1114,6 +1115,8 @@ static const struct dev_pm_ops ufs_mtk_pm_ops = {
 	.runtime_suspend = ufshcd_pltfrm_runtime_suspend,
 	.runtime_resume  = ufshcd_pltfrm_runtime_resume,
 	.runtime_idle    = ufshcd_pltfrm_runtime_idle,
+	.prepare	 = ufshcd_suspend_prepare,
+	.complete	 = ufshcd_resume_complete,
 };
 
 static struct platform_driver ufs_mtk_pltform = {
