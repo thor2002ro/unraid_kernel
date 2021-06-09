@@ -1473,7 +1473,7 @@ static void dcn20_update_dchubp_dpp(
 			plane_state->update_flags.bits.per_pixel_alpha_change ||
 			pipe_ctx->stream->update_flags.bits.scaling) {
 		pipe_ctx->plane_res.scl_data.lb_params.alpha_en = pipe_ctx->plane_state->per_pixel_alpha;
-		ASSERT(pipe_ctx->plane_res.scl_data.lb_params.depth == LB_PIXEL_DEPTH_30BPP);
+		ASSERT(pipe_ctx->plane_res.scl_data.lb_params.depth == LB_PIXEL_DEPTH_36BPP);
 		/* scaler configuration */
 		pipe_ctx->plane_res.dpp->funcs->dpp_set_scaler(
 				pipe_ctx->plane_res.dpp, &pipe_ctx->plane_res.scl_data);
@@ -1700,7 +1700,11 @@ void dcn20_program_front_end_for_ctx(
 
 		if (pipe->plane_state && !pipe->top_pipe) {
 			while (pipe) {
-				dcn20_program_pipe(dc, pipe, context);
+				if (hws->funcs.program_pipe)
+					hws->funcs.program_pipe(dc, pipe, context);
+				else
+					dcn20_program_pipe(dc, pipe, context);
+
 				pipe = pipe->bottom_pipe;
 			}
 			/* Program secondary blending tree and writeback pipes */

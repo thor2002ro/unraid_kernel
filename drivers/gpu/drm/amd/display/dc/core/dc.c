@@ -59,7 +59,6 @@
 #include "dc_link_ddc.h"
 #include "dm_helpers.h"
 #include "mem_input.h"
-#include "hubp.h"
 
 #include "dc_link_dp.h"
 #include "dc_dmub_srv.h"
@@ -304,7 +303,7 @@ bool dc_stream_adjust_vmin_vmax(struct dc *dc,
 		struct dc_stream_state *stream,
 		struct dc_crtc_timing_adjust *adjust)
 {
-	int i = 0;
+	int i;
 	bool ret = false;
 
 	stream->adjust.v_total_max = adjust->v_total_max;
@@ -332,7 +331,7 @@ bool dc_stream_get_crtc_position(struct dc *dc,
 {
 	/* TODO: Support multiple streams */
 	const struct dc_stream_state *stream = streams[0];
-	int i = 0;
+	int i;
 	bool ret = false;
 	struct crtc_position position;
 
@@ -539,7 +538,7 @@ void dc_stream_set_dyn_expansion(struct dc *dc, struct dc_stream_state *stream,
 		enum dc_dynamic_expansion option)
 {
 	/* OPP FMT dyn expansion updates*/
-	int i = 0;
+	int i;
 	struct pipe_ctx *pipe_ctx;
 
 	for (i = 0; i < MAX_PIPES; i++) {
@@ -597,7 +596,7 @@ void dc_stream_set_dither_option(struct dc_stream_state *stream,
 
 bool dc_stream_set_gamut_remap(struct dc *dc, const struct dc_stream_state *stream)
 {
-	int i = 0;
+	int i;
 	bool ret = false;
 	struct pipe_ctx *pipes;
 
@@ -614,7 +613,7 @@ bool dc_stream_set_gamut_remap(struct dc *dc, const struct dc_stream_state *stre
 
 bool dc_stream_program_csc_matrix(struct dc *dc, struct dc_stream_state *stream)
 {
-	int i = 0;
+	int i;
 	bool ret = false;
 	struct pipe_ctx *pipes;
 
@@ -640,8 +639,7 @@ void dc_stream_set_static_screen_params(struct dc *dc,
 		int num_streams,
 		const struct dc_static_screen_params *params)
 {
-	int i = 0;
-	int j = 0;
+	int i, j;
 	struct pipe_ctx *pipes_affected[MAX_PIPES];
 	int num_pipes_affected = 0;
 
@@ -896,7 +894,7 @@ static void disable_all_writeback_pipes_for_stream(
 static void apply_ctx_interdependent_lock(struct dc *dc, struct dc_state *context,
 					  struct dc_stream_state *stream, bool lock)
 {
-	int i = 0;
+	int i;
 
 	/* Checks if interdependent update function pointer is NULL or not, takes care of DCE110 case */
 	if (dc->hwss.interdependent_update_lock)
@@ -1156,7 +1154,7 @@ static void enable_timing_multisync(
 		struct dc *dc,
 		struct dc_state *ctx)
 {
-	int i = 0, multisync_count = 0;
+	int i, multisync_count = 0;
 	int pipe_count = dc->res_pool->pipe_count;
 	struct pipe_ctx *multisync_pipes[MAX_PIPES] = { NULL };
 
@@ -2664,7 +2662,6 @@ static void commit_planes_for_stream(struct dc *dc,
 			dc->hwss.interdependent_update_lock(dc, context, false);
 		else
 			dc->hwss.pipe_control_lock(dc, top_pipe_to_program, false);
-
 		dc->hwss.post_unlock_program_front_end(dc, context);
 		return;
 	}
@@ -2765,6 +2762,7 @@ static void commit_planes_for_stream(struct dc *dc,
 							plane_state->flip_immediate);
 				}
 			}
+
 		/* Perform requested Updates */
 		for (i = 0; i < surface_count; i++) {
 			struct dc_plane_state *plane_state = srf_updates[i].surface;
@@ -2787,6 +2785,7 @@ static void commit_planes_for_stream(struct dc *dc,
 					dc->hwss.update_plane_addr(dc, pipe_ctx);
 			}
 		}
+
 	}
 
 	if ((update_type != UPDATE_TYPE_FAST) && dc->hwss.interdependent_update_lock)
@@ -3219,19 +3218,6 @@ void dc_link_remove_remote_sink(struct dc_link *link, struct dc_sink *sink)
 	}
 }
 
-void dc_wait_for_vblank(struct dc *dc, struct dc_stream_state *stream)
-{
-	int i;
-
-	for (i = 0; i < dc->res_pool->pipe_count; i++)
-		if (dc->current_state->res_ctx.pipe_ctx[i].stream == stream) {
-			struct timing_generator *tg =
-				dc->current_state->res_ctx.pipe_ctx[i].stream_res.tg;
-			tg->funcs->wait_for_state(tg, CRTC_STATE_VBLANK);
-			break;
-		}
-}
-
 void get_clock_requirements_for_state(struct dc_state *state, struct AsicStateEx *info)
 {
 	info->displayClock				= (unsigned int)state->bw_ctx.bw.dcn.clk.dispclk_khz;
@@ -3287,7 +3273,7 @@ void dc_allow_idle_optimizations(struct dc *dc, bool allow)
 	if (dc->debug.disable_idle_power_optimizations)
 		return;
 
-	if (dc->clk_mgr->funcs->is_smu_present)
+	if (dc->clk_mgr != NULL && dc->clk_mgr->funcs->is_smu_present)
 		if (!dc->clk_mgr->funcs->is_smu_present(dc->clk_mgr))
 			return;
 
@@ -3348,18 +3334,10 @@ void dc_hardware_release(struct dc *dc)
 #endif
 
 /**
- *****************************************************************************
- *  Function: dc_enable_dmub_notifications
+ * dc_enable_dmub_notifications - Returns whether dmub notification can be enabled
+ * @dc: dc structure
  *
- *  @brief
- *		Returns whether dmub notification can be enabled
- *
- *  @param
- *		[in] dc: dc structure
- *
- *	@return
- *		True to enable dmub notifications, False otherwise
- *****************************************************************************
+ * Returns: True to enable dmub notifications, False otherwise
  */
 bool dc_enable_dmub_notifications(struct dc *dc)
 {
@@ -3368,21 +3346,13 @@ bool dc_enable_dmub_notifications(struct dc *dc)
 }
 
 /**
- *****************************************************************************
- *  Function: dc_process_dmub_aux_transfer_async
+ * dc_process_dmub_aux_transfer_async - Submits aux command to dmub via inbox message
+ *                                      Sets port index appropriately for legacy DDC
+ * @dc: dc structure
+ * @link_index: link index
+ * @payload: aux payload
  *
- *  @brief
- *		Submits aux command to dmub via inbox message
- *		Sets port index appropriately for legacy DDC
- *
- *  @param
- *		[in] dc: dc structure
- *		[in] link_index: link index
- *		[in] payload: aux payload
- *
- *	@return
- *		True if successful, False if failure
- *****************************************************************************
+ * Returns: True if successful, False if failure
  */
 bool dc_process_dmub_aux_transfer_async(struct dc *dc,
 				uint32_t link_index,
@@ -3441,16 +3411,8 @@ bool dc_process_dmub_aux_transfer_async(struct dc *dc,
 }
 
 /**
- *****************************************************************************
- *  Function: dc_disable_accelerated_mode
- *
- *  @brief
- *		disable accelerated mode
- *
- *  @param
- *		[in] dc: dc structure
- *
- *****************************************************************************
+ * dc_disable_accelerated_mode - disable accelerated mode
+ * @dc: dc structure
  */
 void dc_disable_accelerated_mode(struct dc *dc)
 {
