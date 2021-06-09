@@ -66,14 +66,16 @@ static DEVICE_ATTR_RO(mem_info_preempt_used);
 static int amdgpu_preempt_mgr_new(struct ttm_resource_manager *man,
 				  struct ttm_buffer_object *tbo,
 				  const struct ttm_place *place,
-				  struct ttm_resource *mem)
+				  struct ttm_resource **res)
 {
+#if 0
 	struct amdgpu_preempt_mgr *mgr = to_preempt_mgr(man);
 
 	atomic64_add(mem->num_pages, &mgr->used);
 
 	mem->mm_node = NULL;
 	mem->start = AMDGPU_BO_INVALID_OFFSET;
+#endif
 	return 0;
 }
 
