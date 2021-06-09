@@ -94,6 +94,21 @@ stash_usr_regs(struct rt_sigframe __user *sf, struct pt_regs *regs,
 
 	err = __copy_to_user(&(sf->uc.uc_mcontext.regs.scratch), &uregs.scratch,
 			     sizeof(sf->uc.uc_mcontext.regs.scratch));
+
+	if (is_isa_arcv2()) {
+		struct user_regs_arcv2 v2abi;
+
+		v2abi.r30 = regs->r30;
+#ifdef CONFIG_ARC_HAS_ACCL_REGS
+		v2abi.r58 = regs->r58;
+		v2abi.r59 = regs->r59;
+#else
+		v2abi.r58 = v2abi.r59 = 0;
+#endif
+		err |= __copy_to_user(&(sf->uc.uc_mcontext.v2abi), &v2abi,
+				      sizeof(sf->uc.uc_mcontext.v2abi));
+	}
+
 	err |= __copy_to_user(&sf->uc.uc_sigmask, set, sizeof(sigset_t));
 
 	return err ? -EFAULT : 0;
@@ -109,6 +124,20 @@ static int restore_usr_regs(struct pt_regs *regs, struct rt_sigframe __user *sf)
 	err |= __copy_from_user(&uregs.scratch,
 				&(sf->uc.uc_mcontext.regs.scratch),
 				sizeof(sf->uc.uc_mcontext.regs.scratch));
+
+	if (is_isa_arcv2()) {
+		struct user_regs_arcv2 v2abi;
+
+		err |= __copy_from_user(&v2abi,	&(sf->uc.uc_mcontext.v2abi),
+					sizeof(sf->uc.uc_mcontext.v2abi));
+
+		regs->r30 = v2abi.r30;
+#ifdef CONFIG_ARC_HAS_ACCL_REGS
+		regs->r58 = v2abi.r58;
+		regs->r59 = v2abi.r59;
+#endif
+	}
+
 	if (err)
 		return -EFAULT;
 
