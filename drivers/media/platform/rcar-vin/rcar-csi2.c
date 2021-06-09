@@ -406,10 +406,17 @@ static void rcsi2_enter_standby(struct rcar_csi2 *priv)
 	pm_runtime_put(priv->dev);
 }
 
-static void rcsi2_exit_standby(struct rcar_csi2 *priv)
+static int rcsi2_exit_standby(struct rcar_csi2 *priv)
 {
-	pm_runtime_get_sync(priv->dev);
+	int ret;
+
+	ret = pm_runtime_resume_and_get(priv->dev);
+	if (ret < 0)
+		return ret;
+
 	reset_control_deassert(priv->rstc);
+
+	return 0;
 }
 
 static int rcsi2_wait_phy_start(struct rcar_csi2 *priv,
@@ -657,7 +664,9 @@ static int rcsi2_start(struct rcar_csi2 *priv)
 {
 	int ret;
 
-	rcsi2_exit_standby(priv);
+	ret = rcsi2_exit_standby(priv);
+	if (ret < 0)
+		return ret;
 
 	ret = rcsi2_start_receiver(priv);
 	if (ret) {
@@ -1112,6 +1121,11 @@ static const struct rcar_csi2_info rcar_csi2_info_r8a7796 = {
 	.num_channels = 4,
 };
 
+static const struct rcar_csi2_info rcar_csi2_info_r8a77961 = {
+	.hsfreqrange = hsfreqrange_m3w_h3es1,
+	.num_channels = 4,
+};
+
 static const struct rcar_csi2_info rcar_csi2_info_r8a77965 = {
 	.init_phtw = rcsi2_init_phtw_h3_v3h_m3n,
 	.hsfreqrange = hsfreqrange_h3_v3h_m3n,
@@ -1163,6 +1177,10 @@ static const struct of_device_id rcar_csi2_of_table[] = {
 	{
 		.compatible = "renesas,r8a7796-csi2",
 		.data = &rcar_csi2_info_r8a7796,
+	},
+	{
+		.compatible = "renesas,r8a77961-csi2",
+		.data = &rcar_csi2_info_r8a77961,
 	},
 	{
 		.compatible = "renesas,r8a77965-csi2",
