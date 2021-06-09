@@ -666,7 +666,9 @@ extern bool acpi_driver_match_device(struct device *dev,
 				     const struct device_driver *drv);
 int acpi_device_uevent_modalias(struct device *, struct kobj_uevent_env *);
 int acpi_device_modalias(struct device *, char *, int);
-void acpi_walk_dep_device_list(acpi_handle handle);
+int acpi_walk_dep_device_list(acpi_handle handle,
+			      int (*callback)(struct acpi_dep_data *, void *),
+			      void *data);
 
 struct platform_device *acpi_create_platform_device(struct acpi_device *,
 						    struct property_entry *);
@@ -765,7 +767,7 @@ static inline bool is_acpi_device_node(const struct fwnode_handle *fwnode)
 	return false;
 }
 
-static inline struct acpi_device *to_acpi_device_node(struct fwnode_handle *fwnode)
+static inline struct acpi_device *to_acpi_device_node(const struct fwnode_handle *fwnode)
 {
 	return NULL;
 }
@@ -775,12 +777,12 @@ static inline bool is_acpi_data_node(const struct fwnode_handle *fwnode)
 	return false;
 }
 
-static inline struct acpi_data_node *to_acpi_data_node(struct fwnode_handle *fwnode)
+static inline struct acpi_data_node *to_acpi_data_node(const struct fwnode_handle *fwnode)
 {
 	return NULL;
 }
 
-static inline bool acpi_data_node_match(struct fwnode_handle *fwnode,
+static inline bool acpi_data_node_match(const struct fwnode_handle *fwnode,
 					const char *name)
 {
 	return false;
@@ -911,7 +913,7 @@ acpi_create_platform_device(struct acpi_device *adev,
 	return NULL;
 }
 
-static inline bool acpi_dma_supported(struct acpi_device *adev)
+static inline bool acpi_dma_supported(const struct acpi_device *adev)
 {
 	return false;
 }

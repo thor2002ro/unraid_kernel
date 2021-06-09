@@ -280,6 +280,12 @@ struct acpi_device_power {
 	struct acpi_device_power_state states[ACPI_D_STATE_COUNT];	/* Power states (D0-D3Cold) */
 };
 
+struct acpi_dep_data {
+	struct list_head node;
+	acpi_handle supplier;
+	acpi_handle consumer;
+};
+
 /* Performance Management */
 
 struct acpi_device_perf_flags {
@@ -586,7 +592,7 @@ struct acpi_pci_root {
 
 /* helper */
 
-bool acpi_dma_supported(struct acpi_device *adev);
+bool acpi_dma_supported(const struct acpi_device *adev);
 enum dev_dma_attr acpi_get_dma_attr(struct acpi_device *adev);
 int acpi_dma_get_range(struct device *dev, u64 *dma_addr, u64 *offset,
 		       u64 *size);
@@ -685,6 +691,8 @@ static inline bool acpi_device_can_poweroff(struct acpi_device *adev)
 
 bool acpi_dev_hid_uid_match(struct acpi_device *adev, const char *hid2, const char *uid2);
 
+void acpi_dev_clear_dependencies(struct acpi_device *supplier);
+struct acpi_device *acpi_dev_get_first_consumer_dev(struct acpi_device *supplier);
 struct acpi_device *
 acpi_dev_get_next_match_dev(struct acpi_device *adev, const char *hid, const char *uid, s64 hrv);
 struct acpi_device *
