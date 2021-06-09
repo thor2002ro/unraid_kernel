@@ -122,7 +122,7 @@ struct irqaction {
 	irq_handler_t		thread_fn;
 	struct task_struct	*thread;
 	struct irqaction	*secondary;
-	unsigned int		irq;
+	struct irq_desc		*desc;
 	unsigned int		flags;
 	unsigned long		thread_flags;
 	unsigned long		thread_mask;

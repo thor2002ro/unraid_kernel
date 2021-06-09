@@ -479,7 +479,7 @@ void handle_nested_irq(unsigned int irq)
 
 	action_ret = IRQ_NONE;
 	for_each_action_of_desc(desc, action)
-		action_ret |= action->thread_fn(action->irq, action->dev_id);
+		action_ret |= action->thread_fn(irq_desc_get_irq(desc), action->dev_id);
 
 	if (!irq_settings_no_debug(desc))
 		note_interrupt(desc, action_ret);
