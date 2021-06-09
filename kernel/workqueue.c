@@ -418,9 +418,6 @@ static void show_pwq(struct pool_workqueue *pwq);
  * This must be called either with wq->mutex held or RCU read locked.
  * If the pwq needs to be used beyond the locking in effect, the caller is
  * responsible for guaranteeing that the pwq stays online.
- *
- * The if/else clause exists only for the lockdep assertion and can be
- * ignored.
  */
 #define for_each_pwq(pwq, wq)						\
 	list_for_each_entry_rcu((pwq), &(wq)->pwqs, pwqs_node,		\
@@ -3209,7 +3206,7 @@ EXPORT_SYMBOL(flush_delayed_work);
  */
 bool flush_rcu_work(struct rcu_work *rwork)
 {
-	if (test_bit(WORK_STRUCT_PENDING_BIT, work_data_bits(&rwork->work))) {
+	if (work_pending(&rwork->work)) {
 		rcu_barrier();
 		flush_work(&rwork->work);
 		return true;
