@@ -224,12 +224,20 @@ static char *translate_scan(struct adapter *padapter,
 	/* parsing WPA/WPA2 IE */
 	{
 		u8 *buf;
-		u8 wpa_ie[255], rsn_ie[255];
+		u8 *wpa_ie, *rsn_ie;
 		u16 wpa_len = 0, rsn_len = 0;
 		u8 *p;
 
 		buf = kzalloc(MAX_WPA_IE_LEN, GFP_ATOMIC);
 		if (!buf)
+			return start;
+
+		wpa_ie = kzalloc(255, GFP_ATOMIC);
+		if (!wpa_ie)
+			return start;
+
+		rsn_ie = kzalloc(255, GFP_ATOMIC);
+		if (!rsn_ie)
 			return start;
 
 		rtw_get_sec_ie(pnetwork->network.ies, pnetwork->network.ie_length, rsn_ie, &rsn_len, wpa_ie, &wpa_len);
@@ -268,6 +276,8 @@ static char *translate_scan(struct adapter *padapter,
 			start = iwe_stream_add_point(info, start, stop, &iwe, rsn_ie);
 		}
 		kfree(buf);
+		kfree(wpa_ie);
+		kfree(rsn_ie);
 	}
 
 	{/* parsing WPS IE */
@@ -657,14 +667,6 @@ static int rtw_wx_get_name(struct net_device *dev,
 	return 0;
 }
 
-static int rtw_wx_set_freq(struct net_device *dev,
-			   struct iw_request_info *info,
-			   union iwreq_data *wrqu, char *extra)
-{
-	RT_TRACE(_module_rtl871x_mlme_c_, _drv_notice_, ("+%s\n", __func__));
-	return 0;
-}
-
 static int rtw_wx_get_freq(struct net_device *dev,
 			   struct iw_request_info *info,
 			   union iwreq_data *wrqu, char *extra)
@@ -952,12 +954,9 @@ static int rtw_wx_set_wap(struct net_device *dev,
 	authmode = padapter->securitypriv.ndisauthtype;
 	spin_lock_bh(&queue->lock);
 	phead = get_list_head(queue);
-	pmlmepriv->pscanned = phead->next;
-
-	while (phead != pmlmepriv->pscanned) {
-		pnetwork = container_of(pmlmepriv->pscanned, struct wlan_network, list);
-
-		pmlmepriv->pscanned = pmlmepriv->pscanned->next;
+	list_for_each(pmlmepriv->pscanned, phead) {
+		pnetwork = list_entry(pmlmepriv->pscanned,
+				      struct wlan_network, list);
 
 		dst_bssid = pnetwork->network.MacAddress;
 
@@ -1211,21 +1210,17 @@ static int rtw_wx_get_scan(struct net_device *dev, struct iw_request_info *a,
 	spin_lock_bh(&pmlmepriv->scanned_queue.lock);
 
 	phead = get_list_head(queue);
-	plist = phead->next;
-
-	while (phead != plist) {
+	list_for_each(plist, phead) {
 		if ((stop - ev) < SCAN_ITEM_SIZE) {
 			ret = -E2BIG;
 			break;
 		}
 
-		pnetwork = container_of(plist, struct wlan_network, list);
+		pnetwork = list_entry(plist, struct wlan_network, list);
 
 		/* report network only if the current channel set contains the channel to which this network belongs */
 		if (rtw_ch_set_search_ch(padapter->mlmeextpriv.channel_set, pnetwork->network.Configuration.DSConfig) >= 0)
 			ev = translate_scan(padapter, a, pnetwork, ev, stop);
-
-		plist = plist->next;
 	}
 
 	spin_unlock_bh(&pmlmepriv->scanned_queue.lock);
@@ -1295,12 +1290,9 @@ static int rtw_wx_set_essid(struct net_device *dev,
 		RT_TRACE(_module_rtl871x_ioctl_os_c, _drv_info_, ("%s: ssid =[%s]\n", __func__, src_ssid));
 		spin_lock_bh(&queue->lock);
 		phead = get_list_head(queue);
-		pmlmepriv->pscanned = phead->next;
-
-		while (phead != pmlmepriv->pscanned) {
-			pnetwork = container_of(pmlmepriv->pscanned, struct wlan_network, list);
-
-			pmlmepriv->pscanned = pmlmepriv->pscanned->next;
+		list_for_each(pmlmepriv->pscanned, phead) {
+			pnetwork = list_entry(pmlmepriv->pscanned,
+					      struct wlan_network, list);
 
 			dst_ssid = pnetwork->network.ssid.ssid;
 
@@ -1908,12 +1900,6 @@ static int rtw_wx_get_nick(struct net_device *dev,
 
 	/* dump debug info here */
 	return 0;
-}
-
-static int dummy(struct net_device *dev, struct iw_request_info *a,
-		 union iwreq_data *wrqu, char *b)
-{
-	return -1;
 }
 
 static int wpa_set_param(struct net_device *dev, u8 name, u32 value)
@@ -2899,62 +2885,35 @@ FREE_EXT:
 }
 
 static iw_handler rtw_handlers[] = {
-	NULL,					/* SIOCSIWCOMMIT */
-	rtw_wx_get_name,		/* SIOCGIWNAME */
-	dummy,					/* SIOCSIWNWID */
-	dummy,					/* SIOCGIWNWID */
-	rtw_wx_set_freq,		/* SIOCSIWFREQ */
-	rtw_wx_get_freq,		/* SIOCGIWFREQ */
-	rtw_wx_set_mode,		/* SIOCSIWMODE */
-	rtw_wx_get_mode,		/* SIOCGIWMODE */
-	dummy,					/* SIOCSIWSENS */
-	rtw_wx_get_sens,		/* SIOCGIWSENS */
-	NULL,					/* SIOCSIWRANGE */
-	rtw_wx_get_range,		/* SIOCGIWRANGE */
-	rtw_wx_set_priv,		/* SIOCSIWPRIV */
-	NULL,					/* SIOCGIWPRIV */
-	NULL,					/* SIOCSIWSTATS */
-	NULL,					/* SIOCGIWSTATS */
-	dummy,					/* SIOCSIWSPY */
-	dummy,					/* SIOCGIWSPY */
-	NULL,					/* SIOCGIWTHRSPY */
-	NULL,					/* SIOCWIWTHRSPY */
-	rtw_wx_set_wap,		/* SIOCSIWAP */
-	rtw_wx_get_wap,		/* SIOCGIWAP */
-	rtw_wx_set_mlme,		/* request MLME operation; uses struct iw_mlme */
-	dummy,					/* SIOCGIWAPLIST -- depricated */
-	rtw_wx_set_scan,		/* SIOCSIWSCAN */
-	rtw_wx_get_scan,		/* SIOCGIWSCAN */
-	rtw_wx_set_essid,		/* SIOCSIWESSID */
-	rtw_wx_get_essid,		/* SIOCGIWESSID */
-	dummy,					/* SIOCSIWNICKN */
-	rtw_wx_get_nick,		/* SIOCGIWNICKN */
-	NULL,					/* -- hole -- */
-	NULL,					/* -- hole -- */
-	rtw_wx_set_rate,		/* SIOCSIWRATE */
-	rtw_wx_get_rate,		/* SIOCGIWRATE */
-	rtw_wx_set_rts,			/* SIOCSIWRTS */
-	rtw_wx_get_rts,			/* SIOCGIWRTS */
-	rtw_wx_set_frag,		/* SIOCSIWFRAG */
-	rtw_wx_get_frag,		/* SIOCGIWFRAG */
-	dummy,					/* SIOCSIWTXPOW */
-	dummy,					/* SIOCGIWTXPOW */
-	dummy,					/* SIOCSIWRETRY */
-	rtw_wx_get_retry,		/* SIOCGIWRETRY */
-	rtw_wx_set_enc,			/* SIOCSIWENCODE */
-	rtw_wx_get_enc,			/* SIOCGIWENCODE */
-	dummy,					/* SIOCSIWPOWER */
-	rtw_wx_get_power,		/* SIOCGIWPOWER */
-	NULL,					/*---hole---*/
-	NULL,					/*---hole---*/
-	rtw_wx_set_gen_ie,		/* SIOCSIWGENIE */
-	NULL,					/* SIOCGWGENIE */
-	rtw_wx_set_auth,		/* SIOCSIWAUTH */
-	NULL,					/* SIOCGIWAUTH */
-	rtw_wx_set_enc_ext,		/* SIOCSIWENCODEEXT */
-	NULL,					/* SIOCGIWENCODEEXT */
-	rtw_wx_set_pmkid,		/* SIOCSIWPMKSA */
-	NULL,					/*---hole---*/
+	IW_HANDLER(SIOCGIWNAME, rtw_wx_get_name),
+	IW_HANDLER(SIOCGIWFREQ, rtw_wx_get_freq),
+	IW_HANDLER(SIOCSIWMODE, rtw_wx_set_mode),
+	IW_HANDLER(SIOCGIWMODE, rtw_wx_get_mode),
+	IW_HANDLER(SIOCGIWSENS, rtw_wx_get_sens),
+	IW_HANDLER(SIOCGIWRANGE, rtw_wx_get_range),
+	IW_HANDLER(SIOCSIWPRIV, rtw_wx_set_priv),
+	IW_HANDLER(SIOCSIWAP, rtw_wx_set_wap),
+	IW_HANDLER(SIOCGIWAP, rtw_wx_get_wap),
+	IW_HANDLER(SIOCSIWMLME, rtw_wx_set_mlme),
+	IW_HANDLER(SIOCSIWSCAN, rtw_wx_set_scan),
+	IW_HANDLER(SIOCGIWSCAN, rtw_wx_get_scan),
+	IW_HANDLER(SIOCSIWESSID, rtw_wx_set_essid),
+	IW_HANDLER(SIOCGIWESSID, rtw_wx_get_essid),
+	IW_HANDLER(SIOCGIWNICKN, rtw_wx_get_nick),
+	IW_HANDLER(SIOCSIWRATE, rtw_wx_set_rate),
+	IW_HANDLER(SIOCGIWRATE, rtw_wx_get_rate),
+	IW_HANDLER(SIOCSIWRTS, rtw_wx_set_rts),
+	IW_HANDLER(SIOCGIWRTS, rtw_wx_get_rts),
+	IW_HANDLER(SIOCSIWFRAG, rtw_wx_set_frag),
+	IW_HANDLER(SIOCGIWFRAG, rtw_wx_get_frag),
+	IW_HANDLER(SIOCGIWRETRY, rtw_wx_get_retry),
+	IW_HANDLER(SIOCSIWENCODE, rtw_wx_set_enc),
+	IW_HANDLER(SIOCGIWENCODE, rtw_wx_get_enc),
+	IW_HANDLER(SIOCGIWPOWER, rtw_wx_get_power),
+	IW_HANDLER(SIOCSIWGENIE, rtw_wx_set_gen_ie),
+	IW_HANDLER(SIOCSIWAUTH, rtw_wx_set_auth),
+	IW_HANDLER(SIOCSIWENCODEEXT, rtw_wx_set_enc_ext),
+	IW_HANDLER(SIOCSIWPMKSA, rtw_wx_set_pmkid),
 };
 
 static struct iw_statistics *rtw_get_wireless_stats(struct net_device *dev)

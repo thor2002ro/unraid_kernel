@@ -820,7 +820,7 @@ int rtw_check_bcn_info(struct adapter  *Adapter, u8 *pframe, u32 packet_len)
 
 	subtype = GetFrameSubType(pframe) >> 4;
 
-	if (subtype == WIFI_BEACON)
+	if (subtype == IEEE80211_STYPE_BEACON)
 		bssid->Reserved[0] = 1;
 
 	bssid->Length = sizeof(struct wlan_bssid_ex) - MAX_IE_SZ + len;
@@ -1029,6 +1029,7 @@ unsigned int is_ap_in_tkip(struct adapter *padapter)
 			case WLAN_EID_RSN:
 				if (!memcmp((pIE->data + 8), RSN_TKIP_CIPHER, 4))
 					return true;
+				break;
 			default:
 				break;
 			}
@@ -1226,6 +1227,7 @@ unsigned char check_assoc_AP(u8 *pframe, uint len)
 			} else {
 				break;
 			}
+			break;
 
 		default:
 			break;
