@@ -460,6 +460,30 @@ int iov_iter_fault_in_readable(const struct iov_iter *i, size_t bytes)
 }
 EXPORT_SYMBOL(iov_iter_fault_in_readable);
 
+int iov_iter_fault_in_writeable(struct iov_iter *i, size_t bytes)
+{
+	if (iter_is_iovec(i)) {
+		const struct iovec *p;
+		size_t skip;
+
+		if (bytes > i->count)
+			bytes = i->count;
+		for (p = i->iov, skip = i->iov_offset; bytes; p++, skip = 0) {
+			size_t len = min(bytes, p->iov_len - skip);
+			int err;
+
+			if (unlikely(!len))
+				continue;
+			err = fault_in_pages_writeable(p->iov_base + skip, len);
+			if (unlikely(err))
+				return err;
+			bytes -= len;
+		}
+	}
+	return 0;
+}
+EXPORT_SYMBOL(iov_iter_fault_in_writeable);
+
 void iov_iter_init(struct iov_iter *i, unsigned int direction,
 			const struct iovec *iov, unsigned long nr_segs,
 			size_t count)
