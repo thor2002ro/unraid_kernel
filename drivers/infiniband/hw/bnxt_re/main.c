@@ -128,6 +128,9 @@ static int bnxt_re_setup_chip_ctx(struct bnxt_re_dev *rdev, u8 wqe_mode)
 	rdev->rcfw.res = &rdev->qplib_res;
 
 	bnxt_re_set_drv_mode(rdev, wqe_mode);
+	if (bnxt_qplib_determine_atomics(en_dev->pdev))
+		ibdev_info(&rdev->ibdev,
+			   "platform doesn't support global atomics.");
 	return 0;
 }
 
@@ -885,12 +888,6 @@ static int bnxt_re_srqn_handler(struct bnxt_qplib_nq *nq,
 	struct ib_event ib_event;
 	int rc = 0;
 
-	if (!srq) {
-		ibdev_err(NULL, "%s: SRQ is NULL, SRQN not handled",
-			  ROCE_DRV_MODULE_NAME);
-		rc = -EINVAL;
-		goto done;
-	}
 	ib_event.device = &srq->rdev->ibdev;
 	ib_event.element.srq = &srq->ib_srq;
 	if (event == NQ_SRQ_EVENT_EVENT_SRQ_THRESHOLD_EVENT)
@@ -903,7 +900,6 @@ static int bnxt_re_srqn_handler(struct bnxt_qplib_nq *nq,
 		(*srq->ib_srq.event_handler)(&ib_event,
 					     srq->ib_srq.srq_context);
 	}
-done:
 	return rc;
 }
 
@@ -913,11 +909,6 @@ static int bnxt_re_cqn_handler(struct bnxt_qplib_nq *nq,
 	struct bnxt_re_cq *cq = container_of(handle, struct bnxt_re_cq,
 					     qplib_cq);
 
-	if (!cq) {
-		ibdev_err(NULL, "%s: CQ is NULL, CQN not handled",
-			  ROCE_DRV_MODULE_NAME);
-		return -EINVAL;
-	}
 	if (cq->ib_cq.comp_handler) {
 		/* Lock comp_handler? */
 		(*cq->ib_cq.comp_handler)(&cq->ib_cq, cq->ib_cq.cq_context);

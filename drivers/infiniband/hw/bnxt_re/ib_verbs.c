@@ -163,6 +163,10 @@ int bnxt_re_query_device(struct ib_device *ibdev,
 	ib_attr->max_qp_init_rd_atom = dev_attr->max_qp_init_rd_atom;
 	ib_attr->atomic_cap = IB_ATOMIC_NONE;
 	ib_attr->masked_atomic_cap = IB_ATOMIC_NONE;
+	if (dev_attr->is_atomic) {
+		ib_attr->atomic_cap = IB_ATOMIC_GLOB;
+		ib_attr->masked_atomic_cap = IB_ATOMIC_GLOB;
+	}
 
 	ib_attr->max_ee_rd_atom = 0;
 	ib_attr->max_res_rd_atom = 0;
@@ -1098,10 +1102,6 @@ static int bnxt_re_init_rq_attr(struct bnxt_re_qp *qp,
 		struct bnxt_re_srq *srq;
 
 		srq = container_of(init_attr->srq, struct bnxt_re_srq, ib_srq);
-		if (!srq) {
-			ibdev_err(&rdev->ibdev, "SRQ not found");
-			return -EINVAL;
-		}
 		qplqp->srq = &srq->qplib_srq;
 		rq->max_wqe = 0;
 	} else {
@@ -1279,22 +1279,12 @@ static int bnxt_re_init_qp_attr(struct bnxt_re_qp *qp, struct bnxt_re_pd *pd,
 	/* Setup CQs */
 	if (init_attr->send_cq) {
 		cq = container_of(init_attr->send_cq, struct bnxt_re_cq, ib_cq);
-		if (!cq) {
-			ibdev_err(&rdev->ibdev, "Send CQ not found");
-			rc = -EINVAL;
-			goto out;
-		}
 		qplqp->scq = &cq->qplib_cq;
 		qp->scq = cq;
 	}
 
 	if (init_attr->recv_cq) {
 		cq = container_of(init_attr->recv_cq, struct bnxt_re_cq, ib_cq);
-		if (!cq) {
-			ibdev_err(&rdev->ibdev, "Receive CQ not found");
-			rc = -EINVAL;
-			goto out;
-		}
 		qplqp->rcq = &cq->qplib_cq;
 		qp->rcq = cq;
 	}
@@ -3473,10 +3463,6 @@ int bnxt_re_poll_cq(struct ib_cq *ib_cq, int num_entries, struct ib_wc *wc)
 				((struct bnxt_qplib_qp *)
 				 (unsigned long)(cqe->qp_handle),
 				 struct bnxt_re_qp, qplib_qp);
-			if (!qp) {
-				ibdev_err(&cq->rdev->ibdev, "POLL CQ : bad QP handle");
-				continue;
-			}
 			wc->qp = &qp->ib_qp;
 			wc->ex.imm_data = cqe->immdata;
 			wc->src_qp = cqe->src_qp;
