@@ -1021,12 +1021,13 @@ static int do_run(mddev_t *mddev)
 
 		if (disk_active(disk) || disk_enabled(disk)) {
 			int unit = disk->number;
-			struct gendisk *gd = alloc_disk(1);
+			struct gendisk *gd = blk_alloc_disk(NUMA_NO_NODE);
 
 			mddev->gendisk[unit] = gd;
 
 			gd->major = MAJOR(mddev->dev);
 			gd->first_minor = unit;
+			gd->minors = 1;
 			sprintf(gd->disk_name, "md%d", unit);
 			gd->fops = &md_fops;
 			gd->private_data = mddev;
@@ -1035,7 +1036,7 @@ static int do_run(mddev_t *mddev)
                         set_capacity(gd, disk->size*2);
 
                         /* alloc our block queue */
-			gd->queue = blk_alloc_queue(NUMA_NO_NODE);
+			//gd->queue = blk_alloc_queue(NUMA_NO_NODE);
 			gd->queue->queuedata = mddev;
                         blk_queue_io_min(gd->queue, PAGE_SIZE);
                         blk_queue_io_opt(gd->queue, 128*1024);
@@ -1071,13 +1072,12 @@ static int do_stop(mddev_t *mddev)
 
                 if (mddev->gendisk[unit]) {
 			struct gendisk *gd = mddev->gendisk[unit];
-                        struct request_queue *gq = gd->queue;
+                        //struct request_queue *gq = gd->queue;
 
 			printk("md%d: stopping\n", unit);
 
 			del_gendisk(gd);
-			blk_cleanup_queue(gq);
-			put_disk(gd);
+			blk_cleanup_disk(gd);
 
 			mddev->gendisk[unit] = NULL;
 		}
