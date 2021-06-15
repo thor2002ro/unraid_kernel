@@ -5,6 +5,13 @@ arm/soc
 		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-soc-5.14
 	sunxi/core
 		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-core-for-5.14-1
+	imx/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-soc-5.14
+	patch
+		ARM: debug: add UART early console support for MSTAR SoCs
+		MAINTAINERS: ARM/MStar/Sigmastar SoCs: Add a link to the MStar tree
+	tegra/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.14-soc
 
 arm/dt
 	patch
@@ -49,6 +56,28 @@ arm/dt
 		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-dt-for-5.14-1
 	patch
 		ARM: dts: gemini: add crypto node
+	keystone/dts
+		git://git.kernel.org/pub/scm/linux/kernel/git/ssantosh/linux-keystone tags/keystone_dts_for_5.13
+	imx/dt-bindings
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-bindings-5.14
+	imx/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-dt-5.14
+	imx/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-dt64-5.14
+	patch
+		arm64: dts: exynos: enable PMIC wakeup from suspend on TM2
+	qcom/dt64
+		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-for-5.14
+	qcom/dt
+		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-dts-for-5.14
+	toshiba/dt
+		https://git.kernel.org/pub/scm/linux/kernel/git/iwamatsu/linux-visconti tags/visconti-arm-dt-for-v5.14
+	tegra/dt-bindings
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.14-dt-bindings
+	tegra/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.14-arm-dt
+	tegra/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.14-arm64-dt
 
 arm/drivers
 	reset/for-v5.14
@@ -67,6 +96,14 @@ arm/drivers
 		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux-mem-ctrl tags/memory-controller-drv-5.14
 	memory/pl353
 		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux-mem-ctrl tags/memory-controller-drv-pl353-5.14
+	keystone/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/ssantosh/linux-keystone tags/drivers_soc_for_5.13
+	imx/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-drivers-5.14
+	qcom/drivers
+		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-drivers-for-5.14
+	tegra/firmware
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.14-firmware
 
 arm/defconfig
 	patch
@@ -84,6 +121,14 @@ arm/defconfig
 		https://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.13-next-defconfig
 	at91/defconfig
 		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-defconfig-5.14
+	imx/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-defconfig-5.14
+	samsung/defconfig
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-defconfig-5.14
+	qcom/defconfig
+		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-defconfig-for-5.14
+	tegra/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.14-arm-defconfig
 
 arm/late
 
@@ -92,4 +137,8 @@ arm/fixes
 		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-fixes-for-5.13-1
 	<no branch> (8efe01b4386ab38a36b99cfdc1dc02c38a8898c3)
 		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.13-rockchip-dtsfixes1
+	patch
+		ARM: dts: ux500: Fix LED probing
+	<no branch> (0fa1baeedf06765ec6b441692ba2a2e83b7d17dc)
+		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-dts-fixes-for-5.13
 
