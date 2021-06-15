@@ -78,6 +78,8 @@ arm/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.14-arm-dt
 	tegra/dt64
 		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.14-arm64-dt
+	mstar/dt
+		git://github.com/linux-chenxing/linux tags/mstar-dt-5.14
 
 arm/drivers
 	reset/for-v5.14
@@ -104,6 +106,8 @@ arm/drivers
 		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-drivers-for-5.14
 	tegra/firmware
 		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.14-firmware
+	firmware/ffa
+		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/arm-ffa-5.14
 
 arm/defconfig
 	patch
