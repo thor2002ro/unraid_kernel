@@ -1406,8 +1406,10 @@ int btrfs_defrag_root(struct btrfs_root *root)
 
 	while (1) {
 		trans = btrfs_start_transaction(root, 0);
-		if (IS_ERR(trans))
-			return PTR_ERR(trans);
+		if (IS_ERR(trans)) {
+			ret = PTR_ERR(trans);
+			break;
+		}
 
 		ret = btrfs_defrag_leaves(trans, root);
 
@@ -1869,31 +1871,6 @@ int btrfs_transaction_blocked(struct btrfs_fs_info *info)
 }
 
 /*
- * wait for the current transaction commit to start and block subsequent
- * transaction joins
- */
-static void wait_current_trans_commit_start(struct btrfs_fs_info *fs_info,
-					    struct btrfs_transaction *trans)
-{
-	wait_event(fs_info->transaction_blocked_wait,
-		   trans->state >= TRANS_STATE_COMMIT_START ||
-		   TRANS_ABORTED(trans));
-}
-
-/*
- * wait for the current transaction to start and then become unblocked.
- * caller holds ref.
- */
-static void wait_current_trans_commit_start_and_unblock(
-					struct btrfs_fs_info *fs_info,
-					struct btrfs_transaction *trans)
-{
-	wait_event(fs_info->transaction_wait,
-		   trans->state >= TRANS_STATE_UNBLOCKED ||
-		   TRANS_ABORTED(trans));
-}
-
-/*
  * commit transactions asynchronously. once btrfs_commit_transaction_async
  * returns, any subsequent transaction will not be allowed to join.
  */
@@ -1920,8 +1897,7 @@ static void do_async_commit(struct work_struct *work)
 	kfree(ac);
 }
 
-int btrfs_commit_transaction_async(struct btrfs_trans_handle *trans,
-				   int wait_for_unblock)
+int btrfs_commit_transaction_async(struct btrfs_trans_handle *trans)
 {
 	struct btrfs_fs_info *fs_info = trans->fs_info;
 	struct btrfs_async_commit *ac;
@@ -1953,13 +1929,13 @@ int btrfs_commit_transaction_async(struct btrfs_trans_handle *trans,
 		__sb_writers_release(fs_info->sb, SB_FREEZE_FS);
 
 	schedule_work(&ac->work);
-
-	/* wait for transaction to start and unblock */
-	if (wait_for_unblock)
-		wait_current_trans_commit_start_and_unblock(fs_info, cur_trans);
-	else
-		wait_current_trans_commit_start(fs_info, cur_trans);
-
+	/*
+	 * Wait for the current transaction commit to start and block
+	 * subsequent transaction joins
+	 */
+	wait_event(fs_info->transaction_blocked_wait,
+		   cur_trans->state >= TRANS_STATE_COMMIT_START ||
+		   TRANS_ABORTED(cur_trans));
 	if (current->journal_info == trans)
 		current->journal_info = NULL;
 
@@ -2073,14 +2049,6 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans)
 	int ret;
 
 	ASSERT(refcount_read(&trans->use_count) == 1);
-
-	/*
-	 * Some places just start a transaction to commit it.  We need to make
-	 * sure that if this commit fails that the abort code actually marks the
-	 * transaction as failed, so set trans->dirty to make the abort code do
-	 * the right thing.
-	 */
-	trans->dirty = true;
 
 	/* Stop the commit early if ->aborted is set */
 	if (TRANS_ABORTED(cur_trans)) {

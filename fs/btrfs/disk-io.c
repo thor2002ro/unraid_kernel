@@ -584,6 +584,7 @@ static int validate_extent_buffer(struct extent_buffer *eb)
 	const u32 csum_size = fs_info->csum_size;
 	u8 found_level;
 	u8 result[BTRFS_CSUM_SIZE];
+	const u8 *header_csum;
 	int ret = 0;
 
 	found_start = btrfs_header_bytenr(eb);
@@ -608,15 +609,14 @@ static int validate_extent_buffer(struct extent_buffer *eb)
 	}
 
 	csum_tree_block(eb, result);
+	header_csum = page_address(eb->pages[0]) +
+		get_eb_offset_in_page(eb, offsetof(struct btrfs_header, csum));
 
-	if (memcmp_extent_buffer(eb, result, 0, csum_size)) {
-		u8 val[BTRFS_CSUM_SIZE] = { 0 };
-
-		read_extent_buffer(eb, &val, 0, csum_size);
+	if (memcmp(result, header_csum, csum_size) != 0) {
 		btrfs_warn_rl(fs_info,
-	"%s checksum verify failed on %llu wanted " CSUM_FMT " found " CSUM_FMT " level %d",
-			      fs_info->sb->s_id, eb->start,
-			      CSUM_FMT_VALUE(csum_size, val),
+	"checksum verify failed on %llu wanted " CSUM_FMT " found " CSUM_FMT " level %d",
+			      eb->start,
+			      CSUM_FMT_VALUE(csum_size, header_csum),
 			      CSUM_FMT_VALUE(csum_size, result),
 			      btrfs_header_level(eb));
 		ret = -EUCLEAN;
@@ -917,23 +917,22 @@ static blk_status_t btree_submit_bio_start(struct inode *inode, struct bio *bio,
 	return btree_csum_one_bio(bio);
 }
 
-static int check_async_write(struct btrfs_fs_info *fs_info,
+static bool should_async_write(struct btrfs_fs_info *fs_info,
 			     struct btrfs_inode *bi)
 {
 	if (btrfs_is_zoned(fs_info))
-		return 0;
+		return false;
 	if (atomic_read(&bi->sync_writers))
-		return 0;
+		return false;
 	if (test_bit(BTRFS_FS_CSUM_IMPL_FAST, &fs_info->flags))
-		return 0;
-	return 1;
+		return false;
+	return true;
 }
 
 blk_status_t btrfs_submit_metadata_bio(struct inode *inode, struct bio *bio,
 				       int mirror_num, unsigned long bio_flags)
 {
 	struct btrfs_fs_info *fs_info = btrfs_sb(inode->i_sb);
-	int async = check_async_write(fs_info, BTRFS_I(inode));
 	blk_status_t ret;
 
 	if (btrfs_op(bio) != BTRFS_MAP_WRITE) {
@@ -946,7 +945,7 @@ blk_status_t btrfs_submit_metadata_bio(struct inode *inode, struct bio *bio,
 		if (ret)
 			goto out_w_error;
 		ret = btrfs_map_bio(fs_info, bio, mirror_num);
-	} else if (!async) {
+	} else if (!should_async_write(fs_info, BTRFS_I(inode))) {
 		ret = btree_csum_one_bio(bio);
 		if (ret)
 			goto out_w_error;
@@ -2252,6 +2251,7 @@ static void btrfs_init_balance(struct btrfs_fs_info *fs_info)
 	atomic_set(&fs_info->balance_cancel_req, 0);
 	fs_info->balance_ctl = NULL;
 	init_waitqueue_head(&fs_info->balance_wait_q);
+	atomic_set(&fs_info->reloc_cancel_req, 0);
 }
 
 static void btrfs_init_btree_inode(struct btrfs_fs_info *fs_info)
@@ -3471,7 +3471,7 @@ int __cold open_ctree(struct super_block *sb, struct btrfs_fs_devices *fs_device
 	 * At this point we know all the devices that make this filesystem,
 	 * including the seed devices but we don't know yet if the replace
 	 * target is required. So free devices that are not part of this
-	 * filesystem but skip the replace traget device which is checked
+	 * filesystem but skip the replace target device which is checked
 	 * below in btrfs_init_dev_replace().
 	 */
 	btrfs_free_extra_devids(fs_devices);
