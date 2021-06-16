@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 /*
- * Copyright (c) 2020, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2021, Microsoft Corporation
  */
 
 /dts-v1/;
@@ -13,8 +13,8 @@
 #include "pm8150l.dtsi"
 
 / {
-	model = "Qualcomm Technologies, Inc. SM8150 HDK";
-	compatible = "qcom,sm8150-hdk", "qcom,sm8150";
+	model = "Microsoft Surface Duo";
+	compatible = "microsoft,surface-duo", "qcom,sm8150";
 
 	aliases {
 		serial0 = &uart2;
@@ -31,6 +31,10 @@
 		regulator-max-microvolt = <3700000>;
 	};
 
+	/*
+	 * Apparently RPMh does not provide support for PM8150 S4 because it
+	 * is always-on; model it as a fixed regulator.
+	 */
 	vreg_s4a_1p8: pm8150-s4 {
 		compatible = "regulator-fixed";
 		regulator-name = "vreg_s4a_1p8";
@@ -47,10 +51,10 @@
 	gpio_keys {
 		compatible = "gpio-keys";
 
-		vol-up {
+		vol_up {
 			label = "Volume Up";
-			linux,code = <KEY_VOLUMEUP>;
 			gpios = <&pm8150_gpios 6 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEUP>;
 		};
 	};
 };
@@ -354,12 +358,75 @@
 	};
 };
 
-&gmu {
+&i2c1 {
 	status = "okay";
+	clock-frequency = <400000>;
+
+	bq27742@55 {
+		compatible = "ti,bq27742";
+		reg = <0x55>;
+	};
+
+	da7280@4a {
+		compatible = "dlg,da7280";
+		reg = <0x4a>;
+		interrupts-extended = <&tlmm 42 IRQ_TYPE_LEVEL_LOW>;
+		pinctrl-names = "da7280_default";
+		pinctrl-0 = <&da7280_intr_default>;
+
+		dlg,actuator-type = "LRA";
+		dlg,dlg,const-op-mode = <1>;
+		dlg,dlg,periodic-op-mode = <1>;
+		dlg,nom-microvolt = <2000000>;
+		dlg,abs-max-microvolt = <2000000>;
+		dlg,imax-microamp = <129000>;
+		dlg,resonant-freq-hz = <180>;
+		dlg,impd-micro-ohms = <14300000>;
+		dlg,freq-track-enable;
+		dlg,bemf-sens-enable;
+		dlg,mem-array = <
+		  0x06 0x08 0x10 0x11 0x12 0x13 0x14 0x15 0x1c 0x2a
+		  0x33 0x3c 0x42 0x4b 0x4c 0x4e 0x17 0x19 0x27 0x29
+		  0x17 0x19 0x03 0x84 0x5e 0x04 0x08 0x84 0x5d 0x01
+		  0x84 0x5e 0x02 0x00 0xa4 0x5d 0x03 0x84 0x5e 0x06
+		  0x08 0x84 0x5d 0x05 0x84 0x5d 0x06 0x84 0x5e 0x08
+		  0x84 0x5e 0x05 0x8c 0x5e 0x24 0x84 0x5f 0x10 0x84
+		  0x5e 0x05 0x84 0x5e 0x08 0x84 0x5f 0x01 0x8c 0x5e
+		  0x04 0x84 0x5e 0x08 0x84 0x5f 0x11 0x19 0x88 0x00
+		  0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
+		  0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00
+		>;
+	};
+
+	/* SMB1381 @ 0x44 */
+	/* MAX34417 @ 0x1c */
 };
 
-&gpu {
+&i2c4 {
 	status = "okay";
+	clock-frequency = <400000>;
+
+	/* SMB1355 @ 0x0c */
+	/* SMB1390 @ 0x10 */
+};
+
+&i2c17 {
+	status = "okay";
+	clock-frequency = <400000>;
+
+	bq27742@55 {
+		compatible = "ti,bq27742";
+		reg = <0x55>;
+	};
+};
+
+&i2c19 {
+	status = "okay";
+	clock-frequency = <400000>;
+
+	/* MAX34417 @ 0x12 */
+	/* MAX34417 @ 0x1a */
+	/* MAX34417 @ 0x1e */
 };
 
 &pon {
@@ -376,30 +443,47 @@
 	};
 };
 
+&qupv3_id_0 {
+	status = "okay";
+};
+
 &qupv3_id_1 {
+	status = "okay";
+};
+
+&qupv3_id_2 {
 	status = "okay";
 };
 
 &remoteproc_adsp {
 	status = "okay";
-
-	firmware-name = "qcom/sm8150/adsp.mbn";
+	firmware-name = "qcom/sm8150/microsoft/adsp.mdt";
 };
 
 &remoteproc_cdsp {
 	status = "okay";
+	firmware-name = "qcom/sm8150/microsoft/cdsp.mdt";
+};
 
-	firmware-name = "qcom/sm8150/cdsp.mbn";
+&remoteproc_mpss {
+	status = "okay";
+	firmware-name = "qcom/sm8150/microsoft/modem.mdt";
 };
 
 &remoteproc_slpi {
 	status = "okay";
-
-	firmware-name = "qcom/sm8150/slpi.mbn";
+	firmware-name = "qcom/sm8150/microsoft/slpi.mdt";
 };
 
 &tlmm {
-	gpio-reserved-ranges = <0 4>, <126 4>;
+	gpio-reserved-ranges = <126 4>;
+
+	da7280_intr_default: da7280-intr-default {
+		pins = "gpio42";
+		function = "gpio";
+		bias-pull-up;
+		input-enable;
+	};
 };
 
 &uart2 {
@@ -435,20 +519,7 @@
 	vdda18-supply = <&vdda_usb_hs_1p8>;
 };
 
-&usb_2_hsphy {
-	status = "okay";
-	vdda-pll-supply = <&vdd_usb_hs_core>;
-	vdda33-supply = <&vdda_usb_hs_3p1>;
-	vdda18-supply = <&vdda_usb_hs_1p8>;
-};
-
 &usb_1_qmpphy {
-	status = "okay";
-	vdda-phy-supply = <&vreg_l3c_1p2>;
-	vdda-pll-supply = <&vdda_usb_ss_dp_core_1>;
-};
-
-&usb_2_qmpphy {
 	status = "okay";
 	vdda-phy-supply = <&vreg_l3c_1p2>;
 	vdda-pll-supply = <&vdda_usb_ss_dp_core_1>;
@@ -458,14 +529,15 @@
 	status = "okay";
 };
 
-&usb_2 {
-	status = "okay";
-};
-
 &usb_1_dwc3 {
 	dr_mode = "peripheral";
 };
 
-&usb_2_dwc3 {
-	dr_mode = "host";
+&wifi {
+	status = "okay";
+
+	vdd-0.8-cx-mx-supply = <&vdda_wcss_pll>;
+	vdd-1.8-xo-supply = <&vreg_l7a_1p8>;
+	vdd-1.3-rfa-supply = <&vdda_wcss_adcdac_1>;
+	vdd-3.3-ch0-supply = <&vreg_l11c_3p3>;
 };
