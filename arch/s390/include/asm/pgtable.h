@@ -17,6 +17,7 @@
 #include <linux/page-flags.h>
 #include <linux/radix-tree.h>
 #include <linux/atomic.h>
+#include <asm/sections.h>
 #include <asm/bug.h>
 #include <asm/page.h>
 #include <asm/uv.h>
@@ -86,16 +87,16 @@ extern unsigned long zero_page_mask;
  * happen without trampolines and in addition the placement within a
  * 2GB frame is branch prediction unit friendly.
  */
-extern unsigned long VMALLOC_START;
-extern unsigned long VMALLOC_END;
+extern unsigned long __bootdata_preserved(VMALLOC_START);
+extern unsigned long __bootdata_preserved(VMALLOC_END);
 #define VMALLOC_DEFAULT_SIZE	((512UL << 30) - MODULES_LEN)
-extern struct page *vmemmap;
-extern unsigned long vmemmap_size;
+extern struct page *__bootdata_preserved(vmemmap);
+extern unsigned long __bootdata_preserved(vmemmap_size);
 
 #define VMEM_MAX_PHYS ((unsigned long) vmemmap)
 
-extern unsigned long MODULES_VADDR;
-extern unsigned long MODULES_END;
+extern unsigned long __bootdata_preserved(MODULES_VADDR);
+extern unsigned long __bootdata_preserved(MODULES_END);
 #define MODULES_VADDR	MODULES_VADDR
 #define MODULES_END	MODULES_END
 #define MODULES_LEN	(1UL << 31)
@@ -863,6 +864,25 @@ static inline int pte_young(pte_t pte)
 static inline int pte_unused(pte_t pte)
 {
 	return pte_val(pte) & _PAGE_UNUSED;
+}
+
+/*
+ * Extract the pgprot value from the given pte while at the same time making it
+ * usable for kernel address space mappings where fault driven dirty and
+ * young/old accounting is not supported, i.e _PAGE_PROTECT and _PAGE_INVALID
+ * must not be set.
+ */
+static inline pgprot_t pte_pgprot(pte_t pte)
+{
+	unsigned long pte_flags = pte_val(pte) & _PAGE_CHG_MASK;
+
+	if (pte_write(pte))
+		pte_flags |= pgprot_val(PAGE_KERNEL);
+	else
+		pte_flags |= pgprot_val(PAGE_KERNEL_RO);
+	pte_flags |= pte_val(pte) & mio_wb_bit_mask;
+
+	return __pgprot(pte_flags);
 }
 
 /*
