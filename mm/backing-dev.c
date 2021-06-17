@@ -645,15 +645,12 @@ static void cgwb_bdi_unregister(struct backing_dev_info *bdi)
 	mutex_unlock(&bdi->cgwb_release_mutex);
 }
 
-/**
- * cleanup_offline_cgwbs - try to release dying cgwbs
+/*
+ * cleanup_offline_cgwbs_workfn - try to release dying cgwbs
  *
  * Try to release dying cgwbs by switching attached inodes to the nearest
  * living ancestor's writeback. Processed wbs are placed at the end
  * of the list to guarantee the forward progress.
- *
- * Should be called with the acquired cgwb_lock lock, which might
- * be released and re-acquired in the process.
  */
 static void cleanup_offline_cgwbs_workfn(struct work_struct *work)
 {
