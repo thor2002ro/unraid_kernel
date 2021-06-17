@@ -535,16 +535,16 @@ static inline pgoff_t page_to_index(struct page *page)
 	return pgoff;
 }
 
+extern pgoff_t hugetlb_basepage_index(struct page *page);
+
 /*
  * Get the offset in PAGE_SIZE (even for hugetlb pages).
  * (TODO: hugetlb pages should have ->index in PAGE_SIZE)
  */
 static inline pgoff_t page_to_pgoff(struct page *page)
 {
-	if (unlikely(PageHuge(page))) {
-		extern pgoff_t hugetlb_basepage_index(struct page *page);
+	if (unlikely(PageHuge(page)))
 		return hugetlb_basepage_index(page);
-	}
 	return page_to_index(page);
 }
 
