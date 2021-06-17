@@ -226,11 +226,12 @@ static int mpol_set_nodemask(struct mempolicy *pol,
 {
 	int ret;
 
-	/* if mode is MPOL_DEFAULT, pol is NULL. This is right. */
-	if (pol == NULL)
-		return 0;
-
-	if (pol->mode == MPOL_LOCAL)
+	/*
+	 * Default (pol==NULL) resp. local memory policies are not a
+	 * subject of any remapping. They also do not need any special
+	 * constructor.
+	 */
+	if (!pol || pol->mode == MPOL_LOCAL)
 		return 0;
 
 	/* Check N_MEMORY */
