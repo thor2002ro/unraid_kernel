@@ -1129,6 +1129,10 @@ static inline void save_sprs(struct thread_struct *t)
 	if (cpu_has_feature(CPU_FTR_ALTIVEC))
 		t->vrsave = mfspr(SPRN_VRSAVE);
 #endif
+#ifdef CONFIG_SPE
+	if (cpu_has_feature(CPU_FTR_SPE))
+		t->spefscr = mfspr(SPRN_SPEFSCR);
+#endif
 #ifdef CONFIG_PPC_BOOK3S_64
 	if (cpu_has_feature(CPU_FTR_DSCR))
 		t->dscr = mfspr(SPRN_DSCR);
@@ -1158,6 +1162,11 @@ static inline void restore_sprs(struct thread_struct *old_thread,
 	if (cpu_has_feature(CPU_FTR_ALTIVEC) &&
 	    old_thread->vrsave != new_thread->vrsave)
 		mtspr(SPRN_VRSAVE, new_thread->vrsave);
+#endif
+#ifdef CONFIG_SPE
+	if (cpu_has_feature(CPU_FTR_SPE) &&
+	    old_thread->spefscr != new_thread->spefscr)
+		mtspr(SPRN_SPEFSCR, new_thread->spefscr);
 #endif
 #ifdef CONFIG_PPC_BOOK3S_64
 	if (cpu_has_feature(CPU_FTR_DSCR)) {
@@ -1736,6 +1745,9 @@ int copy_thread(unsigned long clone_flags, unsigned long usp,
 #ifdef CONFIG_ALTIVEC
 	p->thread.vr_save_area = NULL;
 #endif
+#if defined(CONFIG_PPC_BOOK3S_32) && defined(CONFIG_PPC_KUAP)
+	p->thread.kuap = KUAP_NONE;
+#endif
 
 	setup_ksp_vsid(p, sp);
 
@@ -2121,8 +2133,9 @@ unsigned long get_wchan(struct task_struct *p)
 
 static int kstack_depth_to_print = CONFIG_PRINT_STACK_DEPTH;
 
-void show_stack(struct task_struct *tsk, unsigned long *stack,
-		const char *loglvl)
+void __no_sanitize_address show_stack(struct task_struct *tsk,
+				      unsigned long *stack,
+				      const char *loglvl)
 {
 	unsigned long sp, ip, lr, newsp;
 	int count = 0;
