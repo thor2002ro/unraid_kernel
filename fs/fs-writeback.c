@@ -513,6 +513,14 @@ static void inode_switch_wbs_work_fn(struct work_struct *work)
 static bool inode_prepare_wbs_switch(struct inode *inode,
 				     struct bdi_writeback *new_wb)
 {
+	/*
+	 * Paired with smp_mb() in cgroup_writeback_umount().
+	 * isw_nr_in_flight must be increased before checking SB_ACTIVE and
+	 * grabbing an inode, otherwise isw_nr_in_flight can be observed as 0
+	 * in cgroup_writeback_umount() and the isw_wq will be not flushed.
+	 */
+	smp_mb();
+
 	/* while holding I_WB_SWITCH, no one else can update the association */
 	spin_lock(&inode->i_lock);
 	if (!(inode->i_sb->s_flags & SB_ACTIVE) ||
