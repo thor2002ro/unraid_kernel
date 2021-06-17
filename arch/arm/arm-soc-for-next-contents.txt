@@ -114,6 +114,8 @@ arm/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/arm-ffa-5.14
 	tegra/memory [sign: G Olof Johansson <olof@lixom.net>]
 		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux-mem-ctrl tags/memory-controller-drv-tegra-5.14-2
+	<no branch> (48a74b1147f7db4623eaed591cc01eb740b871c0) [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.pengutronix.de/pza/linux tags/reset-for-v5.14-2
 
 arm/defconfig
 	patch
