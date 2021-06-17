@@ -229,7 +229,8 @@ void wb_wait_for_completion(struct wb_completion *done)
  * Maximum inodes per isw.  A specific value has been chosen to make
  * struct inode_switch_wbs_context fit into 1024 bytes kmalloc.
  */
-#define WB_MAX_INODES_PER_ISW	115
+#define WB_MAX_INODES_PER_ISW  ((1024UL - sizeof(struct inode_switch_wbs_context)) \
+                                / sizeof(struct inode *))
 
 static atomic_t isw_nr_in_flight = ATOMIC_INIT(0);
 static struct workqueue_struct *isw_wq;
