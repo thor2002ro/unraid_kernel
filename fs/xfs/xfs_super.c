@@ -36,6 +36,7 @@
 #include "xfs_bmap_item.h"
 #include "xfs_reflink.h"
 #include "xfs_pwork.h"
+#include "xfs_ag.h"
 
 #include <linux/magic.h>
 #include <linux/fs_context.h>
@@ -339,13 +340,6 @@ xfs_blkdev_put(
 		blkdev_put(bdev, FMODE_READ|FMODE_WRITE|FMODE_EXCL);
 }
 
-void
-xfs_blkdev_issue_flush(
-	xfs_buftarg_t		*buftarg)
-{
-	blkdev_issue_flush(buftarg->bt_bdev);
-}
-
 STATIC void
 xfs_close_devices(
 	struct xfs_mount	*mp)
@@ -507,9 +501,13 @@ xfs_init_mount_workqueues(
 	if (!mp->m_unwritten_workqueue)
 		goto out_destroy_buf;
 
+	/*
+	 * Limit the CIL pipeline depth to 4 concurrent works to bound the
+	 * concurrency the log spinlocks will be exposed to.
+	 */
 	mp->m_cil_workqueue = alloc_workqueue("xfs-cil/%s",
 			XFS_WQFLAGS(WQ_FREEZABLE | WQ_MEM_RECLAIM | WQ_UNBOUND),
-			0, mp->m_super->s_id);
+			4, mp->m_super->s_id);
 	if (!mp->m_cil_workqueue)
 		goto out_destroy_unwritten;
 
@@ -667,7 +665,7 @@ xfs_fs_destroy_inode(
 	 * reclaim path handles this more efficiently than we can here, so
 	 * simply let background reclaim tear down all inodes.
 	 */
-	xfs_inode_set_reclaim_tag(ip);
+	xfs_inode_mark_reclaimable(ip);
 }
 
 static void
@@ -2126,6 +2124,36 @@ xfs_destroy_workqueues(void)
 	destroy_workqueue(xfs_alloc_wq);
 }
 
+static int
+xfs_cpu_dead(
+	unsigned int		cpu)
+{
+	xlog_cil_pcp_dead(cpu);
+	return 0;
+}
+
+static int __init
+xfs_cpu_hotplug_init(void)
+{
+	int	error;
+
+	error = cpuhp_setup_state_nocalls(CPUHP_XFS_DEAD,
+					"xfs:dead", NULL,
+					xfs_cpu_dead);
+	if (error < 0) {
+		xfs_alert(NULL,
+"Failed to initialise CPU hotplug, error %d. XFS is non-functional.",
+			error);
+	}
+	return error;
+}
+
+static void
+xfs_cpu_hotplug_destroy(void)
+{
+	cpuhp_remove_state_nocalls(CPUHP_XFS_DEAD);
+}
+
 STATIC int __init
 init_xfs_fs(void)
 {
@@ -2138,9 +2166,13 @@ init_xfs_fs(void)
 
 	xfs_dir_startup();
 
-	error = xfs_init_zones();
+	error = xfs_cpu_hotplug_init();
 	if (error)
 		goto out;
+
+	error = xfs_init_zones();
+	if (error)
+		goto out_destroy_hp;
 
 	error = xfs_init_workqueues();
 	if (error)
@@ -2221,6 +2253,8 @@ init_xfs_fs(void)
 	xfs_destroy_workqueues();
  out_destroy_zones:
 	xfs_destroy_zones();
+ out_destroy_hp:
+	xfs_cpu_hotplug_destroy();
  out:
 	return error;
 }
@@ -2243,6 +2277,7 @@ exit_xfs_fs(void)
 	xfs_destroy_workqueues();
 	xfs_destroy_zones();
 	xfs_uuid_table_free();
+	xfs_cpu_hotplug_destroy();
 }
 
 module_init(init_xfs_fs);
