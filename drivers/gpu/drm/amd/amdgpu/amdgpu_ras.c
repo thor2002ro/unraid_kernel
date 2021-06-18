@@ -2063,7 +2063,9 @@ static void amdgpu_ras_get_quirks(struct amdgpu_device *adev)
 		return;
 
 	if (strnstr(ctx->vbios_version, "D16406",
-		    sizeof(ctx->vbios_version)))
+		    sizeof(ctx->vbios_version)) ||
+		strnstr(ctx->vbios_version, "D36002",
+			sizeof(ctx->vbios_version)))
 		adev->ras_hw_enabled |= (1 << AMDGPU_RAS_BLOCK__GFX);
 }
 
@@ -2122,7 +2124,7 @@ static void amdgpu_ras_counte_dw(struct work_struct *work)
 	struct amdgpu_ras *con = container_of(work, struct amdgpu_ras,
 					      ras_counte_delay_work.work);
 	struct amdgpu_device *adev = con->adev;
-	struct drm_device *dev = &adev->ddev;
+	struct drm_device *dev = adev_to_drm(adev);
 	unsigned long ce_count, ue_count;
 	int res;
 
