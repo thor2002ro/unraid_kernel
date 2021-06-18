@@ -30,8 +30,9 @@ static void SRXAFSCB_TellMeAboutYourself(struct work_struct *);
 static int afs_deliver_yfs_cb_callback(struct afs_call *);
 
 #define CM_NAME(name) \
-	char afs_SRXCB##name##_name[] __tracepoint_string =	\
-		"CB." #name
+	const char afs_SRXCB##name##_name[] = "CB." #name;		\
+	static const char *_afs_SRXCB##name##_name __tracepoint_string =\
+		afs_SRXCB##name##_name
 
 /*
  * CB.CallBack operation type
