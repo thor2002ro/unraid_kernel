@@ -38,7 +38,7 @@ static	u32 phy_CalculateBitShift(u32 BitMask)
 
 
 /**
- * PHY_QueryBBReg - Read "specific bits" from BB register.
+ * PHY_QueryBBReg_8723B - Read "specific bits" from BB register.
  * @Adapter:
  * @RegAddr:	The target address to be readback
  * @BitMask:	The target bit position in the target address
@@ -53,10 +53,6 @@ u32 PHY_QueryBBReg_8723B(struct adapter *Adapter, u32 RegAddr, u32 BitMask)
 {
 	u32 OriginalValue, BitShift;
 
-#if (DISABLE_BB_RF == 1)
-	return 0;
-#endif
-
 	OriginalValue = rtw_read32(Adapter, RegAddr);
 	BitShift = phy_CalculateBitShift(BitMask);
 
@@ -66,7 +62,7 @@ u32 PHY_QueryBBReg_8723B(struct adapter *Adapter, u32 RegAddr, u32 BitMask)
 
 
 /**
- * PHY_SetBBReg - Write "Specific bits" to BB register (page 8~).
+ * PHY_SetBBReg_8723B - Write "Specific bits" to BB register (page 8~).
  * @Adapter:
  * @RegAddr:	The target address to be modified
  * @BitMask:	The target bit position in the target address
@@ -87,10 +83,6 @@ void PHY_SetBBReg_8723B(
 {
 	/* u16 BBWaitCounter	= 0; */
 	u32 OriginalValue, BitShift;
-
-#if (DISABLE_BB_RF == 1)
-	return;
-#endif
 
 	if (BitMask != bMaskDWord) { /* if not "double word" write */
 		OriginalValue = rtw_read32(Adapter, RegAddr);
@@ -231,10 +223,10 @@ static void phy_RFSerialWrite_8723B(
 
 
 /**
- * PHY_QueryRFReg - Query "Specific bits" to RF register (page 8~).
+ * PHY_QueryRFReg_8723B - Query "Specific bits" to RF register (page 8~).
  * @Adapter:
  * @eRFPath:	Radio path of A/B/C/D
- * @RegAdd:	The target address to be read
+ * @RegAddr:	The target address to be read
  * @BitMask:	The target bit position in the target address
  *				to be read
  *
@@ -252,10 +244,6 @@ u32 PHY_QueryRFReg_8723B(
 {
 	u32 Original_Value, BitShift;
 
-#if (DISABLE_BB_RF == 1)
-	return 0;
-#endif
-
 	Original_Value = phy_RFSerialRead_8723B(Adapter, eRFPath, RegAddr);
 	BitShift =  phy_CalculateBitShift(BitMask);
 
@@ -263,7 +251,7 @@ u32 PHY_QueryRFReg_8723B(
 }
 
 /**
- * PHY_SetRFReg - Write "Specific bits" to RF register (page 8~).
+ * PHY_SetRFReg_8723B - Write "Specific bits" to RF register (page 8~).
  * @Adapter:
  * @eRFPath:	Radio path of A/B/C/D
  * @RegAddr:	The target address to be modified
@@ -284,10 +272,6 @@ void PHY_SetRFReg_8723B(
 )
 {
 	u32 Original_Value, BitShift;
-
-#if (DISABLE_BB_RF == 1)
-	return;
-#endif
 
 	/*  RF data is 12 bits only */
 	if (BitMask != bRFRegOffsetMask) {

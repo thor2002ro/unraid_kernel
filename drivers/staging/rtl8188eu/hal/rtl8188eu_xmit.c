@@ -287,11 +287,7 @@ static s32 update_txdesc(struct xmit_frame *pxmitframe, u8 *pmem, s32 sz, u8 bag
 			ptxdesc->txdw5 |= cpu_to_le32(0x00300000);/* retry limit = 12 */
 
 		ptxdesc->txdw5 |= cpu_to_le32(MRateToHwRate(pmlmeext->tx_rate));
-	} else if ((pxmitframe->frame_tag & 0x0f) == TXAGG_FRAMETAG) {
-		DBG_88E("pxmitframe->frame_tag == TXAGG_FRAMETAG\n");
 	} else {
-		DBG_88E("pxmitframe->frame_tag = %d\n", pxmitframe->frame_tag);
-
 		/* offset 4 */
 		ptxdesc->txdw1 |= cpu_to_le32((4) & 0x3f);/* CAM_ID(MAC_ID) */
 
@@ -322,7 +318,6 @@ static s32 update_txdesc(struct xmit_frame *pxmitframe, u8 *pmem, s32 sz, u8 bag
 	rtl88eu_dm_set_tx_ant_by_tx_info(odmpriv, pmem, pattrib->mac_id);
 
 	rtl8188eu_cal_txdesc_chksum(ptxdesc);
-	_dbg_dump_tx_info(adapt, pxmitframe->frame_tag, ptxdesc);
 	return pull;
 }
 
@@ -413,7 +408,7 @@ static u32 xmitframe_need_length(struct xmit_frame *pxmitframe)
 bool rtl8188eu_xmitframe_complete(struct adapter *adapt,
 				  struct xmit_priv *pxmitpriv)
 {
-	struct xmit_frame *pxmitframe = NULL;
+	struct xmit_frame *pxmitframe, *n;
 	struct xmit_frame *pfirstframe = NULL;
 	struct xmit_buf *pxmitbuf;
 
@@ -422,7 +417,7 @@ bool rtl8188eu_xmitframe_complete(struct adapter *adapt,
 	struct sta_info *psta = NULL;
 	struct tx_servq *ptxservq = NULL;
 
-	struct list_head *xmitframe_plist = NULL, *xmitframe_phead = NULL;
+	struct list_head *xmitframe_phead = NULL;
 
 	u32 pbuf;	/*  next pkt address */
 	u32 pbuf_tail;	/*  last pkt tail */
@@ -442,8 +437,6 @@ bool rtl8188eu_xmitframe_complete(struct adapter *adapt,
 		return false;
 
 	/* 3 1. pick up first frame */
-	rtw_free_xmitframe(pxmitpriv, pxmitframe);
-
 	pxmitframe = rtw_dequeue_xframe(pxmitpriv, pxmitpriv->hwxmits, pxmitpriv->hwxmit_entry);
 	if (!pxmitframe) {
 		/*  no more xmit frame, release xmit buffer */
@@ -507,12 +500,7 @@ bool rtl8188eu_xmitframe_complete(struct adapter *adapt,
 	spin_lock_bh(&pxmitpriv->lock);
 
 	xmitframe_phead = get_list_head(&ptxservq->sta_pending);
-	xmitframe_plist = xmitframe_phead->next;
-
-	while (xmitframe_phead != xmitframe_plist) {
-		pxmitframe = container_of(xmitframe_plist, struct xmit_frame, list);
-		xmitframe_plist = xmitframe_plist->next;
-
+	list_for_each_entry_safe(pxmitframe, n, xmitframe_phead, list) {
 		pxmitframe->agg_num = 0; /*  not first frame of aggregation */
 		pxmitframe->pkt_offset = 0; /*  not first frame of aggregation, no need to reserve offset */
 
@@ -627,7 +615,6 @@ bool rtw_hal_xmit(struct adapter *adapt, struct xmit_frame *pxmitframe)
 	if (res == _SUCCESS) {
 		rtw_dump_xframe(adapt, pxmitframe);
 	} else {
-		DBG_88E("==> %s xmitframe_coalesce failed\n", __func__);
 		rtw_free_xmitbuf(pxmitpriv, pxmitbuf);
 		rtw_free_xmitframe(pxmitpriv, pxmitframe);
 	}

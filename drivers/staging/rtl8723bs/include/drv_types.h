@@ -15,7 +15,6 @@
 #define __DRV_TYPES_H__
 
 #include <linux/sched/signal.h>
-#include <autoconf.h>
 #include <basic_types.h>
 #include <osdep_service.h>
 #include <rtw_byteorder.h>
@@ -503,7 +502,6 @@ static inline u8 *myid(struct eeprom_priv *peepriv)
 
 void rtw_indicate_wx_disassoc_event(struct adapter *padapter);
 void rtw_indicate_wx_assoc_event(struct adapter *padapter);
-void rtw_indicate_wx_disassoc_event(struct adapter *padapter);
 void indicate_wx_scan_complete_event(struct adapter *padapter);
 int rtw_change_ifname(struct adapter *padapter, const char *ifname);
 

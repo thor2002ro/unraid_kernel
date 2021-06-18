@@ -12,12 +12,12 @@
 #include <hal_intf.h>
 
 static const struct {
-        int channel_plan;
-        char *name;
+	int channel_plan;
+	char *name;
 } channel_table[] = { { RT_CHANNEL_DOMAIN_FCC, "US" },
-        { RT_CHANNEL_DOMAIN_ETSI, "EU" },
-        { RT_CHANNEL_DOMAIN_MKK, "JP" },
-        { RT_CHANNEL_DOMAIN_CHINA, "CN"} };
+	{ RT_CHANNEL_DOMAIN_ETSI, "EU" },
+	{ RT_CHANNEL_DOMAIN_MKK, "JP" },
+	{ RT_CHANNEL_DOMAIN_CHINA, "CN"} };
 
 extern void indicate_wx_scan_complete_event(struct adapter *padapter);
 
@@ -143,7 +143,6 @@ u8 rtw_set_802_11_bssid(struct adapter *padapter, u8 *bssid)
 
 	spin_lock_bh(&pmlmepriv->lock);
 
-	DBG_88E("Set BSSID under fw_state = 0x%08x\n", get_fwstate(pmlmepriv));
 	if (check_fwstate(pmlmepriv, _FW_UNDER_SURVEY))
 		goto handle_tkip_countermeasure;
 	else if (check_fwstate(pmlmepriv, _FW_UNDER_LINKING))
@@ -227,7 +226,6 @@ u8 rtw_set_802_11_ssid(struct adapter *padapter, struct ndis_802_11_ssid *ssid)
 
 	spin_lock_bh(&pmlmepriv->lock);
 
-	DBG_88E("Set SSID under fw_state = 0x%08x\n", get_fwstate(pmlmepriv));
 	if (check_fwstate(pmlmepriv, _FW_UNDER_SURVEY))
 		goto handle_tkip_countermeasure;
 	else if (check_fwstate(pmlmepriv, _FW_UNDER_LINKING))
@@ -328,7 +326,6 @@ u8 rtw_set_802_11_infrastructure_mode(struct adapter *padapter,
 		spin_lock_bh(&pmlmepriv->lock);
 
 		RT_TRACE(_module_rtl871x_ioctl_set_c_, _drv_info_, (" change mode!"));
-		/* DBG_88E("change mode, old_mode =%d, new_mode =%d, fw_state = 0x%x\n", *pold_state, networktype, get_fwstate(pmlmepriv)); */
 
 		if (*pold_state == Ndis802_11APMode) {
 			/* change to other mode from Ndis802_11APMode */
@@ -432,7 +429,6 @@ u8 rtw_set_802_11_bssid_list_scan(struct adapter *padapter, struct ndis_802_11_s
 
 	} else {
 		if (rtw_is_scan_deny(padapter)) {
-			DBG_88E(FUNC_ADPT_FMT": scan deny\n", FUNC_ADPT_ARG(padapter));
 			indicate_wx_scan_complete_event(padapter);
 			return _SUCCESS;
 		}
@@ -595,16 +591,12 @@ int rtw_set_country(struct adapter *adapter, const char *country_code)
 	int i;
 	int channel_plan = RT_CHANNEL_DOMAIN_WORLD_WIDE_5G;
 
-	DBG_88E("%s country_code:%s\n", __func__, country_code);
 	for (i = 0; i < ARRAY_SIZE(channel_table); i++) {
 		if (strcmp(channel_table[i].name, country_code) == 0) {
 			channel_plan = channel_table[i].channel_plan;
 			break;
 		}
 	}
-
-	if (i == ARRAY_SIZE(channel_table))
-		DBG_88E("%s unknown country_code:%s\n", __func__, country_code);
 
 	return rtw_set_chplan_cmd(adapter, channel_plan, 1);
 }
