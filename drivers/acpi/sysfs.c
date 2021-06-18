@@ -359,8 +359,7 @@ static int acpi_table_attr_init(struct kobject *tables_obj,
 	}
 	table_attr->instance++;
 	if (table_attr->instance > ACPI_MAX_TABLE_INSTANCES) {
-		pr_warn("%4.4s: too many table instances\n",
-			table_attr->name);
+		pr_warn("%4.4s: too many table instances\n", table_attr->name);
 		return -ERANGE;
 	}
 
@@ -582,8 +581,6 @@ static void delete_gpe_attr_array(void)
 		kfree(counter_attrs);
 	}
 	kfree(all_attrs);
-
-	return;
 }
 
 static void gpe_count(u32 gpe_number)
@@ -598,8 +595,6 @@ static void gpe_count(u32 gpe_number)
 	else
 		all_counters[num_gpes + ACPI_NUM_FIXED_EVENTS +
 			     COUNT_ERROR].count++;
-
-	return;
 }
 
 static void fixed_event_count(u32 event_number)
@@ -612,8 +607,6 @@ static void fixed_event_count(u32 event_number)
 	else
 		all_counters[num_gpes + ACPI_NUM_FIXED_EVENTS +
 			     COUNT_ERROR].count++;
-
-	return;
 }
 
 static void acpi_global_event_handler(u32 event_type, acpi_handle device,
@@ -737,8 +730,7 @@ static ssize_t counter_set(struct kobject *kobj,
 		goto end;
 
 	if (!(status & ACPI_EVENT_FLAG_HAS_HANDLER)) {
-		printk(KERN_WARNING PREFIX
-		       "Can not change Invalid GPE/Fixed Event status\n");
+		pr_warn("Can not change Invalid GPE/Fixed Event status\n");
 		return -EINVAL;
 	}
 
@@ -914,8 +906,6 @@ static void __exit interrupt_stats_exit(void)
 	sysfs_remove_group(acpi_kobj, &interrupt_stats_attr_group);
 
 	delete_gpe_attr_array();
-
-	return;
 }
 
 static ssize_t
@@ -983,7 +973,7 @@ void acpi_sysfs_add_hotplug_profile(struct acpi_hotplug_profile *hotplug,
 	return;
 
  err_out:
-	pr_err(PREFIX "Unable to add hotplug profile '%s'\n", name);
+	pr_err("Unable to add hotplug profile '%s'\n", name);
 }
 
 static ssize_t force_remove_show(struct kobject *kobj,

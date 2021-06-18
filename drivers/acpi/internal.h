@@ -11,8 +11,6 @@
 
 #include <linux/idr.h>
 
-#define PREFIX "ACPI: "
-
 int early_acpi_osi_init(void);
 int acpi_osi_init(void);
 acpi_status acpi_os_initialize1(void);
@@ -142,7 +140,7 @@ int acpi_device_sleep_wake(struct acpi_device *dev,
 int acpi_power_get_inferred_state(struct acpi_device *device, int *state);
 int acpi_power_on_resources(struct acpi_device *device, int state);
 int acpi_power_transition(struct acpi_device *device, int state);
-void acpi_turn_off_unused_power_resources(bool init);
+void acpi_turn_off_unused_power_resources(void);
 
 /* --------------------------------------------------------------------------
                               Device Power Management
