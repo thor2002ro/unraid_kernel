@@ -1732,6 +1732,7 @@ static void mpi3mr_sastopochg_evt_th(struct mpi3mr_ioc *mrioc,
 				atomic_dec_if_positive
 				    (&scsi_tgt_priv_data->block_io);
 			}
+			break;
 		case MPI3_EVENT_SAS_TOPO_PHY_RC_PHY_CHANGED:
 		default:
 			break;
@@ -2127,8 +2128,7 @@ static void mpi3mr_map_eedp_error(struct scsi_cmnd *scmd,
 
 	mpi3mr_build_sense_buffer(0, scmd->sense_buffer, ILLEGAL_REQUEST,
 	    0x10, ascq);
-	scmd->result = DRIVER_SENSE << 24 | (DID_ABORT << 16) |
-	    SAM_STAT_CHECK_CONDITION;
+	scmd->result = (DID_ABORT << 16) | SAM_STAT_CHECK_CONDITION;
 }
 
 /**
@@ -3295,13 +3295,10 @@ static int mpi3mr_target_alloc(struct scsi_target *starget)
 		return -ENOMEM;
 
 	starget->hostdata = scsi_tgt_priv_data;
-	scsi_tgt_priv_data->starget = starget;
-	scsi_tgt_priv_data->dev_handle = MPI3MR_INVALID_DEV_HANDLE;
 
 	spin_lock_irqsave(&mrioc->tgtdev_lock, flags);
 	tgt_dev = __mpi3mr_get_tgtdev_by_perst_id(mrioc, starget->id);
 	if (tgt_dev && !tgt_dev->is_hidden) {
-		starget->hostdata = scsi_tgt_priv_data;
 		scsi_tgt_priv_data->starget = starget;
 		scsi_tgt_priv_data->dev_handle = tgt_dev->dev_handle;
 		scsi_tgt_priv_data->perst_id = tgt_dev->perst_id;
@@ -3310,10 +3307,8 @@ static int mpi3mr_target_alloc(struct scsi_target *starget)
 		tgt_dev->starget = starget;
 		atomic_set(&scsi_tgt_priv_data->block_io, 0);
 		retval = 0;
-	} else {
-		kfree(scsi_tgt_priv_data);
+	} else
 		retval = -ENXIO;
-	}
 	spin_unlock_irqrestore(&mrioc->tgtdev_lock, flags);
 
 	return retval;
@@ -3354,8 +3349,7 @@ static bool mpi3mr_check_return_unmap(struct mpi3mr_ioc *mrioc,
 		    "%s: cdb received with invalid param_len: %d\n",
 		    __func__, param_len);
 		scsi_print_command(scmd);
-		scmd->result = (DRIVER_SENSE << 24) |
-		    SAM_STAT_CHECK_CONDITION;
+		scmd->result = SAM_STAT_CHECK_CONDITION;
 		scsi_build_sense_buffer(0, scmd->sense_buffer, ILLEGAL_REQUEST,
 		    0x1A, 0);
 		scmd->scsi_done(scmd);
@@ -3366,8 +3360,7 @@ static bool mpi3mr_check_return_unmap(struct mpi3mr_ioc *mrioc,
 		    "%s: cdb received with param_len: %d bufflen: %d\n",
 		    __func__, param_len, scsi_bufflen(scmd));
 		scsi_print_command(scmd);
-		scmd->result = (DRIVER_SENSE << 24) |
-		    SAM_STAT_CHECK_CONDITION;
+		scmd->result = SAM_STAT_CHECK_CONDITION;
 		scsi_build_sense_buffer(0, scmd->sense_buffer, ILLEGAL_REQUEST,
 		    0x1A, 0);
 		scmd->scsi_done(scmd);
@@ -3376,8 +3369,7 @@ static bool mpi3mr_check_return_unmap(struct mpi3mr_ioc *mrioc,
 	buf = kzalloc(scsi_bufflen(scmd), GFP_ATOMIC);
 	if (!buf) {
 		scsi_print_command(scmd);
-		scmd->result = (DRIVER_SENSE << 24) |
-		    SAM_STAT_CHECK_CONDITION;
+		scmd->result = SAM_STAT_CHECK_CONDITION;
 		scsi_build_sense_buffer(0, scmd->sense_buffer, ILLEGAL_REQUEST,
 		    0x55, 0x03);
 		scmd->scsi_done(scmd);
@@ -3391,8 +3383,7 @@ static bool mpi3mr_check_return_unmap(struct mpi3mr_ioc *mrioc,
 		    "%s: Invalid descriptor length in param list: %d\n",
 		    __func__, desc_len);
 		scsi_print_command(scmd);
-		scmd->result = (DRIVER_SENSE << 24) |
-		    SAM_STAT_CHECK_CONDITION;
+		scmd->result = SAM_STAT_CHECK_CONDITION;
 		scsi_build_sense_buffer(0, scmd->sense_buffer, ILLEGAL_REQUEST,
 		    0x26, 0);
 		scmd->scsi_done(scmd);
