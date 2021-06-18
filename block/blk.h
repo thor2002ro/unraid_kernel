@@ -192,7 +192,6 @@ void blk_account_io_done(struct request *req, u64 now);
 
 void blk_insert_flush(struct request *rq);
 
-void elevator_init_mq(struct request_queue *q);
 int elevator_switch_mq(struct request_queue *q,
 			      struct elevator_type *new_e);
 void __elevator_exit(struct request_queue *, struct elevator_queue *);
@@ -343,8 +342,8 @@ static inline void blk_queue_free_zone_bitmaps(struct request_queue *q) {}
 static inline void blk_queue_clear_zone_settings(struct request_queue *q) {}
 #endif
 
-int blk_alloc_devt(struct block_device *part, dev_t *devt);
-void blk_free_devt(dev_t devt);
+int blk_alloc_ext_minor(void);
+void blk_free_ext_minor(unsigned int minor);
 char *disk_name(struct gendisk *hd, int partno, char *buf);
 #define ADDPART_FLAG_NONE	0
 #define ADDPART_FLAG_RAID	1
@@ -358,5 +357,7 @@ int bdev_resize_partition(struct block_device *bdev, int partno,
 int bio_add_hw_page(struct request_queue *q, struct bio *bio,
 		struct page *page, unsigned int len, unsigned int offset,
 		unsigned int max_sectors, bool *same_page);
+
+struct request_queue *blk_alloc_queue(int node_id);
 
 #endif /* BLK_INTERNAL_H */
