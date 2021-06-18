@@ -7,6 +7,7 @@
 #include <linux/device.h>
 #include <linux/kernel.h>
 #include <linux/skbuff.h>
+#include <linux/netlink.h>
 
 /**
  * enum wwan_port_type - WWAN port types
@@ -15,7 +16,10 @@
  * @WWAN_PORT_QMI: Qcom modem/MSM interface for modem control
  * @WWAN_PORT_QCDM: Qcom Modem diagnostic interface
  * @WWAN_PORT_FIREHOSE: XML based command protocol
- * @WWAN_PORT_MAX: Number of supported port types
+ *
+ * @WWAN_PORT_MAX: Highest supported port types
+ * @WWAN_PORT_UNKNOWN: Special value to indicate an unknown port type
+ * @__WWAN_PORT_MAX: Internal use
  */
 enum wwan_port_type {
 	WWAN_PORT_AT,
@@ -23,7 +27,12 @@ enum wwan_port_type {
 	WWAN_PORT_QMI,
 	WWAN_PORT_QCDM,
 	WWAN_PORT_FIREHOSE,
-	WWAN_PORT_MAX,
+
+	/* Add new port types above this line */
+
+	__WWAN_PORT_MAX,
+	WWAN_PORT_MAX = __WWAN_PORT_MAX - 1,
+	WWAN_PORT_UNKNOWN,
 };
 
 struct wwan_port;
@@ -107,5 +116,28 @@ void wwan_port_txon(struct wwan_port *port);
  * @port: Related WWAN port
  */
 void *wwan_port_get_drvdata(struct wwan_port *port);
+
+/**
+ * struct wwan_ops - WWAN device ops
+ * @owner: module owner of the WWAN ops
+ * @priv_size: size of private netdev data area
+ * @setup: set up a new netdev
+ * @newlink: register the new netdev
+ * @dellink: remove the given netdev
+ */
+struct wwan_ops {
+	struct module *owner;
+	unsigned int priv_size;
+	void (*setup)(struct net_device *dev);
+	int (*newlink)(void *ctxt, struct net_device *dev,
+		       u32 if_id, struct netlink_ext_ack *extack);
+	void (*dellink)(void *ctxt, struct net_device *dev,
+			struct list_head *head);
+};
+
+int wwan_register_ops(struct device *parent, const struct wwan_ops *ops,
+		      void *ctxt);
+
+void wwan_unregister_ops(struct device *parent);
 
 #endif /* __WWAN_H */

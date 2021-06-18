@@ -62,7 +62,7 @@ static int set_miss_action(struct mlx5_flow_root_namespace *ns,
 
 static int mlx5_cmd_dr_create_flow_table(struct mlx5_flow_root_namespace *ns,
 					 struct mlx5_flow_table *ft,
-					 unsigned int log_size,
+					 unsigned int size,
 					 struct mlx5_flow_table *next_ft)
 {
 	struct mlx5dr_table *tbl;
@@ -71,7 +71,7 @@ static int mlx5_cmd_dr_create_flow_table(struct mlx5_flow_root_namespace *ns,
 
 	if (mlx5_dr_is_fw_table(ft->flags))
 		return mlx5_fs_cmd_get_fw_cmds()->create_flow_table(ns, ft,
-								    log_size,
+								    size,
 								    next_ft);
 	flags = ft->flags;
 	/* turn off encap/decap if not supported for sw-str by fw */
@@ -96,6 +96,8 @@ static int mlx5_cmd_dr_create_flow_table(struct mlx5_flow_root_namespace *ns,
 			return err;
 		}
 	}
+
+	ft->max_fte = INT_MAX;
 
 	return 0;
 }
@@ -287,7 +289,8 @@ static int mlx5_cmd_dr_create_fte(struct mlx5_flow_root_namespace *ns,
 			DR_ACTION_REFORMAT_TYP_TNL_L2_TO_L2;
 
 		tmp_action = mlx5dr_action_create_packet_reformat(domain,
-								  decap_type, 0,
+								  decap_type,
+								  0, 0, 0,
 								  NULL);
 		if (!tmp_action) {
 			err = -ENOMEM;
@@ -520,9 +523,7 @@ out_err:
 }
 
 static int mlx5_cmd_dr_packet_reformat_alloc(struct mlx5_flow_root_namespace *ns,
-					     int reformat_type,
-					     size_t size,
-					     void *reformat_data,
+					     struct mlx5_pkt_reformat_params *params,
 					     enum mlx5_flow_namespace_type namespace,
 					     struct mlx5_pkt_reformat *pkt_reformat)
 {
@@ -530,7 +531,7 @@ static int mlx5_cmd_dr_packet_reformat_alloc(struct mlx5_flow_root_namespace *ns
 	struct mlx5dr_action *action;
 	int dr_reformat;
 
-	switch (reformat_type) {
+	switch (params->type) {
 	case MLX5_REFORMAT_TYPE_L2_TO_VXLAN:
 	case MLX5_REFORMAT_TYPE_L2_TO_NVGRE:
 	case MLX5_REFORMAT_TYPE_L2_TO_L2_TUNNEL:
@@ -542,16 +543,21 @@ static int mlx5_cmd_dr_packet_reformat_alloc(struct mlx5_flow_root_namespace *ns
 	case MLX5_REFORMAT_TYPE_L2_TO_L3_TUNNEL:
 		dr_reformat = DR_ACTION_REFORMAT_TYP_L2_TO_TNL_L3;
 		break;
+	case MLX5_REFORMAT_TYPE_INSERT_HDR:
+		dr_reformat = DR_ACTION_REFORMAT_TYP_INSERT_HDR;
+		break;
 	default:
 		mlx5_core_err(ns->dev, "Packet-reformat not supported(%d)\n",
-			      reformat_type);
+			      params->type);
 		return -EOPNOTSUPP;
 	}
 
 	action = mlx5dr_action_create_packet_reformat(dr_domain,
 						      dr_reformat,
-						      size,
-						      reformat_data);
+						      params->param_0,
+						      params->param_1,
+						      params->size,
+						      params->data);
 	if (!action) {
 		mlx5_core_err(ns->dev, "Failed allocating packet-reformat action\n");
 		return -EINVAL;
