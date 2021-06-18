@@ -21,7 +21,7 @@ The wrapper can be run with:
 	./tools/testing/kunit/kunit.py run
 
 For more information on this wrapper (also called kunit_tool) check out the
-:doc:`kunit-tool` page.
+Documentation/dev-tools/kunit/kunit-tool.rst page.
 
 Creating a .kunitconfig
 -----------------------
@@ -234,7 +234,7 @@ Congrats! You just wrote your first KUnit test!
 
 Next Steps
 ==========
-*   Check out the :doc:`tips` page for tips on
+*   Check out the Documentation/dev-tools/kunit/tips.rst page for tips on
     writing idiomatic KUnit tests.
 *   Check out the :doc:`running_tips` page for tips on
     how to make running KUnit tests easier.
