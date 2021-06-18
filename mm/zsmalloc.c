@@ -328,7 +328,7 @@ static int create_cache(struct zs_pool *pool)
 		return 1;
 
 	pool->zspage_cachep = kmem_cache_create("zspage", sizeof(struct zspage),
-					0, 0, NULL);
+					0, SLAB_RECLAIM_ACCOUNT, NULL);
 	if (!pool->zspage_cachep) {
 		kmem_cache_destroy(pool->handle_cachep);
 		pool->handle_cachep = NULL;
