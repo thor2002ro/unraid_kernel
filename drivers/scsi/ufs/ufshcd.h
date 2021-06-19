@@ -193,7 +193,6 @@ struct ufs_pm_lvl_states {
  * @crypto_key_slot: the key slot to use for inline crypto (-1 if none)
  * @data_unit_num: the data unit number for the first block for inline crypto
  * @req_abort_skip: skip request abort task flag
- * @in_use: indicates that this lrb is still in use
  */
 struct ufshcd_lrb {
 	struct utp_transfer_req_desc *utr_descriptor_ptr;
@@ -223,7 +222,6 @@ struct ufshcd_lrb {
 #endif
 
 	bool req_abort_skip;
-	bool in_use;
 };
 
 /**
@@ -1160,6 +1158,11 @@ static inline u32 ufshcd_vops_get_ufs_hci_version(struct ufs_hba *hba)
 		return hba->vops->get_ufs_hci_version(hba);
 
 	return ufshcd_readl(hba, REG_UFS_VERSION);
+}
+
+static inline bool ufshcd_has_utrlcnr(struct ufs_hba *hba)
+{
+	return (hba->ufs_version >= ufshci_version(3, 0));
 }
 
 static inline int ufshcd_vops_clk_scale_notify(struct ufs_hba *hba,
