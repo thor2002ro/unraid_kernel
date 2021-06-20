@@ -88,6 +88,8 @@
  * See the file Documentation/i2c/busses/i2c-i801.rst for details.
  */
 
+#define DRV_NAME	"i801_smbus"
+
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/pci.h>
@@ -155,9 +157,6 @@
 /* Auxiliary control register bits, ICH4+ only */
 #define SMBAUXCTL_CRC		BIT(0)
 #define SMBAUXCTL_E32B		BIT(1)
-
-/* Other settings */
-#define MAX_RETRIES		400
 
 /* I801 command constants */
 #define I801_QUICK		0x00
@@ -445,42 +444,35 @@ static int i801_check_post(struct i801_priv *priv, int status)
 /* Wait for BUSY being cleared and either INTR or an error flag being set */
 static int i801_wait_intr(struct i801_priv *priv)
 {
-	int timeout = 0;
-	int status;
+	unsigned long timeout = jiffies + priv->adapter.timeout;
+	int status, busy;
 
-	/* We will always wait for a fraction of a second! */
 	do {
 		usleep_range(250, 500);
 		status = inb_p(SMBHSTSTS(priv));
-	} while (((status & SMBHSTSTS_HOST_BUSY) ||
-		  !(status & (STATUS_ERROR_FLAGS | SMBHSTSTS_INTR))) &&
-		 (timeout++ < MAX_RETRIES));
+		busy = status & SMBHSTSTS_HOST_BUSY;
+		status &= STATUS_ERROR_FLAGS | SMBHSTSTS_INTR;
+		if (!busy && status)
+			return status;
+	} while (time_is_after_eq_jiffies(timeout));
 
-	if (timeout > MAX_RETRIES) {
-		dev_dbg(&priv->pci_dev->dev, "INTR Timeout!\n");
-		return -ETIMEDOUT;
-	}
-	return status & (STATUS_ERROR_FLAGS | SMBHSTSTS_INTR);
+	return -ETIMEDOUT;
 }
 
 /* Wait for either BYTE_DONE or an error flag being set */
 static int i801_wait_byte_done(struct i801_priv *priv)
 {
-	int timeout = 0;
+	unsigned long timeout = jiffies + priv->adapter.timeout;
 	int status;
 
-	/* We will always wait for a fraction of a second! */
 	do {
 		usleep_range(250, 500);
 		status = inb_p(SMBHSTSTS(priv));
-	} while (!(status & (STATUS_ERROR_FLAGS | SMBHSTSTS_BYTE_DONE)) &&
-		 (timeout++ < MAX_RETRIES));
+		if (status & (STATUS_ERROR_FLAGS | SMBHSTSTS_BYTE_DONE))
+			return status & STATUS_ERROR_FLAGS;
+	} while (time_is_after_eq_jiffies(timeout));
 
-	if (timeout > MAX_RETRIES) {
-		dev_dbg(&priv->pci_dev->dev, "BYTE_DONE Timeout!\n");
-		return -ETIMEDOUT;
-	}
-	return status & STATUS_ERROR_FLAGS;
+	return -ETIMEDOUT;
 }
 
 static int i801_transaction(struct i801_priv *priv, int xact)
@@ -1300,11 +1292,11 @@ static void i801_probe_optional_slaves(struct i801_priv *priv)
 		return;
 
 	if (apanel_addr) {
-		struct i2c_board_info info;
+		struct i2c_board_info info = {
+			.addr = apanel_addr,
+			.type = "fujitsu_apanel",
+		};
 
-		memset(&info, 0, sizeof(struct i2c_board_info));
-		info.addr = apanel_addr;
-		strlcpy(info.type, "fujitsu_apanel", I2C_NAME_SIZE);
 		i2c_new_client_device(&priv->adapter, &info);
 	}
 
@@ -1693,19 +1685,17 @@ static inline int i801_acpi_probe(struct i801_priv *priv) { return 0; }
 static inline void i801_acpi_remove(struct i801_priv *priv) { }
 #endif
 
-static unsigned char i801_setup_hstcfg(struct i801_priv *priv)
+static void i801_setup_hstcfg(struct i801_priv *priv)
 {
 	unsigned char hstcfg = priv->original_hstcfg;
 
 	hstcfg &= ~SMBHSTCFG_I2C_EN;	/* SMBus timing */
 	hstcfg |= SMBHSTCFG_HST_EN;
 	pci_write_config_byte(priv->pci_dev, SMBHSTCFG, hstcfg);
-	return hstcfg;
 }
 
 static int i801_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {
-	unsigned char temp;
 	int err, i;
 	struct i801_priv *priv;
 
@@ -1816,8 +1806,7 @@ static int i801_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	if (i801_acpi_probe(priv))
 		return -ENODEV;
 
-	err = pcim_iomap_regions(dev, 1 << SMBBAR,
-				 dev_driver_string(&dev->dev));
+	err = pcim_iomap_regions(dev, 1 << SMBBAR, DRV_NAME);
 	if (err) {
 		dev_err(&dev->dev,
 			"Failed to request SMBus region 0x%lx-0x%Lx\n",
@@ -1828,16 +1817,16 @@ static int i801_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	}
 
 	pci_read_config_byte(priv->pci_dev, SMBHSTCFG, &priv->original_hstcfg);
-	temp = i801_setup_hstcfg(priv);
+	i801_setup_hstcfg(priv);
 	if (!(priv->original_hstcfg & SMBHSTCFG_HST_EN))
 		dev_info(&dev->dev, "Enabling SMBus device\n");
 
-	if (temp & SMBHSTCFG_SMB_SMI_EN) {
+	if (priv->original_hstcfg & SMBHSTCFG_SMB_SMI_EN) {
 		dev_dbg(&dev->dev, "SMBus using interrupt SMI#\n");
 		/* Disable SMBus interrupt feature if SMBus using SMI# */
 		priv->features &= ~FEATURE_IRQ;
 	}
-	if (temp & SMBHSTCFG_SPD_WD)
+	if (priv->original_hstcfg & SMBHSTCFG_SPD_WD)
 		dev_info(&dev->dev, "SPD Write Disable is set\n");
 
 	/* Clear special mode bits */
@@ -1875,8 +1864,7 @@ static int i801_probe(struct pci_dev *dev, const struct pci_device_id *id)
 		init_completion(&priv->done);
 
 		err = devm_request_irq(&dev->dev, dev->irq, i801_isr,
-				       IRQF_SHARED,
-				       dev_driver_string(&dev->dev), priv);
+				       IRQF_SHARED, DRV_NAME, priv);
 		if (err) {
 			dev_err(&dev->dev, "Failed to allocate irq %d: %d\n",
 				dev->irq, err);
@@ -1966,7 +1954,7 @@ static int i801_resume(struct device *dev)
 static SIMPLE_DEV_PM_OPS(i801_pm_ops, i801_suspend, i801_resume);
 
 static struct pci_driver i801_driver = {
-	.name		= "i801_smbus",
+	.name		= DRV_NAME,
 	.id_table	= i801_ids,
 	.probe		= i801_probe,
 	.remove		= i801_remove,
