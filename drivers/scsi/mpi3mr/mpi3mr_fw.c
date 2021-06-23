@@ -9,7 +9,6 @@
 
 #include "mpi3mr.h"
 #include <linux/io-64-nonatomic-lo-hi.h>
-extern int prot_mask;
 
 #if defined(writeq) && defined(CONFIG_64BIT)
 static inline void mpi3mr_writeq(__u64 b, volatile void __iomem *addr)
@@ -1585,7 +1584,7 @@ static int mpi3mr_create_op_reply_q(struct mpi3mr_ioc *mrioc, u16 qidx)
 	if (mrioc->init_cmds.state & MPI3MR_CMD_PENDING) {
 		retval = -1;
 		ioc_err(mrioc, "CreateRepQ: Init command is in use\n");
-		goto out;
+		goto out_unlock;
 	}
 	mrioc->init_cmds.state = MPI3MR_CMD_PENDING;
 	mrioc->init_cmds.is_waiting = 1;
@@ -1694,7 +1693,7 @@ static int mpi3mr_create_op_req_q(struct mpi3mr_ioc *mrioc, u16 idx,
 	if (mrioc->init_cmds.state & MPI3MR_CMD_PENDING) {
 		retval = -1;
 		ioc_err(mrioc, "CreateReqQ: Init command is in use\n");
-		goto out;
+		goto out_unlock;
 	}
 	mrioc->init_cmds.state = MPI3MR_CMD_PENDING;
 	mrioc->init_cmds.is_waiting = 1;
@@ -3297,6 +3296,7 @@ int mpi3mr_init_ioc(struct mpi3mr_ioc *mrioc, u8 re_init)
 	}
 	ioc_state = mpi3mr_get_iocstate(mrioc);
 	if (ioc_state != MRIOC_STATE_RESET) {
+		retval = -1;
 		ioc_err(mrioc, "Cannot bring IOC to reset state\n");
 		goto out_failed;
 	}
@@ -3393,6 +3393,7 @@ int mpi3mr_init_ioc(struct mpi3mr_ioc *mrioc, u8 re_init)
 
 	if (re_init &&
 	    (mrioc->shost->nr_hw_queues > mrioc->num_op_reply_q)) {
+		retval = -1;
 		ioc_err(mrioc,
 		    "Cannot create minimum number of OpQueues expected:%d created:%d\n",
 		    mrioc->shost->nr_hw_queues, mrioc->num_op_reply_q);
