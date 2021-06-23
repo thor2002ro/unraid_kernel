@@ -2069,7 +2069,7 @@ static const struct blk_mq_ops loop_mq_ops = {
 	.complete	= lo_complete_rq,
 };
 
-static int loop_add(struct loop_device **l, int i)
+static int loop_add(int i)
 {
 	struct loop_device *lo;
 	struct gendisk *disk;
@@ -2157,7 +2157,6 @@ static int loop_add(struct loop_device **l, int i)
 	disk->queue		= lo->lo_queue;
 	sprintf(disk->disk_name, "loop%d", i);
 	add_disk(disk);
-	*l = lo;
 	return lo->lo_number;
 
 out_cleanup_tags:
@@ -2227,7 +2226,7 @@ static void loop_probe(dev_t dev)
 
 	mutex_lock(&loop_ctl_mutex);
 	if (loop_lookup(&lo, idx) < 0)
-		loop_add(&lo, idx);
+		loop_add(idx);
 	mutex_unlock(&loop_ctl_mutex);
 }
 
@@ -2249,7 +2248,7 @@ static long loop_control_ioctl(struct file *file, unsigned int cmd,
 			ret = -EEXIST;
 			break;
 		}
-		ret = loop_add(&lo, parm);
+		ret = loop_add(parm);
 		break;
 	case LOOP_CTL_REMOVE:
 		ret = loop_lookup(&lo, parm);
@@ -2277,7 +2276,7 @@ static long loop_control_ioctl(struct file *file, unsigned int cmd,
 		ret = loop_lookup(&lo, -1);
 		if (ret >= 0)
 			break;
-		ret = loop_add(&lo, -1);
+		ret = loop_add(-1);
 	}
 	mutex_unlock(&loop_ctl_mutex);
 
@@ -2304,7 +2303,6 @@ MODULE_ALIAS("devname:loop-control");
 static int __init loop_init(void)
 {
 	int i, nr;
-	struct loop_device *lo;
 	int err;
 
 	part_shift = 0;
@@ -2358,7 +2356,7 @@ static int __init loop_init(void)
 	/* pre-create number of devices given by config or max_loop */
 	mutex_lock(&loop_ctl_mutex);
 	for (i = 0; i < nr; i++)
-		loop_add(&lo, i);
+		loop_add(i);
 	mutex_unlock(&loop_ctl_mutex);
 
 	printk(KERN_INFO "loop: module loaded\n");
