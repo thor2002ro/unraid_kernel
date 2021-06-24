@@ -7072,7 +7072,7 @@ static int io_sq_thread(void *data)
 
 	mutex_lock(&sqd->lock);
 	while (1) {
-		bool cap_entries, sqt_spin, needs_sched;
+		bool cap_entries, sqt_spin = false;
 
 		if (io_sqd_events_pending(sqd) || signal_pending(current)) {
 			if (io_sqd_handle_event(sqd))
@@ -7081,7 +7081,6 @@ static int io_sq_thread(void *data)
 			continue;
 		}
 
-		sqt_spin = false;
 		cap_entries = !list_is_singular(&sqd->ctx_list);
 		list_for_each_entry(ctx, &sqd->ctx_list, sqd_list) {
 			int ret = __io_sq_thread(ctx, cap_entries);
@@ -7100,7 +7099,8 @@ static int io_sq_thread(void *data)
 
 		prepare_to_wait(&sqd->wait, &wait, TASK_INTERRUPTIBLE);
 		if (!io_sqd_events_pending(sqd) && !io_run_task_work()) {
-			needs_sched = true;
+			bool needs_sched = true;
+
 			list_for_each_entry(ctx, &sqd->ctx_list, sqd_list) {
 				io_ring_set_wakeup_flag(ctx);
 
