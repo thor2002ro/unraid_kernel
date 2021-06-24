@@ -364,6 +364,16 @@ static int ref_wr_duration[2];
  */
 static const unsigned long max_service_from_wr = 120000;
 
+/*
+ * Maximum time between the creation of two queues, for stable merge
+ * to be activated (in ms)
+ */
+static const unsigned long bfq_activation_stable_merging = 600;
+/*
+ * Minimum time to be waited before evaluating delayed stable merge (in ms)
+ */
+static const unsigned long bfq_late_stable_merging = 600;
+
 #define RQ_BIC(rq)		icq_to_bic((rq)->elv.priv[0])
 #define RQ_BFQQ(rq)		((rq)->elv.priv[1])
 
@@ -1729,10 +1739,23 @@ static void bfq_bfqq_handle_idle_busy_switch(struct bfq_data *bfqd,
 		bfqq->entity.new_weight == 40;
 	*interactive = !in_burst && idle_for_long_time &&
 		bfqq->entity.new_weight == 40;
+	/*
+	 * Merged bfq_queues are kept out of weight-raising
+	 * (low-latency) mechanisms. The reason is that these queues
+	 * are usually created for non-interactive and
+	 * non-soft-real-time tasks. Yet this is not the case for
+	 * stably-merged queues. These queues are merged just because
+	 * they are created shortly after each other. So they may
+	 * easily serve the I/O of an interactive or soft-real time
+	 * application, if the application happens to spawn multiple
+	 * processes. So let also stably-merged queued enjoy weight
+	 * raising.
+	 */
 	wr_or_deserves_wr = bfqd->low_latency &&
 		(bfqq->wr_coeff > 1 ||
 		 (bfq_bfqq_sync(bfqq) &&
-		  bfqq->bic && (*interactive || soft_rt)));
+		  (bfqq->bic || RQ_BIC(rq)->stably_merged) &&
+		   (*interactive || soft_rt)));
 
 	/*
 	 * Using the last flag, update budget and check whether bfqq
@@ -1962,14 +1985,18 @@ static void bfq_update_io_intensity(struct bfq_queue *bfqq, u64 now_ns)
  * Turning back to the detection of a waker queue, a queue Q is deemed
  * as a waker queue for bfqq if, for three consecutive times, bfqq
  * happens to become non empty right after a request of Q has been
- * completed. In particular, on the first time, Q is tentatively set
- * as a candidate waker queue, while on the third consecutive time
- * that Q is detected, the field waker_bfqq is set to Q, to confirm
- * that Q is a waker queue for bfqq. These detection steps are
- * performed only if bfqq has a long think time, so as to make it more
- * likely that bfqq's I/O is actually being blocked by a
- * synchronization. This last filter, plus the above three-times
- * requirement, make false positives less likely.
+ * completed. In this respect, even if bfqq is empty, we do not check
+ * for a waker if it still has some in-flight I/O. In fact, in this
+ * case bfqq is actually still being served by the drive, and may
+ * receive new I/O on the completion of some of the in-flight
+ * requests. In particular, on the first time, Q is tentatively set as
+ * a candidate waker queue, while on the third consecutive time that Q
+ * is detected, the field waker_bfqq is set to Q, to confirm that Q is
+ * a waker queue for bfqq. These detection steps are performed only if
+ * bfqq has a long think time, so as to make it more likely that
+ * bfqq's I/O is actually being blocked by a synchronization. This
+ * last filter, plus the above three-times requirement, make false
+ * positives less likely.
  *
  * NOTE
  *
@@ -1995,6 +2022,7 @@ static void bfq_check_waker(struct bfq_data *bfqd, struct bfq_queue *bfqq,
 	if (!bfqd->last_completed_rq_bfqq ||
 	    bfqd->last_completed_rq_bfqq == bfqq ||
 	    bfq_bfqq_has_short_ttime(bfqq) ||
+	    bfqq->dispatched > 0 ||
 	    now_ns - bfqd->last_completion >= 4 * NSEC_PER_MSEC ||
 	    bfqd->last_completed_rq_bfqq == bfqq->waker_bfqq)
 		return;
@@ -2695,10 +2723,18 @@ bfq_setup_cooperator(struct bfq_data *bfqd, struct bfq_queue *bfqq,
 	 * costly and complicated.
 	 */
 	if (unlikely(!bfqd->nonrot_with_queueing)) {
-		if (bic->stable_merge_bfqq &&
+		/*
+		 * Make sure also that bfqq is sync, because
+		 * bic->stable_merge_bfqq may point to some queue (for
+		 * stable merging) also if bic is associated with a
+		 * sync queue, but this bfqq is async
+		 */
+		if (bfq_bfqq_sync(bfqq) && bic->stable_merge_bfqq &&
 		    !bfq_bfqq_just_created(bfqq) &&
-		    time_is_after_jiffies(bfqq->split_time +
-					  msecs_to_jiffies(200))) {
+		    time_is_before_jiffies(bfqq->split_time +
+					  msecs_to_jiffies(bfq_late_stable_merging)) &&
+		    time_is_before_jiffies(bfqq->creation_time +
+					   msecs_to_jiffies(bfq_late_stable_merging))) {
 			struct bfq_queue *stable_merge_bfqq =
 				bic->stable_merge_bfqq;
 			int proc_ref = min(bfqq_process_refs(bfqq),
@@ -5479,7 +5515,7 @@ static struct bfq_queue *bfq_do_or_sched_stable_merge(struct bfq_data *bfqd,
 	 */
 	if (!last_bfqq_created ||
 	    time_before(last_bfqq_created->creation_time +
-			bfqd->bfq_burst_interval,
+			msecs_to_jiffies(bfq_activation_stable_merging),
 			bfqq->creation_time) ||
 		bfqq->entity.parent != last_bfqq_created->entity.parent ||
 		bfqq->ioprio != last_bfqq_created->ioprio ||
@@ -6129,11 +6165,13 @@ static void bfq_completed_request(struct bfq_queue *bfqq, struct bfq_data *bfqd)
 	 * of other queues. But a false waker will unjustly steal
 	 * bandwidth to its supposedly woken queue. So considering
 	 * also shared queues in the waking mechanism may cause more
-	 * control troubles than throughput benefits. Then do not set
-	 * last_completed_rq_bfqq to bfqq if bfqq is a shared queue.
+	 * control troubles than throughput benefits. Then reset
+	 * last_completed_rq_bfqq if bfqq is a shared queue.
 	 */
 	if (!bfq_bfqq_coop(bfqq))
 		bfqd->last_completed_rq_bfqq = bfqq;
+	else
+		bfqd->last_completed_rq_bfqq = NULL;
 
 	/*
 	 * If we are waiting to discover whether the request pattern
