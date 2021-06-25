@@ -2187,11 +2187,14 @@ int make_device_exclusive_range(struct mm_struct *mm, unsigned long start,
 				void *owner)
 {
 	long npages = (end - start) >> PAGE_SHIFT;
-	unsigned long i;
+	long i;
 
 	npages = get_user_pages_remote(mm, start, npages,
 				       FOLL_GET | FOLL_WRITE | FOLL_SPLIT_PMD,
 				       pages, NULL, NULL);
+	if (npages < 0)
+		return npages;
+
 	for (i = 0; i < npages; i++, start += PAGE_SIZE) {
 		if (!trylock_page(pages[i])) {
 			put_page(pages[i]);
