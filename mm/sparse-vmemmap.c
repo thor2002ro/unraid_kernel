@@ -272,7 +272,7 @@ out:
  * @end:	end address of the vmemmap virtual address range that we want to
  *		remap.
  * @reuse:	reuse address.
- * @gpf_mask:	GFP flag for allocating vmemmap pages.
+ * @gfp_mask:	GFP flag for allocating vmemmap pages.
  */
 int vmemmap_remap_alloc(unsigned long start, unsigned long end,
 			unsigned long reuse, gfp_t gfp_mask)
