@@ -448,7 +448,8 @@ static bool move_pgt_entry(enum pgt_entry entry, struct vm_area_struct *vma,
 				      new_entry);
 		break;
 	case HPAGE_PUD:
-		moved = move_huge_pud(vma, old_addr, new_addr, old_entry,
+		moved = IS_ENABLED(CONFIG_TRANSPARENT_HUGEPAGE) &&
+			move_huge_pud(vma, old_addr, new_addr, old_entry,
 				      new_entry);
 		break;
 
