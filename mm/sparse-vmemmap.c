@@ -35,7 +35,7 @@
 #include <asm/tlbflush.h>
 
 /**
- * vmemmap_remap_walk - walk vmemmap page table
+ * struct vmemmap_remap_walk - walk vmemmap page table
  *
  * @remap_pte:		called for each lowest-level entry (PTE).
  * @reuse_page:		the page which is reused for the tail vmemmap pages.
