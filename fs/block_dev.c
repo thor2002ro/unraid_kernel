@@ -1242,59 +1242,6 @@ static void blkdev_flush_mapping(struct block_device *bdev)
 	bdev_write_inode(bdev);
 }
 
-int bdev_disk_changed(struct block_device *bdev, bool invalidate)
-{
-	struct gendisk *disk = bdev->bd_disk;
-	int ret = 0;
-
-	lockdep_assert_held(&disk->open_mutex);
-
-	if (!(disk->flags & GENHD_FL_UP))
-		return -ENXIO;
-
-rescan:
-	if (disk->open_partitions)
-		return -EBUSY;
-	sync_blockdev(bdev);
-	invalidate_bdev(bdev);
-	blk_drop_partitions(disk);
-
-	clear_bit(GD_NEED_PART_SCAN, &disk->state);
-
-	/*
-	 * Historically we only set the capacity to zero for devices that
-	 * support partitions (independ of actually having partitions created).
-	 * Doing that is rather inconsistent, but changing it broke legacy
-	 * udisks polling for legacy ide-cdrom devices.  Use the crude check
-	 * below to get the sane behavior for most device while not breaking
-	 * userspace for this particular setup.
-	 */
-	if (invalidate) {
-		if (disk_part_scan_enabled(disk) ||
-		    !(disk->flags & GENHD_FL_REMOVABLE))
-			set_capacity(disk, 0);
-	}
-
-	if (get_capacity(disk)) {
-		ret = blk_add_partitions(disk, bdev);
-		if (ret == -EAGAIN)
-			goto rescan;
-	} else if (invalidate) {
-		/*
-		 * Tell userspace that the media / partition table may have
-		 * changed.
-		 */
-		kobject_uevent(&disk_to_dev(disk)->kobj, KOBJ_CHANGE);
-	}
-
-	return ret;
-}
-/*
- * Only exported for loop and dasd for historic reasons.  Don't use in new
- * code!
- */
-EXPORT_SYMBOL_GPL(bdev_disk_changed);
-
 static int blkdev_get_whole(struct block_device *bdev, fmode_t mode)
 {
 	struct gendisk *disk = bdev->bd_disk;
@@ -1306,7 +1253,7 @@ static int blkdev_get_whole(struct block_device *bdev, fmode_t mode)
 			/* avoid ghost partitions on a removed medium */
 			if (ret == -ENOMEDIUM &&
 			     test_bit(GD_NEED_PART_SCAN, &disk->state))
-				bdev_disk_changed(bdev, true);
+				bdev_disk_changed(disk, true);
 			return ret;
 		}
 	}
@@ -1317,7 +1264,7 @@ static int blkdev_get_whole(struct block_device *bdev, fmode_t mode)
 			bdev->bd_bdi = bdi_get(disk->queue->backing_dev_info);
 	}
 	if (test_bit(GD_NEED_PART_SCAN, &disk->state))
-		bdev_disk_changed(bdev, false);
+		bdev_disk_changed(disk, false);
 	bdev->bd_openers++;
 	return 0;;
 }
