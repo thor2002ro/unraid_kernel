@@ -5126,7 +5126,7 @@ int hugetlb_mcopy_atomic_pte(struct mm_struct *dst_mm,
 			 * contents.
 			 */
 			page = alloc_huge_page_vma(h, dst_vma, dst_addr);
-			if (IS_ERR(page)) {
+			if (!page) {
 				ret = -ENOMEM;
 				goto out;
 			}
@@ -5152,7 +5152,7 @@ int hugetlb_mcopy_atomic_pte(struct mm_struct *dst_mm,
 			*pagep = NULL;
 			goto out;
 		}
-		migrate_copy_huge_page(page, *pagep);
+		copy_huge_page(page, *pagep);
 		put_page(*pagep);
 		*pagep = NULL;
 	}
