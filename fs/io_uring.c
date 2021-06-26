@@ -1740,7 +1740,7 @@ static struct io_kiocb *io_alloc_req(struct io_ring_ctx *ctx)
 
 	if (!state->free_reqs) {
 		gfp_t gfp = GFP_KERNEL | __GFP_NOWARN;
-		int ret;
+		int ret, i;
 
 		if (io_flush_cached_reqs(ctx))
 			goto got_req;
@@ -1757,6 +1757,20 @@ static struct io_kiocb *io_alloc_req(struct io_ring_ctx *ctx)
 			if (!state->reqs[0])
 				return NULL;
 			ret = 1;
+		}
+
+		/*
+		 * Don't initialise the fields below on every allocation, but
+		 * do that in advance and keep valid on free.
+		 */
+		for (i = 0; i < ret; i++) {
+			struct io_kiocb *req = state->reqs[i];
+
+			req->ctx = ctx;
+			req->link = NULL;
+			req->async_data = NULL;
+			/* not necessary, but safer to zero */
+			req->result = 0;
 		}
 		state->free_reqs = ret;
 	}
@@ -1781,8 +1795,10 @@ static void io_dismantle_req(struct io_kiocb *req)
 		io_put_file(req->file);
 	if (req->fixed_rsrc_refs)
 		percpu_ref_put(req->fixed_rsrc_refs);
-	if (req->async_data)
+	if (req->async_data) {
 		kfree(req->async_data);
+		req->async_data = NULL;
+	}
 }
 
 /* must to be called somewhat shortly after putting a request */
@@ -6730,15 +6746,11 @@ static int io_init_req(struct io_ring_ctx *ctx, struct io_kiocb *req,
 	/* same numerical values with corresponding REQ_F_*, safe to copy */
 	req->flags = sqe_flags = READ_ONCE(sqe->flags);
 	req->user_data = READ_ONCE(sqe->user_data);
-	req->async_data = NULL;
 	req->file = NULL;
-	req->ctx = ctx;
-	req->link = NULL;
 	req->fixed_rsrc_refs = NULL;
 	/* one is dropped after submission, the other at completion */
 	atomic_set(&req->refs, 2);
 	req->task = current;
-	req->result = 0;
 
 	/* enforce forwards compatibility on users */
 	if (unlikely(sqe_flags & ~SQE_VALID_FLAGS))
