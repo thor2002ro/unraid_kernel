@@ -103,7 +103,7 @@ struct llvm_prf_data {
 } __aligned(LLVM_INSTR_PROF_DATA_ALIGNMENT);
 
 /**
- * structure llvm_prf_value_node_data - represents the data part of the struct
+ * struct llvm_prf_value_node_data - represents the data part of the struct
  *   llvm_prf_value_node data structure.
  * @value: the value counters.
  * @count: the counters' count.
