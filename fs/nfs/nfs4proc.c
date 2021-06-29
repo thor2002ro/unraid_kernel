@@ -1205,12 +1205,12 @@ nfs4_update_changeattr_locked(struct inode *inode,
 	u64 change_attr = inode_peek_iversion_raw(inode);
 
 	cache_validity |= NFS_INO_INVALID_CTIME | NFS_INO_INVALID_MTIME;
+	if (S_ISDIR(inode->i_mode))
+		cache_validity |= NFS_INO_INVALID_DATA;
 
 	switch (NFS_SERVER(inode)->change_attr_type) {
 	case NFS4_CHANGE_TYPE_IS_UNDEFINED:
-		break;
-	case NFS4_CHANGE_TYPE_IS_TIME_METADATA:
-		if ((s64)(change_attr - cinfo->after) > 0)
+		if (cinfo->after == change_attr)
 			goto out;
 		break;
 	default:
@@ -1218,24 +1218,21 @@ nfs4_update_changeattr_locked(struct inode *inode,
 			goto out;
 	}
 
-	if (cinfo->atomic && cinfo->before == change_attr) {
-		nfsi->attrtimeo_timestamp = jiffies;
-	} else {
-		if (S_ISDIR(inode->i_mode)) {
-			cache_validity |= NFS_INO_INVALID_DATA;
-			nfs_force_lookup_revalidate(inode);
-		} else {
-			if (!NFS_PROTO(inode)->have_delegation(inode,
-							       FMODE_READ))
-				cache_validity |= NFS_INO_REVAL_PAGECACHE;
-		}
-
-		if (cinfo->before != change_attr)
-			cache_validity |= NFS_INO_INVALID_ACCESS |
-					  NFS_INO_INVALID_ACL |
-					  NFS_INO_INVALID_XATTR;
-	}
 	inode_set_iversion_raw(inode, cinfo->after);
+	if (!cinfo->atomic || cinfo->before != change_attr) {
+		if (S_ISDIR(inode->i_mode))
+			nfs_force_lookup_revalidate(inode);
+
+		if (!NFS_PROTO(inode)->have_delegation(inode, FMODE_READ))
+			cache_validity |=
+				NFS_INO_INVALID_ACCESS | NFS_INO_INVALID_ACL |
+				NFS_INO_INVALID_SIZE | NFS_INO_INVALID_OTHER |
+				NFS_INO_INVALID_BLOCKS | NFS_INO_INVALID_NLINK |
+				NFS_INO_INVALID_MODE | NFS_INO_INVALID_XATTR |
+				NFS_INO_REVAL_PAGECACHE;
+		nfsi->attrtimeo = NFS_MINATTRTIMEO(inode);
+	}
+	nfsi->attrtimeo_timestamp = jiffies;
 	nfsi->read_cache_jiffies = timestamp;
 	nfsi->attr_gencount = nfs_inc_attr_generation_counter();
 	nfsi->cache_validity &= ~NFS_INO_INVALID_CHANGE;
@@ -7436,6 +7433,43 @@ nfs4_proc_lock(struct file *filp, int cmd, struct file_lock *request)
 		return status;
 
 	return nfs4_retry_setlk(state, cmd, request);
+}
+
+static int nfs4_delete_lease(struct file *file, void **priv)
+{
+	return generic_setlease(file, F_UNLCK, NULL, priv);
+}
+
+static int nfs4_add_lease(struct file *file, long arg, struct file_lock **lease,
+			  void **priv)
+{
+	struct inode *inode = file_inode(file);
+	fmode_t type = arg == F_RDLCK ? FMODE_READ : FMODE_WRITE;
+	int ret;
+
+	/* No delegation, no lease */
+	if (!nfs4_have_delegation(inode, type))
+		return -EAGAIN;
+	ret = generic_setlease(file, arg, lease, priv);
+	if (ret || nfs4_have_delegation(inode, type))
+		return ret;
+	/* We raced with a delegation return */
+	nfs4_delete_lease(file, priv);
+	return -EAGAIN;
+}
+
+int nfs4_proc_setlease(struct file *file, long arg, struct file_lock **lease,
+		       void **priv)
+{
+	switch (arg) {
+	case F_RDLCK:
+	case F_WRLCK:
+		return nfs4_add_lease(file, arg, lease, priv);
+	case F_UNLCK:
+		return nfs4_delete_lease(file, priv);
+	default:
+		return -EINVAL;
+	}
 }
 
 int nfs4_lock_delegation_recall(struct file_lock *fl, struct nfs4_state *state, const nfs4_stateid *stateid)
