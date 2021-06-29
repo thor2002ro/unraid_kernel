@@ -1243,8 +1243,8 @@ static void ext4_put_super(struct super_block *sb)
 	ext4_xattr_destroy_cache(sbi->s_ea_block_cache);
 	sbi->s_ea_block_cache = NULL;
 
-	if (sbi->s_mmp_tsk)
-		kthread_stop(sbi->s_mmp_tsk);
+	ext4_stop_mmpd(sbi);
+
 	brelse(sbi->s_sbh);
 	sb->s_fs_info = NULL;
 	/*
@@ -3098,8 +3098,15 @@ static void ext4_orphan_cleanup(struct super_block *sb,
 			inode_lock(inode);
 			truncate_inode_pages(inode->i_mapping, inode->i_size);
 			ret = ext4_truncate(inode);
-			if (ret)
+			if (ret) {
+				/*
+				 * We need to clean up the in-core orphan list
+				 * manually if ext4_truncate() failed to get a
+				 * transaction handle.
+				 */
+				ext4_orphan_del(NULL, inode);
 				ext4_std_error(inode->i_sb, ret);
+			}
 			inode_unlock(inode);
 			nr_truncates++;
 		} else {
@@ -5055,6 +5062,7 @@ no_journal:
 			ext4_msg(sb, KERN_ERR,
 			       "unable to initialize "
 			       "flex_bg meta info!");
+			ret = -ENOMEM;
 			goto failed_mount6;
 		}
 
@@ -5183,8 +5191,7 @@ failed_mount3a:
 failed_mount3:
 	flush_work(&sbi->s_error_work);
 	del_timer_sync(&sbi->s_err_report);
-	if (sbi->s_mmp_tsk)
-		kthread_stop(sbi->s_mmp_tsk);
+	ext4_stop_mmpd(sbi);
 failed_mount2:
 	rcu_read_lock();
 	group_desc = rcu_dereference(sbi->s_group_desc);
@@ -5643,7 +5650,7 @@ static int ext4_mark_recovery_complete(struct super_block *sb,
 		return 0;
 	}
 	jbd2_journal_lock_updates(journal);
-	err = jbd2_journal_flush(journal);
+	err = jbd2_journal_flush(journal, 0);
 	if (err < 0)
 		goto out;
 
@@ -5785,7 +5792,7 @@ static int ext4_freeze(struct super_block *sb)
 		 * Don't clear the needs_recovery flag if we failed to
 		 * flush the journal.
 		 */
-		error = jbd2_journal_flush(journal);
+		error = jbd2_journal_flush(journal, 0);
 		if (error < 0)
 			goto out;
 
@@ -5986,8 +5993,7 @@ static int ext4_remount(struct super_block *sb, int *flags, char *data)
 				 */
 				ext4_mark_recovery_complete(sb, es);
 			}
-			if (sbi->s_mmp_tsk)
-				kthread_stop(sbi->s_mmp_tsk);
+			ext4_stop_mmpd(sbi);
 		} else {
 			/* Make sure we can mount this feature set readwrite */
 			if (ext4_has_feature_readonly(sb) ||
@@ -6380,7 +6386,7 @@ static int ext4_quota_on(struct super_block *sb, int type, int format_id,
 		 * otherwise be livelocked...
 		 */
 		jbd2_journal_lock_updates(EXT4_SB(sb)->s_journal);
-		err = jbd2_journal_flush(EXT4_SB(sb)->s_journal);
+		err = jbd2_journal_flush(EXT4_SB(sb)->s_journal, 0);
 		jbd2_journal_unlock_updates(EXT4_SB(sb)->s_journal);
 		if (err)
 			return err;

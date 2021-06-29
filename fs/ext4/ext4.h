@@ -720,6 +720,7 @@ enum {
 #define EXT4_IOC_CLEAR_ES_CACHE		_IO('f', 40)
 #define EXT4_IOC_GETSTATE		_IOW('f', 41, __u32)
 #define EXT4_IOC_GET_ES_CACHE		_IOWR('f', 42, struct fiemap)
+#define EXT4_IOC_CHECKPOINT		_IOW('f', 43, __u32)
 
 #define EXT4_IOC_SHUTDOWN _IOR ('X', 125, __u32)
 
@@ -740,6 +741,14 @@ enum {
 #define EXT4_STATE_FLAG_NEW		0x00000002
 #define EXT4_STATE_FLAG_NEWENTRY	0x00000004
 #define EXT4_STATE_FLAG_DA_ALLOC_CLOSE	0x00000008
+
+/* flags for ioctl EXT4_IOC_CHECKPOINT */
+#define EXT4_IOC_CHECKPOINT_FLAG_DISCARD	0x1
+#define EXT4_IOC_CHECKPOINT_FLAG_ZEROOUT	0x2
+#define EXT4_IOC_CHECKPOINT_FLAG_DRY_RUN	0x4
+#define EXT4_IOC_CHECKPOINT_FLAG_VALID		(EXT4_IOC_CHECKPOINT_FLAG_DISCARD | \
+						EXT4_IOC_CHECKPOINT_FLAG_ZEROOUT | \
+						EXT4_IOC_CHECKPOINT_FLAG_DRY_RUN)
 
 #if defined(__KERNEL__) && defined(CONFIG_COMPAT)
 /*
@@ -1479,6 +1488,7 @@ struct ext4_sb_info {
 	struct kobject s_kobj;
 	struct completion s_kobj_unregister;
 	struct super_block *s_sb;
+	struct buffer_head *s_mmp_bh;
 
 	/* Journaling */
 	struct journal_s *s_journal;
@@ -3710,6 +3720,9 @@ extern struct ext4_io_end_vec *ext4_last_io_end_vec(ext4_io_end_t *io_end);
 /* mmp.c */
 extern int ext4_multi_mount_protect(struct super_block *, ext4_fsblk_t);
 
+/* mmp.c */
+extern void ext4_stop_mmpd(struct ext4_sb_info *sbi);
+
 /* verity.c */
 extern const struct fsverity_operations ext4_verityops;
 
@@ -3774,7 +3787,7 @@ static inline int ext4_buffer_uptodate(struct buffer_head *bh)
 	 * have to read the block because we may read the old data
 	 * successfully.
 	 */
-	if (!buffer_uptodate(bh) && buffer_write_io_error(bh))
+	if (buffer_write_io_error(bh))
 		set_buffer_uptodate(bh);
 	return buffer_uptodate(bh);
 }
