@@ -73,13 +73,32 @@
 #include <asm/kprobes.h>
 #include <asm/runlatch.h>
 
+#ifdef CONFIG_PPC64
+extern char __end_soft_masked[];
+unsigned long search_kernel_restart_table(unsigned long addr);
+#endif
+
+#ifdef CONFIG_PPC_BOOK3S_64
+DECLARE_STATIC_KEY_FALSE(interrupt_exit_not_reentrant);
+
+static inline void srr_regs_clobbered(void)
+{
+	local_paca->srr_valid = 0;
+	local_paca->hsrr_valid = 0;
+}
+#else
+static inline void srr_regs_clobbered(void)
+{
+}
+#endif
+
 static inline void nap_adjust_return(struct pt_regs *regs)
 {
 #ifdef CONFIG_PPC_970_NAP
 	if (unlikely(test_thread_local_flags(_TLF_NAPPING))) {
 		/* Can avoid a test-and-clear because NMIs do not call this */
 		clear_thread_local_flags(_TLF_NAPPING);
-		regs->nip = (unsigned long)power4_idle_nap_return;
+		regs_set_return_ip(regs, (unsigned long)power4_idle_nap_return);
 	}
 #endif
 }
@@ -129,8 +148,13 @@ static inline void interrupt_enter_prepare(struct pt_regs *regs, struct interrup
 		 * CT_WARN_ON comes here via program_check_exception,
 		 * so avoid recursion.
 		 */
-		if (TRAP(regs) != INTERRUPT_PROGRAM)
+		if (TRAP(regs) != INTERRUPT_PROGRAM) {
 			CT_WARN_ON(ct_state() != CONTEXT_KERNEL);
+			BUG_ON(regs->nip < (unsigned long)__end_soft_masked);
+		}
+		/* Move this under a debugging check */
+		if (arch_irq_disabled_regs(regs))
+			BUG_ON(search_kernel_restart_table(regs->nip));
 	}
 #endif
 
@@ -221,8 +245,8 @@ static inline void interrupt_nmi_enter_prepare(struct pt_regs *regs, struct inte
 	local_paca->irq_happened |= PACA_IRQ_HARD_DIS;
 
 	if (IS_ENABLED(CONFIG_PPC_BOOK3S_64) && !(regs->msr & MSR_PR) &&
-				regs->nip < (unsigned long)__end_interrupts) {
-		// Kernel code running below __end_interrupts is
+				regs->nip < (unsigned long)__end_soft_masked) {
+		// Kernel code running below __end_soft_masked is
 		// implicitly soft-masked.
 		regs->softe = IRQS_ALL_DISABLED;
 	}
@@ -256,6 +280,14 @@ static inline void interrupt_nmi_exit_prepare(struct pt_regs *regs, struct inter
 	 * nmi does not call nap_adjust_return because nmi should not create
 	 * new work to do (must use irq_work for that).
 	 */
+
+#ifdef CONFIG_PPC64
+	if (arch_irq_disabled_regs(regs)) {
+		unsigned long rst = search_kernel_restart_table(regs->nip);
+		if (rst)
+			regs_set_return_ip(regs, rst);
+	}
+#endif
 
 #ifdef CONFIG_PPC64
 	if (nmi_disables_ftrace(regs))
