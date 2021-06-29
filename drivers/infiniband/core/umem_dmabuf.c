@@ -57,7 +57,6 @@ int ib_umem_dmabuf_map_pages(struct ib_umem_dmabuf *umem_dmabuf)
 
 	umem_dmabuf->umem.sg_head.sgl = umem_dmabuf->first_sg;
 	umem_dmabuf->umem.sg_head.nents = nmap;
-	umem_dmabuf->umem.nmap = nmap;
 	umem_dmabuf->sgt = sgt;
 
 wait_fence:
