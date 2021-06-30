@@ -1422,8 +1422,7 @@ static int tegra_xusb_probe(struct platform_device *pdev)
 	if (err < 0)
 		return err;
 
-	regs = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	tegra->regs = devm_ioremap_resource(&pdev->dev, regs);
+	tegra->regs = devm_platform_get_and_ioremap_resource(pdev, 0, &regs);
 	if (IS_ERR(tegra->regs))
 		return PTR_ERR(tegra->regs);
 
@@ -1450,12 +1449,16 @@ static int tegra_xusb_probe(struct platform_device *pdev)
 		return PTR_ERR(tegra->padctl);
 
 	np = of_parse_phandle(pdev->dev.of_node, "nvidia,xusb-padctl", 0);
-	if (!np)
-		return -ENODEV;
+	if (!np) {
+		err = -ENODEV;
+		goto put_padctl;
+	}
 
 	tegra->padctl_irq = of_irq_get(np, 0);
-	if (tegra->padctl_irq <= 0)
-		return (tegra->padctl_irq == 0) ? -ENODEV : tegra->padctl_irq;
+	if (tegra->padctl_irq <= 0) {
+		err = (tegra->padctl_irq == 0) ? -ENODEV : tegra->padctl_irq;
+		goto put_padctl;
+	}
 
 	tegra->host_clk = devm_clk_get(&pdev->dev, "xusb_host");
 	if (IS_ERR(tegra->host_clk)) {
@@ -1747,6 +1750,7 @@ put_hcd:
 put_powerdomains:
 	tegra_xusb_powerdomain_remove(&pdev->dev, tegra);
 put_padctl:
+	of_node_put(np);
 	tegra_xusb_padctl_put(tegra->padctl);
 	return err;
 }
