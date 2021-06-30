@@ -204,7 +204,6 @@ check_attr_tree_state_again:
 
 	buf = kzalloc(node_size, GFP_NOFS);
 	if (!buf) {
-		pr_err("failed to allocate memory for header node\n");
 		err = -ENOMEM;
 		goto end_attr_file_creation;
 	}
@@ -262,10 +261,8 @@ int __hfsplus_setxattr(struct inode *inode, const char *name,
 	struct hfs_find_data cat_fd;
 	hfsplus_cat_entry entry;
 	u16 cat_entry_flags, cat_entry_type;
-	u16 folder_finderinfo_len = sizeof(struct DInfo) +
-					sizeof(struct DXInfo);
-	u16 file_finderinfo_len = sizeof(struct FInfo) +
-					sizeof(struct FXInfo);
+	u16 folder_finderinfo_len = sizeof(entry.folder.info);
+	u16 file_finderinfo_len = sizeof(entry.file.info);
 
 	if ((!S_ISREG(inode->i_mode) &&
 			!S_ISDIR(inode->i_mode)) ||
@@ -297,7 +294,7 @@ int __hfsplus_setxattr(struct inode *inode, const char *name,
 					sizeof(hfsplus_cat_entry));
 		if (be16_to_cpu(entry.type) == HFSPLUS_FOLDER) {
 			if (size == folder_finderinfo_len) {
-				memcpy(&entry.folder.user_info, value,
+				memcpy(&entry.folder.info, value,
 						folder_finderinfo_len);
 				hfs_bnode_write(cat_fd.bnode, &entry,
 					cat_fd.entryoffset,
@@ -310,7 +307,7 @@ int __hfsplus_setxattr(struct inode *inode, const char *name,
 			}
 		} else if (be16_to_cpu(entry.type) == HFSPLUS_FILE) {
 			if (size == file_finderinfo_len) {
-				memcpy(&entry.file.user_info, value,
+				memcpy(&entry.file.info, value,
 						file_finderinfo_len);
 				hfs_bnode_write(cat_fd.bnode, &entry,
 					cat_fd.entryoffset,
@@ -463,14 +460,14 @@ static ssize_t hfsplus_getxattr_finder_info(struct inode *inode,
 		if (entry_type == HFSPLUS_FOLDER) {
 			hfs_bnode_read(fd.bnode, folder_finder_info,
 				fd.entryoffset +
-				offsetof(struct hfsplus_cat_folder, user_info),
+				offsetof(struct hfsplus_cat_folder, info.user),
 				folder_rec_len);
 			memcpy(value, folder_finder_info, folder_rec_len);
 			res = folder_rec_len;
 		} else if (entry_type == HFSPLUS_FILE) {
 			hfs_bnode_read(fd.bnode, file_finder_info,
 				fd.entryoffset +
-				offsetof(struct hfsplus_cat_file, user_info),
+				offsetof(struct hfsplus_cat_file, info.user),
 				file_rec_len);
 			memcpy(value, file_finder_info, file_rec_len);
 			res = file_rec_len;
@@ -631,14 +628,14 @@ static ssize_t hfsplus_listxattr_finder_info(struct dentry *dentry,
 		len = sizeof(struct DInfo) + sizeof(struct DXInfo);
 		hfs_bnode_read(fd.bnode, folder_finder_info,
 				fd.entryoffset +
-				offsetof(struct hfsplus_cat_folder, user_info),
+				offsetof(struct hfsplus_cat_folder, info.user),
 				len);
 		found_bit = find_first_bit((void *)folder_finder_info, len*8);
 	} else if (entry_type == HFSPLUS_FILE) {
 		len = sizeof(struct FInfo) + sizeof(struct FXInfo);
 		hfs_bnode_read(fd.bnode, file_finder_info,
 				fd.entryoffset +
-				offsetof(struct hfsplus_cat_file, user_info),
+				offsetof(struct hfsplus_cat_file, info.user),
 				len);
 		found_bit = find_first_bit((void *)file_finder_info, len*8);
 	} else {

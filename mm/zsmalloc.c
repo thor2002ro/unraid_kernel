@@ -328,7 +328,7 @@ static int create_cache(struct zs_pool *pool)
 		return 1;
 
 	pool->zspage_cachep = kmem_cache_create("zspage", sizeof(struct zspage),
-					0, 0, NULL);
+					0, SLAB_RECLAIM_ACCOUNT, NULL);
 	if (!pool->zspage_cachep) {
 		kmem_cache_destroy(pool->handle_cachep);
 		pool->handle_cachep = NULL;
@@ -1471,7 +1471,6 @@ static void obj_free(struct size_class *class, unsigned long obj)
 	unsigned int f_objidx;
 	void *vaddr;
 
-	obj &= ~OBJ_ALLOCATED_TAG;
 	obj_to_location(obj, &f_page, &f_objidx);
 	f_offset = (class->size * f_objidx) & ~PAGE_MASK;
 	zspage = get_zspage(f_page);
@@ -1829,13 +1828,12 @@ static void putback_zspage_deferred(struct zs_pool *pool,
 static inline void zs_pool_dec_isolated(struct zs_pool *pool)
 {
 	VM_BUG_ON(atomic_long_read(&pool->isolated_pages) <= 0);
-	atomic_long_dec(&pool->isolated_pages);
 	/*
 	 * There's no possibility of racing, since wait_for_isolated_drain()
 	 * checks the isolated count under &class->lock after enqueuing
 	 * on migration_wait.
 	 */
-	if (atomic_long_read(&pool->isolated_pages) == 0 && pool->destroying)
+	if (atomic_long_dec_and_test(&pool->isolated_pages) && pool->destroying)
 		wake_up_all(&pool->migration_wait);
 }
 
@@ -2163,7 +2161,7 @@ static void async_free_zspage(struct work_struct *work)
 		VM_BUG_ON(fullness != ZS_EMPTY);
 		class = pool->size_class[class_idx];
 		spin_lock(&class->lock);
-		__free_zspage(pool, pool->size_class[class_idx], zspage);
+		__free_zspage(pool, class, zspage);
 		spin_unlock(&class->lock);
 	}
 };
