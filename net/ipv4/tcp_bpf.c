@@ -163,8 +163,8 @@ static bool tcp_bpf_stream_read(const struct sock *sk)
 	return !empty;
 }
 
-static int tcp_msg_wait_data(struct sock *sk, struct sk_psock *psock, int flags,
-			     long timeo, int *err)
+static int tcp_msg_wait_data(struct sock *sk, struct sk_psock *psock,
+			     long timeo)
 {
 	DEFINE_WAIT_FUNC(wait, woken_wake_function);
 	int ret = 0;
@@ -206,11 +206,11 @@ static int tcp_bpf_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 msg_bytes_ready:
 	copied = sk_msg_recvmsg(sk, psock, msg, len, flags);
 	if (!copied) {
-		int data, err = 0;
 		long timeo;
+		int data;
 
 		timeo = sock_rcvtimeo(sk, nonblock);
-		data = tcp_msg_wait_data(sk, psock, flags, timeo, &err);
+		data = tcp_msg_wait_data(sk, psock, timeo);
 		if (data) {
 			if (!sk_psock_queue_empty(psock))
 				goto msg_bytes_ready;
@@ -218,14 +218,9 @@ msg_bytes_ready:
 			sk_psock_put(sk, psock);
 			return tcp_recvmsg(sk, msg, len, nonblock, flags, addr_len);
 		}
-		if (err) {
-			ret = err;
-			goto out;
-		}
 		copied = -EAGAIN;
 	}
 	ret = copied;
-out:
 	release_sock(sk);
 	sk_psock_put(sk, psock);
 	return ret;

@@ -13,6 +13,12 @@
 #include "ice_dcb_lib.h"
 #include "ice_dcb_nl.h"
 #include "ice_devlink.h"
+/* Including ice_trace.h with CREATE_TRACE_POINTS defined will generate the
+ * ice tracepoint functions. This must be done exactly once across the
+ * ice driver.
+ */
+#define CREATE_TRACE_POINTS
+#include "ice_trace.h"
 
 #define DRV_SUMMARY	"Intel(R) Ethernet Connection E800 Series Linux Driver"
 static const char ice_driver_string[] = DRV_SUMMARY;
@@ -471,6 +477,9 @@ ice_prepare_for_reset(struct ice_pf *pf)
 	/* disable the VSIs and their queues that are not already DOWN */
 	ice_pf_dis_all_vsi(pf, false);
 
+	if (test_bit(ICE_FLAG_PTP_SUPPORTED, pf->flags))
+		ice_ptp_release(pf);
+
 	if (hw->port_info)
 		ice_sched_clear_port(hw->port_info);
 
@@ -503,6 +512,7 @@ static void ice_do_reset(struct ice_pf *pf, enum ice_reset_req reset_type)
 		clear_bit(ICE_PFR_REQ, pf->state);
 		clear_bit(ICE_CORER_REQ, pf->state);
 		clear_bit(ICE_GLOBR_REQ, pf->state);
+		wake_up(&pf->reset_wait_queue);
 		return;
 	}
 
@@ -515,6 +525,7 @@ static void ice_do_reset(struct ice_pf *pf, enum ice_reset_req reset_type)
 		ice_rebuild(pf, reset_type);
 		clear_bit(ICE_PREPARED_FOR_RESET, pf->state);
 		clear_bit(ICE_PFR_REQ, pf->state);
+		wake_up(&pf->reset_wait_queue);
 		ice_reset_all_vfs(pf, true);
 	}
 }
@@ -565,6 +576,7 @@ static void ice_reset_subtask(struct ice_pf *pf)
 			clear_bit(ICE_PFR_REQ, pf->state);
 			clear_bit(ICE_CORER_REQ, pf->state);
 			clear_bit(ICE_GLOBR_REQ, pf->state);
+			wake_up(&pf->reset_wait_queue);
 			ice_reset_all_vfs(pf, true);
 		}
 
@@ -862,6 +874,38 @@ static void ice_set_dflt_mib(struct ice_pf *pf)
 }
 
 /**
+ * ice_check_module_power
+ * @pf: pointer to PF struct
+ * @link_cfg_err: bitmap from the link info structure
+ *
+ * check module power level returned by a previous call to aq_get_link_info
+ * and print error messages if module power level is not supported
+ */
+static void ice_check_module_power(struct ice_pf *pf, u8 link_cfg_err)
+{
+	/* if module power level is supported, clear the flag */
+	if (!(link_cfg_err & (ICE_AQ_LINK_INVAL_MAX_POWER_LIMIT |
+			      ICE_AQ_LINK_MODULE_POWER_UNSUPPORTED))) {
+		clear_bit(ICE_FLAG_MOD_POWER_UNSUPPORTED, pf->flags);
+		return;
+	}
+
+	/* if ICE_FLAG_MOD_POWER_UNSUPPORTED was previously set and the
+	 * above block didn't clear this bit, there's nothing to do
+	 */
+	if (test_bit(ICE_FLAG_MOD_POWER_UNSUPPORTED, pf->flags))
+		return;
+
+	if (link_cfg_err & ICE_AQ_LINK_INVAL_MAX_POWER_LIMIT) {
+		dev_err(ice_pf_to_dev(pf), "The installed module is incompatible with the device's NVM image. Cannot start link\n");
+		set_bit(ICE_FLAG_MOD_POWER_UNSUPPORTED, pf->flags);
+	} else if (link_cfg_err & ICE_AQ_LINK_MODULE_POWER_UNSUPPORTED) {
+		dev_err(ice_pf_to_dev(pf), "The module's power requirements exceed the device's power supply. Cannot start link\n");
+		set_bit(ICE_FLAG_MOD_POWER_UNSUPPORTED, pf->flags);
+	}
+}
+
+/**
  * ice_link_event - process the link event
  * @pf: PF that the link event is associated with
  * @pi: port_info for the port that the link event is associated with
@@ -895,6 +939,8 @@ ice_link_event(struct ice_pf *pf, struct ice_port_info *pi, bool link_up,
 		dev_dbg(dev, "Failed to update link status on port %d, err %s aq_err %s\n",
 			pi->lport, ice_stat_str(status),
 			ice_aq_str(pi->hw->adminq.sq_last_status));
+
+	ice_check_module_power(pf, pi->phy.link_info.link_cfg_err);
 
 	/* Check if the link state is up after updating link info, and treat
 	 * this event as an UP event since the link is actually UP now.
@@ -1194,6 +1240,10 @@ static int __ice_clean_ctrlq(struct ice_pf *pf, enum ice_ctl_q q_type)
 		cq = &hw->adminq;
 		qtype = "Admin";
 		break;
+	case ICE_CTL_Q_SB:
+		cq = &hw->sbq;
+		qtype = "Sideband";
+		break;
 	case ICE_CTL_Q_MAILBOX:
 		cq = &hw->mailboxq;
 		qtype = "Mailbox";
@@ -1363,6 +1413,34 @@ static void ice_clean_mailboxq_subtask(struct ice_pf *pf)
 
 	if (ice_ctrlq_pending(hw, &hw->mailboxq))
 		__ice_clean_ctrlq(pf, ICE_CTL_Q_MAILBOX);
+
+	ice_flush(hw);
+}
+
+/**
+ * ice_clean_sbq_subtask - clean the Sideband Queue rings
+ * @pf: board private structure
+ */
+static void ice_clean_sbq_subtask(struct ice_pf *pf)
+{
+	struct ice_hw *hw = &pf->hw;
+
+	/* Nothing to do here if sideband queue is not supported */
+	if (!ice_is_sbq_supported(hw)) {
+		clear_bit(ICE_SIDEBANDQ_EVENT_PENDING, pf->state);
+		return;
+	}
+
+	if (!test_bit(ICE_SIDEBANDQ_EVENT_PENDING, pf->state))
+		return;
+
+	if (__ice_clean_ctrlq(pf, ICE_CTL_Q_SB))
+		return;
+
+	clear_bit(ICE_SIDEBANDQ_EVENT_PENDING, pf->state);
+
+	if (ice_ctrlq_pending(hw, &hw->sbq))
+		__ice_clean_ctrlq(pf, ICE_CTL_Q_SB);
 
 	ice_flush(hw);
 }
@@ -2010,6 +2088,8 @@ static void ice_check_media_subtask(struct ice_pf *pf)
 	if (err)
 		return;
 
+	ice_check_module_power(pf, pi->phy.link_info.link_cfg_err);
+
 	if (pi->phy.link_info.link_info & ICE_AQ_MEDIA_AVAILABLE) {
 		if (!test_bit(ICE_PHY_INIT_COMPLETE, pf->state))
 			ice_init_phy_user_cfg(pi);
@@ -2067,6 +2147,7 @@ static void ice_service_task(struct work_struct *work)
 
 	ice_process_vflr_event(pf);
 	ice_clean_mailboxq_subtask(pf);
+	ice_clean_sbq_subtask(pf);
 	ice_sync_arfs_fltrs(pf);
 	ice_flush_fdir_ctx(pf);
 
@@ -2082,6 +2163,7 @@ static void ice_service_task(struct work_struct *work)
 	    test_bit(ICE_VFLR_EVENT_PENDING, pf->state) ||
 	    test_bit(ICE_MAILBOXQ_EVENT_PENDING, pf->state) ||
 	    test_bit(ICE_FD_VF_FLUSH_CTX, pf->state) ||
+	    test_bit(ICE_SIDEBANDQ_EVENT_PENDING, pf->state) ||
 	    test_bit(ICE_ADMINQ_EVENT_PENDING, pf->state))
 		mod_timer(&pf->serv_tmr, jiffies);
 }
@@ -2100,6 +2182,10 @@ static void ice_set_ctrlq_len(struct ice_hw *hw)
 	hw->mailboxq.num_sq_entries = ICE_MBXSQ_LEN;
 	hw->mailboxq.rq_buf_size = ICE_MBXQ_MAX_BUF_LEN;
 	hw->mailboxq.sq_buf_size = ICE_MBXQ_MAX_BUF_LEN;
+	hw->sbq.num_rq_entries = ICE_SBQ_LEN;
+	hw->sbq.num_sq_entries = ICE_SBQ_LEN;
+	hw->sbq.rq_buf_size = ICE_SBQ_MAX_BUF_LEN;
+	hw->sbq.sq_buf_size = ICE_SBQ_MAX_BUF_LEN;
 }
 
 /**
@@ -2654,6 +2740,7 @@ static irqreturn_t ice_misc_intr(int __always_unused irq, void *data)
 	dev = ice_pf_to_dev(pf);
 	set_bit(ICE_ADMINQ_EVENT_PENDING, pf->state);
 	set_bit(ICE_MAILBOXQ_EVENT_PENDING, pf->state);
+	set_bit(ICE_SIDEBANDQ_EVENT_PENDING, pf->state);
 
 	oicr = rd32(hw, PFINT_OICR);
 	ena_mask = rd32(hw, PFINT_OICR_ENA);
@@ -2725,6 +2812,23 @@ static irqreturn_t ice_misc_intr(int __always_unused irq, void *data)
 		}
 	}
 
+	if (oicr & PFINT_OICR_TSYN_TX_M) {
+		ena_mask &= ~PFINT_OICR_TSYN_TX_M;
+		ice_ptp_process_ts(pf);
+	}
+
+	if (oicr & PFINT_OICR_TSYN_EVNT_M) {
+		u8 tmr_idx = hw->func_caps.ts_func_info.tmr_index_owned;
+		u32 gltsyn_stat = rd32(hw, GLTSYN_STAT(tmr_idx));
+
+		/* Save EVENTs from GTSYN register */
+		pf->ptp.ext_ts_irq |= gltsyn_stat & (GLTSYN_STAT_EVENT0_M |
+						     GLTSYN_STAT_EVENT1_M |
+						     GLTSYN_STAT_EVENT2_M);
+		ena_mask &= ~PFINT_OICR_TSYN_EVNT_M;
+		kthread_queue_work(pf->ptp.kworker, &pf->ptp.extts_work);
+	}
+
 #define ICE_AUX_CRIT_ERR (PFINT_OICR_PE_CRITERR_M | PFINT_OICR_HMC_ERR_M | PFINT_OICR_PE_PUSH_M)
 	if (oicr & ICE_AUX_CRIT_ERR) {
 		struct iidc_event *event;
@@ -2774,6 +2878,9 @@ static void ice_dis_ctrlq_interrupts(struct ice_hw *hw)
 	/* disable Mailbox queue Interrupt causes */
 	wr32(hw, PFINT_MBX_CTL,
 	     rd32(hw, PFINT_MBX_CTL) & ~PFINT_MBX_CTL_CAUSE_ENA_M);
+
+	wr32(hw, PFINT_SB_CTL,
+	     rd32(hw, PFINT_SB_CTL) & ~PFINT_SB_CTL_CAUSE_ENA_M);
 
 	/* disable Control queue Interrupt causes */
 	wr32(hw, PFINT_OICR_CTL,
@@ -2828,6 +2935,11 @@ static void ice_ena_ctrlq_interrupts(struct ice_hw *hw, u16 reg_idx)
 	val = ((reg_idx & PFINT_MBX_CTL_MSIX_INDX_M) |
 	       PFINT_MBX_CTL_CAUSE_ENA_M);
 	wr32(hw, PFINT_MBX_CTL, val);
+
+	/* This enables Sideband queue Interrupt causes */
+	val = ((reg_idx & PFINT_SB_CTL_MSIX_INDX_M) |
+	       PFINT_SB_CTL_CAUSE_ENA_M);
+	wr32(hw, PFINT_SB_CTL, val);
 
 	ice_flush(hw);
 }
@@ -2998,7 +3110,6 @@ static void ice_set_netdev_features(struct net_device *netdev)
  */
 static int ice_cfg_netdev(struct ice_vsi *vsi)
 {
-	struct ice_pf *pf = vsi->back;
 	struct ice_netdev_priv *np;
 	struct net_device *netdev;
 	u8 mac_addr[ETH_ALEN];
@@ -3018,7 +3129,7 @@ static int ice_cfg_netdev(struct ice_vsi *vsi)
 	ice_set_ops(netdev);
 
 	if (vsi->type == ICE_VSI_PF) {
-		SET_NETDEV_DEV(netdev, ice_pf_to_dev(pf));
+		SET_NETDEV_DEV(netdev, ice_pf_to_dev(vsi->back));
 		ether_addr_copy(mac_addr, vsi->port_info->mac.perm_addr);
 		ether_addr_copy(netdev->dev_addr, mac_addr);
 		ether_addr_copy(netdev->perm_addr, mac_addr);
@@ -3292,6 +3403,9 @@ static void ice_deinit_pf(struct ice_pf *pf)
 		bitmap_free(pf->avail_rxqs);
 		pf->avail_rxqs = NULL;
 	}
+
+	if (pf->ptp.clock)
+		ptp_clock_unregister(pf->ptp.clock);
 }
 
 /**
@@ -3338,6 +3452,10 @@ static void ice_set_pf_caps(struct ice_pf *pf)
 				       func_caps->fd_fltr_best_effort);
 	}
 
+	clear_bit(ICE_FLAG_PTP_SUPPORTED, pf->flags);
+	if (func_caps->common_cap.ieee_1588)
+		set_bit(ICE_FLAG_PTP_SUPPORTED, pf->flags);
+
 	pf->max_pf_txqs = func_caps->common_cap.num_txq;
 	pf->max_pf_rxqs = func_caps->common_cap.num_rxq;
 }
@@ -3356,6 +3474,8 @@ static int ice_init_pf(struct ice_pf *pf)
 	INIT_HLIST_HEAD(&pf->aq_wait_list);
 	spin_lock_init(&pf->aq_wait_lock);
 	init_waitqueue_head(&pf->aq_wait_queue);
+
+	init_waitqueue_head(&pf->reset_wait_queue);
 
 	/* setup service timer and periodic service task */
 	timer_setup(&pf->serv_tmr, ice_service_timer, 0);
@@ -4278,6 +4398,8 @@ ice_probe(struct pci_dev *pdev, const struct pci_device_id __always_unused *ent)
 
 	ice_init_link_dflt_override(pf->hw.port_info);
 
+	ice_check_module_power(pf, pf->hw.port_info->phy.link_info.link_cfg_err);
+
 	/* if media available, initialize PHY settings */
 	if (pf->hw.port_info->phy.link_info.link_info &
 	    ICE_AQ_MEDIA_AVAILABLE) {
@@ -4316,6 +4438,8 @@ ice_probe(struct pci_dev *pdev, const struct pci_device_id __always_unused *ent)
 	}
 
 	/* initialize DDP driven features */
+	if (test_bit(ICE_FLAG_PTP_SUPPORTED, pf->flags))
+		ice_ptp_init(pf);
 
 	/* Note: Flow director init failure is non-fatal to load */
 	if (ice_init_fdir(pf))
@@ -4483,6 +4607,8 @@ static void ice_remove(struct pci_dev *pdev)
 
 	mutex_destroy(&(&pf->hw)->fdir_fltr_lock);
 	ice_deinit_lag(pf);
+	if (test_bit(ICE_FLAG_PTP_SUPPORTED, pf->flags))
+		ice_ptp_release(pf);
 	if (!ice_is_safe_mode(pf))
 		ice_remove_arfs(pf);
 	ice_setup_mc_magic_wake(pf);
@@ -5369,6 +5495,7 @@ static void ice_tx_dim_work(struct work_struct *work)
 	itr = tx_profile[dim->profile_ix].itr;
 	intrl = tx_profile[dim->profile_ix].intrl;
 
+	ice_trace(tx_dim_work, q_vector, dim);
 	ice_write_itr(rc, itr);
 	ice_write_intrl(q_vector, intrl);
 
@@ -5393,6 +5520,7 @@ static void ice_rx_dim_work(struct work_struct *work)
 	itr = rx_profile[dim->profile_ix].itr;
 	intrl = rx_profile[dim->profile_ix].intrl;
 
+	ice_trace(rx_dim_work, q_vector, dim);
 	ice_write_itr(rc, itr);
 	ice_write_intrl(q_vector, intrl);
 
@@ -5536,7 +5664,6 @@ ice_update_vsi_tx_ring_stats(struct ice_vsi *vsi, struct ice_ring **rings,
 static void ice_update_vsi_ring_stats(struct ice_vsi *vsi)
 {
 	struct rtnl_link_stats64 *vsi_stats = &vsi->net_stats;
-	struct ice_ring *ring;
 	u64 pkts, bytes;
 	int i;
 
@@ -5560,7 +5687,8 @@ static void ice_update_vsi_ring_stats(struct ice_vsi *vsi)
 
 	/* update Rx rings counters */
 	ice_for_each_rxq(vsi, i) {
-		ring = READ_ONCE(vsi->rx_rings[i]);
+		struct ice_ring *ring = READ_ONCE(vsi->rx_rings[i]);
+
 		ice_fetch_u64_stats_per_ring(ring, &pkts, &bytes);
 		vsi_stats->rx_packets += pkts;
 		vsi_stats->rx_bytes += bytes;
@@ -6227,6 +6355,12 @@ static void ice_rebuild(struct ice_pf *pf, enum ice_reset_req reset_type)
 
 	ice_clear_pxe_mode(hw);
 
+	ret = ice_init_nvm(hw);
+	if (ret) {
+		dev_err(dev, "ice_init_nvm failed %s\n", ice_stat_str(ret));
+		goto err_init_ctrlq;
+	}
+
 	ret = ice_get_caps(hw);
 	if (ret) {
 		dev_err(dev, "ice_get_caps failed %s\n", ice_stat_str(ret));
@@ -6267,6 +6401,13 @@ static void ice_rebuild(struct ice_pf *pf, enum ice_reset_req reset_type)
 
 	if (test_bit(ICE_FLAG_DCB_ENA, pf->flags))
 		ice_dcb_rebuild(pf);
+
+	/* If the PF previously had enabled PTP, PTP init needs to happen before
+	 * the VSI rebuild. If not, this causes the PTP link status events to
+	 * fail.
+	 */
+	if (test_bit(ICE_FLAG_PTP_SUPPORTED, pf->flags))
+		ice_ptp_init(pf);
 
 	/* rebuild PF VSI */
 	err = ice_vsi_rebuild_by_type(pf, ICE_VSI_PF);
@@ -6414,6 +6555,27 @@ event_after:
 	kfree(event);
 
 	return err;
+}
+
+/**
+ * ice_do_ioctl - Access the hwtstamp interface
+ * @netdev: network interface device structure
+ * @ifr: interface request data
+ * @cmd: ioctl command
+ */
+static int ice_do_ioctl(struct net_device *netdev, struct ifreq *ifr, int cmd)
+{
+	struct ice_netdev_priv *np = netdev_priv(netdev);
+	struct ice_pf *pf = np->vsi->back;
+
+	switch (cmd) {
+	case SIOCGHWTSTAMP:
+		return ice_ptp_get_ts_config(pf, ifr);
+	case SIOCSHWTSTAMP:
+		return ice_ptp_set_ts_config(pf, ifr);
+	default:
+		return -EOPNOTSUPP;
+	}
 }
 
 /**
@@ -6932,6 +7094,8 @@ int ice_open_internal(struct net_device *netdev)
 		return -EIO;
 	}
 
+	ice_check_module_power(pf, pi->phy.link_info.link_cfg_err);
+
 	/* Set PHY if there is media, otherwise, turn off PHY */
 	if (pi->phy.link_info.link_info & ICE_AQ_MEDIA_AVAILABLE) {
 		clear_bit(ICE_FLAG_NO_MEDIA, pf->flags);
@@ -7065,6 +7229,7 @@ static const struct net_device_ops ice_netdev_ops = {
 	.ndo_change_mtu = ice_change_mtu,
 	.ndo_get_stats64 = ice_get_stats64,
 	.ndo_set_tx_maxrate = ice_set_tx_maxrate,
+	.ndo_do_ioctl = ice_do_ioctl,
 	.ndo_set_vf_spoofchk = ice_set_vf_spoofchk,
 	.ndo_set_vf_mac = ice_set_vf_mac,
 	.ndo_get_vf_config = ice_get_vf_cfg,

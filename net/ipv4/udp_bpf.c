@@ -36,8 +36,8 @@ static bool psock_has_data(struct sk_psock *psock)
 #define udp_msg_has_data(__sk, __psock)	\
 		({ udp_sk_has_data(__sk) || psock_has_data(__psock); })
 
-static int udp_msg_wait_data(struct sock *sk, struct sk_psock *psock, int flags,
-			     long timeo, int *err)
+static int udp_msg_wait_data(struct sock *sk, struct sk_psock *psock,
+			     long timeo)
 {
 	DEFINE_WAIT_FUNC(wait, woken_wake_function);
 	int ret = 0;
@@ -81,19 +81,15 @@ static int udp_bpf_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 msg_bytes_ready:
 	copied = sk_msg_recvmsg(sk, psock, msg, len, flags);
 	if (!copied) {
-		int data, err = 0;
 		long timeo;
+		int data;
 
 		timeo = sock_rcvtimeo(sk, nonblock);
-		data = udp_msg_wait_data(sk, psock, flags, timeo, &err);
+		data = udp_msg_wait_data(sk, psock, timeo);
 		if (data) {
 			if (psock_has_data(psock))
 				goto msg_bytes_ready;
 			ret = sk_udp_recvmsg(sk, msg, len, nonblock, flags, addr_len);
-			goto out;
-		}
-		if (err) {
-			ret = err;
 			goto out;
 		}
 		copied = -EAGAIN;
