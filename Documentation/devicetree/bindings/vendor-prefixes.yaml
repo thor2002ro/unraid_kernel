@@ -478,7 +478,7 @@ patternProperties:
   "^hirschmann,.*":
     description: Hirschmann Automation and Control GmbH
   "^hisilicon,.*":
-    description: Hisilicon Limited.
+    description: HiSilicon Limited.
   "^hit,.*":
     description: Hitachi Ltd.
   "^hitex,.*":
@@ -539,6 +539,8 @@ patternProperties:
     description: Innolux Corporation
   "^inside-secure,.*":
     description: INSIDE Secure
+  "^insignal,.*":
+    description: Insignal Ltd.
   "^inspur,.*":
     description: Inspur Corporation
   "^intel,.*":
@@ -1095,6 +1097,8 @@ patternProperties:
       (formerly part of MStar Semiconductor, Inc.)
   "^st,.*":
     description: STMicroelectronics
+  "^starfive,.*":
+    description: StarFive Technology Co. Ltd.
   "^starry,.*":
     description: Starry Electronic Technology (ShenZhen) Co., LTD
   "^startek,.*":

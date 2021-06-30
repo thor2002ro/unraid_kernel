@@ -177,4 +177,8 @@ static inline int of_dma_set_restricted_buffer(struct device *dev,
 }
 #endif
 
+void fdt_init_reserved_mem(void);
+void fdt_reserved_mem_save_node(unsigned long node, const char *uname,
+			       phys_addr_t base, phys_addr_t size);
+
 #endif /* _LINUX_OF_PRIVATE_H */
