@@ -101,8 +101,8 @@ int rvt_driver_mr_init(struct rvt_dev_info *rdi)
 }
 
 /**
- *rvt_mr_exit: clean up MR
- *@rdi: rvt dev structure
+ * rvt_mr_exit - clean up MR
+ * @rdi: rvt dev structure
  *
  * called when drivers have unregistered or perhaps failed to register with us
  */
@@ -410,7 +410,7 @@ struct ib_mr *rvt_reg_user_mr(struct ib_pd *pd, u64 start, u64 length,
 	mr->mr.page_shift = PAGE_SHIFT;
 	m = 0;
 	n = 0;
-	for_each_sg_page (umem->sg_head.sgl, &sg_iter, umem->nmap, 0) {
+	for_each_sg_page (umem->sg_head.sgl, &sg_iter, umem->sg_head.nents, 0) {
 		void *vaddr;
 
 		vaddr = page_address(sg_page_iter_page(&sg_iter));

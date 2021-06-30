@@ -27,8 +27,6 @@ struct ib_umem {
 	u32 is_dmabuf : 1;
 	struct work_struct	work;
 	struct sg_table sg_head;
-	int             nmap;
-	unsigned int    sg_nents;
 };
 
 struct ib_umem_dmabuf {
@@ -77,7 +75,8 @@ static inline void __rdma_umem_block_iter_start(struct ib_block_iter *biter,
 						struct ib_umem *umem,
 						unsigned long pgsz)
 {
-	__rdma_block_iter_start(biter, umem->sg_head.sgl, umem->nmap, pgsz);
+	__rdma_block_iter_start(biter, umem->sg_head.sgl, umem->sg_head.nents,
+				pgsz);
 }
 
 /**

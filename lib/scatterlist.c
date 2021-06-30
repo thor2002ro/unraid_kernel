@@ -192,33 +192,26 @@ static void sg_kfree(struct scatterlist *sg, unsigned int nents)
 void __sg_free_table(struct sg_table *table, unsigned int max_ents,
 		     unsigned int nents_first_chunk, sg_free_fn *free_fn)
 {
-	struct scatterlist *sgl, *next;
+	struct scatterlist *sgl, *next = NULL;
 	unsigned curr_max_ents = nents_first_chunk ?: max_ents;
 
 	if (unlikely(!table->sgl))
 		return;
 
 	sgl = table->sgl;
-	while (table->orig_nents) {
-		unsigned int alloc_size = table->orig_nents;
-		unsigned int sg_size;
+	while (table->total_nents) {
+		unsigned int alloc_size = table->total_nents;
 
 		/*
 		 * If we have more than max_ents segments left,
 		 * then assign 'next' to the sg table after the current one.
-		 * sg_size is then one less than alloc size, since the last
-		 * element is the chain pointer.
 		 */
 		if (alloc_size > curr_max_ents) {
 			next = sg_chain_ptr(&sgl[curr_max_ents - 1]);
 			alloc_size = curr_max_ents;
-			sg_size = alloc_size - 1;
-		} else {
-			sg_size = alloc_size;
-			next = NULL;
 		}
 
-		table->orig_nents -= sg_size;
+		table->total_nents -= alloc_size;
 		if (nents_first_chunk)
 			nents_first_chunk = 0;
 		else
@@ -301,20 +294,11 @@ int __sg_alloc_table(struct sg_table *table, unsigned int nents,
 		} else {
 			sg = alloc_fn(alloc_size, gfp_mask);
 		}
-		if (unlikely(!sg)) {
-			/*
-			 * Adjust entry count to reflect that the last
-			 * entry of the previous table won't be used for
-			 * linkage.  Without this, sg_kfree() may get
-			 * confused.
-			 */
-			if (prv)
-				table->nents = ++table->orig_nents;
-
+		if (unlikely(!sg))
 			return -ENOMEM;
-		}
 
 		sg_init_table(sg, alloc_size);
+		table->total_nents += alloc_size;
 		table->nents = table->orig_nents += sg_size;
 
 		/*
@@ -385,12 +369,11 @@ static struct scatterlist *get_next_sg(struct sg_table *table,
 	if (!new_sg)
 		return ERR_PTR(-ENOMEM);
 	sg_init_table(new_sg, alloc_size);
+	table->total_nents += alloc_size;
 	if (cur) {
 		__sg_chain(next_sg, new_sg);
-		table->orig_nents += alloc_size - 1;
 	} else {
 		table->sgl = new_sg;
-		table->orig_nents = alloc_size;
 		table->nents = 0;
 	}
 	return new_sg;
@@ -515,6 +498,7 @@ struct scatterlist *__sg_alloc_table_from_pages(struct sg_table *sgt,
 		cur_page = j;
 	}
 	sgt->nents += added_nents;
+	sgt->orig_nents = sgt->nents;
 out:
 	if (!left_pages)
 		sg_mark_end(s);
