@@ -647,14 +647,13 @@ static inline void loop_update_dio(struct loop_device *lo)
 				lo->use_dio);
 }
 
-static void loop_reread_partitions(struct loop_device *lo,
-				   struct block_device *bdev)
+static void loop_reread_partitions(struct loop_device *lo)
 {
 	int rc;
 
-	mutex_lock(&bdev->bd_mutex);
-	rc = bdev_disk_changed(bdev, false);
-	mutex_unlock(&bdev->bd_mutex);
+	mutex_lock(&lo->lo_disk->open_mutex);
+	rc = bdev_disk_changed(lo->lo_disk, false);
+	mutex_unlock(&lo->lo_disk->open_mutex);
 	if (rc)
 		pr_warn("%s: partition scan of loop%d (%s) failed (rc=%d)\n",
 			__func__, lo->lo_number, lo->lo_file_name, rc);
@@ -747,12 +746,12 @@ static int loop_change_fd(struct loop_device *lo, struct block_device *bdev,
 	mutex_unlock(&lo->lo_mutex);
 	/*
 	 * We must drop file reference outside of lo_mutex as dropping
-	 * the file ref can take bd_mutex which creates circular locking
+	 * the file ref can take open_mutex which creates circular locking
 	 * dependency.
 	 */
 	fput(old_file);
 	if (partscan)
-		loop_reread_partitions(lo, bdev);
+		loop_reread_partitions(lo);
 	return 0;
 
 out_err:
@@ -1154,6 +1153,7 @@ static int loop_configure(struct loop_device *lo, fmode_t mode,
 	blk_queue_physical_block_size(lo->lo_queue, bsize);
 	blk_queue_io_min(lo->lo_queue, bsize);
 
+	loop_config_discard(lo);
 	loop_update_rotational(lo);
 	loop_update_dio(lo);
 	loop_sysfs_init(lo);
@@ -1174,7 +1174,7 @@ static int loop_configure(struct loop_device *lo, fmode_t mode,
 	bdgrab(bdev);
 	mutex_unlock(&lo->lo_mutex);
 	if (partscan)
-		loop_reread_partitions(lo, bdev);
+		loop_reread_partitions(lo);
 	if (!(mode & FMODE_EXCL))
 		bd_abort_claiming(bdev, loop_configure);
 	return 0;
@@ -1260,7 +1260,7 @@ out_unlock:
 	mutex_unlock(&lo->lo_mutex);
 	if (partscan) {
 		/*
-		 * bd_mutex has been held already in release path, so don't
+		 * open_mutex has been held already in release path, so don't
 		 * acquire it if this function is called in such case.
 		 *
 		 * If the reread partition isn't from release path, lo_refcnt
@@ -1268,10 +1268,10 @@ out_unlock:
 		 * current holder is released.
 		 */
 		if (!release)
-			mutex_lock(&bdev->bd_mutex);
-		err = bdev_disk_changed(bdev, false);
+			mutex_lock(&lo->lo_disk->open_mutex);
+		err = bdev_disk_changed(lo->lo_disk, false);
 		if (!release)
-			mutex_unlock(&bdev->bd_mutex);
+			mutex_unlock(&lo->lo_disk->open_mutex);
 		if (err)
 			pr_warn("%s: partition scan of loop%d failed (rc=%d)\n",
 				__func__, lo_number, err);
@@ -1298,7 +1298,7 @@ out_unlock:
 	/*
 	 * Need not hold lo_mutex to fput backing file. Calling fput holding
 	 * lo_mutex triggers a circular lock dependency possibility warning as
-	 * fput can take bd_mutex which is usually taken before lo_mutex.
+	 * fput can take open_mutex which is usually taken before lo_mutex.
 	 */
 	if (filp)
 		fput(filp);
@@ -1416,7 +1416,7 @@ out_unfreeze:
 out_unlock:
 	mutex_unlock(&lo->lo_mutex);
 	if (partscan)
-		loop_reread_partitions(lo, bdev);
+		loop_reread_partitions(lo);
 
 	return err;
 }
@@ -2068,7 +2068,7 @@ static const struct blk_mq_ops loop_mq_ops = {
 	.complete	= lo_complete_rq,
 };
 
-static int loop_add(struct loop_device **l, int i)
+static int loop_add(int i)
 {
 	struct loop_device *lo;
 	struct gendisk *disk;
@@ -2078,8 +2078,11 @@ static int loop_add(struct loop_device **l, int i)
 	lo = kzalloc(sizeof(*lo), GFP_KERNEL);
 	if (!lo)
 		goto out;
-
 	lo->lo_state = Lo_unbound;
+
+	err = mutex_lock_killable(&loop_ctl_mutex);
+	if (err)
+		goto out_free_dev;
 
 	/* allocate id, if @id >= 0, we're requesting that specific id */
 	if (i >= 0) {
@@ -2090,7 +2093,7 @@ static int loop_add(struct loop_device **l, int i)
 		err = idr_alloc(&loop_index_idr, lo, 0, 0, GFP_KERNEL);
 	}
 	if (err < 0)
-		goto out_free_dev;
+		goto out_unlock;
 	i = err;
 
 	err = -ENOMEM;
@@ -2106,12 +2109,12 @@ static int loop_add(struct loop_device **l, int i)
 	if (err)
 		goto out_free_idr;
 
-	lo->lo_queue = blk_mq_init_queue(&lo->tag_set);
-	if (IS_ERR(lo->lo_queue)) {
-		err = PTR_ERR(lo->lo_queue);
+	disk = lo->lo_disk = blk_mq_alloc_disk(&lo->tag_set, lo);
+	if (IS_ERR(disk)) {
+		err = PTR_ERR(disk);
 		goto out_cleanup_tags;
 	}
-	lo->lo_queue->queuedata = lo;
+	lo->lo_queue = lo->lo_disk->queue;
 
 	blk_queue_max_hw_sectors(lo->lo_queue, BLK_DEF_MAX_SECTORS);
 
@@ -2122,11 +2125,6 @@ static int loop_add(struct loop_device **l, int i)
 	 * to underlayer disk. We will enable merge once directio is enabled.
 	 */
 	blk_queue_flag_set(QUEUE_FLAG_NOMERGES, lo->lo_queue);
-
-	err = -ENOMEM;
-	disk = lo->lo_disk = alloc_disk(1 << part_shift);
-	if (!disk)
-		goto out_free_queue;
 
 	/*
 	 * Disable partition scanning by default. The in-kernel partition
@@ -2155,20 +2153,21 @@ static int loop_add(struct loop_device **l, int i)
 	spin_lock_init(&lo->lo_lock);
 	disk->major		= LOOP_MAJOR;
 	disk->first_minor	= i << part_shift;
+	disk->minors		= 1 << part_shift;
 	disk->fops		= &lo_fops;
 	disk->private_data	= lo;
 	disk->queue		= lo->lo_queue;
 	sprintf(disk->disk_name, "loop%d", i);
 	add_disk(disk);
-	*l = lo;
-	return lo->lo_number;
+	mutex_unlock(&loop_ctl_mutex);
+	return i;
 
-out_free_queue:
-	blk_cleanup_queue(lo->lo_queue);
 out_cleanup_tags:
 	blk_mq_free_tag_set(&lo->tag_set);
 out_free_idr:
 	idr_remove(&loop_index_idr, i);
+out_unlock:
+	mutex_unlock(&loop_ctl_mutex);
 out_free_dev:
 	kfree(lo);
 out:
@@ -2178,116 +2177,92 @@ out:
 static void loop_remove(struct loop_device *lo)
 {
 	del_gendisk(lo->lo_disk);
-	blk_cleanup_queue(lo->lo_queue);
+	blk_cleanup_disk(lo->lo_disk);
 	blk_mq_free_tag_set(&lo->tag_set);
-	put_disk(lo->lo_disk);
 	mutex_destroy(&lo->lo_mutex);
 	kfree(lo);
-}
-
-static int find_free_cb(int id, void *ptr, void *data)
-{
-	struct loop_device *lo = ptr;
-	struct loop_device **l = data;
-
-	if (lo->lo_state == Lo_unbound) {
-		*l = lo;
-		return 1;
-	}
-	return 0;
-}
-
-static int loop_lookup(struct loop_device **l, int i)
-{
-	struct loop_device *lo;
-	int ret = -ENODEV;
-
-	if (i < 0) {
-		int err;
-
-		err = idr_for_each(&loop_index_idr, &find_free_cb, &lo);
-		if (err == 1) {
-			*l = lo;
-			ret = lo->lo_number;
-		}
-		goto out;
-	}
-
-	/* lookup and return a specific i */
-	lo = idr_find(&loop_index_idr, i);
-	if (lo) {
-		*l = lo;
-		ret = lo->lo_number;
-	}
-out:
-	return ret;
 }
 
 static void loop_probe(dev_t dev)
 {
 	int idx = MINOR(dev) >> part_shift;
-	struct loop_device *lo;
 
 	if (max_loop && idx >= max_loop)
 		return;
+	loop_add(idx);
+}
 
-	mutex_lock(&loop_ctl_mutex);
-	if (loop_lookup(&lo, idx) < 0)
-		loop_add(&lo, idx);
+static int loop_control_remove(int idx)
+{
+	struct loop_device *lo;
+	int ret;
+
+	if (idx < 0) {
+		pr_warn("deleting an unspecified loop device is not supported.\n");
+		return -EINVAL;
+	}
+		
+	ret = mutex_lock_killable(&loop_ctl_mutex);
+	if (ret)
+		return ret;
+
+	lo = idr_find(&loop_index_idr, idx);
+	if (!lo) {
+		ret = -ENODEV;
+		goto out_unlock_ctrl;
+	}
+
+	ret = mutex_lock_killable(&lo->lo_mutex);
+	if (ret)
+		goto out_unlock_ctrl;
+	if (lo->lo_state != Lo_unbound ||
+	    atomic_read(&lo->lo_refcnt) > 0) {
+		mutex_unlock(&lo->lo_mutex);
+		ret = -EBUSY;
+		goto out_unlock_ctrl;
+	}
+	lo->lo_state = Lo_deleting;
+	mutex_unlock(&lo->lo_mutex);
+
+	idr_remove(&loop_index_idr, lo->lo_number);
+	loop_remove(lo);
+out_unlock_ctrl:
 	mutex_unlock(&loop_ctl_mutex);
+	return ret;
+}
+
+static int loop_control_get_free(int idx)
+{
+	struct loop_device *lo;
+	int id, ret;
+
+	ret = mutex_lock_killable(&loop_ctl_mutex);
+	if (ret)
+		return ret;
+	idr_for_each_entry(&loop_index_idr, lo, id) {
+		if (lo->lo_state == Lo_unbound)
+			goto found;
+	}
+	mutex_unlock(&loop_ctl_mutex);
+	return loop_add(-1);
+found:
+	mutex_unlock(&loop_ctl_mutex);
+	return id;
 }
 
 static long loop_control_ioctl(struct file *file, unsigned int cmd,
 			       unsigned long parm)
 {
-	struct loop_device *lo;
-	int ret;
-
-	ret = mutex_lock_killable(&loop_ctl_mutex);
-	if (ret)
-		return ret;
-
-	ret = -ENOSYS;
 	switch (cmd) {
 	case LOOP_CTL_ADD:
-		ret = loop_lookup(&lo, parm);
-		if (ret >= 0) {
-			ret = -EEXIST;
-			break;
-		}
-		ret = loop_add(&lo, parm);
-		break;
+		return loop_add(parm);
 	case LOOP_CTL_REMOVE:
-		ret = loop_lookup(&lo, parm);
-		if (ret < 0)
-			break;
-		ret = mutex_lock_killable(&lo->lo_mutex);
-		if (ret)
-			break;
-		if (lo->lo_state != Lo_unbound) {
-			ret = -EBUSY;
-			mutex_unlock(&lo->lo_mutex);
-			break;
-		}
-		if (atomic_read(&lo->lo_refcnt) > 0) {
-			ret = -EBUSY;
-			mutex_unlock(&lo->lo_mutex);
-			break;
-		}
-		lo->lo_state = Lo_deleting;
-		mutex_unlock(&lo->lo_mutex);
-		idr_remove(&loop_index_idr, lo->lo_number);
-		loop_remove(lo);
-		break;
+		return loop_control_remove(parm);
 	case LOOP_CTL_GET_FREE:
-		ret = loop_lookup(&lo, -1);
-		if (ret >= 0)
-			break;
-		ret = loop_add(&lo, -1);
+		return loop_control_get_free(parm);
+	default:
+		return -ENOSYS;
 	}
-	mutex_unlock(&loop_ctl_mutex);
-
-	return ret;
 }
 
 static const struct file_operations loop_ctl_fops = {
@@ -2310,7 +2285,6 @@ MODULE_ALIAS("devname:loop-control");
 static int __init loop_init(void)
 {
 	int i, nr;
-	struct loop_device *lo;
 	int err;
 
 	part_shift = 0;
@@ -2362,10 +2336,8 @@ static int __init loop_init(void)
 	}
 
 	/* pre-create number of devices given by config or max_loop */
-	mutex_lock(&loop_ctl_mutex);
 	for (i = 0; i < nr; i++)
-		loop_add(&lo, i);
-	mutex_unlock(&loop_ctl_mutex);
+		loop_add(i);
 
 	printk(KERN_INFO "loop: module loaded\n");
 	return 0;
@@ -2376,26 +2348,20 @@ err_out:
 	return err;
 }
 
-static int loop_exit_cb(int id, void *ptr, void *data)
-{
-	struct loop_device *lo = ptr;
-
-	loop_remove(lo);
-	return 0;
-}
-
 static void __exit loop_exit(void)
 {
-	mutex_lock(&loop_ctl_mutex);
-
-	idr_for_each(&loop_index_idr, &loop_exit_cb, NULL);
-	idr_destroy(&loop_index_idr);
+	struct loop_device *lo;
+	int id;
 
 	unregister_blkdev(LOOP_MAJOR, "loop");
-
 	misc_deregister(&loop_misc);
 
+	mutex_lock(&loop_ctl_mutex);
+	idr_for_each_entry(&loop_index_idr, lo, id)
+		loop_remove(lo);
 	mutex_unlock(&loop_ctl_mutex);
+
+	idr_destroy(&loop_index_idr);
 }
 
 module_init(loop_init);
