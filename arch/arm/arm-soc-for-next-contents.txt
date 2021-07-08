@@ -1,0 +1,194 @@
+arm/soc
+	omap/cleanup [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.14/cleanup-signed
+	samsung/soc [sign: N ]
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-soc-5.14
+	sunxi/core [sign: N ]
+		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-core-for-5.14-1
+	imx/soc [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-soc-5.14
+	patch
+		ARM: debug: add UART early console support for MSTAR SoCs [sign: N ]
+		MAINTAINERS: ARM/MStar/Sigmastar SoCs: Add a link to the MStar tree [sign: N ]
+	tegra/soc [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.14-soc
+	<no branch> (093a474ce10d8ea3db3ef2922aca5a38f34bab1b) [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.14/fixes-not-urgent-signed
+	<no branch> (0da518dae87dd18e5f23e406e15575f393e4a97c) [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.kernel.org/pub/scm/linux/kernel/git/linusw/linux-nomadik tags/ixp4xx-arm-soc-v5.14
+
+arm/dt
+	patch
+		dt-bindings: add vendor prefix for welltech [sign: N ]
+		dt-bindings: arm: intel-ixp4xx: add welltech,epbx100 [sign: N ]
+		ARM: dts: add intel-ixp42x-welltech-epbx100 [sign: N ]
+	ixp4xx/dts [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/linusw/linux-nomadik tags/ixp4xx-dts-v5.14-1
+	gemini/dts [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/linusw/linux-nomadik tags/gemini-dts-v5.14-1
+	renesas/dt [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-dt-for-v5.14-tag1
+	omap/dt [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.14/dt-signed
+	amlogic/dt64 [sign: N ]
+		https://git.kernel.org/pub/scm/linux/kernel/git/amlogic/linux tags/amlogic-arm64-dt-for-v5.14
+	patch
+		ARM: dts: ixp4xx: Add crypto engine [sign: N ]
+	aspeed/dt [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/joel/bmc tags/aspeed-5.14-devicetree
+	samsung/dt [sign: N ]
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-dt-5.14
+	stm32/dt [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/atorgue/stm32 tags/stm32-dt-for-v5.14-1
+	brcm/dt [sign: N ]
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.14/devicetree
+	brcm/dt64 [sign: N ]
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.14/devicetree-arm64
+	ux500/dt [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/linusw/linux-nomadik tags/ux500-dts-v5.14
+	juno/dt [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/juno-fix-5.14
+	renesas/dt2 [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-dt-for-v5.14-tag2
+	renesas/dt-bindings [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-dt-bindings-for-v5.14-tag1
+	mediatek/dt64 [sign: N ]
+		https://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.13-next-dts64
+	at91/dt [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-dt-5.14
+	sunxi/dt [sign: N ]
+		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-dt-for-5.14-1
+	patch
+		ARM: dts: gemini: add crypto node [sign: N ]
+	keystone/dts [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/ssantosh/linux-keystone tags/keystone_dts_for_5.13
+	imx/dt-bindings [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-bindings-5.14
+	imx/dt [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-dt-5.14
+	imx/dt64 [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-dt64-5.14
+	patch
+		arm64: dts: exynos: enable PMIC wakeup from suspend on TM2 [sign: N ]
+	qcom/dt64 [sign: N ]
+		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-for-5.14
+	qcom/dt [sign: N ]
+		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-dts-for-5.14
+	toshiba/dt [sign: N ]
+		https://git.kernel.org/pub/scm/linux/kernel/git/iwamatsu/linux-visconti tags/visconti-arm-dt-for-v5.14
+	tegra/dt-bindings [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.14-dt-bindings
+	tegra/dt [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.14-arm-dt
+	tegra/dt64 [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.14-arm64-dt
+	mstar/dt [sign: G Olof Johansson <olof@lixom.net>]
+		git://github.com/linux-chenxing/linux tags/mstar-dt-5.14
+	<no branch> (303d2af21aedeaebe824411fbff912dfcdb48de5) [sign: G Olof Johansson <olof@lixom.net>]
+		https://git.kernel.org/pub/scm/linux/kernel/git/amlogic/linux tags/amlogic-arm64-dt-for-v5.14-v2
+	<no branch> (7db3cde5123e2acdd65ff7458628a9835c804b27) [sign: G Olof Johansson <olof@lixom.net>]
+		https://git.kernel.org/pub/scm/linux/kernel/git/amlogic/linux tags/amlogic-arm-dt-for-v5.14
+	<no branch> (da1eab9e15ef96c10e5cadd73ebe113e7947f8f7) [sign: G Olof Johansson <olof@lixom.net>]
+		git://github.com/hisilicon/linux-hisi tags/hisi-arm32-dt-for-5.14
+	<no branch> (e3211e414d26cda43f3093fd09e5d8d0a797648f) [sign: G Olof Johansson <olof@lixom.net>]
+		git://github.com/hisilicon/linux-hisi tags/hisi-arm64-dt-for-5.14
+	<no branch> (9b11fec7345f21995f4ea4bafb0e108b9a620238) [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.14/dt-cleanup-signed
+	<no branch> (d71abfcc6c050b72ba735b74f3e3848ce07ddd15) [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.kernel.org/pub/scm/linux/kernel/git/nmenon/linux tags/ti-k3-dt-for-v5.14
+	<no branch> (e3850467bf8c82de4a052619136839fe8054b774) [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.kernel.org/pub/scm/linux/kernel/git/gclement/mvebu tags/mvebu-dt64-5.14-1
+	<no branch> (623ba75a5d6b8e196a21f3ed36d26a5f6db459ce) [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.14-rockchip-dts32-1
+	<no branch> (eb607cd4957fb0ef97beb2a8293478be6a54240a) [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.14-rockchip-dts64-1
+	<no branch> (abe66bb7a2f6e308f2fb059d60b1076df84306ad) [sign: G Olof Johansson <olof@lixom.net>]
+		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-for-5.14-1
+	<no branch> (36e9534dfcb5b09b919d2831d6a19aa3856b95a1) [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.14-rockchip-dts32-2
+	<no branch> (01610a24cefa182b155a17e38cd0b84f8a3f0529) [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.14-rockchip-dts64-2
+
+arm/drivers
+	reset/for-v5.14 [sign: N ]
+		git://git.pengutronix.de/pza/linux tags/reset-for-v5.14
+	amlogic/drivers [sign: N ]
+		https://git.kernel.org/pub/scm/linux/kernel/git/amlogic/linux tags/amlogic-drivers-for-v5.14
+	brcm/drivers [sign: N ]
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.14/drivers
+	scmi/updates [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/scmi-updates-5.14
+	renesas/drivers [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-drivers-for-v5.14-tag1
+	mediatek/soc [sign: N ]
+		https://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.13-next-soc
+	memory/drivers [sign: N ]
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux-mem-ctrl tags/memory-controller-drv-5.14
+	memory/pl353 [sign: N ]
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux-mem-ctrl tags/memory-controller-drv-pl353-5.14
+	keystone/drivers [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/ssantosh/linux-keystone tags/drivers_soc_for_5.13
+	imx/drivers [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-drivers-5.14
+	qcom/drivers [sign: N ]
+		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-drivers-for-5.14
+	tegra/firmware [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.14-firmware
+	firmware/ffa [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/arm-ffa-5.14
+	tegra/memory [sign: G Olof Johansson <olof@lixom.net>]
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux-mem-ctrl tags/memory-controller-drv-tegra-5.14-2
+	<no branch> (48a74b1147f7db4623eaed591cc01eb740b871c0) [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.pengutronix.de/pza/linux tags/reset-for-v5.14-2
+	<no branch> (fae20160992269431507708fb74c1fd9f3c309c1) [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.kernel.org/pub/scm/linux/kernel/git/gclement/mvebu tags/mvebu-fixes-5.13-1
+	<no branch> (90ae47215de3fec862aeb1a0f0e28bb505ab1351) [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.kernel.org/pub/scm/linux/kernel/git/gclement/mvebu tags/mvebu-drivers-5.14-1
+	<no branch> (fcafd31b5f535573dd045f6151ab93a806e2b05b) [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.14-rockchip-drivers1
+
+arm/defconfig
+	patch
+		ARM: ixp4xx_defconfig: add CONFIG_SERIAL_OF_PLATFORM [sign: N ]
+		ARM: ixp4xx_defconfig: add MTD_PHYSMAP [sign: N ]
+	renesas/defconfig [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-defconfig-for-v5.14-tag1
+	omap/defconfig [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.14/defconfig-signed
+	patch
+		ARM: config: aspeed: Add DEBUG_FS and EXT4 [sign: N ]
+	renesas/defconfig2 [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-defconfig-for-v5.14-tag2
+	mediatek/defconfig [sign: N ]
+		https://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.13-next-defconfig
+	at91/defconfig [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-defconfig-5.14
+	imx/defconfig [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-defconfig-5.14
+	samsung/defconfig [sign: N ]
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-defconfig-5.14
+	qcom/defconfig [sign: N ]
+		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-defconfig-for-5.14
+	tegra/defconfig [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.14-arm-defconfig
+	<no branch> (d1588b22dcbb662d94740489713b8fcfe3c13023) [sign: G Olof Johansson <olof@lixom.net>]
+		https://git.kernel.org/pub/scm/linux/kernel/git/iwamatsu/linux-visconti tags/visconti-arm-defconfig-for-v5.14
+	<no branch> (8ae030c34dce4f5764e945b325e8dc4d2adef044) [sign: G Olof Johansson <olof@lixom.net>]
+		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-defconfig-for-5.14-1
+
+arm/late
+
+arm/fixes
+	<no branch> (bd5431b2f9b30a70f6ed964dd5ee9a6d1c397c06) [sign: N ]
+		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-fixes-for-5.13-1
+	<no branch> (8efe01b4386ab38a36b99cfdc1dc02c38a8898c3) [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.13-rockchip-dtsfixes1
+	patch
+		ARM: dts: ux500: Fix LED probing [sign: N ]
+	<no branch> (0fa1baeedf06765ec6b441692ba2a2e83b7d17dc) [sign: N ]
+		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-dts-fixes-for-5.13
+	<no branch> (78b4b165280d3d70e7a217599f0c06a4c0bb11f9) [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.13/fixes-rc6-signed
+	<no branch> (9600948a2e919cabc18f196373e9f60c32bdb44e) [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.linaro.org:/people/jens.wiklander/linux-tee tags/tee-reviewer-for-v5.13
+
