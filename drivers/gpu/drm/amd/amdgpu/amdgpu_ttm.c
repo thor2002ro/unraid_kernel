@@ -677,8 +677,8 @@ int amdgpu_ttm_tt_get_user_pages(struct amdgpu_bo *bo, struct page **pages)
 		return -ESRCH;
 
 	mmap_read_lock(mm);
-	vma = vma_lookup(mm, start);
-	if (unlikely(!vma)) {
+	vma = find_vma(mm, start);
+	if (unlikely(!vma || start < vma->vm_start)) {
 		r = -EFAULT;
 		goto out_unlock;
 	}

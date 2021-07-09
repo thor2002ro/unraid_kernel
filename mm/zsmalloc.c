@@ -328,7 +328,7 @@ static int create_cache(struct zs_pool *pool)
 		return 1;
 
 	pool->zspage_cachep = kmem_cache_create("zspage", sizeof(struct zspage),
-					0, 0, NULL);
+					0, SLAB_RECLAIM_ACCOUNT, NULL);
 	if (!pool->zspage_cachep) {
 		kmem_cache_destroy(pool->handle_cachep);
 		pool->handle_cachep = NULL;
@@ -1828,13 +1828,12 @@ static void putback_zspage_deferred(struct zs_pool *pool,
 static inline void zs_pool_dec_isolated(struct zs_pool *pool)
 {
 	VM_BUG_ON(atomic_long_read(&pool->isolated_pages) <= 0);
-	atomic_long_dec(&pool->isolated_pages);
 	/*
 	 * There's no possibility of racing, since wait_for_isolated_drain()
 	 * checks the isolated count under &class->lock after enqueuing
 	 * on migration_wait.
 	 */
-	if (atomic_long_read(&pool->isolated_pages) == 0 && pool->destroying)
+	if (atomic_long_dec_and_test(&pool->isolated_pages) && pool->destroying)
 		wake_up_all(&pool->migration_wait);
 }
 
