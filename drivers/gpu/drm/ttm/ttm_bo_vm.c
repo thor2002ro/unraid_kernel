@@ -542,17 +542,29 @@ int ttm_bo_vm_access(struct vm_area_struct *vma, unsigned long addr,
 }
 EXPORT_SYMBOL(ttm_bo_vm_access);
 
+int ttm_bo_vm_mprotect(struct vm_area_struct *vma, unsigned long start,
+		       unsigned long end, unsigned long newflags)
+{
+	/* Enforce no COW since would have really strange behavior with it. */
+	if (is_cow_mapping(newflags) && (newflags & VM_WRITE))
+		return -EINVAL;
+
+	return 0;
+}
+EXPORT_SYMBOL(ttm_bo_vm_mprotect);
+
 static const struct vm_operations_struct ttm_bo_vm_ops = {
 	.fault = ttm_bo_vm_fault,
 	.open = ttm_bo_vm_open,
 	.close = ttm_bo_vm_close,
 	.access = ttm_bo_vm_access,
+	.mprotect = ttm_bo_vm_mprotect,
 };
 
 int ttm_bo_mmap_obj(struct vm_area_struct *vma, struct ttm_buffer_object *bo)
 {
 	/* Enforce no COW since would have really strange behavior with it. */
-	if (is_cow_mapping(vma->vm_flags))
+	if (is_cow_mapping(vma->vm_flags) && (vma->vm_flags & VM_WRITE))
 		return -EINVAL;
 
 	ttm_bo_get(bo);

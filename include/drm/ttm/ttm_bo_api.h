@@ -605,6 +605,10 @@ void ttm_bo_vm_close(struct vm_area_struct *vma);
 
 int ttm_bo_vm_access(struct vm_area_struct *vma, unsigned long addr,
 		     void *buf, int len, int write);
+
+int ttm_bo_vm_mprotect(struct vm_area_struct *vma, unsigned long start,
+		       unsigned long end, unsigned long newflags);
+
 bool ttm_bo_delayed_delete(struct ttm_device *bdev, bool remove_all);
 
 vm_fault_t ttm_bo_vm_dummy_page(struct vm_fault *vmf, pgprot_t prot);
