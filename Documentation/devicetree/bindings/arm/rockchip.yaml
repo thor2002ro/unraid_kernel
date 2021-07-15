@@ -115,11 +115,22 @@ properties:
           - const: firefly,roc-rk3328-cc
           - const: rockchip,rk3328
 
+      - description: Firefly ROC-RK3328-PC
+        items:
+          - const: firefly,roc-rk3328-pc
+          - const: rockchip,rk3328
+
       - description: Firefly ROC-RK3399-PC
         items:
           - enum:
               - firefly,roc-rk3399-pc
               - firefly,roc-rk3399-pc-mezzanine
+          - const: rockchip,rk3399
+
+      - description: Firefly ROC-RK3399-PC-PLUS
+        items:
+          - enum:
+              - firefly,roc-rk3399-pc-plus
           - const: rockchip,rk3399
 
       - description: FriendlyElec NanoPi R2S
