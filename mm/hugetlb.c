@@ -2162,7 +2162,7 @@ struct page *alloc_buddy_huge_page_with_mpol(struct hstate *h,
 	if (mpol->mode == MPOL_PREFERRED_MANY) {
 		gfp_t gfp = (gfp_mask | __GFP_NOWARN) & ~__GFP_DIRECT_RECLAIM;
 
-		page = alloc_surplus_huge_page(h, gfp, nid, nodemask);
+		page = alloc_surplus_huge_page(h, gfp, nid, nodemask, false);
 		if (page) {
 			mpol_cond_put(mpol);
 			return page;
