@@ -1404,6 +1404,7 @@ static int __init setup_slub_debug(char *str)
 	char *slab_list;
 	bool global_slub_debug_changed = false;
 	bool slab_list_specified = false;
+	bool slab_list_debug_disable = true;
 
 	slub_debug = DEBUG_DEFAULT_FLAGS;
 	if (*str++ != '=' || !*str)
@@ -1411,7 +1412,6 @@ static int __init setup_slub_debug(char *str)
 		 * No options specified. Switch on full debugging.
 		 */
 		goto out;
-
 	saved_str = str;
 	while (str) {
 		str = parse_slub_debug_flags(str, &flags, &slab_list, true);
@@ -1420,6 +1420,8 @@ static int __init setup_slub_debug(char *str)
 			slub_debug = flags;
 			global_slub_debug_changed = true;
 		} else {
+			if (flags || !IS_ENABLED(CONFIG_SLUB_DEBUG_ON))
+				slab_list_debug_disable = false;
 			slab_list_specified = true;
 		}
 	}
@@ -1431,7 +1433,7 @@ static int __init setup_slub_debug(char *str)
 	 * long as there is no option specifying flags without a slab list.
 	 */
 	if (slab_list_specified) {
-		if (!global_slub_debug_changed)
+		if (!global_slub_debug_changed && !slab_list_debug_disable)
 			slub_debug = 0;
 		slub_debug_string = saved_str;
 	}
