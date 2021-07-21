@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 
 #include <linux/device.h>
+#include <linux/dynamic_debug.h>
 #include <linux/err.h>
 #include <linux/errno.h>
 #include <linux/fs.h>
@@ -20,6 +21,15 @@
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <asm/unaligned.h>
+
+#if !defined(CONFIG_DYNAMIC_DEBUG_CORE)
+#define DEFINE_DYNAMIC_DEBUG_METADATA(name, fmt)
+#if defined(DEBUG)
+#define DYNAMIC_DEBUG_BRANCH(descriptor) true
+#else /* DEBUG */
+#define DYNAMIC_DEBUG_BRANCH(descriptor) false
+#endif /* DEBUG */
+#endif /* CONFIG_DYNAMIC_DEBUG_CORE */
 
 #define OCC_SRAM_BYTES		4096
 #define OCC_CMD_DATA_BYTES	4090
@@ -359,6 +369,20 @@ static int occ_putsram(struct occ *occ, const void *data, ssize_t len,
 	byte_buf[len - 2] = checksum >> 8;
 	byte_buf[len - 1] = checksum & 0xff;
 
+	{
+		DEFINE_DYNAMIC_DEBUG_METADATA(ddm_occ_cmd, "OCC command");
+
+		if (DYNAMIC_DEBUG_BRANCH(ddm_occ_cmd)) {
+			char prefix[64];
+
+			snprintf(prefix, sizeof(prefix), "%s %s: cmd ",
+				 dev_driver_string(occ->dev),
+				 dev_name(occ->dev));
+			print_hex_dump(KERN_DEBUG, prefix, DUMP_PREFIX_OFFSET,
+				       16, 4, byte_buf, len, false);
+		}
+	}
+
 	rc = sbefifo_submit(occ->sbefifo, buf, cmd_len, buf, &resp_len);
 	if (rc)
 		goto free;
@@ -556,6 +580,27 @@ int fsi_occ_submit(struct device *dev, const void *request, size_t req_len,
 	}
 
 	*resp_len = resp_data_length + 7;
+
+	{
+		DEFINE_DYNAMIC_DEBUG_METADATA(ddm_occ_rsp,
+					      "OCC response");
+		DEFINE_DYNAMIC_DEBUG_METADATA(ddm_occ_full_rsp,
+					      "OCC full response");
+
+		if (DYNAMIC_DEBUG_BRANCH(ddm_occ_full_rsp) ||
+		    DYNAMIC_DEBUG_BRANCH(ddm_occ_rsp)) {
+			char prefix[64];
+			size_t l = DYNAMIC_DEBUG_BRANCH(ddm_occ_full_rsp) ?
+				*resp_len : 16;
+
+			snprintf(prefix, sizeof(prefix), "%s %s: rsp ",
+				 dev_driver_string(occ->dev),
+				 dev_name(occ->dev));
+			print_hex_dump(KERN_DEBUG, prefix, DUMP_PREFIX_OFFSET,
+				       16, 4, resp, l, false);
+		}
+	}
+
 	rc = occ_verify_checksum(occ, resp, resp_data_length);
 
  done:
