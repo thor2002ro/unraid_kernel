@@ -1177,7 +1177,9 @@ static struct page *dequeue_huge_page_vma(struct hstate *h,
 #endif
 	page = dequeue_huge_page_nodemask(h, gfp_mask, nid, nodemask);
 
+#ifdef CONFIG_NUMA
 check_reserve:
+#endif
 	if (page && !avoid_reserve && vma_has_reserves(vma, chg)) {
 		SetHPageRestoreReserve(page);
 		h->resv_huge_pages--;
