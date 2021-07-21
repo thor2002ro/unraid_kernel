@@ -72,7 +72,7 @@ out:
 	return 0;
 }
 
-static int seq_fdinfo_open(struct inode *inode, struct file *file)
+static int proc_fdinfo_access_allowed(struct inode *inode)
 {
 	bool allowed = false;
 	struct task_struct *task = get_proc_task(inode);
@@ -86,13 +86,44 @@ static int seq_fdinfo_open(struct inode *inode, struct file *file)
 	if (!allowed)
 		return -EACCES;
 
+	return 0;
+}
+
+static int seq_fdinfo_open(struct inode *inode, struct file *file)
+{
+	int ret = proc_fdinfo_access_allowed(inode);
+
+	if (ret)
+		return ret;
+
 	return single_open(file, seq_show, inode);
+}
+
+static ssize_t seq_fdinfo_read(struct file *file, char __user *buf, size_t size,
+		loff_t *ppos)
+{
+	int ret = proc_fdinfo_access_allowed(file_inode(file));
+
+	if (ret)
+		return ret;
+
+	return seq_read(file, buf, size, ppos);
+}
+
+static loff_t seq_fdinfo_lseek(struct file *file, loff_t offset, int whence)
+{
+	int ret = proc_fdinfo_access_allowed(file_inode(file));
+
+	if (ret)
+		return ret;
+
+	return seq_lseek(file, offset, whence);
 }
 
 static const struct file_operations proc_fdinfo_file_operations = {
 	.open		= seq_fdinfo_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
+	.read		= seq_fdinfo_read,
+	.llseek		= seq_fdinfo_lseek,
 	.release	= single_release,
 };
 
@@ -344,8 +375,33 @@ proc_lookupfdinfo(struct inode *dir, struct dentry *dentry, unsigned int flags)
 
 static int proc_readfdinfo(struct file *file, struct dir_context *ctx)
 {
+	int ret = proc_fdinfo_access_allowed(file_inode(file));
+
+	if (ret)
+		return ret;
+
 	return proc_readfd_common(file, ctx,
 				  proc_fdinfo_instantiate);
+}
+
+static loff_t proc_llseek_fdinfo(struct file *file, loff_t offset, int whence)
+{
+	int ret = proc_fdinfo_access_allowed(file_inode(file));
+
+	if (ret)
+		return ret;
+
+	return generic_file_llseek(file, offset, whence);
+}
+
+static int proc_open_fdinfo(struct inode *inode, struct file *file)
+{
+	int ret = proc_fdinfo_access_allowed(inode);
+
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 const struct inode_operations proc_fdinfo_inode_operations = {
@@ -354,7 +410,8 @@ const struct inode_operations proc_fdinfo_inode_operations = {
 };
 
 const struct file_operations proc_fdinfo_operations = {
+	.open		= proc_open_fdinfo,
 	.read		= generic_read_dir,
 	.iterate_shared	= proc_readfdinfo,
-	.llseek		= generic_file_llseek,
+	.llseek		= proc_llseek_fdinfo,
 };
