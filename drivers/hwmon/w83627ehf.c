@@ -1694,7 +1694,7 @@ static const struct hwmon_chip_info w83627ehf_chip_info = {
 	.info = w83627ehf_info,
 };
 
-static int w83627ehf_probe(struct platform_device *pdev)
+static int __init w83627ehf_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct w83627ehf_sio_data *sio_data = dev_get_platdata(dev);
@@ -1705,20 +1705,12 @@ static int w83627ehf_probe(struct platform_device *pdev)
 	struct device *hwmon_dev;
 
 	res = platform_get_resource(pdev, IORESOURCE_IO, 0);
-	if (!request_region(res->start, IOREGION_LENGTH, DRVNAME)) {
-		err = -EBUSY;
-		dev_err(dev, "Failed to request region 0x%lx-0x%lx\n",
-			(unsigned long)res->start,
-			(unsigned long)res->start + IOREGION_LENGTH - 1);
-		goto exit;
-	}
+	if (!devm_request_region(dev, res->start, IOREGION_LENGTH, DRVNAME))
+		return -EBUSY;
 
-	data = devm_kzalloc(&pdev->dev, sizeof(struct w83627ehf_data),
-			    GFP_KERNEL);
-	if (!data) {
-		err = -ENOMEM;
-		goto exit_release;
-	}
+	data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
+	if (!data)
+		return -ENOMEM;
 
 	data->addr = res->start;
 	mutex_init(&data->lock);
@@ -1882,7 +1874,7 @@ static int w83627ehf_probe(struct platform_device *pdev)
 
 	err = superio_enter(sio_data->sioreg);
 	if (err)
-		goto exit_release;
+		return err;
 
 	/* Read VID value */
 	if (sio_data->kind == w83667hg || sio_data->kind == w83667hg_b) {
@@ -1951,26 +1943,7 @@ static int w83627ehf_probe(struct platform_device *pdev)
 							 data,
 							 &w83627ehf_chip_info,
 							 w83627ehf_groups);
-	if (IS_ERR(hwmon_dev)) {
-		err = PTR_ERR(hwmon_dev);
-		goto exit_release;
-	}
-
-	return 0;
-
-exit_release:
-	release_region(res->start, IOREGION_LENGTH);
-exit:
-	return err;
-}
-
-static int w83627ehf_remove(struct platform_device *pdev)
-{
-	struct w83627ehf_data *data = platform_get_drvdata(pdev);
-
-	release_region(data->addr, IOREGION_LENGTH);
-
-	return 0;
+	return PTR_ERR_OR_ZERO(hwmon_dev);
 }
 
 #ifdef CONFIG_PM
@@ -2057,8 +2030,6 @@ static struct platform_driver w83627ehf_driver = {
 		.name	= DRVNAME,
 		.pm	= W83627EHF_DEV_PM_OPS,
 	},
-	.probe		= w83627ehf_probe,
-	.remove		= w83627ehf_remove,
 };
 
 /* w83627ehf_find() looks for a '627 in the Super-I/O config space */
@@ -2150,8 +2121,7 @@ static int __init w83627ehf_find(int sioaddr, unsigned short *addr,
 /*
  * when Super-I/O functions move to a separate file, the Super-I/O
  * bus will manage the lifetime of the device and this module will only keep
- * track of the w83627ehf driver. But since we platform_device_alloc(), we
- * must keep track of the device
+ * track of the w83627ehf driver.
  */
 static struct platform_device *pdev;
 
@@ -2159,7 +2129,10 @@ static int __init sensors_w83627ehf_init(void)
 {
 	int err;
 	unsigned short address;
-	struct resource res;
+	struct resource res = {
+		.name	= DRVNAME,
+		.flags	= IORESOURCE_IO,
+	};
 	struct w83627ehf_sio_data sio_data;
 
 	/*
@@ -2173,55 +2146,17 @@ static int __init sensors_w83627ehf_init(void)
 	    w83627ehf_find(0x4e, &address, &sio_data))
 		return -ENODEV;
 
-	err = platform_driver_register(&w83627ehf_driver);
-	if (err)
-		goto exit;
-
-	pdev = platform_device_alloc(DRVNAME, address);
-	if (!pdev) {
-		err = -ENOMEM;
-		pr_err("Device allocation failed\n");
-		goto exit_unregister;
-	}
-
-	err = platform_device_add_data(pdev, &sio_data,
-				       sizeof(struct w83627ehf_sio_data));
-	if (err) {
-		pr_err("Platform data allocation failed\n");
-		goto exit_device_put;
-	}
-
-	memset(&res, 0, sizeof(res));
-	res.name = DRVNAME;
 	res.start = address + IOREGION_OFFSET;
 	res.end = address + IOREGION_OFFSET + IOREGION_LENGTH - 1;
-	res.flags = IORESOURCE_IO;
 
 	err = acpi_check_resource_conflict(&res);
 	if (err)
-		goto exit_device_put;
+		return err;
 
-	err = platform_device_add_resources(pdev, &res, 1);
-	if (err) {
-		pr_err("Device resource addition failed (%d)\n", err);
-		goto exit_device_put;
-	}
+	pdev = platform_create_bundle(&w83627ehf_driver, w83627ehf_probe, &res, 1, &sio_data,
+				      sizeof(struct w83627ehf_sio_data));
 
-	/* platform_device_add calls probe() */
-	err = platform_device_add(pdev);
-	if (err) {
-		pr_err("Device addition failed (%d)\n", err);
-		goto exit_device_put;
-	}
-
-	return 0;
-
-exit_device_put:
-	platform_device_put(pdev);
-exit_unregister:
-	platform_driver_unregister(&w83627ehf_driver);
-exit:
-	return err;
+	return PTR_ERR_OR_ZERO(pdev);
 }
 
 static void __exit sensors_w83627ehf_exit(void)
