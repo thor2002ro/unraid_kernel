@@ -193,7 +193,7 @@ int mhi_map_single_no_bb(struct mhi_controller *mhi_cntrl,
 int mhi_map_single_use_bb(struct mhi_controller *mhi_cntrl,
 			  struct mhi_buf_info *buf_info)
 {
-	void *buf = mhi_alloc_coherent(mhi_cntrl, buf_info->len,
+	void *buf = dma_alloc_coherent(mhi_cntrl->cntrl_dev, buf_info->len,
 				       &buf_info->p_addr, GFP_ATOMIC);
 
 	if (!buf)
@@ -220,8 +220,8 @@ void mhi_unmap_single_use_bb(struct mhi_controller *mhi_cntrl,
 	if (buf_info->dir == DMA_FROM_DEVICE)
 		memcpy(buf_info->v_addr, buf_info->bb_addr, buf_info->len);
 
-	mhi_free_coherent(mhi_cntrl, buf_info->len, buf_info->bb_addr,
-			  buf_info->p_addr);
+	dma_free_coherent(mhi_cntrl->cntrl_dev, buf_info->len,
+			  buf_info->bb_addr, buf_info->p_addr);
 }
 
 static int get_nr_avail_ring_elements(struct mhi_controller *mhi_cntrl,
@@ -1430,7 +1430,7 @@ exit_unprepare_channel:
 }
 
 int mhi_prepare_channel(struct mhi_controller *mhi_cntrl,
-			struct mhi_chan *mhi_chan)
+			struct mhi_chan *mhi_chan, unsigned int flags)
 {
 	int ret = 0;
 	struct device *dev = &mhi_chan->mhi_dev->dev;
@@ -1454,6 +1454,9 @@ int mhi_prepare_channel(struct mhi_controller *mhi_cntrl,
 				       MHI_CH_STATE_TYPE_START);
 	if (ret)
 		goto error_pm_state;
+
+	if (mhi_chan->dir == DMA_FROM_DEVICE)
+		mhi_chan->pre_alloc = !!(flags & MHI_CH_INBOUND_ALLOC_BUFS);
 
 	/* Pre-allocate buffer for xfer ring */
 	if (mhi_chan->pre_alloc) {
@@ -1610,7 +1613,7 @@ void mhi_reset_chan(struct mhi_controller *mhi_cntrl, struct mhi_chan *mhi_chan)
 }
 
 /* Move channel to start state */
-int mhi_prepare_for_transfer(struct mhi_device *mhi_dev)
+int mhi_prepare_for_transfer(struct mhi_device *mhi_dev, unsigned int flags)
 {
 	int ret, dir;
 	struct mhi_controller *mhi_cntrl = mhi_dev->mhi_cntrl;
@@ -1621,7 +1624,7 @@ int mhi_prepare_for_transfer(struct mhi_device *mhi_dev)
 		if (!mhi_chan)
 			continue;
 
-		ret = mhi_prepare_channel(mhi_cntrl, mhi_chan);
+		ret = mhi_prepare_channel(mhi_cntrl, mhi_chan, flags);
 		if (ret)
 			goto error_open_chan;
 	}
