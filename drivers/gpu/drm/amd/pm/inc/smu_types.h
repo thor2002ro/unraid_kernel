@@ -183,7 +183,7 @@
 	__SMU_DUMMY_MAP(SET_DRIVER_DUMMY_TABLE_DRAM_ADDR_LOW), \
 	__SMU_DUMMY_MAP(GET_UMC_FW_WA), \
 	__SMU_DUMMY_MAP(Mode1Reset), \
-	__SMU_DUMMY_MAP(RlcPowerNotify),                 \
+	__SMU_DUMMY_MAP(RlcPowerDownNotify),             \
 	__SMU_DUMMY_MAP(SetHardMinIspiclkByFreq),        \
 	__SMU_DUMMY_MAP(SetHardMinIspxclkByFreq),        \
 	__SMU_DUMMY_MAP(SetSoftMinSocclkByFreq),         \
@@ -225,7 +225,8 @@
 	__SMU_DUMMY_MAP(DisableDeterminism),		\
 	__SMU_DUMMY_MAP(SetUclkDpmMode),		\
 	__SMU_DUMMY_MAP(LightSBR),			\
-	__SMU_DUMMY_MAP(GfxDriverResetRecovery),
+	__SMU_DUMMY_MAP(GfxDriverResetRecovery),	\
+	__SMU_DUMMY_MAP(BoardPowerCalibration),
 
 #undef __SMU_DUMMY_MAP
 #define __SMU_DUMMY_MAP(type)	SMU_MSG_##type

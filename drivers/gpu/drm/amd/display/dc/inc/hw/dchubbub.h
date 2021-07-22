@@ -102,6 +102,15 @@ struct hubbub_addr_config {
 	} default_addrs;
 };
 
+struct dcn_hubbub_state {
+	uint32_t vm_fault_addr_msb;
+	uint32_t vm_fault_addr_lsb;
+	uint32_t vm_error_status;
+	uint32_t vm_error_vmid;
+	uint32_t vm_error_pipe;
+	uint32_t vm_error_mode;
+};
+
 struct hubbub_funcs {
 	void (*update_dchub)(
 			struct hubbub *hubbub,
@@ -149,18 +158,23 @@ struct hubbub_funcs {
 
 	void (*force_wm_propagate_to_pipes)(struct hubbub *hubbub);
 
+	void (*hubbub_read_state)(struct hubbub *hubbub, struct dcn_hubbub_state *hubbub_state);
+
 	void (*force_pstate_change_control)(struct hubbub *hubbub, bool force, bool allow);
 
 	void (*init_watermarks)(struct hubbub *hubbub);
 	void (*program_det_size)(struct hubbub *hubbub, int hubp_inst, unsigned det_buffer_size_in_kbyte);
 	void (*program_compbuf_size)(struct hubbub *hubbub, unsigned compbuf_size_kb, bool safe_to_increase);
 	void (*init_crb)(struct hubbub *hubbub);
+	void (*apply_invalidation_req_wa)(struct hubbub *hubbub,
+			struct dcn_hubbub_phys_addr_config *pa_config);
 };
 
 struct hubbub {
 	const struct hubbub_funcs *funcs;
 	struct dc_context *ctx;
 	bool riommu_active;
+	struct dcn_hubbub_phys_addr_config vmid_cache;
 };
 
 #endif
