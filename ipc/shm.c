@@ -173,6 +173,14 @@ static inline struct shmid_kernel *shm_obtain_object_check(struct ipc_namespace 
 	return container_of(ipcp, struct shmid_kernel, shm_perm);
 }
 
+static inline bool is_shm_in_ns(struct ipc_namespace *ns, struct shmid_kernel *shp)
+{
+	int idx = ipcid_to_idx(shp->shm_perm.id);
+	struct shmid_kernel *tshp = shm_obtain_object(ns, idx);
+
+	return !IS_ERR(tshp) && tshp == shp;
+}
+
 /*
  * shm_lock_(check_) routines are called in the paths where the rwsem
  * is not necessarily held.
@@ -415,7 +423,7 @@ void exit_shm(struct task_struct *task)
 	list_for_each_entry_safe(shp, n, &task->sysvshm.shm_clist, shm_clist) {
 		shp->shm_creator = NULL;
 
-		if (shm_may_destroy(ns, shp)) {
+		if (is_shm_in_ns(ns, shp) && shm_may_destroy(ns, shp)) {
 			shm_lock_by_ptr(shp);
 			shm_destroy(ns, shp);
 		}
