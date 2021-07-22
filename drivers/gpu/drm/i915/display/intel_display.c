@@ -975,7 +975,7 @@ void intel_enable_pipe(const struct intel_crtc_state *new_crtc_state)
 		/* FIXME: assert CPU port conditions for SNB+ */
 	}
 
-	/* Wa_22012358565:adlp */
+	/* Wa_22012358565:adl-p */
 	if (DISPLAY_VER(dev_priv) == 13)
 		intel_de_rmw(dev_priv, PIPE_ARB_CTL(pipe),
 			     0, PIPE_ARB_USE_PROG_SLOTS);
@@ -9002,6 +9002,10 @@ verify_crtc_state(struct intel_crtc *crtc,
 
 	if (!new_crtc_state->hw.active)
 		return;
+
+	if (new_crtc_state->bigjoiner_slave)
+		/* No PLLs set for slave */
+		pipe_config->shared_dpll = NULL;
 
 	intel_pipe_config_sanity_check(dev_priv, pipe_config);
 

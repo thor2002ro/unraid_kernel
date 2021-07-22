@@ -383,7 +383,7 @@ static u32 i9xx_cursor_ctl(const struct intel_crtc_state *crtc_state,
 	if (plane_state->hw.rotation & DRM_MODE_ROTATE_180)
 		cntl |= MCURSOR_ROTATE_180;
 
-	/* Wa_22012358565:adlp */
+	/* Wa_22012358565:adl-p */
 	if (DISPLAY_VER(dev_priv) == 13)
 		cntl |= MCURSOR_ARB_SLOTS(1);
 
@@ -801,7 +801,7 @@ intel_cursor_plane_create(struct drm_i915_private *dev_priv,
 	if (DISPLAY_VER(dev_priv) >= 12)
 		drm_plane_enable_fb_damage_clips(&cursor->base);
 
-	drm_plane_helper_add(&cursor->base, &intel_plane_helper_funcs);
+	intel_plane_helper_add(cursor);
 
 	return cursor;
 

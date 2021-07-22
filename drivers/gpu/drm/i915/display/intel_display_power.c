@@ -5799,8 +5799,9 @@ static void tgl_bw_buddy_init(struct drm_i915_private *dev_priv)
 	int config, i;
 
 	if (IS_ALDERLAKE_S(dev_priv) ||
-	    IS_DG1_REVID(dev_priv, DG1_REVID_A0, DG1_REVID_A0) ||
-	    IS_TGL_DISPLAY_STEP(dev_priv, STEP_A0, STEP_B0))
+	    IS_DG1_DISPLAY_STEP(dev_priv, STEP_A0, STEP_B0) ||
+	    IS_RKL_DISPLAY_STEP(dev_priv, STEP_A0, STEP_B0) ||
+	    IS_TGL_DISPLAY_STEP(dev_priv, STEP_A0, STEP_C0))
 		/* Wa_1409767108:tgl,dg1,adl-s */
 		table = wa_1409767108_buddy_page_masks;
 	else
@@ -5822,10 +5823,11 @@ static void tgl_bw_buddy_init(struct drm_i915_private *dev_priv)
 			intel_de_write(dev_priv, BW_BUDDY_PAGE_MASK(i),
 				       table[config].page_mask);
 
-			/* Wa_22010178259:tgl,rkl */
-			intel_de_rmw(dev_priv, BW_BUDDY_CTL(i),
-				     BW_BUDDY_TLB_REQ_TIMER_MASK,
-				     BW_BUDDY_TLB_REQ_TIMER(0x8));
+			/* Wa_22010178259:tgl,dg1,rkl,adl-s */
+			if (DISPLAY_VER(dev_priv) == 12)
+				intel_de_rmw(dev_priv, BW_BUDDY_CTL(i),
+					     BW_BUDDY_TLB_REQ_TIMER_MASK,
+					     BW_BUDDY_TLB_REQ_TIMER(0x8));
 		}
 	}
 }
@@ -5882,8 +5884,8 @@ static void icl_display_core_init(struct drm_i915_private *dev_priv,
 	if (resume && intel_dmc_has_payload(dev_priv))
 		intel_dmc_load_program(dev_priv);
 
-	/* Wa_14011508470 */
-	if (DISPLAY_VER(dev_priv) == 12) {
+	/* Wa_14011508470:tgl,dg1,rkl,adl-s,adl-p */
+	if (DISPLAY_VER(dev_priv) >= 12) {
 		val = DCPR_CLEAR_MEMSTAT_DIS | DCPR_SEND_RESP_IMM |
 		      DCPR_MASK_LPMODE | DCPR_MASK_MAXLATENCY_MEMUP_CLR;
 		intel_uncore_rmw(&dev_priv->uncore, GEN11_CHICKEN_DCPR_2, 0, val);
