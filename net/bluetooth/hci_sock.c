@@ -760,10 +760,18 @@ void hci_sock_dev_event(struct hci_dev *hdev, int event)
 		struct sock *sk;
 
 		/* Detach sockets from device */
+restart:
 		read_lock(&hci_sk_list.lock);
 		sk_for_each(sk, &hci_sk_list.head) {
+			/* This sock_hold(sk) is safe, for bt_sock_unlink(sk)
+			 * is not called yet.
+			 */
+			sock_hold(sk);
+			read_unlock(&hci_sk_list.lock);
 			lock_sock(sk);
-			if (hci_pi(sk)->hdev == hdev) {
+			write_lock(&hci_sk_list.lock);
+			/* Check that bt_sock_unlink(sk) is not called yet. */
+			if (sk_hashed(sk) && hci_pi(sk)->hdev == hdev) {
 				hci_pi(sk)->hdev = NULL;
 				sk->sk_err = EPIPE;
 				sk->sk_state = BT_OPEN;
@@ -771,7 +779,27 @@ void hci_sock_dev_event(struct hci_dev *hdev, int event)
 
 				hci_dev_put(hdev);
 			}
+			write_unlock(&hci_sk_list.lock);
 			release_sock(sk);
+			read_lock(&hci_sk_list.lock);
+			/* If bt_sock_unlink(sk) is not called yet, we can
+			 * continue iteration. We can use __sock_put(sk) here
+			 * because hci_sock_release() will call sock_put(sk)
+			 * after bt_sock_unlink(sk).
+			 */
+			if (sk_hashed(sk)) {
+				__sock_put(sk);
+				continue;
+			}
+			/* Otherwise, we need to restart iteration, for the
+			 * next socket pointed by sk->next might be already
+			 * gone. We can't use __sock_put(sk) here because
+			 * hci_sock_release() might have already called
+			 * sock_put(sk) after bt_sock_unlink(sk).
+			 */
+			read_unlock(&hci_sk_list.lock);
+			sock_put(sk);
+			goto restart;
 		}
 		read_unlock(&hci_sk_list.lock);
 	}
