@@ -79,7 +79,8 @@ static const struct vm_operations_struct amdgpu_gem_vm_ops = {
 	.fault = amdgpu_gem_fault,
 	.open = ttm_bo_vm_open,
 	.close = ttm_bo_vm_close,
-	.access = ttm_bo_vm_access
+	.access = ttm_bo_vm_access,
+	.mprotect = ttm_bo_vm_mprotect
 };
 
 static void amdgpu_gem_object_free(struct drm_gem_object *gobj)
