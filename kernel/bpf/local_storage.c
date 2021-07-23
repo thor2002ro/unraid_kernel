@@ -11,9 +11,6 @@
 
 #ifdef CONFIG_CGROUP_BPF
 
-DEFINE_PER_CPU(struct bpf_cgroup_storage_info,
-	       bpf_cgroup_storage_info[BPF_CGROUP_STORAGE_NEST_MAX]);
-
 #include "../cgroup/cgroup-internal.h"
 
 #define LOCAL_STORAGE_CREATE_FLAG_MASK					\
@@ -409,7 +406,7 @@ static int cgroup_storage_check_btf(const struct bpf_map *map,
 static void cgroup_storage_seq_show_elem(struct bpf_map *map, void *key,
 					 struct seq_file *m)
 {
-	enum bpf_cgroup_storage_type stype = cgroup_storage_type(map);
+	enum bpf_cgroup_storage_type stype;
 	struct bpf_cgroup_storage *storage;
 	int cpu;
 
