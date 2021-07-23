@@ -341,6 +341,17 @@ static void hsw_wait_for_power_well_enable(struct drm_i915_private *dev_priv,
 {
 	const struct i915_power_well_regs *regs = power_well->desc->hsw.regs;
 	int pw_idx = power_well->desc->hsw.idx;
+	int enable_delay = power_well->desc->hsw.fixed_enable_delay;
+
+	/*
+	 * For some power wells we're not supposed to watch the status bit for
+	 * an ack, but rather just wait a fixed amount of time and then
+	 * proceed.  This is only used on DG2.
+	 */
+	if (IS_DG2(dev_priv) && enable_delay) {
+		usleep_range(enable_delay, 2 * enable_delay);
+		return;
+	}
 
 	/* Timeout for PW1:10 us, AUX:not specified, other PWs:20 us. */
 	if (intel_de_wait_for_set(dev_priv, regs->driver,
@@ -4828,6 +4839,7 @@ static const struct i915_power_well_desc xelpd_power_wells[] = {
 		{
 			.hsw.regs = &icl_aux_power_well_regs,
 			.hsw.idx = ICL_PW_CTL_IDX_AUX_A,
+			.hsw.fixed_enable_delay = 600,
 		},
 	},
 	{
@@ -4838,6 +4850,7 @@ static const struct i915_power_well_desc xelpd_power_wells[] = {
 		{
 			.hsw.regs = &icl_aux_power_well_regs,
 			.hsw.idx = ICL_PW_CTL_IDX_AUX_B,
+			.hsw.fixed_enable_delay = 600,
 		},
 	},
 	{
@@ -4848,6 +4861,7 @@ static const struct i915_power_well_desc xelpd_power_wells[] = {
 		{
 			.hsw.regs = &icl_aux_power_well_regs,
 			.hsw.idx = ICL_PW_CTL_IDX_AUX_C,
+			.hsw.fixed_enable_delay = 600,
 		},
 	},
 	{
@@ -4858,6 +4872,7 @@ static const struct i915_power_well_desc xelpd_power_wells[] = {
 		{
 			.hsw.regs = &icl_aux_power_well_regs,
 			.hsw.idx = XELPD_PW_CTL_IDX_AUX_D,
+			.hsw.fixed_enable_delay = 600,
 		},
 	},
 	{
@@ -4878,6 +4893,7 @@ static const struct i915_power_well_desc xelpd_power_wells[] = {
 		{
 			.hsw.regs = &icl_aux_power_well_regs,
 			.hsw.idx = TGL_PW_CTL_IDX_AUX_TC1,
+			.hsw.fixed_enable_delay = 600,
 		},
 	},
 	{
@@ -5798,9 +5814,14 @@ static void tgl_bw_buddy_init(struct drm_i915_private *dev_priv)
 	unsigned long abox_mask = INTEL_INFO(dev_priv)->abox_mask;
 	int config, i;
 
+	/* BW_BUDDY registers are not used on dgpu's beyond DG1 */
+	if (IS_DGFX(dev_priv) && !IS_DG1(dev_priv))
+		return;
+
 	if (IS_ALDERLAKE_S(dev_priv) ||
-	    IS_DG1_REVID(dev_priv, DG1_REVID_A0, DG1_REVID_A0) ||
-	    IS_TGL_DISPLAY_STEP(dev_priv, STEP_A0, STEP_B0))
+	    IS_DG1_DISPLAY_STEP(dev_priv, STEP_A0, STEP_B0) ||
+	    IS_RKL_DISPLAY_STEP(dev_priv, STEP_A0, STEP_B0) ||
+	    IS_TGL_DISPLAY_STEP(dev_priv, STEP_A0, STEP_C0))
 		/* Wa_1409767108:tgl,dg1,adl-s */
 		table = wa_1409767108_buddy_page_masks;
 	else
@@ -5822,10 +5843,11 @@ static void tgl_bw_buddy_init(struct drm_i915_private *dev_priv)
 			intel_de_write(dev_priv, BW_BUDDY_PAGE_MASK(i),
 				       table[config].page_mask);
 
-			/* Wa_22010178259:tgl,rkl */
-			intel_de_rmw(dev_priv, BW_BUDDY_CTL(i),
-				     BW_BUDDY_TLB_REQ_TIMER_MASK,
-				     BW_BUDDY_TLB_REQ_TIMER(0x8));
+			/* Wa_22010178259:tgl,dg1,rkl,adl-s */
+			if (DISPLAY_VER(dev_priv) == 12)
+				intel_de_rmw(dev_priv, BW_BUDDY_CTL(i),
+					     BW_BUDDY_TLB_REQ_TIMER_MASK,
+					     BW_BUDDY_TLB_REQ_TIMER(0x8));
 		}
 	}
 }
@@ -5882,8 +5904,8 @@ static void icl_display_core_init(struct drm_i915_private *dev_priv,
 	if (resume && intel_dmc_has_payload(dev_priv))
 		intel_dmc_load_program(dev_priv);
 
-	/* Wa_14011508470 */
-	if (DISPLAY_VER(dev_priv) == 12) {
+	/* Wa_14011508470:tgl,dg1,rkl,adl-s,adl-p */
+	if (DISPLAY_VER(dev_priv) >= 12) {
 		val = DCPR_CLEAR_MEMSTAT_DIS | DCPR_SEND_RESP_IMM |
 		      DCPR_MASK_LPMODE | DCPR_MASK_MAXLATENCY_MEMUP_CLR;
 		intel_uncore_rmw(&dev_priv->uncore, GEN11_CHICKEN_DCPR_2, 0, val);

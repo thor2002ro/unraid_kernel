@@ -23,6 +23,41 @@ struct intel_qgv_info {
 	u8 t_bl;
 };
 
+static int dg1_mchbar_read_qgv_point_info(struct drm_i915_private *dev_priv,
+					  struct intel_qgv_point *sp,
+					  int point)
+{
+	u32 dclk_ratio, dclk_reference;
+	u32 val;
+
+	val = intel_uncore_read(&dev_priv->uncore, SA_PERF_STATUS_0_0_0_MCHBAR_PC);
+	dclk_ratio = REG_FIELD_GET(DG1_QCLK_RATIO_MASK, val);
+	if (val & DG1_QCLK_REFERENCE)
+		dclk_reference = 6; /* 6 * 16.666 MHz = 100 MHz */
+	else
+		dclk_reference = 8; /* 8 * 16.666 MHz = 133 MHz */
+	sp->dclk = dclk_ratio * dclk_reference;
+
+	val = intel_uncore_read(&dev_priv->uncore, SKL_MC_BIOS_DATA_0_0_0_MCHBAR_PCU);
+	if (val & DG1_GEAR_TYPE)
+		sp->dclk *= 2;
+
+	if (sp->dclk == 0)
+		return -EINVAL;
+
+	val = intel_uncore_read(&dev_priv->uncore, MCHBAR_CH0_CR_TC_PRE_0_0_0_MCHBAR);
+	sp->t_rp = REG_FIELD_GET(DG1_DRAM_T_RP_MASK, val);
+	sp->t_rdpre = REG_FIELD_GET(DG1_DRAM_T_RDPRE_MASK, val);
+
+	val = intel_uncore_read(&dev_priv->uncore, MCHBAR_CH0_CR_TC_PRE_0_0_0_MCHBAR_HIGH);
+	sp->t_rcd = REG_FIELD_GET(DG1_DRAM_T_RCD_MASK, val);
+	sp->t_ras = REG_FIELD_GET(DG1_DRAM_T_RAS_MASK, val);
+
+	sp->t_rc = sp->t_rp + sp->t_ras;
+
+	return 0;
+}
+
 static int icl_pcode_read_qgv_point_info(struct drm_i915_private *dev_priv,
 					 struct intel_qgv_point *sp,
 					 int point)
@@ -99,7 +134,11 @@ static int icl_get_qgv_points(struct drm_i915_private *dev_priv,
 	for (i = 0; i < qi->num_points; i++) {
 		struct intel_qgv_point *sp = &qi->points[i];
 
-		ret = icl_pcode_read_qgv_point_info(dev_priv, sp, i);
+		if (IS_DG1(dev_priv))
+			ret = dg1_mchbar_read_qgv_point_info(dev_priv, sp, i);
+		else
+			ret = icl_pcode_read_qgv_point_info(dev_priv, sp, i);
+
 		if (ret)
 			return ret;
 
@@ -234,6 +273,26 @@ static int icl_get_bw_info(struct drm_i915_private *dev_priv, const struct intel
 	return 0;
 }
 
+static void dg2_get_bw_info(struct drm_i915_private *i915)
+{
+	struct intel_bw_info *bi = &i915->max_bw[0];
+
+	/*
+	 * DG2 doesn't have SAGV or QGV points, just a constant max bandwidth
+	 * that doesn't depend on the number of planes enabled.  Create a
+	 * single dummy QGV point to reflect that.  DG2-G10 platforms have a
+	 * constant 50 GB/s bandwidth, whereas DG2-G11 platforms have 38 GB/s.
+	 */
+	bi->num_planes = 1;
+	bi->num_qgv_points = 1;
+	if (IS_DG2_G11(i915))
+		bi->deratedbw[0] = 38000;
+	else
+		bi->deratedbw[0] = 50000;
+
+	i915->sagv_status = I915_SAGV_NOT_CONTROLLED;
+}
+
 static unsigned int icl_max_bw(struct drm_i915_private *dev_priv,
 			       int num_planes, int qgv_point)
 {
@@ -267,7 +326,9 @@ void intel_bw_init_hw(struct drm_i915_private *dev_priv)
 	if (!HAS_DISPLAY(dev_priv))
 		return;
 
-	if (IS_ALDERLAKE_S(dev_priv) || IS_ALDERLAKE_P(dev_priv))
+	if (IS_DG2(dev_priv))
+		dg2_get_bw_info(dev_priv);
+	else if (IS_ALDERLAKE_S(dev_priv) || IS_ALDERLAKE_P(dev_priv))
 		icl_get_bw_info(dev_priv, &adls_sa_info);
 	else if (IS_ROCKETLAKE(dev_priv))
 		icl_get_bw_info(dev_priv, &rkl_sa_info);
