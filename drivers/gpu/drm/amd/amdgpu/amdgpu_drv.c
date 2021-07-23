@@ -870,11 +870,10 @@ MODULE_PARM_DESC(reset_method, "GPU reset method (-1 = auto (default), 0 = legac
 module_param_named(reset_method, amdgpu_reset_method, int, 0444);
 
 /**
- * DOC: bad_page_threshold (int)
- * Bad page threshold is to specify the threshold value of faulty pages
- * detected by RAS ECC, that may result in GPU entering bad status if total
- * faulty pages by ECC exceed threshold value and leave it for user's further
- * check.
+ * DOC: bad_page_threshold (int) Bad page threshold is specifies the
+ * threshold value of faulty pages detected by RAS ECC, which may
+ * result in the GPU entering bad status when the number of total
+ * faulty pages by ECC exceeds the threshold value.
  */
 MODULE_PARM_DESC(bad_page_threshold, "Bad page threshold(-1 = auto(default value), 0 = disable bad page retirement)");
 module_param_named(bad_page_threshold, amdgpu_bad_page_threshold, int, 0444);
@@ -1212,6 +1211,9 @@ static const struct pci_device_id pciidlist[] = {
 	{0x1002, 0x740C, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CHIP_ALDEBARAN|AMD_EXP_HW_SUPPORT},
 	{0x1002, 0x740F, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CHIP_ALDEBARAN|AMD_EXP_HW_SUPPORT},
 	{0x1002, 0x7410, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CHIP_ALDEBARAN|AMD_EXP_HW_SUPPORT},
+
+	/* CYAN_SKILLFISH */
+	{0x1002, 0x13FE, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CHIP_CYAN_SKILLFISH|AMD_IS_APU},
 
 	{0, 0, 0}
 };
