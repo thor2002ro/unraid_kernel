@@ -88,8 +88,7 @@ u32 rtw_hal_power_on(struct adapter *adapt)
 	if (adapt->HalData->bMacPwrCtrlOn)
 		return _SUCCESS;
 
-	if (!rtl88eu_pwrseqcmdparsing(adapt, PWR_CUT_ALL_MSK,
-				      Rtl8188E_NIC_PWR_ON_FLOW))
+	if (!rtl88eu_pwrseqcmdparsing(adapt, Rtl8188E_NIC_PWR_ON_FLOW))
 		return _FAIL;
 
 	/*  Enable MAC DMA/WMAC/SCHEDULE/SEC block */
@@ -684,7 +683,7 @@ u32 rtl8188eu_hal_init(struct adapter *Adapter)
 	}
 	rtl8188e_InitializeFirmwareVars(Adapter);
 
-	rtl88eu_phy_mac_config(Adapter);
+	phy_mac_config(Adapter);
 
 	rtl88eu_phy_bb_config(Adapter);
 
@@ -830,8 +829,7 @@ static void CardDisableRTL8188EU(struct adapter *Adapter)
 	usb_write8(Adapter, REG_CR, 0x0);
 
 	/*  Run LPS WL RFOFF flow */
-	rtl88eu_pwrseqcmdparsing(Adapter, PWR_CUT_ALL_MSK,
-				 Rtl8188E_NIC_LPS_ENTER_FLOW);
+	rtl88eu_pwrseqcmdparsing(Adapter, Rtl8188E_NIC_LPS_ENTER_FLOW);
 
 	/*  2. 0x1F[7:0] = 0		turn off RF */
 
@@ -852,8 +850,7 @@ static void CardDisableRTL8188EU(struct adapter *Adapter)
 	usb_write8(Adapter, REG_32K_CTRL, val8 & (~BIT(0)));
 
 	/*  Card disable power action flow */
-	rtl88eu_pwrseqcmdparsing(Adapter, PWR_CUT_ALL_MSK,
-				 Rtl8188E_NIC_DISABLE_FLOW);
+	rtl88eu_pwrseqcmdparsing(Adapter, Rtl8188E_NIC_DISABLE_FLOW);
 
 	/*  Reset MCU IO Wrapper */
 	val8 = usb_read8(Adapter, REG_RSV_CTRL + 1);
@@ -990,28 +987,17 @@ static void readAdapterInfo_8188EU(struct adapter *adapt)
 	Hal_ReadThermalMeter_88E(adapt, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
 }
 
-static void _ReadPROMContent(struct adapter *Adapter)
-{
-	struct eeprom_priv *eeprom = GET_EEPROM_EFUSE_PRIV(Adapter);
-	u8 eeValue;
-
-	/* check system boot selection */
-	eeValue = usb_read8(Adapter, REG_9346CR);
-	eeprom->EepromOrEfuse		= (eeValue & BOOT_FROM_EEPROM) ? true : false;
-	eeprom->bautoload_fail_flag	= (eeValue & EEPROM_EN) ? false : true;
-
-	Hal_InitPGData88E(Adapter);
-	readAdapterInfo_8188EU(Adapter);
-}
-
 void rtw_hal_read_chip_info(struct adapter *Adapter)
 {
-	_ReadPROMContent(Adapter);
-}
+	struct eeprom_priv *eeprom = GET_EEPROM_EFUSE_PRIV(Adapter);
+	u8 eeValue = usb_read8(Adapter, REG_9346CR);
 
-#define GPIO_DEBUG_PORT_NUM 0
-static void rtl8192cu_trigger_gpio_0(struct adapter *adapt)
-{
+	eeprom->bautoload_fail_flag = (eeValue & EEPROM_EN) ? false : true;
+
+	if (eeValue & BOOT_FROM_EEPROM)
+		EFUSE_ShadowMapUpdate(Adapter);
+
+	readAdapterInfo_8188EU(Adapter);
 }
 
 static void ResumeTxBeacon(struct adapter *adapt)
@@ -1556,9 +1542,6 @@ void rtw_hal_set_hwreg(struct adapter *Adapter, u8 variable, u8 *val)
 				ODM_Write_DIG(podmpriv, rx_gain);
 			}
 		}
-		break;
-	case HW_VAR_TRIGGER_GPIO_0:
-		rtl8192cu_trigger_gpio_0(Adapter);
 		break;
 	case HW_VAR_RPT_TIMER_SETTING:
 		{

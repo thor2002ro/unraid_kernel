@@ -168,14 +168,14 @@ void rtw_hal_notch_filter(struct adapter *adapter, bool enable)
 static s32 _LLTWrite(struct adapter *padapter, u32 address, u32 data)
 {
 	s32	status = _SUCCESS;
-	s32	count = 0;
+	s32	count;
 	u32	value = _LLT_INIT_ADDR(address) | _LLT_INIT_DATA(data) | _LLT_OP(_LLT_WRITE_ACCESS);
 	u16	LLTReg = REG_LLT_INIT;
 
 	usb_write32(padapter, LLTReg, value);
 
 	/* polling */
-	do {
+	for (count = 0; ; count++) {
 		value = usb_read32(padapter, LLTReg);
 		if (_LLT_OP_VALUE(value) == _LLT_NO_ACTIVE)
 			break;
@@ -185,7 +185,7 @@ static s32 _LLTWrite(struct adapter *padapter, u32 address, u32 data)
 			break;
 		}
 		udelay(5);
-	} while (count++);
+	}
 
 	return status;
 }
@@ -226,12 +226,6 @@ s32 InitLLTTable(struct adapter *padapter, u8 txpktbuf_bndy)
 	}
 
 	return status;
-}
-
-void Hal_InitPGData88E(struct adapter *padapter)
-{
-	if (!is_boot_from_eeprom(padapter))
-		EFUSE_ShadowMapUpdate(padapter);
 }
 
 void Hal_EfuseParseIDCode88E(struct adapter *padapter, u8 *hwinfo)

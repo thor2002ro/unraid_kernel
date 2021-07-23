@@ -55,7 +55,7 @@ u8 networktype_to_raid_ex(struct adapter *adapter, struct sta_info *psta)
 
 	if (cur_rf_type == RF_1T1R) {
 		rf_type = RF_1T1R;
-	} else if (IsSupportedHT(psta->wireless_mode)) {
+	} else if (is_supported_ht(psta->wireless_mode)) {
 		if (psta->ra_mask & 0xfff00000)
 			rf_type = RF_2T2R;
 	}
@@ -1661,7 +1661,7 @@ void update_wireless_mode(struct adapter *padapter)
 
 void update_sta_basic_rate(struct sta_info *psta, u8 wireless_mode)
 {
-	if (IsSupportedTxCCK(wireless_mode)) {
+	if (is_supported_tx_cck(wireless_mode)) {
 		/*  Only B, B/G, and B/G/N AP could use CCK rate */
 		memcpy(psta->bssrateset, rtw_basic_rate_cck, 4);
 		psta->bssratelen = 4;

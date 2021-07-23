@@ -34,12 +34,12 @@ properties:
 
   interrupt-controller: true
 
-  gpios:
-    maxItems: 1
-    description: GPIO used for IRQs
+  interrupts: true
 
   regulators:
     type: object
+
+    additionalProperties: false
 
     properties:
       '#address-cells':
@@ -49,10 +49,12 @@ properties:
         const: 0
 
     patternProperties:
-      '^ldo[0-9]+@[0-9a-f]$':
+      '^(ldo|LDO)[0-9]+$':
         type: object
 
         $ref: "/schemas/regulator/regulator.yaml#"
+
+        unevaluatedProperties: false
 
 required:
   - compatible
@@ -63,15 +65,15 @@ additionalProperties: false
 
 examples:
   - |
-    /* pmic properties */
 
     pmic: pmic@0 {
-      compatible = "hisilicon,hi6421-spmi";
+      compatible = "hisilicon,hi6421v600-spmi";
       reg = <0 0>;
 
       #interrupt-cells = <2>;
       interrupt-controller;
-      gpios = <&gpio28 0 0>;
+      interrupt-parent = <&gpio28>;
+      interrupts = <0 0>;
 
       regulators {
         #address-cells = <1>;
