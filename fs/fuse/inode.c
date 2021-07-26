@@ -1561,6 +1561,9 @@ static int fuse_fill_super(struct super_block *sb, struct fs_context *fsc)
 static int fuse_get_tree(struct fs_context *fsc)
 {
 	struct fuse_fs_context *ctx = fsc->fs_private;
+	struct fuse_dev *fud;
+	struct fuse_conn *fc;
+	struct fuse_mount *fm;
 	int err;
 
 	if (!ctx->fd_present || !ctx->rootmode_present ||
@@ -1573,8 +1576,27 @@ static int fuse_get_tree(struct fs_context *fsc)
 		err = get_tree_bdev(fsc, fuse_fill_super);
 		goto out_fput;
 	}
+	/*
+	 * While block dev mount can be initialized with a dummy device fd
+	 * (found by device name), normal fuse mounts can't
+	 */
+	if (!ctx->file)
+		return -EINVAL;
 
-	err = get_tree_nodev(fsc, fuse_fill_super);
+	/*
+	 * Allow creating a fuse mount with an already initialized fuse
+	 * connection
+	 */
+	fud = READ_ONCE(ctx->file->private_data);
+	if (ctx->file->f_op == &fuse_dev_operations && fud) {
+		fc = fud->fc;
+		/* No submounts for plain fuse yet */
+		WARN_ON(!list_is_singular(&fc->mounts));
+		fm = list_first_entry(&fc->mounts, struct fuse_mount, fc_entry);
+		err = get_tree_keyed(fsc, fuse_fill_super, fm);
+	} else {
+		err = get_tree_nodev(fsc, fuse_fill_super);
+	}
 out_fput:
 	if (ctx->file)
 		fput(ctx->file);
