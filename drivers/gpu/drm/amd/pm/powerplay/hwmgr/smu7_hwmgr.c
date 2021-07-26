@@ -1498,6 +1498,37 @@ static int smu7_populate_edc_leakage_registers(struct pp_hwmgr *hwmgr)
 	return ret;
 }
 
+static int smu7_start_gpu_power_logging(struct pp_hwmgr *hwmgr)
+{
+	struct amdgpu_device *adev = hwmgr->adev;
+	u32 tmp = 0;
+
+	/*
+	 * PPSMC_MSG_GetCurrPkgPwr is not supported on:
+	 *  - Hawaii
+	 *  - Bonaire
+	 *  - Fiji
+	 *  - Tonga
+	 */
+	if ((adev->asic_type != CHIP_HAWAII) &&
+	    (adev->asic_type != CHIP_BONAIRE) &&
+	    (adev->asic_type != CHIP_FIJI) &&
+	    (adev->asic_type != CHIP_TONGA)) {
+		smum_send_msg_to_smc_with_parameter(hwmgr, PPSMC_MSG_GetCurrPkgPwr, 0, &tmp);
+		if (tmp != 0)
+			return 0;
+	}
+	smum_send_msg_to_smc(hwmgr, PPSMC_MSG_PmStatusLogStart, NULL);
+	cgs_write_ind_register(hwmgr->device, CGS_IND_REG__SMC,
+			       ixSMU_PM_STATUS_95, 0);
+	mdelay(10);
+	smum_send_msg_to_smc(hwmgr, PPSMC_MSG_PmStatusLogSample, NULL);
+	tmp = cgs_read_ind_register(hwmgr->device,
+				    CGS_IND_REG__SMC,
+				    ixSMU_PM_STATUS_95);
+	return 0;
+}
+
 static int smu7_enable_dpm_tasks(struct pp_hwmgr *hwmgr)
 {
 	int tmp_result = 0;
@@ -1621,6 +1652,9 @@ static int smu7_enable_dpm_tasks(struct pp_hwmgr *hwmgr)
 	tmp_result = smu7_pcie_performance_request(hwmgr);
 	PP_ASSERT_WITH_CODE((0 == tmp_result),
 			"pcie performance request failed!", result = tmp_result);
+	tmp_result = smu7_start_gpu_power_logging(hwmgr);
+	PP_ASSERT_WITH_CODE((0 == tmp_result),
+			"start power logging failed!", result = tmp_result);
 
 	return 0;
 }
@@ -3921,18 +3955,14 @@ static int smu7_get_gpu_power(struct pp_hwmgr *hwmgr, u32 *query)
 			return 0;
 	}
 
-	smum_send_msg_to_smc(hwmgr, PPSMC_MSG_PmStatusLogStart, NULL);
-	cgs_write_ind_register(hwmgr->device, CGS_IND_REG__SMC,
-							ixSMU_PM_STATUS_95, 0);
-
 	for (i = 0; i < 10; i++) {
-		msleep(500);
 		smum_send_msg_to_smc(hwmgr, PPSMC_MSG_PmStatusLogSample, NULL);
 		tmp = cgs_read_ind_register(hwmgr->device,
-						CGS_IND_REG__SMC,
-						ixSMU_PM_STATUS_95);
+					    CGS_IND_REG__SMC,
+					    ixSMU_PM_STATUS_95);
 		if (tmp != 0)
 			break;
+		mdelay(10);
 	}
 	*query = tmp;
 
