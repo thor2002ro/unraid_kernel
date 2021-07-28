@@ -29,6 +29,23 @@
 
 static struct kobject *block_depr;
 
+/*
+ * Unique, monotonically increasing sequential number associated with block
+ * devices instances (i.e. incremented each time a device is attached).
+ * Associating uevents with block devices in userspace is difficult and racy:
+ * the uevent netlink socket is lossy, and on slow and overloaded systems has
+ * a very high latency.
+ * Block devices do not have exclusive owners in userspace, any process can set
+ * one up (e.g. loop devices). Moreover, device names can be reused (e.g. loop0
+ * can be reused again and again).
+ * A userspace process setting up a block device and watching for its events
+ * cannot thus reliably tell whether an event relates to the device it just set
+ * up or another earlier instance with the same name.
+ * This sequential number allows userspace processes to solve this problem, and
+ * uniquely associate an uevent to the lifetime to a device.
+ */
+static atomic64_t diskseq;
+
 /* for extended dynamic devt allocation, currently only one major is used */
 #define NR_EXT_DEVT		(1 << MINORBITS)
 static DEFINE_IDA(ext_devt_ida);
@@ -960,6 +977,14 @@ static ssize_t disk_discard_alignment_show(struct device *dev,
 	return sprintf(buf, "%d\n", queue_discard_alignment(disk->queue));
 }
 
+static ssize_t diskseq_show(struct device *dev,
+			    struct device_attribute *attr, char *buf)
+{
+	struct gendisk *disk = dev_to_disk(dev);
+
+	return sprintf(buf, "%llu\n", disk->diskseq);
+}
+
 static DEVICE_ATTR(range, 0444, disk_range_show, NULL);
 static DEVICE_ATTR(ext_range, 0444, disk_ext_range_show, NULL);
 static DEVICE_ATTR(removable, 0444, disk_removable_show, NULL);
@@ -972,6 +997,7 @@ static DEVICE_ATTR(capability, 0444, disk_capability_show, NULL);
 static DEVICE_ATTR(stat, 0444, part_stat_show, NULL);
 static DEVICE_ATTR(inflight, 0444, part_inflight_show, NULL);
 static DEVICE_ATTR(badblocks, 0644, disk_badblocks_show, disk_badblocks_store);
+static DEVICE_ATTR(diskseq, 0444, diskseq_show, NULL);
 
 #ifdef CONFIG_FAIL_MAKE_REQUEST
 ssize_t part_fail_show(struct device *dev,
@@ -1017,6 +1043,7 @@ static struct attribute *disk_attrs[] = {
 	&dev_attr_events.attr,
 	&dev_attr_events_async.attr,
 	&dev_attr_events_poll_msecs.attr,
+	&dev_attr_diskseq.attr,
 #ifdef CONFIG_FAIL_MAKE_REQUEST
 	&dev_attr_fail.attr,
 #endif
@@ -1075,8 +1102,17 @@ static void disk_release(struct device *dev)
 		blk_put_queue(disk->queue);
 	iput(disk->part0->bd_inode);	/* frees the disk */
 }
+
+static int block_uevent(struct device *dev, struct kobj_uevent_env *env)
+{
+	struct gendisk *disk = dev_to_disk(dev);
+
+	return add_uevent_var(env, "DISKSEQ=%llu", disk->diskseq);
+}
+
 struct class block_class = {
 	.name		= "block",
+	.dev_uevent	= block_uevent,
 };
 
 static char *block_devnode(struct device *dev, umode_t *mode,
@@ -1252,6 +1288,8 @@ struct gendisk *__alloc_disk_node(int minors, int node_id)
 	disk_to_dev(disk)->class = &block_class;
 	disk_to_dev(disk)->type = &disk_type;
 	device_initialize(disk_to_dev(disk));
+	inc_diskseq(disk);
+
 	return disk;
 
 out_destroy_part_tbl:
@@ -1352,3 +1390,8 @@ int bdev_read_only(struct block_device *bdev)
 	return bdev->bd_read_only || get_disk_ro(bdev->bd_disk);
 }
 EXPORT_SYMBOL(bdev_read_only);
+
+void inc_diskseq(struct gendisk *disk)
+{
+	disk->diskseq = atomic64_inc_return(&diskseq);
+}
