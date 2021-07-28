@@ -78,11 +78,17 @@ bool set_capacity_and_notify(struct gendisk *disk, sector_t size)
 EXPORT_SYMBOL_GPL(set_capacity_and_notify);
 
 /*
- * Format the device name of the indicated disk into the supplied buffer and
- * return a pointer to that same buffer for convenience.
+ * Format the device name of the indicated block device into the supplied buffer
+ * and return a pointer to that same buffer for convenience.
+ *
+ * Note: do not use this in new code, use the %pg specifier to sprintf and
+ * printk insted.
  */
-char *disk_name(struct gendisk *hd, int partno, char *buf)
+const char *bdevname(struct block_device *bdev, char *buf)
 {
+	struct gendisk *hd = bdev->bd_disk;
+	int partno = bdev->bd_partno;
+
 	if (!partno)
 		snprintf(buf, BDEVNAME_SIZE, "%s", hd->disk_name);
 	else if (isdigit(hd->disk_name[strlen(hd->disk_name)-1]))
@@ -91,11 +97,6 @@ char *disk_name(struct gendisk *hd, int partno, char *buf)
 		snprintf(buf, BDEVNAME_SIZE, "%s%d", hd->disk_name, partno);
 
 	return buf;
-}
-
-const char *bdevname(struct block_device *bdev, char *buf)
-{
-	return disk_name(bdev->bd_disk, bdev->bd_partno, buf);
 }
 EXPORT_SYMBOL(bdevname);
 
@@ -678,7 +679,6 @@ void __init printk_all_partitions(void)
 	while ((dev = class_dev_iter_next(&iter))) {
 		struct gendisk *disk = dev_to_disk(dev);
 		struct block_device *part;
-		char name_buf[BDEVNAME_SIZE];
 		char devt_buf[BDEVT_SIZE];
 		unsigned long idx;
 
@@ -698,11 +698,10 @@ void __init printk_all_partitions(void)
 		xa_for_each(&disk->part_tbl, idx, part) {
 			if (!bdev_nr_sectors(part))
 				continue;
-			printk("%s%s %10llu %s %s",
+			printk("%s%s %10llu %pg %s",
 			       bdev_is_partition(part) ? "  " : "",
 			       bdevt_str(part->bd_dev, devt_buf),
-			       bdev_nr_sectors(part) >> 1,
-			       disk_name(disk, part->bd_partno, name_buf),
+			       bdev_nr_sectors(part) >> 1, part,
 			       part->bd_meta_info ?
 					part->bd_meta_info->uuid : "");
 			if (bdev_is_partition(part))
@@ -780,7 +779,6 @@ static int show_partition(struct seq_file *seqf, void *v)
 	struct gendisk *sgp = v;
 	struct block_device *part;
 	unsigned long idx;
-	char buf[BDEVNAME_SIZE];
 
 	/* Don't show non-partitionable removeable devices or empty devices */
 	if (!get_capacity(sgp) || (!disk_max_parts(sgp) &&
@@ -793,10 +791,9 @@ static int show_partition(struct seq_file *seqf, void *v)
 	xa_for_each(&sgp->part_tbl, idx, part) {
 		if (!bdev_nr_sectors(part))
 			continue;
-		seq_printf(seqf, "%4d  %7d %10llu %s\n",
+		seq_printf(seqf, "%4d  %7d %10llu %pg\n",
 			   MAJOR(part->bd_dev), MINOR(part->bd_dev),
-			   bdev_nr_sectors(part) >> 1,
-			   disk_name(sgp, part->bd_partno, buf));
+			   bdev_nr_sectors(part) >> 1, part);
 	}
 	rcu_read_unlock();
 	return 0;
@@ -1111,7 +1108,6 @@ static int diskstats_show(struct seq_file *seqf, void *v)
 {
 	struct gendisk *gp = v;
 	struct block_device *hd;
-	char buf[BDEVNAME_SIZE];
 	unsigned int inflight;
 	struct disk_stats stat;
 	unsigned long idx;
@@ -1134,15 +1130,14 @@ static int diskstats_show(struct seq_file *seqf, void *v)
 		else
 			inflight = part_in_flight(hd);
 
-		seq_printf(seqf, "%4d %7d %s "
+		seq_printf(seqf, "%4d %7d %pg "
 			   "%lu %lu %lu %u "
 			   "%lu %lu %lu %u "
 			   "%u %u %u "
 			   "%lu %lu %lu %u "
 			   "%lu %u"
 			   "\n",
-			   MAJOR(hd->bd_dev), MINOR(hd->bd_dev),
-			   disk_name(gp, hd->bd_partno, buf),
+			   MAJOR(hd->bd_dev), MINOR(hd->bd_dev), hd,
 			   stat.ios[STAT_READ],
 			   stat.merges[STAT_READ],
 			   stat.sectors[STAT_READ],
