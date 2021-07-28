@@ -585,18 +585,13 @@ void del_gendisk(struct gendisk *disk)
 	disk_del_events(disk);
 
 	mutex_lock(&disk->open_mutex);
+	remove_inode_hash(disk->part0->bd_inode);
 	disk->flags &= ~GENHD_FL_UP;
 	blk_drop_partitions(disk);
 	mutex_unlock(&disk->open_mutex);
 
 	fsync_bdev(disk->part0);
 	__invalidate_device(disk->part0, true);
-
-	/*
-	 * Unhash the bdev inode for this device so that it can't be looked
-	 * up any more even if openers still hold references to it.
-	 */
-	remove_inode_hash(disk->part0->bd_inode);
 
 	set_capacity(disk, 0);
 
@@ -1079,10 +1074,9 @@ static void disk_release(struct device *dev)
 	disk_release_events(disk);
 	kfree(disk->random);
 	xa_destroy(&disk->part_tbl);
-	bdput(disk->part0);
 	if (test_bit(GD_QUEUE_REF, &disk->state) && disk->queue)
 		blk_put_queue(disk->queue);
-	kfree(disk);
+	iput(disk->part0->bd_inode);	/* frees the disk */
 }
 struct class block_class = {
 	.name		= "block",
@@ -1267,7 +1261,7 @@ struct gendisk *__alloc_disk_node(int minors, int node_id)
 
 out_destroy_part_tbl:
 	xa_destroy(&disk->part_tbl);
-	bdput(disk->part0);
+	iput(disk->part0->bd_inode);
 out_free_disk:
 	kfree(disk);
 	return NULL;
