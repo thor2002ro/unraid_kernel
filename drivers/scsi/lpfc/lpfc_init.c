@@ -2599,6 +2599,9 @@ lpfc_get_hba_model_desc(struct lpfc_hba *phba, uint8_t *mdp, uint8_t *descp)
 	case PCI_DEVICE_ID_LANCER_G7_FC:
 		m = (typeof(m)){"LPe36000", "PCIe", "Fibre Channel Adapter"};
 		break;
+	case PCI_DEVICE_ID_LANCER_G7P_FC:
+		m = (typeof(m)){"LPe38000", "PCIe", "Fibre Channel Adapter"};
+		break;
 	case PCI_DEVICE_ID_SKYHAWK:
 	case PCI_DEVICE_ID_SKYHAWK_VF:
 		oneConnect = 1;
@@ -4676,6 +4679,8 @@ static void lpfc_host_supported_speeds_set(struct Scsi_Host *shost)
 	if (phba->hba_flag & HBA_FCOE_MODE)
 		return;
 
+	if (phba->lmt & LMT_256Gb)
+		fc_host_supported_speeds(shost) |= FC_PORTSPEED_256GBIT;
 	if (phba->lmt & LMT_128Gb)
 		fc_host_supported_speeds(shost) |= FC_PORTSPEED_128GBIT;
 	if (phba->lmt & LMT_64Gb)
@@ -5083,6 +5088,9 @@ lpfc_sli4_port_speed_parse(struct lpfc_hba *phba, uint32_t evt_code,
 			break;
 		case LPFC_FC_LA_SPEED_128G:
 			port_speed = 128000;
+			break;
+		case LPFC_FC_LA_SPEED_256G:
+			port_speed = 256000;
 			break;
 		default:
 			port_speed = 0;
@@ -8547,9 +8555,12 @@ lpfc_map_topology(struct lpfc_hba *phba, struct lpfc_mbx_read_config *rd_config)
 	}
 	/* FW supports persistent topology - override module parameter value */
 	phba->hba_flag |= HBA_PERSISTENT_TOPO;
-	switch (phba->pcidev->device) {
-	case PCI_DEVICE_ID_LANCER_G7_FC:
-	case PCI_DEVICE_ID_LANCER_G6_FC:
+
+	/* if ASIC_GEN_NUM >= 0xC) */
+	if ((bf_get(lpfc_sli_intf_if_type, &phba->sli4_hba.sli_intf) ==
+		    LPFC_SLI_INTF_IF_TYPE_6) ||
+	    (bf_get(lpfc_sli_intf_sli_family, &phba->sli4_hba.sli_intf) ==
+		    LPFC_SLI_INTF_FAMILY_G6)) {
 		if (!tf) {
 			phba->cfg_topology = ((pt == LINK_FLAGS_LOOP)
 					? FLAGS_TOPOLOGY_MODE_LOOP
@@ -8557,8 +8568,7 @@ lpfc_map_topology(struct lpfc_hba *phba, struct lpfc_mbx_read_config *rd_config)
 		} else {
 			phba->hba_flag &= ~HBA_PERSISTENT_TOPO;
 		}
-		break;
-	default:	/* G5 */
+	} else { /* G5 */
 		if (tf) {
 			/* If topology failover set - pt is '0' or '1' */
 			phba->cfg_topology = (pt ? FLAGS_TOPOLOGY_MODE_PT_LOOP :
@@ -8568,7 +8578,6 @@ lpfc_map_topology(struct lpfc_hba *phba, struct lpfc_mbx_read_config *rd_config)
 					? FLAGS_TOPOLOGY_MODE_PT_PT
 					: FLAGS_TOPOLOGY_MODE_LOOP);
 		}
-		break;
 	}
 	if (phba->hba_flag & HBA_PERSISTENT_TOPO) {
 		lpfc_printf_log(phba, KERN_INFO, LOG_SLI,
@@ -12988,7 +12997,9 @@ lpfc_log_write_firmware_error(struct lpfc_hba *phba, uint32_t offset,
 	const struct firmware *fw)
 {
 	int rc;
+	u8 sli_family;
 
+	sli_family = bf_get(lpfc_sli_intf_sli_family, &phba->sli4_hba.sli_intf);
 	/* Three cases:  (1) FW was not supported on the detected adapter.
 	 * (2) FW update has been locked out administratively.
 	 * (3) Some other error during FW update.
@@ -12996,10 +13007,12 @@ lpfc_log_write_firmware_error(struct lpfc_hba *phba, uint32_t offset,
 	 * for admin diagnosis.
 	 */
 	if (offset == ADD_STATUS_FW_NOT_SUPPORTED ||
-	    (phba->pcidev->device == PCI_DEVICE_ID_LANCER_G6_FC &&
+	    (sli_family == LPFC_SLI_INTF_FAMILY_G6 &&
 	     magic_number != MAGIC_NUMBER_G6) ||
-	    (phba->pcidev->device == PCI_DEVICE_ID_LANCER_G7_FC &&
-	     magic_number != MAGIC_NUMBER_G7)) {
+	    (sli_family == LPFC_SLI_INTF_FAMILY_G7 &&
+	     magic_number != MAGIC_NUMBER_G7) ||
+	    (sli_family == LPFC_SLI_INTF_FAMILY_G7P &&
+	     magic_number != MAGIC_NUMBER_G7P)) {
 		lpfc_printf_log(phba, KERN_ERR, LOG_TRACE_EVENT,
 				"3030 This firmware version is not supported on"
 				" this HBA model. Device:%x Magic:%x Type:%x "
@@ -14050,17 +14063,18 @@ lpfc_sli4_oas_verify(struct lpfc_hba *phba)
 void
 lpfc_sli4_ras_init(struct lpfc_hba *phba)
 {
-	switch (phba->pcidev->device) {
-	case PCI_DEVICE_ID_LANCER_G6_FC:
-	case PCI_DEVICE_ID_LANCER_G7_FC:
+	/* if ASIC_GEN_NUM >= 0xC) */
+	if ((bf_get(lpfc_sli_intf_if_type, &phba->sli4_hba.sli_intf) ==
+		    LPFC_SLI_INTF_IF_TYPE_6) ||
+	    (bf_get(lpfc_sli_intf_sli_family, &phba->sli4_hba.sli_intf) ==
+		    LPFC_SLI_INTF_FAMILY_G6)) {
 		phba->ras_fwlog.ras_hwsupport = true;
 		if (phba->cfg_ras_fwlog_func == PCI_FUNC(phba->pcidev->devfn) &&
 		    phba->cfg_ras_fwlog_buffsize)
 			phba->ras_fwlog.ras_enabled = true;
 		else
 			phba->ras_fwlog.ras_enabled = false;
-		break;
-	default:
+	} else {
 		phba->ras_fwlog.ras_hwsupport = false;
 	}
 }
