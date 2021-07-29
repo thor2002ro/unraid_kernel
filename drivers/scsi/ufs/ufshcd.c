@@ -3418,7 +3418,9 @@ int ufshcd_read_desc_param(struct ufs_hba *hba,
 
 	if (is_kmalloc) {
 		/* Make sure we don't copy more data than available */
-		if (param_offset + param_size > buff_len)
+		if (buff_len < param_offset)
+			param_size = 0;
+		else if (param_offset + param_size > buff_len)
 			param_size = buff_len - param_offset;
 		memcpy(param_read_buf, &desc_buf[param_offset], param_size);
 	}
