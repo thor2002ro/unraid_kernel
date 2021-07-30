@@ -907,7 +907,6 @@ static const struct intel_device_info rkl_info = {
 
 #define DGFX_FEATURES \
 	.memory_regions = REGION_SMEM | REGION_LMEM | REGION_STOLEN_LMEM, \
-	.has_master_unit_irq = 1, \
 	.has_llc = 0, \
 	.has_snoop = 1, \
 	.is_dgfx = 1
@@ -915,6 +914,7 @@ static const struct intel_device_info rkl_info = {
 static const struct intel_device_info dg1_info __maybe_unused = {
 	GEN12_FEATURES,
 	DGFX_FEATURES,
+	.graphics_rel = 10,
 	PLATFORM(INTEL_DG1),
 	.pipe_mask = BIT(PIPE_A) | BIT(PIPE_B) | BIT(PIPE_C) | BIT(PIPE_D),
 	.require_force_probe = 1,
@@ -947,7 +947,7 @@ static const struct intel_device_info adl_s_info = {
 
 #define XE_LPD_FEATURES \
 	.abox_mask = GENMASK(1, 0),						\
-	.color = { .degamma_lut_size = 33, .gamma_lut_size = 262145 },		\
+	.color = { .degamma_lut_size = 0, .gamma_lut_size = 0 },		\
 	.cpu_transcoder_mask = BIT(TRANSCODER_A) | BIT(TRANSCODER_B) |		\
 		BIT(TRANSCODER_C) | BIT(TRANSCODER_D),				\
 	.dbuf.size = 4096,							\
@@ -984,8 +984,8 @@ static const struct intel_device_info adl_p_info = {
 	GEN12_FEATURES,
 	XE_LPD_FEATURES,
 	PLATFORM(INTEL_ALDERLAKE_P),
-	.has_cdclk_crawl = 1,
 	.require_force_probe = 1,
+	.display.has_cdclk_crawl = 1,
 	.display.has_modular_fia = 1,
 	.display.has_psr_hw_tracking = 0,
 	.platform_engine_mask =
@@ -995,6 +995,65 @@ static const struct intel_device_info adl_p_info = {
 };
 
 #undef GEN
+
+#define XE_HP_PAGE_SIZES \
+	.page_sizes = I915_GTT_PAGE_SIZE_4K | \
+		      I915_GTT_PAGE_SIZE_64K | \
+		      I915_GTT_PAGE_SIZE_2M
+
+#define XE_HP_FEATURES \
+	.graphics_ver = 12, \
+	.graphics_rel = 50, \
+	XE_HP_PAGE_SIZES, \
+	.dma_mask_size = 46, \
+	.has_64bit_reloc = 1, \
+	.has_global_mocs = 1, \
+	.has_gt_uc = 1, \
+	.has_llc = 1, \
+	.has_logical_ring_contexts = 1, \
+	.has_logical_ring_elsq = 1, \
+	.has_rc6 = 1, \
+	.has_reset_engine = 1, \
+	.has_rps = 1, \
+	.has_runtime_pm = 1, \
+	.ppgtt_size = 48, \
+	.ppgtt_type = INTEL_PPGTT_FULL
+
+#define XE_HPM_FEATURES \
+	.media_ver = 12, \
+	.media_rel = 50
+
+__maybe_unused
+static const struct intel_device_info xehpsdv_info = {
+	XE_HP_FEATURES,
+	XE_HPM_FEATURES,
+	DGFX_FEATURES,
+	PLATFORM(INTEL_XEHPSDV),
+	.display = { },
+	.pipe_mask = 0,
+	.platform_engine_mask =
+		BIT(RCS0) | BIT(BCS0) |
+		BIT(VECS0) | BIT(VECS1) |
+		BIT(VCS0) | BIT(VCS1) | BIT(VCS2) | BIT(VCS3),
+	.require_force_probe = 1,
+};
+
+__maybe_unused
+static const struct intel_device_info dg2_info = {
+	XE_HP_FEATURES,
+	XE_HPM_FEATURES,
+	XE_LPD_FEATURES,
+	DGFX_FEATURES,
+	.graphics_rel = 55,
+	.media_rel = 55,
+	PLATFORM(INTEL_DG2),
+	.platform_engine_mask =
+		BIT(RCS0) | BIT(BCS0) |
+		BIT(VECS0) | BIT(VECS1) |
+		BIT(VCS0) | BIT(VCS2),
+	.require_force_probe = 1,
+};
+
 #undef PLATFORM
 
 /*

@@ -926,7 +926,7 @@ static u32 skl_plane_ctl(const struct intel_crtc_state *crtc_state,
 	else if (key->flags & I915_SET_COLORKEY_SOURCE)
 		plane_ctl |= PLANE_CTL_KEY_ENABLE_SOURCE;
 
-	/* Wa_22012358565:adlp */
+	/* Wa_22012358565:adl-p */
 	if (DISPLAY_VER(dev_priv) == 13)
 		plane_ctl |= adlp_plane_ctl_arb_slots(plane_state);
 
@@ -1910,11 +1910,11 @@ static bool gen12_plane_supports_mc_ccs(struct drm_i915_private *dev_priv,
 {
 	/* Wa_14010477008:tgl[a0..c0],rkl[all],dg1[all] */
 	if (IS_DG1(dev_priv) || IS_ROCKETLAKE(dev_priv) ||
-	    IS_TGL_DISPLAY_STEP(dev_priv, STEP_A0, STEP_C0))
+	    IS_TGL_DISPLAY_STEP(dev_priv, STEP_A0, STEP_D0))
 		return false;
 
 	/* Wa_22011186057 */
-	if (IS_ADLP_DISPLAY_STEP(dev_priv, STEP_A0, STEP_A0))
+	if (IS_ADLP_DISPLAY_STEP(dev_priv, STEP_A0, STEP_B0))
 		return false;
 
 	return plane_id < PLANE_SPRITE4;
@@ -1938,7 +1938,7 @@ static bool gen12_plane_format_mod_supported(struct drm_plane *_plane,
 	case I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS:
 	case I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS_CC:
 		/* Wa_22011186057 */
-		if (IS_ADLP_DISPLAY_STEP(dev_priv, STEP_A0, STEP_A0))
+		if (IS_ADLP_DISPLAY_STEP(dev_priv, STEP_A0, STEP_B0))
 			return false;
 		break;
 	default:
@@ -1995,7 +1995,7 @@ static const u64 *gen12_get_plane_modifiers(struct drm_i915_private *dev_priv,
 					    enum plane_id plane_id)
 {
 	/* Wa_22011186057 */
-	if (IS_ADLP_DISPLAY_STEP(dev_priv, STEP_A0, STEP_A0))
+	if (IS_ADLP_DISPLAY_STEP(dev_priv, STEP_A0, STEP_B0))
 		return adlp_step_a_plane_format_modifiers;
 	else if (gen12_plane_supports_mc_ccs(dev_priv, plane_id))
 		return gen12_plane_format_modifiers_mc_ccs;
@@ -2179,7 +2179,7 @@ skl_universal_plane_create(struct drm_i915_private *dev_priv,
 						BIT(DRM_SCALING_FILTER_DEFAULT) |
 						BIT(DRM_SCALING_FILTER_NEAREST_NEIGHBOR));
 
-	drm_plane_helper_add(&plane->base, &intel_plane_helper_funcs);
+	intel_plane_helper_add(plane);
 
 	return plane;
 

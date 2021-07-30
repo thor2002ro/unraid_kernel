@@ -59,6 +59,7 @@
 #include "display/intel_hdmi.h"
 #include "display/intel_lvds.h"
 #include "display/intel_sdvo.h"
+#include "display/intel_snps_phy.h"
 #include "display/intel_tv.h"
 #include "display/intel_vdsc.h"
 #include "display/intel_vrr.h"
@@ -975,7 +976,7 @@ void intel_enable_pipe(const struct intel_crtc_state *new_crtc_state)
 		/* FIXME: assert CPU port conditions for SNB+ */
 	}
 
-	/* Wa_22012358565:adlp */
+	/* Wa_22012358565:adl-p */
 	if (DISPLAY_VER(dev_priv) == 13)
 		intel_de_rmw(dev_priv, PIPE_ARB_CTL(pipe),
 			     0, PIPE_ARB_USE_PROG_SLOTS);
@@ -1034,6 +1035,10 @@ void intel_disable_pipe(const struct intel_crtc_state *old_crtc_state)
 	/* Don't disable pipe or pipe PLLs if needed */
 	if (!IS_I830(dev_priv))
 		val &= ~PIPECONF_ENABLE;
+
+	if (DISPLAY_VER(dev_priv) >= 12)
+		intel_de_rmw(dev_priv, CHICKEN_TRANS(cpu_transcoder),
+			     FECSTALL_DIS_DPTSTREAM_DPTTG, 0);
 
 	intel_de_write(dev_priv, reg, val);
 	if ((val & PIPECONF_ENABLE) == 0)
@@ -2204,8 +2209,26 @@ unlock:
 	clear_bit_unlock(I915_RESET_MODESET, &dev_priv->gt.reset.flags);
 }
 
-static void icl_set_pipe_chicken(struct intel_crtc *crtc)
+static bool underrun_recovery_supported(const struct intel_crtc_state *crtc_state)
 {
+	if (crtc_state->pch_pfit.enabled &&
+	    (crtc_state->pipe_src_w > drm_rect_width(&crtc_state->pch_pfit.dst) ||
+	     crtc_state->pipe_src_h > drm_rect_height(&crtc_state->pch_pfit.dst) ||
+	     crtc_state->output_format == INTEL_OUTPUT_FORMAT_YCBCR420))
+		return false;
+
+	if (crtc_state->dsc.compression_enable)
+		return false;
+
+	if (crtc_state->has_psr2)
+		return false;
+
+	return true;
+}
+
+static void icl_set_pipe_chicken(const struct intel_crtc_state *crtc_state)
+{
+	struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
 	struct drm_i915_private *dev_priv = to_i915(crtc->base.dev);
 	enum pipe pipe = crtc->pipe;
 	u32 tmp;
@@ -2226,19 +2249,19 @@ static void icl_set_pipe_chicken(struct intel_crtc *crtc)
 	 */
 	tmp |= PIXEL_ROUNDING_TRUNC_FB_PASSTHRU;
 
-	/*
-	 * "The underrun recovery mechanism should be disabled
-	 *  when the following is enabled for this pipe:
-	 *  WiDi
-	 *  Downscaling (this includes YUV420 fullblend)
-	 *  COG
-	 *  DSC
-	 *  PSR2"
-	 *
-	 * FIXME: enable whenever possible...
-	 */
-	if (IS_ALDERLAKE_P(dev_priv))
-		tmp |= UNDERRUN_RECOVERY_DISABLE;
+	if (IS_DG2(dev_priv)) {
+		/*
+		 * Underrun recovery must always be disabled on DG2.  However
+		 * the chicken bit meaning is inverted compared to other
+		 * platforms.
+		 */
+		tmp &= ~UNDERRUN_RECOVERY_ENABLE_DG2;
+	} else if (DISPLAY_VER(dev_priv) >= 13) {
+		if (underrun_recovery_supported(crtc_state))
+			tmp &= ~UNDERRUN_RECOVERY_DISABLE_ADLP;
+		else
+			tmp |= UNDERRUN_RECOVERY_DISABLE_ADLP;
+	}
 
 	intel_de_write(dev_priv, PIPE_CHICKEN(pipe), tmp);
 }
@@ -3188,6 +3211,28 @@ static void intel_encoders_enable(struct intel_atomic_state *state,
 	}
 }
 
+static void intel_encoders_pre_disable(struct intel_atomic_state *state,
+				       struct intel_crtc *crtc)
+{
+	const struct intel_crtc_state *old_crtc_state =
+		intel_atomic_get_old_crtc_state(state, crtc);
+	const struct drm_connector_state *old_conn_state;
+	struct drm_connector *conn;
+	int i;
+
+	for_each_old_connector_in_state(&state->base, conn, old_conn_state, i) {
+		struct intel_encoder *encoder =
+			to_intel_encoder(old_conn_state->best_encoder);
+
+		if (old_conn_state->crtc != &crtc->base)
+			continue;
+
+		if (encoder->pre_disable)
+			encoder->pre_disable(state, encoder, old_crtc_state,
+					     old_conn_state);
+	}
+}
+
 static void intel_encoders_disable(struct intel_atomic_state *state,
 				   struct intel_crtc *crtc)
 {
@@ -3471,7 +3516,8 @@ static void icl_ddi_bigjoiner_pre_enable(struct intel_atomic_state *state,
 		 * Enable sequence steps 1-7 on bigjoiner master
 		 */
 		intel_encoders_pre_pll_enable(state, master);
-		intel_enable_shared_dpll(master_crtc_state);
+		if (master_crtc_state->shared_dpll)
+			intel_enable_shared_dpll(master_crtc_state);
 		intel_encoders_pre_enable(state, master);
 
 		/* and DSC on slave */
@@ -3553,7 +3599,7 @@ static void hsw_crtc_enable(struct intel_atomic_state *state,
 	hsw_set_linetime_wm(new_crtc_state);
 
 	if (DISPLAY_VER(dev_priv) >= 11)
-		icl_set_pipe_chicken(crtc);
+		icl_set_pipe_chicken(new_crtc_state);
 
 	if (dev_priv->display.initial_watermarks)
 		dev_priv->display.initial_watermarks(state, crtc);
@@ -3693,6 +3739,13 @@ bool intel_phy_is_combo(struct drm_i915_private *dev_priv, enum phy phy)
 {
 	if (phy == PHY_NONE)
 		return false;
+	else if (IS_DG2(dev_priv))
+		/*
+		 * DG2 outputs labelled as "combo PHY" in the bspec use
+		 * SNPS PHYs with completely different programming,
+		 * hence we always return false here.
+		 */
+		return false;
 	else if (IS_ALDERLAKE_S(dev_priv))
 		return phy <= PHY_E;
 	else if (IS_DG1(dev_priv) || IS_ROCKETLAKE(dev_priv))
@@ -3707,7 +3760,10 @@ bool intel_phy_is_combo(struct drm_i915_private *dev_priv, enum phy phy)
 
 bool intel_phy_is_tc(struct drm_i915_private *dev_priv, enum phy phy)
 {
-	if (IS_ALDERLAKE_P(dev_priv))
+	if (IS_DG2(dev_priv))
+		/* DG2's "TC1" output uses a SNPS PHY */
+		return false;
+	else if (IS_ALDERLAKE_P(dev_priv))
 		return phy >= PHY_F && phy <= PHY_I;
 	else if (IS_TIGERLAKE(dev_priv))
 		return phy >= PHY_D && phy <= PHY_I;
@@ -3715,6 +3771,20 @@ bool intel_phy_is_tc(struct drm_i915_private *dev_priv, enum phy phy)
 		return phy >= PHY_C && phy <= PHY_F;
 	else
 		return false;
+}
+
+bool intel_phy_is_snps(struct drm_i915_private *dev_priv, enum phy phy)
+{
+	if (phy == PHY_NONE)
+		return false;
+	else if (IS_DG2(dev_priv))
+		/*
+		 * All four "combo" ports and the TC1 port (PHY E) use
+		 * Synopsis PHYs.
+		 */
+		return phy <= PHY_E;
+
+	return false;
 }
 
 enum phy intel_port_to_phy(struct drm_i915_private *i915, enum port port)
@@ -8630,10 +8700,11 @@ intel_pipe_config_compare(const struct intel_crtc_state *current_config,
 
 	PIPE_CONF_CHECK_BOOL(double_wide);
 
-	PIPE_CONF_CHECK_P(shared_dpll);
+	if (dev_priv->dpll.mgr)
+		PIPE_CONF_CHECK_P(shared_dpll);
 
 	/* FIXME do the readout properly and get rid of this quirk */
-	if (!PIPE_CONF_QUIRK(PIPE_CONFIG_QUIRK_BIGJOINER_SLAVE)) {
+	if (dev_priv->dpll.mgr && !PIPE_CONF_QUIRK(PIPE_CONFIG_QUIRK_BIGJOINER_SLAVE)) {
 		PIPE_CONF_CHECK_X(dpll_hw_state.dpll);
 		PIPE_CONF_CHECK_X(dpll_hw_state.dpll_md);
 		PIPE_CONF_CHECK_X(dpll_hw_state.fp0);
@@ -8665,7 +8736,9 @@ intel_pipe_config_compare(const struct intel_crtc_state *current_config,
 		PIPE_CONF_CHECK_X(dpll_hw_state.mg_pll_ssc);
 		PIPE_CONF_CHECK_X(dpll_hw_state.mg_pll_bias);
 		PIPE_CONF_CHECK_X(dpll_hw_state.mg_pll_tdc_coldst_bias);
+	}
 
+	if (!PIPE_CONF_QUIRK(PIPE_CONFIG_QUIRK_BIGJOINER_SLAVE)) {
 		PIPE_CONF_CHECK_X(dsi_pll.ctrl);
 		PIPE_CONF_CHECK_X(dsi_pll.div);
 
@@ -9003,6 +9076,10 @@ verify_crtc_state(struct intel_crtc *crtc,
 	if (!new_crtc_state->hw.active)
 		return;
 
+	if (new_crtc_state->bigjoiner_slave)
+		/* No PLLs set for slave */
+		pipe_config->shared_dpll = NULL;
+
 	intel_pipe_config_sanity_check(dev_priv, pipe_config);
 
 	if (!intel_pipe_config_compare(new_crtc_state,
@@ -9106,6 +9183,55 @@ verify_shared_dpll_state(struct intel_crtc *crtc,
 }
 
 static void
+verify_mpllb_state(struct intel_atomic_state *state,
+		   struct intel_crtc_state *new_crtc_state)
+{
+	struct drm_i915_private *i915 = to_i915(state->base.dev);
+	struct intel_mpllb_state mpllb_hw_state = { 0 };
+	struct intel_mpllb_state *mpllb_sw_state = &new_crtc_state->mpllb_state;
+	struct intel_crtc *crtc = to_intel_crtc(new_crtc_state->uapi.crtc);
+	struct intel_encoder *encoder;
+
+	if (!IS_DG2(i915))
+		return;
+
+	if (!new_crtc_state->hw.active)
+		return;
+
+	if (new_crtc_state->bigjoiner_slave)
+		return;
+
+	encoder = intel_get_crtc_new_encoder(state, new_crtc_state);
+	intel_mpllb_readout_hw_state(encoder, &mpllb_hw_state);
+
+#define MPLLB_CHECK(name) do { \
+	if (mpllb_sw_state->name != mpllb_hw_state.name) { \
+		pipe_config_mismatch(false, crtc, "MPLLB:" __stringify(name), \
+				     "(expected 0x%08x, found 0x%08x)", \
+				     mpllb_sw_state->name, \
+				     mpllb_hw_state.name); \
+	} \
+} while (0)
+
+	MPLLB_CHECK(mpllb_cp);
+	MPLLB_CHECK(mpllb_div);
+	MPLLB_CHECK(mpllb_div2);
+	MPLLB_CHECK(mpllb_fracn1);
+	MPLLB_CHECK(mpllb_fracn2);
+	MPLLB_CHECK(mpllb_sscen);
+	MPLLB_CHECK(mpllb_sscstep);
+
+	/*
+	 * ref_control is handled by the hardware/firemware and never
+	 * programmed by the software, but the proper values are supplied
+	 * in the bspec for verification purposes.
+	 */
+	MPLLB_CHECK(ref_control);
+
+#undef MPLLB_CHECK
+}
+
+static void
 intel_modeset_verify_crtc(struct intel_crtc *crtc,
 			  struct intel_atomic_state *state,
 			  struct intel_crtc_state *old_crtc_state,
@@ -9118,6 +9244,7 @@ intel_modeset_verify_crtc(struct intel_crtc *crtc,
 	verify_connector_state(state, crtc);
 	verify_crtc_state(crtc, old_crtc_state, new_crtc_state);
 	verify_shared_dpll_state(crtc, old_crtc_state, new_crtc_state);
+	verify_mpllb_state(state, new_crtc_state);
 }
 
 static void
@@ -10154,7 +10281,7 @@ static void intel_pipe_fastset(const struct intel_crtc_state *old_crtc_state,
 		hsw_set_linetime_wm(new_crtc_state);
 
 	if (DISPLAY_VER(dev_priv) >= 11)
-		icl_set_pipe_chicken(crtc);
+		icl_set_pipe_chicken(new_crtc_state);
 }
 
 static void commit_pipe_pre_planes(struct intel_atomic_state *state,
@@ -10287,6 +10414,8 @@ static void intel_old_crtc_state_disables(struct intel_atomic_state *state,
 	struct drm_i915_private *dev_priv = to_i915(state->base.dev);
 
 	drm_WARN_ON(&dev_priv->drm, old_crtc_state->bigjoiner_slave);
+
+	intel_encoders_pre_disable(state, crtc);
 
 	intel_crtc_disable_planes(state, crtc);
 
@@ -11322,7 +11451,12 @@ static void intel_setup_outputs(struct drm_i915_private *dev_priv)
 	if (!HAS_DISPLAY(dev_priv))
 		return;
 
-	if (IS_ALDERLAKE_P(dev_priv)) {
+	if (IS_DG2(dev_priv)) {
+		intel_ddi_init(dev_priv, PORT_A);
+		intel_ddi_init(dev_priv, PORT_B);
+		intel_ddi_init(dev_priv, PORT_C);
+		intel_ddi_init(dev_priv, PORT_D_XELPD);
+	} else if (IS_ALDERLAKE_P(dev_priv)) {
 		intel_ddi_init(dev_priv, PORT_A);
 		intel_ddi_init(dev_priv, PORT_B);
 		intel_ddi_init(dev_priv, PORT_TC1);
@@ -13153,6 +13287,24 @@ static void intel_early_display_was(struct drm_i915_private *dev_priv)
 		intel_de_rmw(dev_priv, CHICKEN_MISC_2,
 			     KBL_ARB_FILL_SPARE_13 | KBL_ARB_FILL_SPARE_14,
 			     KBL_ARB_FILL_SPARE_14);
+	}
+
+	if (IS_ADLP_DISPLAY_STEP(dev_priv, STEP_A0, STEP_B0)) {
+		u32 val;
+
+		/*
+		 * Wa_16011069516:adl-p[a0]
+		 *
+		 * All CMTG regs are unreliable until CMTG clock gating is
+		 * disabled, so we can only assume the default CMTG_CHICKEN
+		 * reg value and sanity check this assumption with a double
+		 * read, which presumably returns the correct value even with
+		 * clock gating on.
+		 */
+		val = intel_de_read(dev_priv, TRANS_CMTG_CHICKEN);
+		val = intel_de_read(dev_priv, TRANS_CMTG_CHICKEN);
+		intel_de_write(dev_priv, TRANS_CMTG_CHICKEN, DISABLE_DPT_CLK_GATING);
+		drm_WARN_ON(&dev_priv->drm, val & ~DISABLE_DPT_CLK_GATING);
 	}
 }
 
