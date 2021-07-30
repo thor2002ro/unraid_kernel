@@ -95,9 +95,6 @@ void _8051Reset88E(struct adapter *padapter)
 
 void rtl8188e_InitializeFirmwareVars(struct adapter *padapter)
 {
-	/*  Init Fw LPS related. */
-	padapter->pwrctrlpriv.bFwCurrentInPSMode = false;
-
 	/*  Init H2C counter. by tynli. 2009.12.09. */
 	padapter->HalData->LastHMEBoxNum = 0;
 }
@@ -168,14 +165,14 @@ void rtw_hal_notch_filter(struct adapter *adapter, bool enable)
 static s32 _LLTWrite(struct adapter *padapter, u32 address, u32 data)
 {
 	s32	status = _SUCCESS;
-	s32	count = 0;
+	s32	count;
 	u32	value = _LLT_INIT_ADDR(address) | _LLT_INIT_DATA(data) | _LLT_OP(_LLT_WRITE_ACCESS);
 	u16	LLTReg = REG_LLT_INIT;
 
 	usb_write32(padapter, LLTReg, value);
 
 	/* polling */
-	do {
+	for (count = 0; ; count++) {
 		value = usb_read32(padapter, LLTReg);
 		if (_LLT_OP_VALUE(value) == _LLT_NO_ACTIVE)
 			break;
@@ -185,7 +182,7 @@ static s32 _LLTWrite(struct adapter *padapter, u32 address, u32 data)
 			break;
 		}
 		udelay(5);
-	} while (count++);
+	}
 
 	return status;
 }
@@ -226,12 +223,6 @@ s32 InitLLTTable(struct adapter *padapter, u8 txpktbuf_bndy)
 	}
 
 	return status;
-}
-
-void Hal_InitPGData88E(struct adapter *padapter)
-{
-	if (!is_boot_from_eeprom(padapter))
-		EFUSE_ShadowMapUpdate(padapter);
 }
 
 void Hal_EfuseParseIDCode88E(struct adapter *padapter, u8 *hwinfo)
@@ -461,7 +452,6 @@ void rtl8188e_EfuseParseChnlPlan(struct adapter *padapter, u8 *hwinfo, bool Auto
 		 hal_com_get_channel_plan(hwinfo ? hwinfo[EEPROM_ChannelPlan_88E] : 0xFF,
 					  padapter->registrypriv.channel_plan,
 					  RT_CHANNEL_DOMAIN_WORLD_WIDE_13, AutoLoadFail);
-
 }
 
 void Hal_EfuseParseCustomerID88E(struct adapter *padapter, u8 *hwinfo, bool AutoLoadFail)
@@ -517,7 +507,6 @@ void Hal_ReadThermalMeter_88E(struct adapter *Adapter, u8 *PROMContent, bool Aut
 	else
 		pHalData->EEPROMThermalMeter = EEPROM_Default_ThermalMeter_88E;
 
-	if (pHalData->EEPROMThermalMeter == 0xff || AutoloadFail) {
+	if (pHalData->EEPROMThermalMeter == 0xff || AutoloadFail)
 		pHalData->EEPROMThermalMeter = EEPROM_Default_ThermalMeter_88E;
-	}
 }

@@ -34,12 +34,13 @@ properties:
 
   interrupt-controller: true
 
-  gpios:
+  interrupts:
     maxItems: 1
-    description: GPIO used for IRQs
 
   regulators:
     type: object
+
+    additionalProperties: false
 
     properties:
       '#address-cells':
@@ -49,10 +50,12 @@ properties:
         const: 0
 
     patternProperties:
-      '^ldo[0-9]+@[0-9a-f]$':
+      '^ldo[0-9]+$':
         type: object
 
         $ref: "/schemas/regulator/regulator.yaml#"
+
+        unevaluatedProperties: false
 
 required:
   - compatible
@@ -63,69 +66,69 @@ additionalProperties: false
 
 examples:
   - |
-    /* pmic properties */
 
     pmic: pmic@0 {
-      compatible = "hisilicon,hi6421-spmi";
+      compatible = "hisilicon,hi6421v600-spmi";
       reg = <0 0>;
 
       #interrupt-cells = <2>;
       interrupt-controller;
-      gpios = <&gpio28 0 0>;
+      interrupt-parent = <&gpio28>;
+      interrupts = <0 0>;
 
       regulators {
         #address-cells = <1>;
         #size-cells = <0>;
 
-        ldo3: LDO3 {
+        ldo3: ldo3 {
           regulator-name = "ldo3";
           regulator-min-microvolt = <1500000>;
           regulator-max-microvolt = <2000000>;
           regulator-boot-on;
         };
 
-        ldo4: LDO4 {
+        ldo4: ldo4 {
           regulator-name = "ldo4";
           regulator-min-microvolt = <1725000>;
           regulator-max-microvolt = <1900000>;
           regulator-boot-on;
         };
 
-        ldo9: LDO9 {
+        ldo9: ldo9 {
           regulator-name = "ldo9";
           regulator-min-microvolt = <1750000>;
           regulator-max-microvolt = <3300000>;
           regulator-boot-on;
         };
 
-        ldo15: LDO15 {
+        ldo15: ldo15 {
           regulator-name = "ldo15";
           regulator-min-microvolt = <1800000>;
           regulator-max-microvolt = <3000000>;
           regulator-always-on;
         };
 
-        ldo16: LDO16 {
+        ldo16: ldo16 {
           regulator-name = "ldo16";
           regulator-min-microvolt = <1800000>;
           regulator-max-microvolt = <3000000>;
           regulator-boot-on;
         };
 
-        ldo17: LDO17 {
+        ldo17: ldo17 {
           regulator-name = "ldo17";
           regulator-min-microvolt = <2500000>;
           regulator-max-microvolt = <3300000>;
         };
 
-        ldo33: LDO33 {
+        ldo33: ldo33 {
           regulator-name = "ldo33";
           regulator-min-microvolt = <2500000>;
           regulator-max-microvolt = <3300000>;
           regulator-boot-on;
         };
 
-        ldo34: LDO34 {
+        ldo34: ldo34 {
           regulator-name = "ldo34";
           regulator-min-microvolt = <2600000>;
           regulator-max-microvolt = <3300000>;

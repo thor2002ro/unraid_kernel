@@ -88,8 +88,7 @@ u32 rtw_hal_power_on(struct adapter *adapt)
 	if (adapt->HalData->bMacPwrCtrlOn)
 		return _SUCCESS;
 
-	if (!rtl88eu_pwrseqcmdparsing(adapt, PWR_CUT_ALL_MSK,
-				      Rtl8188E_NIC_PWR_ON_FLOW))
+	if (!rtl88eu_pwrseqcmdparsing(adapt, Rtl8188E_NIC_PWR_ON_FLOW))
 		return _FAIL;
 
 	/*  Enable MAC DMA/WMAC/SCHEDULE/SEC block */
@@ -119,11 +118,9 @@ static void _InitInterrupt(struct adapter *Adapter)
 	/*  HIMR - */
 	imr = IMR_PSTIMEOUT_88E | IMR_TBDER_88E | IMR_CPWM_88E | IMR_CPWM2_88E;
 	usb_write32(Adapter, REG_HIMR_88E, imr);
-	Adapter->HalData->IntrMask[0] = imr;
 
 	imr_ex = IMR_TXERR_88E | IMR_RXERR_88E | IMR_TXFOVW_88E | IMR_RXFOVW_88E;
 	usb_write32(Adapter, REG_HIMRE_88E, imr_ex);
-	Adapter->HalData->IntrMask[1] = imr_ex;
 
 	/*  REG_USB_SPECIAL_OPTION - BIT(4) */
 	/*  0; Use interrupt endpoint to upload interrupt pkt */
@@ -518,26 +515,6 @@ static void usb_AggSettingRxUpdate(struct adapter *Adapter)
 		/*  TODO: */
 		break;
 	}
-
-	switch (PBP_128) {
-	case PBP_128:
-		haldata->HwRxPageSize = 128;
-		break;
-	case PBP_64:
-		haldata->HwRxPageSize = 64;
-		break;
-	case PBP_256:
-		haldata->HwRxPageSize = 256;
-		break;
-	case PBP_512:
-		haldata->HwRxPageSize = 512;
-		break;
-	case PBP_1024:
-		haldata->HwRxPageSize = 1024;
-		break;
-	default:
-		break;
-	}
 }	/*  usb_AggSettingRxUpdate */
 
 static void InitUsbAggregationSetting(struct adapter *Adapter)
@@ -564,8 +541,6 @@ static void _InitBeaconParameters(struct adapter *Adapter)
 	/*  beacause test chip does not contension before sending beacon. by tynli. 2009.11.03 */
 	usb_write16(Adapter, REG_BCNTCFG, 0x660F);
 
-	haldata->RegBcnCtrlVal = usb_read8(Adapter, REG_BCN_CTRL);
-	haldata->RegTxPause = usb_read8(Adapter, REG_TXPAUSE);
 	haldata->RegFwHwTxQCtrl = usb_read8(Adapter, REG_FWHW_TXQ_CTRL + 2);
 	haldata->RegReg542 = usb_read8(Adapter, REG_TBTT_PROHIBIT + 2);
 	haldata->RegCR_1 = usb_read8(Adapter, REG_CR + 1);
@@ -642,9 +617,8 @@ u32 rtl8188eu_hal_init(struct adapter *Adapter)
 	}
 
 	status = rtw_hal_power_on(Adapter);
-	if (status == _FAIL) {
+	if (status == _FAIL)
 		goto exit;
-	}
 
 	/*  Save target channel */
 	haldata->CurrentChannel = 6;/* default set to 6 */
@@ -684,7 +658,7 @@ u32 rtl8188eu_hal_init(struct adapter *Adapter)
 	}
 	rtl8188e_InitializeFirmwareVars(Adapter);
 
-	rtl88eu_phy_mac_config(Adapter);
+	phy_mac_config(Adapter);
 
 	rtl88eu_phy_bb_config(Adapter);
 
@@ -697,9 +671,8 @@ u32 rtl8188eu_hal_init(struct adapter *Adapter)
 	_InitTxBufferBoundary(Adapter, txpktbuf_bndy);
 
 	status =  InitLLTTable(Adapter, txpktbuf_bndy);
-	if (status == _FAIL) {
+	if (status == _FAIL)
 		goto exit;
-	}
 
 	/*  Get Rx PHY status in order to report RSSI and others. */
 	_InitDriverInfoSize(Adapter, DRVINFO_SZ);
@@ -830,8 +803,7 @@ static void CardDisableRTL8188EU(struct adapter *Adapter)
 	usb_write8(Adapter, REG_CR, 0x0);
 
 	/*  Run LPS WL RFOFF flow */
-	rtl88eu_pwrseqcmdparsing(Adapter, PWR_CUT_ALL_MSK,
-				 Rtl8188E_NIC_LPS_ENTER_FLOW);
+	rtl88eu_pwrseqcmdparsing(Adapter, Rtl8188E_NIC_LPS_ENTER_FLOW);
 
 	/*  2. 0x1F[7:0] = 0		turn off RF */
 
@@ -852,8 +824,7 @@ static void CardDisableRTL8188EU(struct adapter *Adapter)
 	usb_write8(Adapter, REG_32K_CTRL, val8 & (~BIT(0)));
 
 	/*  Card disable power action flow */
-	rtl88eu_pwrseqcmdparsing(Adapter, PWR_CUT_ALL_MSK,
-				 Rtl8188E_NIC_DISABLE_FLOW);
+	rtl88eu_pwrseqcmdparsing(Adapter, Rtl8188E_NIC_DISABLE_FLOW);
 
 	/*  Reset MCU IO Wrapper */
 	val8 = usb_read8(Adapter, REG_RSV_CTRL + 1);
@@ -955,19 +926,16 @@ static void Hal_EfuseParsePIDVID_8188EU(struct adapter *adapt, u8 *hwinfo, bool 
 	}
 }
 
-static void Hal_EfuseParseMACAddr_8188EU(struct adapter *adapt, u8 *hwinfo, bool AutoLoadFail)
+static void Hal_EfuseParseMACAddr_8188EU(struct adapter *adapt)
 {
-	u16 i;
-	u8 sMacAddr[6] = {0x00, 0xE0, 0x4C, 0x81, 0x88, 0x02};
+	u8 sMacAddr[] = {0x00, 0xE0, 0x4C, 0x81, 0x88, 0x02};
 	struct eeprom_priv *eeprom = GET_EEPROM_EFUSE_PRIV(adapt);
+	u8 *hwinfo = eeprom->efuse_eeprom_data;
 
-	if (AutoLoadFail) {
-		for (i = 0; i < 6; i++)
-			eeprom->mac_addr[i] = sMacAddr[i];
-	} else {
-		/* Read Permanent MAC address */
+	if (eeprom->bautoload_fail_flag)
+		memcpy(eeprom->mac_addr, sMacAddr, sizeof(sMacAddr));
+	else
 		memcpy(eeprom->mac_addr, &hwinfo[EEPROM_MAC_ADDR_88EU], ETH_ALEN);
-	}
 }
 
 static void readAdapterInfo_8188EU(struct adapter *adapt)
@@ -977,7 +945,7 @@ static void readAdapterInfo_8188EU(struct adapter *adapt)
 	/* parse the eeprom/efuse content */
 	Hal_EfuseParseIDCode88E(adapt, eeprom->efuse_eeprom_data);
 	Hal_EfuseParsePIDVID_8188EU(adapt, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
-	Hal_EfuseParseMACAddr_8188EU(adapt, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
+	Hal_EfuseParseMACAddr_8188EU(adapt);
 
 	Hal_ReadPowerSavingMode88E(adapt, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
 	Hal_ReadTxPowerInfo88E(adapt, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
@@ -990,28 +958,17 @@ static void readAdapterInfo_8188EU(struct adapter *adapt)
 	Hal_ReadThermalMeter_88E(adapt, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
 }
 
-static void _ReadPROMContent(struct adapter *Adapter)
-{
-	struct eeprom_priv *eeprom = GET_EEPROM_EFUSE_PRIV(Adapter);
-	u8 eeValue;
-
-	/* check system boot selection */
-	eeValue = usb_read8(Adapter, REG_9346CR);
-	eeprom->EepromOrEfuse		= (eeValue & BOOT_FROM_EEPROM) ? true : false;
-	eeprom->bautoload_fail_flag	= (eeValue & EEPROM_EN) ? false : true;
-
-	Hal_InitPGData88E(Adapter);
-	readAdapterInfo_8188EU(Adapter);
-}
-
 void rtw_hal_read_chip_info(struct adapter *Adapter)
 {
-	_ReadPROMContent(Adapter);
-}
+	struct eeprom_priv *eeprom = GET_EEPROM_EFUSE_PRIV(Adapter);
+	u8 eeValue = usb_read8(Adapter, REG_9346CR);
 
-#define GPIO_DEBUG_PORT_NUM 0
-static void rtl8192cu_trigger_gpio_0(struct adapter *adapt)
-{
+	eeprom->bautoload_fail_flag = (eeValue & EEPROM_EN) ? false : true;
+
+	if (eeValue & BOOT_FROM_EEPROM)
+		EFUSE_ShadowMapUpdate(Adapter);
+
+	readAdapterInfo_8188EU(Adapter);
 }
 
 static void ResumeTxBeacon(struct adapter *adapt)
@@ -1149,15 +1106,6 @@ void rtw_hal_set_hwreg(struct adapter *Adapter, u8 variable, u8 *val)
 			usb_write8(Adapter, MSR, val8);
 		}
 		break;
-	case HW_VAR_MEDIA_STATUS1:
-		{
-			u8 val8;
-
-			val8 = usb_read8(Adapter, MSR) & 0x03;
-			val8 |= *((u8 *)val) << 2;
-			usb_write8(Adapter, MSR, val8);
-		}
-		break;
 	case HW_VAR_SET_OPMODE:
 		hw_var_set_opmode(Adapter, variable, val);
 		break;
@@ -1200,9 +1148,6 @@ void rtw_hal_set_hwreg(struct adapter *Adapter, u8 variable, u8 *val)
 			/*  Ziv - Check */
 			usb_write8(Adapter, REG_INIRTS_RATE_SEL, RateIndex);
 		}
-		break;
-	case HW_VAR_TXPAUSE:
-		usb_write8(Adapter, REG_TXPAUSE, *((u8 *)val));
 		break;
 	case HW_VAR_BCN_FUNC:
 		hw_var_set_bcn_func(Adapter, variable, val);
@@ -1557,9 +1502,6 @@ void rtw_hal_set_hwreg(struct adapter *Adapter, u8 variable, u8 *val)
 			}
 		}
 		break;
-	case HW_VAR_TRIGGER_GPIO_0:
-		rtl8192cu_trigger_gpio_0(Adapter);
-		break;
 	case HW_VAR_RPT_TIMER_SETTING:
 		{
 			u16 min_rpt_time = (*(u16 *)val);
@@ -1639,9 +1581,6 @@ void rtw_hal_get_hwreg(struct adapter *Adapter, u8 variable, u8 *val)
 	case HW_VAR_BASIC_RATE:
 		*((u16 *)(val)) = Adapter->HalData->BasicRateSet;
 		fallthrough;
-	case HW_VAR_TXPAUSE:
-		val[0] = usb_read8(Adapter, REG_TXPAUSE);
-		break;
 	case HW_VAR_BCN_VALID:
 		/* BCN_VALID, BIT16 of REG_TDECTRL = BIT0 of REG_TDECTRL+2 */
 		val[0] = (BIT(0) & usb_read8(Adapter, REG_TDECTRL + 2)) ? true : false;
