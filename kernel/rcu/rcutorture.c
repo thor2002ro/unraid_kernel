@@ -2022,8 +2022,13 @@ static int rcu_torture_stall(void *args)
 			  __func__, raw_smp_processor_id());
 		while (ULONG_CMP_LT((unsigned long)ktime_get_seconds(),
 				    stop_at))
-			if (stall_cpu_block)
+			if (stall_cpu_block) {
+#ifdef CONFIG_PREEMPTION
+				preempt_schedule();
+#else
 				schedule_timeout_uninterruptible(HZ);
+#endif
+			}
 		if (stall_cpu_irqsoff)
 			local_irq_enable();
 		else if (!stall_cpu_block)
@@ -2444,7 +2449,7 @@ static int __init rcu_torture_fwd_prog_init(void)
 	}
 	if (stall_cpu > 0) {
 		VERBOSE_TOROUT_STRING("rcu_torture_fwd_prog_init: Disabled, conflicts with CPU-stall testing");
-		if (IS_MODULE(CONFIG_RCU_TORTURE_TESTS))
+		if (IS_MODULE(CONFIG_RCU_TORTURE_TEST))
 			return -EINVAL; /* In module, can fail back to user. */
 		WARN_ON(1); /* Make sure rcutorture notices conflict. */
 		return 0;
