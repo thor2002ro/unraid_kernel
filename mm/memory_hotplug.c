@@ -741,13 +741,15 @@ static void auto_movable_stats_account_zone(struct auto_movable_stats *stats,
 	if (zone_idx(zone) == ZONE_MOVABLE) {
 		stats->movable_pages += zone->present_pages;
 	} else {
+		stats->kernel_early_pages += zone->present_early_pages;
+#ifdef CONFIG_CMA
 		/*
 		 * CMA pages (never on hotplugged memory) behave like
 		 * ZONE_MOVABLE.
 		 */
 		stats->movable_pages += zone->cma_pages;
-		stats->kernel_early_pages += zone->present_early_pages;
 		stats->kernel_early_pages -= zone->cma_pages;
+#endif /* CONFIG_CMA */
 	}
 }
 
