@@ -575,7 +575,7 @@ soc15_asic_reset_method(struct amdgpu_device *adev)
 		baco_reset = amdgpu_dpm_is_baco_supported(adev);
 		break;
 	case CHIP_VEGA20:
-		if (adev->psp.sos_fw_version >= 0x80067)
+		if (adev->psp.sos.fw_version >= 0x80067)
 			baco_reset = amdgpu_dpm_is_baco_supported(adev);
 
 		/*
@@ -635,7 +635,7 @@ static bool soc15_supports_baco(struct amdgpu_device *adev)
 	case CHIP_ARCTURUS:
 		return amdgpu_dpm_is_baco_supported(adev);
 	case CHIP_VEGA20:
-		if (adev->psp.sos_fw_version >= 0x80067)
+		if (adev->psp.sos.fw_version >= 0x80067)
 			return amdgpu_dpm_is_baco_supported(adev);
 		return false;
 	default:
@@ -1275,7 +1275,8 @@ static int soc15_common_early_init(void *handle)
 
 			adev->pg_flags = AMD_PG_SUPPORT_SDMA |
 				AMD_PG_SUPPORT_MMHUB |
-				AMD_PG_SUPPORT_VCN;
+				AMD_PG_SUPPORT_VCN |
+				AMD_PG_SUPPORT_VCN_DPG;
 		} else {
 			adev->cg_flags = AMD_CG_SUPPORT_GFX_MGCG |
 				AMD_CG_SUPPORT_GFX_MGLS |
