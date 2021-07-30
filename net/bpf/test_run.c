@@ -951,7 +951,10 @@ int bpf_prog_test_run_syscall(struct bpf_prog *prog,
 			goto out;
 		}
 	}
+
+	rcu_read_lock();
 	retval = bpf_prog_run_pin_on_cpu(prog, ctx);
+	rcu_read_unlock();
 
 	if (copy_to_user(&uattr->test.retval, &retval, sizeof(u32))) {
 		err = -EFAULT;
