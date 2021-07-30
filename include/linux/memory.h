@@ -28,6 +28,10 @@ struct memory_group {
 	int nid;
 	/* References from memory blocks + 1. */
 	refcount_t refcount;
+	/* Present (online) memory outside ZONE_MOVABLE of this memory group. */
+	unsigned long present_kernel_pages;
+	/* Present (online) memory in ZONE_MOVABLE of this memory group. */
+	unsigned long present_movable_pages;
 	/*
 	 * Memory group type: static vs. dynamic.
 	 *
