@@ -7,6 +7,7 @@
 
 #include <linux/clk.h>
 #include <linux/etherdevice.h>
+#include <linux/if_bridge.h>
 #include <linux/if_vlan.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
@@ -1479,7 +1480,7 @@ static const struct net_device_ops am65_cpsw_nuss_netdev_ops = {
 	.ndo_tx_timeout		= am65_cpsw_nuss_ndo_host_tx_timeout,
 	.ndo_vlan_rx_add_vid	= am65_cpsw_nuss_ndo_slave_add_vid,
 	.ndo_vlan_rx_kill_vid	= am65_cpsw_nuss_ndo_slave_kill_vid,
-	.ndo_do_ioctl		= am65_cpsw_nuss_ndo_slave_ioctl,
+	.ndo_eth_ioctl		= am65_cpsw_nuss_ndo_slave_ioctl,
 	.ndo_setup_tc           = am65_cpsw_qos_ndo_setup_tc,
 	.ndo_get_devlink_port   = am65_cpsw_ndo_get_devlink_port,
 };
@@ -2077,10 +2078,13 @@ bool am65_cpsw_port_dev_check(const struct net_device *ndev)
 	return false;
 }
 
-static int am65_cpsw_netdevice_port_link(struct net_device *ndev, struct net_device *br_ndev)
+static int am65_cpsw_netdevice_port_link(struct net_device *ndev,
+					 struct net_device *br_ndev,
+					 struct netlink_ext_ack *extack)
 {
 	struct am65_cpsw_common *common = am65_ndev_to_common(ndev);
 	struct am65_cpsw_ndev_priv *priv = am65_ndev_to_priv(ndev);
+	int err;
 
 	if (!common->br_members) {
 		common->hw_bridge_dev = br_ndev;
@@ -2091,6 +2095,11 @@ static int am65_cpsw_netdevice_port_link(struct net_device *ndev, struct net_dev
 		if (common->hw_bridge_dev != br_ndev)
 			return -EOPNOTSUPP;
 	}
+
+	err = switchdev_bridge_port_offload(ndev, ndev, NULL, NULL, NULL,
+					    false, extack);
+	if (err)
+		return err;
 
 	common->br_members |= BIT(priv->port->port_id);
 
@@ -2104,6 +2113,8 @@ static void am65_cpsw_netdevice_port_unlink(struct net_device *ndev)
 	struct am65_cpsw_common *common = am65_ndev_to_common(ndev);
 	struct am65_cpsw_ndev_priv *priv = am65_ndev_to_priv(ndev);
 
+	switchdev_bridge_port_unoffload(ndev, NULL, NULL, NULL);
+
 	common->br_members &= ~BIT(priv->port->port_id);
 
 	am65_cpsw_port_offload_fwd_mark_update(common);
@@ -2116,6 +2127,7 @@ static void am65_cpsw_netdevice_port_unlink(struct net_device *ndev)
 static int am65_cpsw_netdevice_event(struct notifier_block *unused,
 				     unsigned long event, void *ptr)
 {
+	struct netlink_ext_ack *extack = netdev_notifier_info_to_extack(ptr);
 	struct net_device *ndev = netdev_notifier_info_to_dev(ptr);
 	struct netdev_notifier_changeupper_info *info;
 	int ret = NOTIFY_DONE;
@@ -2129,7 +2141,9 @@ static int am65_cpsw_netdevice_event(struct notifier_block *unused,
 
 		if (netif_is_bridge_master(info->upper_dev)) {
 			if (info->linking)
-				ret = am65_cpsw_netdevice_port_link(ndev, info->upper_dev);
+				ret = am65_cpsw_netdevice_port_link(ndev,
+								    info->upper_dev,
+								    extack);
 			else
 				am65_cpsw_netdevice_port_unlink(ndev);
 		}
@@ -2384,21 +2398,6 @@ static const struct devlink_param am65_cpsw_devlink_params[] = {
 			     am65_cpsw_dl_switch_mode_set, NULL),
 };
 
-static void am65_cpsw_unregister_devlink_ports(struct am65_cpsw_common *common)
-{
-	struct devlink_port *dl_port;
-	struct am65_cpsw_port *port;
-	int i;
-
-	for (i = 1; i <= common->port_num; i++) {
-		port = am65_common_get_port(common, i);
-		dl_port = &port->devlink_port;
-
-		if (dl_port->registered)
-			devlink_port_unregister(dl_port);
-	}
-}
-
 static int am65_cpsw_nuss_register_devlink(struct am65_cpsw_common *common)
 {
 	struct devlink_port_attrs attrs = {};
@@ -2460,7 +2459,12 @@ static int am65_cpsw_nuss_register_devlink(struct am65_cpsw_common *common)
 	return ret;
 
 dl_port_unreg:
-	am65_cpsw_unregister_devlink_ports(common);
+	for (i = i - 1; i >= 1; i--) {
+		port = am65_common_get_port(common, i);
+		dl_port = &port->devlink_port;
+
+		devlink_port_unregister(dl_port);
+	}
 dl_unreg:
 	devlink_unregister(common->devlink);
 dl_free:
@@ -2471,6 +2475,17 @@ dl_free:
 
 static void am65_cpsw_unregister_devlink(struct am65_cpsw_common *common)
 {
+	struct devlink_port *dl_port;
+	struct am65_cpsw_port *port;
+	int i;
+
+	for (i = 1; i <= common->port_num; i++) {
+		port = am65_common_get_port(common, i);
+		dl_port = &port->devlink_port;
+
+		devlink_port_unregister(dl_port);
+	}
+
 	if (!AM65_CPSW_IS_CPSW2G(common) &&
 	    IS_ENABLED(CONFIG_TI_K3_AM65_CPSW_SWITCHDEV)) {
 		devlink_params_unpublish(common->devlink);
@@ -2478,7 +2493,6 @@ static void am65_cpsw_unregister_devlink(struct am65_cpsw_common *common)
 					  ARRAY_SIZE(am65_cpsw_devlink_params));
 	}
 
-	am65_cpsw_unregister_devlink_ports(common);
 	devlink_unregister(common->devlink);
 	devlink_free(common->devlink);
 }

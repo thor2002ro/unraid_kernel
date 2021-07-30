@@ -1577,20 +1577,10 @@ reset:
 #endif
 }
 
-int tcf_classify(struct sk_buff *skb, const struct tcf_proto *tp,
+int tcf_classify(struct sk_buff *skb,
+		 const struct tcf_block *block,
+		 const struct tcf_proto *tp,
 		 struct tcf_result *res, bool compat_mode)
-{
-	u32 last_executed_chain = 0;
-
-	return __tcf_classify(skb, tp, tp, res, compat_mode,
-			      &last_executed_chain);
-}
-EXPORT_SYMBOL(tcf_classify);
-
-int tcf_classify_ingress(struct sk_buff *skb,
-			 const struct tcf_block *ingress_block,
-			 const struct tcf_proto *tp,
-			 struct tcf_result *res, bool compat_mode)
 {
 #if !IS_ENABLED(CONFIG_NET_TC_SKB_EXT)
 	u32 last_executed_chain = 0;
@@ -1603,20 +1593,22 @@ int tcf_classify_ingress(struct sk_buff *skb,
 	struct tc_skb_ext *ext;
 	int ret;
 
-	ext = skb_ext_find(skb, TC_SKB_EXT);
+	if (block) {
+		ext = skb_ext_find(skb, TC_SKB_EXT);
 
-	if (ext && ext->chain) {
-		struct tcf_chain *fchain;
+		if (ext && ext->chain) {
+			struct tcf_chain *fchain;
 
-		fchain = tcf_chain_lookup_rcu(ingress_block, ext->chain);
-		if (!fchain)
-			return TC_ACT_SHOT;
+			fchain = tcf_chain_lookup_rcu(block, ext->chain);
+			if (!fchain)
+				return TC_ACT_SHOT;
 
-		/* Consume, so cloned/redirect skbs won't inherit ext */
-		skb_ext_del(skb, TC_SKB_EXT);
+			/* Consume, so cloned/redirect skbs won't inherit ext */
+			skb_ext_del(skb, TC_SKB_EXT);
 
-		tp = rcu_dereference_bh(fchain->filter_chain);
-		last_executed_chain = fchain->index;
+			tp = rcu_dereference_bh(fchain->filter_chain);
+			last_executed_chain = fchain->index;
+		}
 	}
 
 	ret = __tcf_classify(skb, tp, orig_tp, res, compat_mode,
@@ -1635,7 +1627,7 @@ int tcf_classify_ingress(struct sk_buff *skb,
 	return ret;
 #endif
 }
-EXPORT_SYMBOL(tcf_classify_ingress);
+EXPORT_SYMBOL(tcf_classify);
 
 struct tcf_chain_info {
 	struct tcf_proto __rcu **pprev;
@@ -1870,13 +1862,10 @@ static int tfilter_notify(struct net *net, struct sk_buff *oskb,
 	}
 
 	if (unicast)
-		err = netlink_unicast(net->rtnl, skb, portid, MSG_DONTWAIT);
+		err = rtnl_unicast(skb, net, portid);
 	else
 		err = rtnetlink_send(skb, net, portid, RTNLGRP_TC,
 				     n->nlmsg_flags & NLM_F_ECHO);
-
-	if (err > 0)
-		err = 0;
 	return err;
 }
 
@@ -1909,15 +1898,13 @@ static int tfilter_del_notify(struct net *net, struct sk_buff *oskb,
 	}
 
 	if (unicast)
-		err = netlink_unicast(net->rtnl, skb, portid, MSG_DONTWAIT);
+		err = rtnl_unicast(skb, net, portid);
 	else
 		err = rtnetlink_send(skb, net, portid, RTNLGRP_TC,
 				     n->nlmsg_flags & NLM_F_ECHO);
 	if (err < 0)
 		NL_SET_ERR_MSG(extack, "Failed to send filter delete notification");
 
-	if (err > 0)
-		err = 0;
 	return err;
 }
 
@@ -2711,13 +2698,11 @@ static int tc_chain_notify(struct tcf_chain *chain, struct sk_buff *oskb,
 	}
 
 	if (unicast)
-		err = netlink_unicast(net->rtnl, skb, portid, MSG_DONTWAIT);
+		err = rtnl_unicast(skb, net, portid);
 	else
 		err = rtnetlink_send(skb, net, portid, RTNLGRP_TC,
 				     flags & NLM_F_ECHO);
 
-	if (err > 0)
-		err = 0;
 	return err;
 }
 
@@ -2741,7 +2726,7 @@ static int tc_chain_notify_delete(const struct tcf_proto_ops *tmplt_ops,
 	}
 
 	if (unicast)
-		return netlink_unicast(net->rtnl, skb, portid, MSG_DONTWAIT);
+		return rtnl_unicast(skb, net, portid);
 
 	return rtnetlink_send(skb, net, portid, RTNLGRP_TC, flags & NLM_F_ECHO);
 }
@@ -3832,7 +3817,7 @@ struct sk_buff *tcf_qevent_handle(struct tcf_qevent *qe, struct Qdisc *sch, stru
 
 	fl = rcu_dereference_bh(qe->filter_chain);
 
-	switch (tcf_classify(skb, fl, &cl_res, false)) {
+	switch (tcf_classify(skb, NULL, fl, &cl_res, false)) {
 	case TC_ACT_SHOT:
 		qdisc_qstats_drop(sch);
 		__qdisc_drop(skb, to_free);

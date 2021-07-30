@@ -1086,9 +1086,18 @@ struct netdev_net_notifier {
  *	Test if Media Access Control address is valid for the device.
  *
  * int (*ndo_do_ioctl)(struct net_device *dev, struct ifreq *ifr, int cmd);
- *	Called when a user requests an ioctl which can't be handled by
- *	the generic interface code. If not defined ioctls return
- *	not supported error code.
+ *	Old-style ioctl entry point. This is used internally by the
+ *	appletalk and ieee802154 subsystems but is no longer called by
+ *	the device ioctl handler.
+ *
+ * int (*ndo_siocbond)(struct net_device *dev, struct ifreq *ifr, int cmd);
+ *	Used by the bonding driver for its device specific ioctls:
+ *	SIOCBONDENSLAVE, SIOCBONDRELEASE, SIOCBONDSETHWADDR, SIOCBONDCHANGEACTIVE,
+ *	SIOCBONDSLAVEINFOQUERY, and SIOCBONDINFOQUERY
+ *
+ * * int (*ndo_eth_ioctl)(struct net_device *dev, struct ifreq *ifr, int cmd);
+ *	Called for ethernet specific ioctls: SIOCGMIIPHY, SIOCGMIIREG,
+ *	SIOCSMIIREG, SIOCSHWTSTAMP and SIOCGHWTSTAMP.
  *
  * int (*ndo_set_config)(struct net_device *dev, struct ifmap *map);
  *	Used to set network devices bus interface parameters. This interface
@@ -1361,6 +1370,15 @@ struct net_device_ops {
 	int			(*ndo_validate_addr)(struct net_device *dev);
 	int			(*ndo_do_ioctl)(struct net_device *dev,
 					        struct ifreq *ifr, int cmd);
+	int			(*ndo_eth_ioctl)(struct net_device *dev,
+						 struct ifreq *ifr, int cmd);
+	int			(*ndo_siocbond)(struct net_device *dev,
+						struct ifreq *ifr, int cmd);
+	int			(*ndo_siocwandev)(struct net_device *dev,
+						  struct if_settings *ifs);
+	int			(*ndo_siocdevprivate)(struct net_device *dev,
+						      struct ifreq *ifr,
+						      void __user *data, int cmd);
 	int			(*ndo_set_config)(struct net_device *dev,
 					          struct ifmap *map);
 	int			(*ndo_change_mtu)(struct net_device *dev,
@@ -1805,6 +1823,7 @@ enum netdev_ml_priv_type {
  *	@ieee802154_ptr: IEEE 802.15.4 low-rate Wireless Personal Area Network
  *			 device struct
  *	@mpls_ptr:	mpls_dev struct pointer
+ *	@mctp_ptr:	MCTP specific data
  *
  *	@dev_addr:	Hw address (before bcast,
  *			because most packets are unicast)
@@ -2091,6 +2110,9 @@ struct net_device {
 	struct wpan_dev		*ieee802154_ptr;
 #if IS_ENABLED(CONFIG_MPLS_ROUTING)
 	struct mpls_dev __rcu	*mpls_ptr;
+#endif
+#if IS_ENABLED(CONFIG_MCTP)
+	struct mctp_dev __rcu	*mctp_ptr;
 #endif
 
 /*
@@ -3289,14 +3311,6 @@ static inline bool dev_has_header(const struct net_device *dev)
 	return dev->header_ops && dev->header_ops->create;
 }
 
-typedef int gifconf_func_t(struct net_device * dev, char __user * bufptr,
-			   int len, int size);
-int register_gifconf(unsigned int family, gifconf_func_t *gifconf);
-static inline int unregister_gifconf(unsigned int family)
-{
-	return register_gifconf(family, NULL);
-}
-
 #ifdef CONFIG_NET_FLOW_LIMIT
 #define FLOW_LIMIT_HISTORY	(1 << 7)  /* must be ^2 and !overflow buckets */
 struct sd_flow_limit {
@@ -3984,6 +3998,8 @@ static inline void dev_consume_skb_any(struct sk_buff *skb)
 	__dev_kfree_skb_any(skb, SKB_REASON_CONSUMED);
 }
 
+u32 bpf_prog_run_generic_xdp(struct sk_buff *skb, struct xdp_buff *xdp,
+			     struct bpf_prog *xdp_prog);
 void generic_xdp_tx(struct sk_buff *skb, struct bpf_prog *xdp_prog);
 int do_xdp_generic(struct bpf_prog *xdp_prog, struct sk_buff *skb);
 int netif_rx(struct sk_buff *skb);
@@ -4012,10 +4028,12 @@ int netdev_rx_handler_register(struct net_device *dev,
 void netdev_rx_handler_unregister(struct net_device *dev);
 
 bool dev_valid_name(const char *name);
+int get_user_ifreq(struct ifreq *ifr, void __user **ifrdata, void __user *arg);
+int put_user_ifreq(struct ifreq *ifr, void __user *arg);
 int dev_ioctl(struct net *net, unsigned int cmd, struct ifreq *ifr,
-		bool *need_copyout);
-int dev_ifconf(struct net *net, struct ifconf *, int);
-int dev_ethtool(struct net *net, struct ifreq *);
+		void __user *data, bool *need_copyout);
+int dev_ifconf(struct net *net, struct ifconf __user *ifc);
+int dev_ethtool(struct net *net, struct ifreq *ifr, void __user *userdata);
 unsigned int dev_get_flags(const struct net_device *);
 int __dev_change_flags(struct net_device *dev, unsigned int flags,
 		       struct netlink_ext_ack *extack);

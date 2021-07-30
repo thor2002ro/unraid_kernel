@@ -124,19 +124,12 @@ int ipa_setup(struct ipa *ipa)
 	if (ret)
 		return ret;
 
-	ipa->interrupt = ipa_interrupt_setup(ipa);
-	if (IS_ERR(ipa->interrupt)) {
-		ret = PTR_ERR(ipa->interrupt);
-		goto err_gsi_teardown;
-	}
 	ipa_interrupt_add(ipa->interrupt, IPA_IRQ_TX_SUSPEND,
 			  ipa_suspend_handler);
 
-	ipa_uc_setup(ipa);
-
 	ret = device_init_wakeup(dev, true);
 	if (ret)
-		goto err_uc_teardown;
+		goto err_interrupt_remove;
 
 	ipa_endpoint_setup(ipa);
 
@@ -167,7 +160,7 @@ int ipa_setup(struct ipa *ipa)
 	ipa_endpoint_default_route_set(ipa, exception_endpoint->endpoint_id);
 
 	/* We're all set.  Now prepare for communication with the modem */
-	ret = ipa_modem_setup(ipa);
+	ret = ipa_qmi_setup(ipa);
 	if (ret)
 		goto err_default_route_clear;
 
@@ -185,11 +178,8 @@ err_command_disable:
 err_endpoint_teardown:
 	ipa_endpoint_teardown(ipa);
 	(void)device_init_wakeup(dev, false);
-err_uc_teardown:
-	ipa_uc_teardown(ipa);
+err_interrupt_remove:
 	ipa_interrupt_remove(ipa->interrupt, IPA_IRQ_TX_SUSPEND);
-	ipa_interrupt_teardown(ipa->interrupt);
-err_gsi_teardown:
 	gsi_teardown(&ipa->gsi);
 
 	return ret;
@@ -204,7 +194,10 @@ static void ipa_teardown(struct ipa *ipa)
 	struct ipa_endpoint *exception_endpoint;
 	struct ipa_endpoint *command_endpoint;
 
-	ipa_modem_teardown(ipa);
+	/* We're going to tear everything down, as if setup never completed */
+	ipa->setup_complete = false;
+
+	ipa_qmi_teardown(ipa);
 	ipa_endpoint_default_route_clear(ipa);
 	exception_endpoint = ipa->name_map[IPA_ENDPOINT_AP_LAN_RX];
 	ipa_endpoint_disable_one(exception_endpoint);
@@ -212,9 +205,7 @@ static void ipa_teardown(struct ipa *ipa)
 	ipa_endpoint_disable_one(command_endpoint);
 	ipa_endpoint_teardown(ipa);
 	(void)device_init_wakeup(&ipa->pdev->dev, false);
-	ipa_uc_teardown(ipa);
 	ipa_interrupt_remove(ipa->interrupt, IPA_IRQ_TX_SUSPEND);
-	ipa_interrupt_teardown(ipa->interrupt);
 	gsi_teardown(&ipa->gsi);
 }
 
@@ -253,9 +244,6 @@ ipa_hardware_config_qsb(struct ipa *ipa, const struct ipa_data *data)
 	const struct ipa_qsb_data *data1;
 	u32 val;
 
-	/* assert(data->qsb_count > 0); */
-	/* assert(data->qsb_count < 3); */
-
 	/* QMB 0 represents DDR; QMB 1 (if present) represents PCIe */
 	data0 = &data->qsb_data[IPA_QSB_MASTER_DDR];
 	if (data->qsb_count > 1)
@@ -293,7 +281,7 @@ ipa_hardware_config_qsb(struct ipa *ipa, const struct ipa_data *data)
  */
 static u32 ipa_aggr_granularity_val(u32 usec)
 {
-	/* assert(usec != 0); */
+	WARN_ON(!usec);
 
 	return DIV_ROUND_CLOSEST(usec * TIMER_FREQUENCY, USEC_PER_SEC) - 1;
 }
@@ -471,31 +459,44 @@ static int ipa_config(struct ipa *ipa, const struct ipa_data *data)
 
 	ipa_hardware_config(ipa, data);
 
-	ret = ipa_endpoint_config(ipa);
+	ret = ipa_mem_config(ipa);
 	if (ret)
 		goto err_hardware_deconfig;
 
-	ret = ipa_mem_config(ipa);
+	ipa->interrupt = ipa_interrupt_config(ipa);
+	if (IS_ERR(ipa->interrupt)) {
+		ret = PTR_ERR(ipa->interrupt);
+		ipa->interrupt = NULL;
+		goto err_mem_deconfig;
+	}
+
+	ipa_uc_config(ipa);
+
+	ret = ipa_endpoint_config(ipa);
 	if (ret)
-		goto err_endpoint_deconfig;
+		goto err_interrupt_deconfig;
 
 	ipa_table_config(ipa);		/* No deconfig required */
 
 	/* Assign resource limitation to each group; no deconfig required */
 	ret = ipa_resource_config(ipa, data->resource_data);
 	if (ret)
-		goto err_mem_deconfig;
+		goto err_endpoint_deconfig;
 
 	ret = ipa_modem_config(ipa);
 	if (ret)
-		goto err_mem_deconfig;
+		goto err_endpoint_deconfig;
 
 	return 0;
 
-err_mem_deconfig:
-	ipa_mem_deconfig(ipa);
 err_endpoint_deconfig:
 	ipa_endpoint_deconfig(ipa);
+err_interrupt_deconfig:
+	ipa_uc_deconfig(ipa);
+	ipa_interrupt_deconfig(ipa->interrupt);
+	ipa->interrupt = NULL;
+err_mem_deconfig:
+	ipa_mem_deconfig(ipa);
 err_hardware_deconfig:
 	ipa_hardware_deconfig(ipa);
 	ipa_clock_put(ipa);
@@ -510,8 +511,11 @@ err_hardware_deconfig:
 static void ipa_deconfig(struct ipa *ipa)
 {
 	ipa_modem_deconfig(ipa);
-	ipa_mem_deconfig(ipa);
 	ipa_endpoint_deconfig(ipa);
+	ipa_uc_deconfig(ipa);
+	ipa_interrupt_deconfig(ipa->interrupt);
+	ipa->interrupt = NULL;
+	ipa_mem_deconfig(ipa);
 	ipa_hardware_deconfig(ipa);
 	ipa_clock_put(ipa);
 }
@@ -612,7 +616,6 @@ MODULE_DEVICE_TABLE(of, ipa_match);
  * */
 static void ipa_validate_build(void)
 {
-#ifdef IPA_VALIDATE
 	/* At one time we assumed a 64-bit build, allowing some do_div()
 	 * calls to be replaced by simple division or modulo operations.
 	 * We currently only perform divide and modulo operations on u32,
@@ -646,7 +649,6 @@ static void ipa_validate_build(void)
 	BUILD_BUG_ON(!ipa_aggr_granularity_val(IPA_AGGR_GRANULARITY));
 	BUILD_BUG_ON(ipa_aggr_granularity_val(IPA_AGGR_GRANULARITY) >
 			field_max(AGGR_GRANULARITY_FMASK));
-#endif /* IPA_VALIDATE */
 }
 
 static bool ipa_version_valid(enum ipa_version version)
@@ -771,9 +773,12 @@ static int ipa_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_table_exit;
 
+	/* The clock needs to be active for config and setup */
+	ipa_clock_get(ipa);
+
 	ret = ipa_config(ipa, data);
 	if (ret)
-		goto err_modem_exit;
+		goto err_clock_put;	/* Error */
 
 	dev_info(dev, "IPA driver initialized");
 
@@ -782,7 +787,7 @@ static int ipa_probe(struct platform_device *pdev)
 	 * we're done here.
 	 */
 	if (modem_init)
-		return 0;
+		goto out_clock_put;	/* Done; no error */
 
 	/* Otherwise we need to load the firmware and have Trust Zone validate
 	 * and install it.  If that succeeds we can proceed with setup.
@@ -795,11 +800,15 @@ static int ipa_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_deconfig;
 
+out_clock_put:
+	ipa_clock_put(ipa);
+
 	return 0;
 
 err_deconfig:
 	ipa_deconfig(ipa);
-err_modem_exit:
+err_clock_put:
+	ipa_clock_put(ipa);
 	ipa_modem_exit(ipa);
 err_table_exit:
 	ipa_table_exit(ipa);
@@ -825,6 +834,8 @@ static int ipa_remove(struct platform_device *pdev)
 	struct ipa_clock *clock = ipa->clock;
 	int ret;
 
+	ipa_clock_get(ipa);
+
 	if (ipa->setup_complete) {
 		ret = ipa_modem_stop(ipa);
 		/* If starting or stopping is in progress, try once more */
@@ -839,6 +850,9 @@ static int ipa_remove(struct platform_device *pdev)
 	}
 
 	ipa_deconfig(ipa);
+
+	ipa_clock_put(ipa);
+
 	ipa_modem_exit(ipa);
 	ipa_table_exit(ipa);
 	ipa_endpoint_exit(ipa);
@@ -874,13 +888,11 @@ static int ipa_suspend(struct device *dev)
 {
 	struct ipa *ipa = dev_get_drvdata(dev);
 
-	/* When a suspended RX endpoint has a packet ready to receive, we
-	 * get an IPA SUSPEND interrupt.  We trigger a system resume in
-	 * that case, but only on the first such interrupt since suspend.
-	 */
-	__clear_bit(IPA_FLAG_RESUMED, ipa->flags);
-
-	ipa_endpoint_suspend(ipa);
+	/* Endpoints aren't usable until setup is complete */
+	if (ipa->setup_complete) {
+		__clear_bit(IPA_FLAG_RESUMED, ipa->flags);
+		ipa_endpoint_suspend(ipa);
+	}
 
 	ipa_clock_put(ipa);
 
@@ -906,7 +918,9 @@ static int ipa_resume(struct device *dev)
 	 */
 	ipa_clock_get(ipa);
 
-	ipa_endpoint_resume(ipa);
+	/* Endpoints aren't usable until setup is complete */
+	if (ipa->setup_complete)
+		ipa_endpoint_resume(ipa);
 
 	return 0;
 }

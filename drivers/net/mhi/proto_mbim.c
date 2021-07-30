@@ -211,6 +211,10 @@ static void mbim_rx(struct mhi_net_dev *mhi_netdev, struct sk_buff *skb)
 				continue;
 			}
 
+			u64_stats_update_begin(&mhi_netdev->stats.rx_syncp);
+			u64_stats_inc(&mhi_netdev->stats.rx_packets);
+			u64_stats_add(&mhi_netdev->stats.rx_bytes, skbn->len);
+			u64_stats_update_end(&mhi_netdev->stats.rx_syncp);
 			netif_rx(skbn);
 		}
 next_ndp:
@@ -292,7 +296,9 @@ static int mbim_init(struct mhi_net_dev *mhi_netdev)
 
 	ndev->needed_headroom = sizeof(struct mbim_tx_hdr);
 	ndev->mtu = MHI_MBIM_DEFAULT_MTU;
-	mhi_netdev->mru = MHI_MBIM_DEFAULT_MRU;
+
+	if (!mhi_netdev->mru)
+		mhi_netdev->mru = MHI_MBIM_DEFAULT_MRU;
 
 	return 0;
 }
