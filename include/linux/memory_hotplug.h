@@ -42,7 +42,6 @@ typedef int __bitwise mhp_t;
  * might be stale, or the resource might have changed.
  */
 #define MHP_MERGE_RESOURCE	((__force mhp_t)BIT(0))
-
 /*
  * We want memmap (struct page array) to be self contained.
  * To do so, we will use the beginning of the hot-added range to build
@@ -50,6 +49,11 @@ typedef int __bitwise mhp_t;
  * Only selected architectures support it with SPARSE_VMEMMAP.
  */
 #define MHP_MEMMAP_ON_MEMORY   ((__force mhp_t)BIT(1))
+/*
+ * The nid field specifies a memory group identifier (mgid) instead. The memory
+ * group implies the nid.
+ */
+#define MHP_NID_IS_MGID		((__force mhp_t)BIT(2))
 
 /*
  * Extended parameters for memory hotplug:

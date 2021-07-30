@@ -23,6 +23,42 @@
 
 #define MIN_MEMORY_BLOCK_SIZE     (1UL << SECTION_SIZE_BITS)
 
+struct memory_group {
+	/* Nid the whole group belongs to. */
+	int nid;
+	/* References from memory blocks + 1. */
+	refcount_t refcount;
+	/*
+	 * Memory group type: static vs. dynamic.
+	 *
+	 * Static: All memory in the group belongs to a single unit, such as,
+	 * a DIMM. All memory belonging to the group will be added in
+	 * one go and removed in one go -- it's static.
+	 *
+	 * Dynamic: Memory within the group is added/removed dynamically in
+	 * units of the specified granularity of at least one memory block.
+	 */
+	bool is_dynamic;
+
+	union {
+		struct {
+			/*
+			 * Maximum number of pages we'll have in this static
+			 * memory group.
+			 */
+			unsigned long max_pages;
+		} s;
+		struct {
+			/*
+			 * Unit in pages in which memory is added/removed in
+			 * this dynamic memory group. This granularity defines
+			 * the alignment of a unit in physical address space.
+			 */
+			unsigned long unit_pages;
+		} d;
+	};
+};
+
 struct memory_block {
 	unsigned long start_section_nr;
 	unsigned long state;		/* serialized by the dev->lock */
@@ -34,6 +70,7 @@ struct memory_block {
 	 * lay at the beginning of the memory block.
 	 */
 	unsigned long nr_vmemmap_pages;
+	struct memory_group *group;	/* group (if any) for this block */
 };
 
 int arch_get_memory_phys_device(unsigned long start_pfn);
@@ -86,7 +123,8 @@ static inline int memory_notify(unsigned long val, void *v)
 extern int register_memory_notifier(struct notifier_block *nb);
 extern void unregister_memory_notifier(struct notifier_block *nb);
 int create_memory_block_devices(unsigned long start, unsigned long size,
-				unsigned long vmemmap_pages);
+				unsigned long vmemmap_pages,
+				struct memory_group *group);
 void remove_memory_block_devices(unsigned long start, unsigned long size);
 extern void memory_dev_init(void);
 extern int memory_notify(unsigned long val, void *v);
@@ -95,6 +133,12 @@ typedef int (*walk_memory_blocks_func_t)(struct memory_block *, void *);
 extern int walk_memory_blocks(unsigned long start, unsigned long size,
 			      void *arg, walk_memory_blocks_func_t func);
 extern int for_each_memory_block(void *arg, walk_memory_blocks_func_t func);
+
+extern int register_static_memory_group(int nid, unsigned long max_pages);
+extern int register_dynamic_memory_group(int nid, unsigned long unit_pages);
+extern int unregister_memory_group(int mgid);
+struct memory_group *get_memory_group(int mgid);
+
 #define CONFIG_MEM_BLOCK_SIZE	(PAGES_PER_SECTION<<PAGE_SHIFT)
 #endif /* CONFIG_MEMORY_HOTPLUG_SPARSE */
 
