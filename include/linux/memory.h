@@ -142,6 +142,9 @@ extern int register_static_memory_group(int nid, unsigned long max_pages);
 extern int register_dynamic_memory_group(int nid, unsigned long unit_pages);
 extern int unregister_memory_group(int mgid);
 struct memory_group *get_memory_group(int mgid);
+typedef int (*walk_memory_groups_func_t)(struct memory_group *, void *);
+int walk_dynamic_memory_groups(int nid, walk_memory_groups_func_t func,
+			       struct memory_group *excluded, void *arg);
 
 #define CONFIG_MEM_BLOCK_SIZE	(PAGES_PER_SECTION<<PAGE_SHIFT)
 #endif /* CONFIG_MEMORY_HOTPLUG_SPARSE */
