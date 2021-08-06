@@ -1568,8 +1568,7 @@ DEFINE_SVCXDRBUF_EVENT(sendto);
 	svc_rqst_flag(SPLICE_OK)					\
 	svc_rqst_flag(VICTIM)						\
 	svc_rqst_flag(BUSY)						\
-	svc_rqst_flag(DATA)						\
-	svc_rqst_flag_end(AUTHERR)
+	svc_rqst_flag_end(DATA)
 
 #undef svc_rqst_flag
 #undef svc_rqst_flag_end
@@ -1611,9 +1610,9 @@ TRACE_DEFINE_ENUM(SVC_COMPLETE);
 		{ SVC_COMPLETE,	"SVC_COMPLETE" })
 
 TRACE_EVENT(svc_authenticate,
-	TP_PROTO(const struct svc_rqst *rqst, int auth_res, __be32 auth_stat),
+	TP_PROTO(const struct svc_rqst *rqst, int auth_res),
 
-	TP_ARGS(rqst, auth_res, auth_stat),
+	TP_ARGS(rqst, auth_res),
 
 	TP_STRUCT__entry(
 		__field(u32, xid)
@@ -1624,7 +1623,7 @@ TRACE_EVENT(svc_authenticate,
 	TP_fast_assign(
 		__entry->xid = be32_to_cpu(rqst->rq_xid);
 		__entry->svc_status = auth_res;
-		__entry->auth_stat = be32_to_cpu(auth_stat);
+		__entry->auth_stat = be32_to_cpu(rqst->rq_auth_stat);
 	),
 
 	TP_printk("xid=0x%08x auth_res=%s auth_stat=%s",
@@ -1642,7 +1641,7 @@ TRACE_EVENT(svc_process,
 		__field(u32, vers)
 		__field(u32, proc)
 		__string(service, name)
-		__string(procedure, rqst->rq_procinfo->pc_name)
+		__string(procedure, svc_proc_name(rqst))
 		__string(addr, rqst->rq_xprt ?
 			 rqst->rq_xprt->xpt_remotebuf : "(null)")
 	),
@@ -1652,7 +1651,7 @@ TRACE_EVENT(svc_process,
 		__entry->vers = rqst->rq_vers;
 		__entry->proc = rqst->rq_proc;
 		__assign_str(service, name);
-		__assign_str(procedure, rqst->rq_procinfo->pc_name);
+		__assign_str(procedure, svc_proc_name(rqst));
 		__assign_str(addr, rqst->rq_xprt ?
 			     rqst->rq_xprt->xpt_remotebuf : "(null)");
 	),
@@ -1918,7 +1917,7 @@ TRACE_EVENT(svc_stats_latency,
 	TP_STRUCT__entry(
 		__field(u32, xid)
 		__field(unsigned long, execute)
-		__string(procedure, rqst->rq_procinfo->pc_name)
+		__string(procedure, svc_proc_name(rqst))
 		__string(addr, rqst->rq_xprt->xpt_remotebuf)
 	),
 
@@ -1926,7 +1925,7 @@ TRACE_EVENT(svc_stats_latency,
 		__entry->xid = be32_to_cpu(rqst->rq_xid);
 		__entry->execute = ktime_to_us(ktime_sub(ktime_get(),
 							 rqst->rq_stime));
-		__assign_str(procedure, rqst->rq_procinfo->pc_name);
+		__assign_str(procedure, svc_proc_name(rqst));
 		__assign_str(addr, rqst->rq_xprt->xpt_remotebuf);
 	),
 
