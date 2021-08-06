@@ -89,11 +89,15 @@ static int nfnl_hook_put_nft_chain_info(struct sk_buff *nlskb,
 	if (!nest2)
 		goto cancel_nest;
 
-	ret = nla_put_string(nlskb, NFTA_CHAIN_TABLE, chain->table->name);
+	ret = nla_put_string(nlskb, NFNLA_CHAIN_TABLE, chain->table->name);
 	if (ret)
 		goto cancel_nest;
 
-	ret = nla_put_string(nlskb, NFTA_CHAIN_NAME, chain->name);
+	ret = nla_put_string(nlskb, NFNLA_CHAIN_NAME, chain->name);
+	if (ret)
+		goto cancel_nest;
+
+	ret = nla_put_u8(nlskb, NFNLA_CHAIN_FAMILY, chain->table->family);
 	if (ret)
 		goto cancel_nest;
 
@@ -109,7 +113,7 @@ cancel_nest:
 static int nfnl_hook_dump_one(struct sk_buff *nlskb,
 			      const struct nfnl_dump_hook_data *ctx,
 			      const struct nf_hook_ops *ops,
-			      unsigned int seq)
+			      int family, unsigned int seq)
 {
 	u16 event = nfnl_msg_type(NFNL_SUBSYS_HOOK, NFNL_MSG_HOOK_GET);
 	unsigned int portid = NETLINK_CB(nlskb).portid;
@@ -120,7 +124,7 @@ static int nfnl_hook_dump_one(struct sk_buff *nlskb,
 	char *module_name;
 #endif
 	nlh = nfnl_msg_put(nlskb, portid, seq, event,
-			   NLM_F_MULTI, ops->pf, NFNETLINK_V0, 0);
+			   NLM_F_MULTI, family, NFNETLINK_V0, 0);
 	if (!nlh)
 		goto nla_put_failure;
 
@@ -135,6 +139,7 @@ static int nfnl_hook_dump_one(struct sk_buff *nlskb,
 	if (module_name) {
 		char *end;
 
+		*module_name = '\0';
 		module_name += 2;
 		end = strchr(module_name, ']');
 		if (end) {
@@ -259,7 +264,8 @@ static int nfnl_hook_dump(struct sk_buff *nlskb,
 	ops = nf_hook_entries_get_hook_ops(e);
 
 	for (; i < e->num_hook_entries; i++) {
-		err = nfnl_hook_dump_one(nlskb, ctx, ops[i], cb->seq);
+		err = nfnl_hook_dump_one(nlskb, ctx, ops[i], family,
+					 cb->nlh->nlmsg_seq);
 		if (err)
 			break;
 	}
