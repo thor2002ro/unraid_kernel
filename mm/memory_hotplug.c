@@ -1256,6 +1256,7 @@ int __ref add_memory_resource(int nid, struct resource *res, mhp_t mhp_flags)
 {
 	struct mhp_params params = { .pgprot = pgprot_mhp(PAGE_KERNEL) };
 	struct vmem_altmap mhp_altmap = {};
+	struct memory_group *group = NULL;
 	u64 start, size;
 	bool new_node = false;
 	int ret;
@@ -1266,6 +1267,13 @@ int __ref add_memory_resource(int nid, struct resource *res, mhp_t mhp_flags)
 	ret = check_hotplug_memory_range(start, size);
 	if (ret)
 		return ret;
+
+	if (mhp_flags & MHP_NID_IS_MGID) {
+		group = get_memory_group(nid);
+		if (!group)
+			return -EINVAL;
+		nid = group->nid;
+	}
 
 	if (!node_possible(nid)) {
 		WARN(1, "node %d was absent from the node_possible_map\n", nid);
@@ -1301,7 +1309,8 @@ int __ref add_memory_resource(int nid, struct resource *res, mhp_t mhp_flags)
 		goto error;
 
 	/* create memory block devices after memory was added */
-	ret = create_memory_block_devices(start, size, mhp_altmap.alloc);
+	ret = create_memory_block_devices(start, size, mhp_altmap.alloc,
+					  group);
 	if (ret) {
 		arch_remove_memory(start, size, NULL);
 		goto error;
