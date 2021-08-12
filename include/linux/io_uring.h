@@ -33,7 +33,7 @@ static inline struct sock *io_uring_get_socket(struct file *file)
 static inline void io_uring_task_cancel(void)
 {
 }
-static inline void io_uring_files_cancel(struct files_struct *files)
+static inline void io_uring_files_cancel(void)
 {
 }
 static inline void io_uring_free(struct task_struct *tsk)
