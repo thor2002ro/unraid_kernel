@@ -243,8 +243,20 @@ dtb-$(CONFIG_ARCH_INTEGRATOR) += \
 	integratorcp.dtb
 dtb-$(CONFIG_ARCH_IXP4XX) += \
 	intel-ixp42x-linksys-nslu2.dtb \
+	intel-ixp42x-linksys-wrv54g.dtb \
+	intel-ixp42x-freecom-fsg-3.dtb \
 	intel-ixp42x-welltech-epbx100.dtb \
-	intel-ixp43x-gateworks-gw2358.dtb
+	intel-ixp42x-ixdp425.dtb \
+	intel-ixp43x-kixrp435.dtb \
+	intel-ixp46x-ixdp465.dtb \
+	intel-ixp42x-adi-coyote.dtb \
+	intel-ixp42x-ixdpg425.dtb \
+	intel-ixp42x-iomega-nas100d.dtb \
+	intel-ixp42x-dlink-dsm-g600.dtb \
+	intel-ixp42x-gateworks-gw2348.dtb \
+	intel-ixp43x-gateworks-gw2358.dtb \
+	intel-ixp42x-netgear-wg302v2.dtb \
+	intel-ixp42x-arcom-vulcan.dtb
 dtb-$(CONFIG_ARCH_KEYSTONE) += \
 	keystone-k2hk-evm.dtb \
 	keystone-k2l-evm.dtb \
@@ -845,6 +857,7 @@ dtb-$(CONFIG_SOC_AM33XX) += \
 	am335x-pocketbeagle.dtb \
 	am335x-regor-rdk.dtb \
 	am335x-sancloud-bbe.dtb \
+	am335x-sancloud-bbe-lite.dtb \
 	am335x-shc.dtb \
 	am335x-sbc-t335.dtb \
 	am335x-sl50.dtb \
@@ -1078,7 +1091,8 @@ dtb-$(CONFIG_ARCH_STI) += \
 	stih407-b2120.dtb \
 	stih410-b2120.dtb \
 	stih410-b2260.dtb \
-	stih418-b2199.dtb
+	stih418-b2199.dtb \
+	stih418-b2264.dtb
 dtb-$(CONFIG_ARCH_STM32) += \
 	stm32f429-disco.dtb \
 	stm32f469-disco.dtb \
