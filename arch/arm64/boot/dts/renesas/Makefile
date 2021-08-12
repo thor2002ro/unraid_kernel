@@ -91,4 +91,6 @@ dtb-$(CONFIG_ARCH_R8A77990) += r8a779m6-ebisu.dtb
 
 dtb-$(CONFIG_ARCH_R8A77995) += r8a779m7-draak.dtb
 
+dtb-$(CONFIG_ARCH_R8A77951) += r8a779m8-salvator-xs.dtb
+
 dtb-$(CONFIG_ARCH_R9A07G044) += r9a07g044l2-smarc.dtb
