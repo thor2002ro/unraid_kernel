@@ -83,4 +83,6 @@ dtb-$(CONFIG_ARCH_R8A77965) += r8a779m4-salvator-xs.dtb
 dtb-$(CONFIG_ARCH_R8A77965) += r8a779m4-ulcb.dtb
 dtb-$(CONFIG_ARCH_R8A77965) += r8a779m4-ulcb-kf.dtb
 
+dtb-$(CONFIG_ARCH_R8A77965) += r8a779m5-salvator-xs.dtb
+
 dtb-$(CONFIG_ARCH_R9A07G044) += r9a07g044l2-smarc.dtb
