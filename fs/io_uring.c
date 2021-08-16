@@ -728,12 +728,12 @@ enum {
 	REQ_F_NEED_CLEANUP_BIT,
 	REQ_F_POLLED_BIT,
 	REQ_F_BUFFER_SELECTED_BIT,
-	REQ_F_LTIMEOUT_ACTIVE_BIT,
 	REQ_F_COMPLETE_INLINE_BIT,
 	REQ_F_REISSUE_BIT,
 	REQ_F_DONT_REISSUE_BIT,
 	REQ_F_CREDS_BIT,
 	REQ_F_REFCOUNT_BIT,
+	REQ_F_ARM_LTIMEOUT_BIT,
 	/* keep async read/write and isreg together and in order */
 	REQ_F_NOWAIT_READ_BIT,
 	REQ_F_NOWAIT_WRITE_BIT,
@@ -773,8 +773,6 @@ enum {
 	REQ_F_POLLED		= BIT(REQ_F_POLLED_BIT),
 	/* buffer already selected */
 	REQ_F_BUFFER_SELECTED	= BIT(REQ_F_BUFFER_SELECTED_BIT),
-	/* linked timeout is active, i.e. prepared by link's head */
-	REQ_F_LTIMEOUT_ACTIVE	= BIT(REQ_F_LTIMEOUT_ACTIVE_BIT),
 	/* completion is deferred through io_comp_state */
 	REQ_F_COMPLETE_INLINE	= BIT(REQ_F_COMPLETE_INLINE_BIT),
 	/* caller should reissue async */
@@ -791,6 +789,8 @@ enum {
 	REQ_F_CREDS		= BIT(REQ_F_CREDS_BIT),
 	/* skip refcounting if not set */
 	REQ_F_REFCOUNT		= BIT(REQ_F_REFCOUNT_BIT),
+	/* there is a linked timeout that has to be armed */
+	REQ_F_ARM_LTIMEOUT	= BIT(REQ_F_ARM_LTIMEOUT_BIT),
 };
 
 struct async_poll {
@@ -1063,6 +1063,9 @@ static const struct io_op_def io_op_defs[] = {
 	[IORING_OP_LINKAT] = {},
 };
 
+/* requests with any of those set should undergo io_disarm_next() */
+#define IO_DISARM_MASK (REQ_F_ARM_LTIMEOUT | REQ_F_LINK_TIMEOUT | REQ_F_FAIL)
+
 static bool io_disarm_next(struct io_kiocb *req);
 static void io_uring_del_tctx_node(unsigned long index);
 static void io_uring_try_cancel_requests(struct io_ring_ctx *ctx,
@@ -1144,12 +1147,17 @@ static inline void req_ref_get(struct io_kiocb *req)
 	atomic_inc(&req->refs);
 }
 
-static inline void io_req_refcount(struct io_kiocb *req)
+static inline void __io_req_set_refcount(struct io_kiocb *req, int nr)
 {
 	if (!(req->flags & REQ_F_REFCOUNT)) {
 		req->flags |= REQ_F_REFCOUNT;
-		atomic_set(&req->refs, 1);
+		atomic_set(&req->refs, nr);
 	}
+}
+
+static inline void io_req_set_refcount(struct io_kiocb *req)
+{
+	__io_req_set_refcount(req, 1);
 }
 
 static inline void io_req_set_rsrc_node(struct io_kiocb *req)
@@ -1325,27 +1333,28 @@ static void io_req_track_inflight(struct io_kiocb *req)
 	}
 }
 
+static inline void io_unprep_linked_timeout(struct io_kiocb *req)
+{
+	req->flags &= ~REQ_F_LINK_TIMEOUT;
+}
+
 static struct io_kiocb *__io_prep_linked_timeout(struct io_kiocb *req)
 {
-	struct io_kiocb *nxt = req->link;
-
-	if (req->flags & REQ_F_LINK_TIMEOUT)
+	if (WARN_ON_ONCE(!req->link))
 		return NULL;
 
-	/* linked timeouts should have two refs once prep'ed */
-	io_req_refcount(req);
-	io_req_refcount(nxt);
-	req_ref_get(nxt);
-
-	nxt->timeout.head = req;
-	nxt->flags |= REQ_F_LTIMEOUT_ACTIVE;
+	req->flags &= ~REQ_F_ARM_LTIMEOUT;
 	req->flags |= REQ_F_LINK_TIMEOUT;
-	return nxt;
+
+	/* linked timeouts should have two refs once prep'ed */
+	io_req_set_refcount(req);
+	__io_req_set_refcount(req->link, 2);
+	return req->link;
 }
 
 static inline struct io_kiocb *io_prep_linked_timeout(struct io_kiocb *req)
 {
-	if (likely(!req->link || req->link->opcode != IORING_OP_LINK_TIMEOUT))
+	if (likely(!(req->flags & REQ_F_ARM_LTIMEOUT)))
 		return NULL;
 	return __io_prep_linked_timeout(req);
 }
@@ -1717,7 +1726,7 @@ static void io_req_complete_post(struct io_kiocb *req, long res,
 	 */
 	if (req_ref_put_and_test(req)) {
 		if (req->flags & (REQ_F_LINK | REQ_F_HARDLINK)) {
-			if (req->flags & (REQ_F_LINK_TIMEOUT | REQ_F_FAIL))
+			if (req->flags & IO_DISARM_MASK)
 				io_disarm_next(req);
 			if (req->link) {
 				io_req_task_queue(req->link);
@@ -1918,11 +1927,7 @@ static bool io_kill_linked_timeout(struct io_kiocb *req)
 {
 	struct io_kiocb *link = req->link;
 
-	/*
-	 * Can happen if a linked timeout fired and link had been like
-	 * req -> link t-out -> link t-out [-> ...]
-	 */
-	if (link && (link->flags & REQ_F_LTIMEOUT_ACTIVE)) {
+	if (link && link->opcode == IORING_OP_LINK_TIMEOUT) {
 		struct io_timeout_data *io = link->async_data;
 
 		io_remove_next_linked(req);
@@ -1959,7 +1964,18 @@ static bool io_disarm_next(struct io_kiocb *req)
 {
 	bool posted = false;
 
-	if (likely(req->flags & REQ_F_LINK_TIMEOUT)) {
+	if (req->flags & REQ_F_ARM_LTIMEOUT) {
+		struct io_kiocb *link = req->link;
+
+		req->flags &= ~REQ_F_ARM_LTIMEOUT;
+		if (link && link->opcode == IORING_OP_LINK_TIMEOUT) {
+			io_remove_next_linked(req);
+			io_cqring_fill_event(link->ctx, link->user_data,
+					     -ECANCELED, 0);
+			io_put_req_deferred(link);
+			posted = true;
+		}
+	} else if (req->flags & REQ_F_LINK_TIMEOUT) {
 		struct io_ring_ctx *ctx = req->ctx;
 
 		spin_lock_irq(&ctx->timeout_lock);
@@ -1984,7 +2000,7 @@ static struct io_kiocb *__io_req_find_next(struct io_kiocb *req)
 	 * dependencies to the next request. In case of failure, fail the rest
 	 * of the chain.
 	 */
-	if (req->flags & (REQ_F_LINK_TIMEOUT | REQ_F_FAIL)) {
+	if (req->flags & IO_DISARM_MASK) {
 		struct io_ring_ctx *ctx = req->ctx;
 		bool posted;
 
@@ -2316,7 +2332,7 @@ static inline bool io_run_task_work(void)
  * Find and free completed poll iocbs
  */
 static void io_iopoll_complete(struct io_ring_ctx *ctx, unsigned int *nr_events,
-			       struct list_head *done, bool resubmit)
+			       struct list_head *done)
 {
 	struct req_batch rb;
 	struct io_kiocb *req;
@@ -2331,7 +2347,7 @@ static void io_iopoll_complete(struct io_ring_ctx *ctx, unsigned int *nr_events,
 		req = list_first_entry(done, struct io_kiocb, inflight_entry);
 		list_del(&req->inflight_entry);
 
-		if (READ_ONCE(req->result) == -EAGAIN && resubmit &&
+		if (READ_ONCE(req->result) == -EAGAIN &&
 		    !(req->flags & REQ_F_DONT_REISSUE)) {
 			req->iopoll_completed = 0;
 			io_req_task_queue_reissue(req);
@@ -2354,7 +2370,7 @@ static void io_iopoll_complete(struct io_ring_ctx *ctx, unsigned int *nr_events,
 }
 
 static int io_do_iopoll(struct io_ring_ctx *ctx, unsigned int *nr_events,
-			long min, bool resubmit)
+			long min)
 {
 	struct io_kiocb *req, *tmp;
 	LIST_HEAD(done);
@@ -2394,7 +2410,7 @@ static int io_do_iopoll(struct io_ring_ctx *ctx, unsigned int *nr_events,
 	}
 
 	if (!list_empty(&done))
-		io_iopoll_complete(ctx, nr_events, &done, resubmit);
+		io_iopoll_complete(ctx, nr_events, &done);
 
 	return 0;
 }
@@ -2412,7 +2428,7 @@ static void io_iopoll_try_reap_events(struct io_ring_ctx *ctx)
 	while (!list_empty(&ctx->iopoll_list)) {
 		unsigned int nr_events = 0;
 
-		io_do_iopoll(ctx, &nr_events, 0, false);
+		io_do_iopoll(ctx, &nr_events, 0);
 
 		/* let it sleep and repeat later if can't complete a request */
 		if (nr_events == 0)
@@ -2474,7 +2490,7 @@ static int io_iopoll_check(struct io_ring_ctx *ctx, long min)
 			    list_empty(&ctx->iopoll_list))
 				break;
 		}
-		ret = io_do_iopoll(ctx, &nr_events, min, true);
+		ret = io_do_iopoll(ctx, &nr_events, min);
 	} while (!ret && nr_events < min && !need_resched());
 out:
 	mutex_unlock(&ctx->uring_lock);
@@ -5401,7 +5417,7 @@ static int io_arm_poll_handler(struct io_kiocb *req)
 	req->apoll = apoll;
 	req->flags |= REQ_F_POLLED;
 	ipt.pt._qproc = io_async_queue_proc;
-	io_req_refcount(req);
+	io_req_set_refcount(req);
 
 	ret = __io_arm_poll_handler(req, &apoll->poll, &ipt, mask,
 					io_async_wake);
@@ -5589,7 +5605,7 @@ static int io_poll_add_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe
 	if (flags & ~IORING_POLL_ADD_MULTI)
 		return -EINVAL;
 
-	io_req_refcount(req);
+	io_req_set_refcount(req);
 	poll->events = io_poll_parse_events(sqe, flags);
 	return 0;
 }
@@ -5864,8 +5880,17 @@ static int io_timeout_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 
 	data->mode = io_translate_timeout_mode(flags);
 	hrtimer_init(&data->timer, CLOCK_MONOTONIC, data->mode);
-	if (is_timeout_link)
-		io_req_track_inflight(req);
+
+	if (is_timeout_link) {
+		struct io_submit_link *link = &req->ctx->submit_state.link;
+
+		if (!link->head)
+			return -EINVAL;
+		if (link->last->opcode == IORING_OP_LINK_TIMEOUT)
+			return -EINVAL;
+		req->timeout.head = link->last;
+		link->last->flags |= REQ_F_ARM_LTIMEOUT;
+	}
 	return 0;
 }
 
@@ -5958,32 +5983,24 @@ static int io_async_cancel_one(struct io_uring_task *tctx, u64 user_data,
 	return ret;
 }
 
-static void io_async_find_and_cancel(struct io_ring_ctx *ctx,
-				     struct io_kiocb *req, __u64 sqe_addr,
-				     int success_ret)
+static int io_try_cancel_userdata(struct io_kiocb *req, u64 sqe_addr)
+	__acquires(&req->ctx->completion_lock)
 {
+	struct io_ring_ctx *ctx = req->ctx;
 	int ret;
+
+	WARN_ON_ONCE(req->task != current);
 
 	ret = io_async_cancel_one(req->task->io_uring, sqe_addr, ctx);
 	spin_lock(&ctx->completion_lock);
 	if (ret != -ENOENT)
-		goto done;
+		return ret;
 	spin_lock_irq(&ctx->timeout_lock);
 	ret = io_timeout_cancel(ctx, sqe_addr);
 	spin_unlock_irq(&ctx->timeout_lock);
 	if (ret != -ENOENT)
-		goto done;
-	ret = io_poll_cancel(ctx, sqe_addr, false);
-done:
-	if (!ret)
-		ret = success_ret;
-	io_cqring_fill_event(ctx, req->user_data, ret, 0);
-	io_commit_cqring(ctx);
-	spin_unlock(&ctx->completion_lock);
-	io_cqring_ev_posted(ctx);
-
-	if (ret < 0)
-		req_set_fail(req);
+		return ret;
+	return io_poll_cancel(ctx, sqe_addr, false);
 }
 
 static int io_async_cancel_prep(struct io_kiocb *req,
@@ -6007,17 +6024,7 @@ static int io_async_cancel(struct io_kiocb *req, unsigned int issue_flags)
 	struct io_tctx_node *node;
 	int ret;
 
-	/* tasks should wait for their io-wq threads, so safe w/o sync */
-	ret = io_async_cancel_one(req->task->io_uring, sqe_addr, ctx);
-	spin_lock(&ctx->completion_lock);
-	if (ret != -ENOENT)
-		goto done;
-	spin_lock_irq(&ctx->timeout_lock);
-	ret = io_timeout_cancel(ctx, sqe_addr);
-	spin_unlock_irq(&ctx->timeout_lock);
-	if (ret != -ENOENT)
-		goto done;
-	ret = io_poll_cancel(ctx, sqe_addr, false);
+	ret = io_try_cancel_userdata(req, sqe_addr);
 	if (ret != -ENOENT)
 		goto done;
 	spin_unlock(&ctx->completion_lock);
@@ -6507,9 +6514,11 @@ static void io_wq_submit_work(struct io_wq_work *work)
 	struct io_kiocb *timeout;
 	int ret = 0;
 
-	io_req_refcount(req);
-	/* will be dropped by ->io_free_work() after returning to io-wq */
-	req_ref_get(req);
+	/* one will be dropped by ->io_free_work() after returning to io-wq */
+	if (!(req->flags & REQ_F_REFCOUNT))
+		__io_req_set_refcount(req, 2);
+	else
+		req_ref_get(req);
 
 	timeout = io_prep_linked_timeout(req);
 	if (timeout)
@@ -6608,9 +6617,17 @@ static void io_req_task_link_timeout(struct io_kiocb *req)
 {
 	struct io_kiocb *prev = req->timeout.prev;
 	struct io_ring_ctx *ctx = req->ctx;
+	int ret;
 
 	if (prev) {
-		io_async_find_and_cancel(ctx, req, prev->user_data, -ETIME);
+		ret = io_try_cancel_userdata(req, prev->user_data);
+		if (!ret)
+			ret = -ETIME;
+		io_cqring_fill_event(ctx, req->user_data, ret, 0);
+		io_commit_cqring(ctx);
+		spin_unlock(&ctx->completion_lock);
+		io_cqring_ev_posted(ctx);
+
 		io_put_req(prev);
 		io_put_req(req);
 	} else {
@@ -6671,7 +6688,7 @@ static void io_queue_linked_timeout(struct io_kiocb *req)
 static void __io_queue_sqe(struct io_kiocb *req)
 	__must_hold(&req->ctx->uring_lock)
 {
-	struct io_kiocb *linked_timeout = io_prep_linked_timeout(req);
+	struct io_kiocb *linked_timeout;
 	int ret;
 
 issue_sqe:
@@ -6689,10 +6706,19 @@ issue_sqe:
 			state->compl_reqs[state->compl_nr++] = req;
 			if (state->compl_nr == ARRAY_SIZE(state->compl_reqs))
 				io_submit_flush_completions(ctx);
+			return;
 		}
+
+		linked_timeout = io_prep_linked_timeout(req);
+		if (linked_timeout)
+			io_queue_linked_timeout(linked_timeout);
 	} else if (ret == -EAGAIN && !(req->flags & REQ_F_NOWAIT)) {
+		linked_timeout = io_prep_linked_timeout(req);
+
 		switch (io_arm_poll_handler(req)) {
 		case IO_APOLL_READY:
+			if (linked_timeout)
+				io_unprep_linked_timeout(req);
 			goto issue_sqe;
 		case IO_APOLL_ABORTED:
 			/*
@@ -6702,11 +6728,12 @@ issue_sqe:
 			io_queue_async_work(req);
 			break;
 		}
+
+		if (linked_timeout)
+			io_queue_linked_timeout(linked_timeout);
 	} else {
 		io_req_complete_failed(req, ret);
 	}
-	if (linked_timeout)
-		io_queue_linked_timeout(linked_timeout);
 }
 
 static inline void io_queue_sqe(struct io_kiocb *req)
@@ -7047,7 +7074,7 @@ static int __io_sq_thread(struct io_ring_ctx *ctx, bool cap_entries)
 
 		mutex_lock(&ctx->uring_lock);
 		if (!list_empty(&ctx->iopoll_list))
-			io_do_iopoll(ctx, &nr_events, 0, true);
+			io_do_iopoll(ctx, &nr_events, 0);
 
 		/*
 		 * Don't submit if refs are dying, good for io_uring_register(),
