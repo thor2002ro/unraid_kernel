@@ -797,11 +797,17 @@ KBUILD_CFLAGS += -Wno-gnu
 # source of a reference will be _MergedGlobals and not on of the whitelisted names.
 # See modpost pattern 2
 KBUILD_CFLAGS += -mno-global-merge
+
+# Warn about unmarked fall-throughs in switch statement.
+# Clang prior to 14.0.0 warned on unreachable fallthroughs with
+# -Wimplicit-fallthrough, which is unacceptable due to IS_ENABLED().
+# https://bugs.llvm.org/show_bug.cgi?id=51094
+ifeq ($(firstword $(sort $(CONFIG_CLANG_VERSION) 140000)),140000)
+KBUILD_CFLAGS += -Wimplicit-fallthrough
+endif
 else
 
 # Warn about unmarked fall-throughs in switch statement.
-# Disabled for clang while comment to attribute conversion happens and
-# https://github.com/ClangBuiltLinux/linux/issues/636 is discussed.
 KBUILD_CFLAGS += $(call cc-option,-Wimplicit-fallthrough=5,)
 endif
 
