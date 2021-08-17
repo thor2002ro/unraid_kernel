@@ -2004,9 +2004,14 @@ static void ctx_flush_and_put(struct io_ring_ctx *ctx)
 		io_submit_flush_completions(ctx);
 		mutex_unlock(&ctx->uring_lock);
 	}
-	percpu_ref_put(&ctx->refs);
 }
 
+/*
+ * All the ctxs we operate on here will stay alive until the function returns.
+ * That's because initially they're refcounted by the requests, and after
+ * io_ring_exit_work() synchronises with the current task by injecting and
+ * waiting for a task_work, which can't be executed until it returns.
+ */
 static void tctx_task_work(struct callback_head *cb)
 {
 	struct io_ring_ctx *ctx = NULL;
@@ -2033,7 +2038,6 @@ static void tctx_task_work(struct callback_head *cb)
 			if (req->ctx != ctx) {
 				ctx_flush_and_put(ctx);
 				ctx = req->ctx;
-				percpu_ref_get(&ctx->refs);
 			}
 			req->io_task_work.func(req);
 			node = next;
