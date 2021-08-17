@@ -250,45 +250,6 @@ int cifs_verify_signature(struct smb_rqst *rqst,
 
 }
 
-/* first calculate 24 bytes ntlm response and then 16 byte session key */
-int setup_ntlm_response(struct cifs_ses *ses, const struct nls_table *nls_cp)
-{
-	int rc = 0;
-	unsigned int temp_len = CIFS_SESS_KEY_SIZE + CIFS_AUTH_RESP_SIZE;
-	char temp_key[CIFS_SESS_KEY_SIZE];
-
-	if (!ses)
-		return -EINVAL;
-
-	ses->auth_key.response = kmalloc(temp_len, GFP_KERNEL);
-	if (!ses->auth_key.response)
-		return -ENOMEM;
-
-	ses->auth_key.len = temp_len;
-
-	rc = SMBNTencrypt(ses->password, ses->server->cryptkey,
-			ses->auth_key.response + CIFS_SESS_KEY_SIZE, nls_cp);
-	if (rc) {
-		cifs_dbg(FYI, "%s Can't generate NTLM response, error: %d\n",
-			 __func__, rc);
-		return rc;
-	}
-
-	rc = E_md4hash(ses->password, temp_key, nls_cp);
-	if (rc) {
-		cifs_dbg(FYI, "%s Can't generate NT hash, error: %d\n",
-			 __func__, rc);
-		return rc;
-	}
-
-	rc = mdfour(ses->auth_key.response, temp_key, CIFS_SESS_KEY_SIZE);
-	if (rc)
-		cifs_dbg(FYI, "%s Can't generate NTLM session key, error: %d\n",
-			 __func__, rc);
-
-	return rc;
-}
-
 /* Build a proper attribute value/target info pairs blob.
  * Fill in netbios and dns domain name and workstation name
  * and client time (total five av pairs and + one end of fields indicator.

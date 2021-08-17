@@ -1061,6 +1061,8 @@ out:
 
 #endif
 
+
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 static void
 sess_auth_ntlm(struct sess_data *sess_data)
 {
@@ -1170,6 +1172,7 @@ out:
 	kfree(ses->auth_key.response);
 	ses->auth_key.response = NULL;
 }
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
 static void
 sess_auth_ntlmv2(struct sess_data *sess_data)
@@ -1687,9 +1690,11 @@ static int select_sec(struct cifs_ses *ses, struct sess_data *sess_data)
 #else
 		return -EOPNOTSUPP;
 #endif
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	case NTLM:
 		sess_data->func = sess_auth_ntlm;
 		break;
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 	case NTLMv2:
 		sess_data->func = sess_auth_ntlmv2;
 		break;
