@@ -289,48 +289,6 @@ int setup_ntlm_response(struct cifs_ses *ses, const struct nls_table *nls_cp)
 	return rc;
 }
 
-#ifdef CONFIG_CIFS_WEAK_PW_HASH
-int calc_lanman_hash(const char *password, const char *cryptkey, bool encrypt,
-			char *lnm_session_key)
-{
-	int i, len;
-	int rc;
-	char password_with_pad[CIFS_ENCPWD_SIZE] = {0};
-
-	if (password) {
-		for (len = 0; len < CIFS_ENCPWD_SIZE; len++)
-			if (!password[len])
-				break;
-
-		memcpy(password_with_pad, password, len);
-	}
-
-	if (!encrypt && global_secflags & CIFSSEC_MAY_PLNTXT) {
-		memcpy(lnm_session_key, password_with_pad,
-			CIFS_ENCPWD_SIZE);
-		return 0;
-	}
-
-	/* calculate old style session key */
-	/* calling toupper is less broken than repeatedly
-	calling nls_toupper would be since that will never
-	work for UTF8, but neither handles multibyte code pages
-	but the only alternative would be converting to UCS-16 (Unicode)
-	(using a routine something like UniStrupr) then
-	uppercasing and then converting back from Unicode - which
-	would only worth doing it if we knew it were utf8. Basically
-	utf8 and other multibyte codepages each need their own strupper
-	function since a byte at a time will ont work. */
-
-	for (i = 0; i < CIFS_ENCPWD_SIZE; i++)
-		password_with_pad[i] = toupper(password_with_pad[i]);
-
-	rc = SMBencrypt(password_with_pad, cryptkey, lnm_session_key);
-
-	return rc;
-}
-#endif /* CIFS_WEAK_PW_HASH */
-
 /* Build a proper attribute value/target info pairs blob.
  * Fill in netbios and dns domain name and workstation name
  * and client time (total five av pairs and + one end of fields indicator.
