@@ -1165,7 +1165,7 @@ int kvmppc_pseries_do_hcall(struct kvm_vcpu *vcpu)
 		break;
 #endif
 	case H_RANDOM:
-		if (!powernv_get_random_long(&vcpu->arch.regs.gpr[4]))
+		if (!arch_get_random_seed_long(&vcpu->arch.regs.gpr[4]))
 			ret = H_HARDWARE;
 		break;
 	case H_RPT_INVALIDATE:
@@ -5328,6 +5328,7 @@ static int kvmppc_set_passthru_irq(struct kvm *kvm, int host_irq, int guest_gsi)
 	struct kvmppc_passthru_irqmap *pimap;
 	struct irq_chip *chip;
 	int i, rc = 0;
+	struct irq_data *host_data;
 
 	if (!kvm_irq_bypass)
 		return 1;
@@ -5355,7 +5356,7 @@ static int kvmppc_set_passthru_irq(struct kvm *kvm, int host_irq, int guest_gsi)
 	 * what our real-mode EOI code does, or a XIVE interrupt
 	 */
 	chip = irq_data_get_irq_chip(&desc->irq_data);
-	if (!chip || !(is_pnv_opal_msi(chip) || is_xive_irq(chip))) {
+	if (!chip || !is_pnv_opal_msi(chip)) {
 		pr_warn("kvmppc_set_passthru_irq_hv: Could not assign IRQ map for (%d,%d)\n",
 			host_irq, guest_gsi);
 		mutex_unlock(&kvm->lock);
@@ -5392,15 +5393,22 @@ static int kvmppc_set_passthru_irq(struct kvm *kvm, int host_irq, int guest_gsi)
 	 * the KVM real mode handler.
 	 */
 	smp_wmb();
-	irq_map->r_hwirq = desc->irq_data.hwirq;
+
+	/*
+	 * The 'host_irq' number is mapped in the PCI-MSI domain but
+	 * the underlying calls, which will EOI the interrupt in real
+	 * mode, need an HW IRQ number mapped in the XICS IRQ domain.
+	 */
+	host_data = irq_domain_get_irq_data(irq_get_default_host(), host_irq);
+	irq_map->r_hwirq = (unsigned int)irqd_to_hwirq(host_data);
 
 	if (i == pimap->n_mapped)
 		pimap->n_mapped++;
 
 	if (xics_on_xive())
-		rc = kvmppc_xive_set_mapped(kvm, guest_gsi, desc);
+		rc = kvmppc_xive_set_mapped(kvm, guest_gsi, host_irq);
 	else
-		kvmppc_xics_set_mapped(kvm, guest_gsi, desc->irq_data.hwirq);
+		kvmppc_xics_set_mapped(kvm, guest_gsi, irq_map->r_hwirq);
 	if (rc)
 		irq_map->r_hwirq = 0;
 
@@ -5439,7 +5447,7 @@ static int kvmppc_clr_passthru_irq(struct kvm *kvm, int host_irq, int guest_gsi)
 	}
 
 	if (xics_on_xive())
-		rc = kvmppc_xive_clr_mapped(kvm, guest_gsi, pimap->mapped[i].desc);
+		rc = kvmppc_xive_clr_mapped(kvm, guest_gsi, host_irq);
 	else
 		kvmppc_xics_clr_mapped(kvm, guest_gsi, pimap->mapped[i].r_hwirq);
 
