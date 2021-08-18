@@ -35,7 +35,7 @@
 #include <linux/bits.h>
 #include <asm-generic/pgtable-nopmd.h>
 #include <asm/page.h>
-#include <asm/mmu.h>	/* to propagate CONFIG_ARC_MMU_VER <n> */
+#include <asm/mmu.h>
 
 /**************************************************************************
  * Page Table Flags
@@ -51,20 +51,6 @@
  *      (saves some bit shift ops in TLB Miss hdlrs)
  */
 
-#if (CONFIG_ARC_MMU_VER <= 2)
-
-#define _PAGE_ACCESSED      (1<<1)	/* Page is accessed (S) */
-#define _PAGE_CACHEABLE     (1<<2)	/* Page is cached (H) */
-#define _PAGE_EXECUTE       (1<<3)	/* Page has user execute perm (H) */
-#define _PAGE_WRITE         (1<<4)	/* Page has user write perm (H) */
-#define _PAGE_READ          (1<<5)	/* Page has user read perm (H) */
-#define _PAGE_DIRTY         (1<<6)	/* Page modified (dirty) (S) */
-#define _PAGE_SPECIAL       (1<<7)
-#define _PAGE_GLOBAL        (1<<8)	/* Page is global (H) */
-#define _PAGE_PRESENT       (1<<10)	/* TLB entry is valid (H) */
-
-#else	/* MMU v3 onwards */
-
 #define _PAGE_CACHEABLE     (1<<0)	/* Page is cached (H) */
 #define _PAGE_EXECUTE       (1<<1)	/* Page has user execute perm (H) */
 #define _PAGE_WRITE         (1<<2)	/* Page has user write perm (H) */
@@ -73,23 +59,15 @@
 #define _PAGE_DIRTY         (1<<5)	/* Page modified (dirty) (S) */
 #define _PAGE_SPECIAL       (1<<6)
 
-#if (CONFIG_ARC_MMU_VER >= 4)
-#define _PAGE_WTHRU         (1<<7)	/* Page cache mode write-thru (H) */
-#endif
-
 #define _PAGE_GLOBAL        (1<<8)	/* Page is global (H) */
 #define _PAGE_PRESENT       (1<<9)	/* TLB entry is valid (H) */
 
-#if (CONFIG_ARC_MMU_VER >= 4)
+#ifdef CONFIG_ARC_MMU_V4
 #define _PAGE_HW_SZ         (1<<10)	/* Page Size indicator (H): 0 normal, 1 super */
 #endif
 
 #define _PAGE_SHARED_CODE   (1<<11)	/* Shared Code page with cmn vaddr
 					   usable for shared TLB entries (H) */
-
-#define _PAGE_UNUSED_BIT    (1<<12)
-#endif
-
 /* vmalloc permissions */
 #define _K_PAGE_PERMS  (_PAGE_EXECUTE | _PAGE_WRITE | _PAGE_READ | \
 			_PAGE_GLOBAL | _PAGE_PRESENT)
@@ -124,9 +102,6 @@
  * Thus Global, all-kernel-access, no-user-access, cached
  */
 #define PAGE_KERNEL          __pgprot(_K_PAGE_PERMS | _PAGE_CACHEABLE)
-
-/* ioremap */
-#define PAGE_KERNEL_NO_CACHE __pgprot(_K_PAGE_PERMS)
 
 /* Masks for actual TLB "PD"s */
 #define PTE_BITS_IN_PD0		(_PAGE_GLOBAL | _PAGE_PRESENT | _PAGE_HW_SZ)
@@ -247,12 +222,6 @@ extern char empty_zero_page[PAGE_SIZE];
 /* find the logical addr (phy for ARC) of the Page Tbl ref by PMD entry */
 #define pmd_page_vaddr(pmd)	(pmd_val(pmd) & PAGE_MASK)
 
-/* In a 2 level sys, setup the PGD entry with PTE value */
-static inline void pmd_set(pmd_t *pmdp, pte_t *ptep)
-{
-	pmd_val(*pmdp) = (unsigned long)ptep;
-}
-
 #define pte_none(x)			(!pte_val(x))
 #define pte_present(x)			(pte_val(x) & _PAGE_PRESENT)
 #define pte_clear(mm, addr, ptep)	set_pte_at(mm, addr, ptep, __pte(0))
@@ -305,29 +274,6 @@ static inline void set_pte_at(struct mm_struct *mm, unsigned long addr,
 {
 	set_pte(ptep, pteval);
 }
-
-/*
- * Macro to quickly access the PGD entry, utlising the fact that some
- * arch may cache the pointer to Page Directory of "current" task
- * in a MMU register
- *
- * Thus task->mm->pgd (3 pointer dereferences, cache misses etc simply
- * becomes read a register
- *
- * ********CAUTION*******:
- * Kernel code might be dealing with some mm_struct of NON "current"
- * Thus use this macro only when you are certain that "current" is current
- * e.g. when dealing with signal frame setup code etc
- */
-#ifdef ARC_USE_SCRATCH_REG
-#define pgd_offset_fast(mm, addr)	\
-({					\
-	pgd_t *pgd_base = (pgd_t *) read_aux_reg(ARC_REG_SCRATCH_DATA0);  \
-	pgd_base + pgd_index(addr);	\
-})
-#else
-#define pgd_offset_fast(mm, addr)	pgd_offset(mm, addr)
-#endif
 
 extern pgd_t swapper_pg_dir[] __aligned(PAGE_SIZE);
 void update_mmu_cache(struct vm_area_struct *vma, unsigned long address,
