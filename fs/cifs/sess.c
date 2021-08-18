@@ -877,7 +877,7 @@ sess_alloc_buffer(struct sess_data *sess_data, int wct)
 	return 0;
 
 out_free_smb_buf:
-	kfree(smb_buf);
+	cifs_small_buf_release(smb_buf);
 	sess_data->iov[0].iov_base = NULL;
 	sess_data->iov[0].iov_len = 0;
 	sess_data->buf0_type = CIFS_NO_BUFFER;
@@ -1061,6 +1061,8 @@ out:
 
 #endif
 
+
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 static void
 sess_auth_ntlm(struct sess_data *sess_data)
 {
@@ -1170,6 +1172,7 @@ out:
 	kfree(ses->auth_key.response);
 	ses->auth_key.response = NULL;
 }
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
 static void
 sess_auth_ntlmv2(struct sess_data *sess_data)
@@ -1687,9 +1690,11 @@ static int select_sec(struct cifs_ses *ses, struct sess_data *sess_data)
 #else
 		return -EOPNOTSUPP;
 #endif
+#ifdef CONFIG_CIFS_ALLOW_INSECURE_LEGACY
 	case NTLM:
 		sess_data->func = sess_auth_ntlm;
 		break;
+#endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 	case NTLMv2:
 		sess_data->func = sess_auth_ntlmv2;
 		break;

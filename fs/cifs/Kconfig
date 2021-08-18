@@ -16,7 +16,6 @@ config CIFS
 	select CRYPTO_GCM
 	select CRYPTO_ECB
 	select CRYPTO_AES
-	select CRYPTO_LIB_DES
 	select KEYS
 	select DNS_RESOLVER
 	select ASN1
@@ -72,7 +71,7 @@ config CIFS_STATS2
 
 config CIFS_ALLOW_INSECURE_LEGACY
 	bool "Support legacy servers which use less secure dialects"
-	depends on CIFS
+	depends on CIFS && CRYPTO_LIB_DES
 	default y
 	help
 	  Modern dialects, SMB2.1 and later (including SMB3 and 3.1.1), have

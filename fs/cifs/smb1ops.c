@@ -5,6 +5,8 @@
  *  Copyright (c) 2012, Jeff Layton <jlayton@redhat.com>
  */
 
+#include <linux/ctype.h>
+#include <linux/fips.h>
 #include <linux/pagemap.h>
 #include <linux/vfs.h>
 #include "cifsglob.h"
@@ -13,6 +15,366 @@
 #include "cifspdu.h"
 #include "cifs_unicode.h"
 #include "fs_context.h"
+#include "ntlmssp.h"
+
+#include <crypto/des.h>
+
+static void
+str_to_key(unsigned char *str, unsigned char *key)
+{
+	int i;
+
+	key[0] = str[0] >> 1;
+	key[1] = ((str[0] & 0x01) << 6) | (str[1] >> 2);
+	key[2] = ((str[1] & 0x03) << 5) | (str[2] >> 3);
+	key[3] = ((str[2] & 0x07) << 4) | (str[3] >> 4);
+	key[4] = ((str[3] & 0x0F) << 3) | (str[4] >> 5);
+	key[5] = ((str[4] & 0x1F) << 2) | (str[5] >> 6);
+	key[6] = ((str[5] & 0x3F) << 1) | (str[6] >> 7);
+	key[7] = str[6] & 0x7F;
+	for (i = 0; i < 8; i++)
+		key[i] = (key[i] << 1);
+}
+
+static int
+smbhash(unsigned char *out, const unsigned char *in, unsigned char *key)
+{
+	unsigned char key2[8];
+	struct des_ctx ctx;
+
+	str_to_key(key, key2);
+
+	if (fips_enabled) {
+		cifs_dbg(VFS, "FIPS compliance enabled: DES not permitted\n");
+		return -ENOENT;
+	}
+
+	des_expand_key(&ctx, key2, DES_KEY_SIZE);
+	des_encrypt(&ctx, out, in);
+	memzero_explicit(&ctx, sizeof(ctx));
+
+	return 0;
+}
+
+static int
+E_P24(unsigned char *p21, const unsigned char *c8, unsigned char *p24)
+{
+	int rc;
+
+	rc = smbhash(p24, c8, p21);
+	if (rc)
+		return rc;
+	rc = smbhash(p24 + 8, c8, p21 + 7);
+	if (rc)
+		return rc;
+	rc = smbhash(p24 + 16, c8, p21 + 14);
+	return rc;
+}
+
+#ifdef CONFIG_CIFS_WEAK_PW_HASH
+static int
+E_P16(unsigned char *p14, unsigned char *p16)
+{
+	int rc;
+	unsigned char sp8[8] =
+	    { 0x4b, 0x47, 0x53, 0x21, 0x40, 0x23, 0x24, 0x25 };
+
+	rc = smbhash(p16, sp8, p14);
+	if (rc)
+		return rc;
+	rc = smbhash(p16 + 8, sp8, p14 + 7);
+	return rc;
+}
+
+/*
+   This implements the X/Open SMB password encryption
+   It takes a password, a 8 byte "crypt key" and puts 24 bytes of
+   encrypted password into p24 */
+/* Note that password must be uppercased and null terminated */
+static int
+SMBencrypt(unsigned char *passwd, const unsigned char *c8, unsigned char *p24)
+{
+	int rc;
+	unsigned char p14[14], p16[16], p21[21];
+
+	memset(p14, '\0', 14);
+	memset(p16, '\0', 16);
+	memset(p21, '\0', 21);
+
+	memcpy(p14, passwd, 14);
+	rc = E_P16(p14, p16);
+	if (rc)
+		return rc;
+
+	memcpy(p21, p16, 16);
+	rc = E_P24(p21, c8, p24);
+
+	return rc;
+}
+
+int calc_lanman_hash(const char *password, const char *cryptkey, bool encrypt,
+			char *lnm_session_key)
+{
+	int i, len;
+	int rc;
+	char password_with_pad[CIFS_ENCPWD_SIZE] = {0};
+
+	if (password) {
+		for (len = 0; len < CIFS_ENCPWD_SIZE; len++)
+			if (!password[len])
+				break;
+
+		memcpy(password_with_pad, password, len);
+	}
+
+	if (!encrypt && global_secflags & CIFSSEC_MAY_PLNTXT) {
+		memcpy(lnm_session_key, password_with_pad,
+			CIFS_ENCPWD_SIZE);
+		return 0;
+	}
+
+	/* calculate old style session key */
+	/* calling toupper is less broken than repeatedly
+	calling nls_toupper would be since that will never
+	work for UTF8, but neither handles multibyte code pages
+	but the only alternative would be converting to UCS-16 (Unicode)
+	(using a routine something like UniStrupr) then
+	uppercasing and then converting back from Unicode - which
+	would only worth doing it if we knew it were utf8. Basically
+	utf8 and other multibyte codepages each need their own strupper
+	function since a byte at a time will ont work. */
+
+	for (i = 0; i < CIFS_ENCPWD_SIZE; i++)
+		password_with_pad[i] = toupper(password_with_pad[i]);
+
+	rc = SMBencrypt(password_with_pad, cryptkey, lnm_session_key);
+
+	return rc;
+}
+#endif /* CIFS_WEAK_PW_HASH */
+
+/* Does the NT MD4 hash then des encryption. */
+static int
+SMBNTencrypt(unsigned char *passwd, unsigned char *c8, unsigned char *p24,
+		const struct nls_table *codepage)
+{
+	int rc;
+	unsigned char p16[16], p21[21];
+
+	memset(p16, '\0', 16);
+	memset(p21, '\0', 21);
+
+	rc = E_md4hash(passwd, p16, codepage);
+	if (rc) {
+		cifs_dbg(FYI, "%s Can't generate NT hash, error: %d\n",
+			 __func__, rc);
+		return rc;
+	}
+	memcpy(p21, p16, 16);
+	rc = E_P24(p21, c8, p24);
+	return rc;
+}
+
+/*
+ * Issue a TREE_CONNECT request.
+ */
+static int
+CIFSTCon(const unsigned int xid, struct cifs_ses *ses,
+	 const char *tree, struct cifs_tcon *tcon,
+	 const struct nls_table *nls_codepage)
+{
+	struct smb_hdr *smb_buffer;
+	struct smb_hdr *smb_buffer_response;
+	TCONX_REQ *pSMB;
+	TCONX_RSP *pSMBr;
+	unsigned char *bcc_ptr;
+	int rc = 0;
+	int length;
+	__u16 bytes_left, count;
+
+	if (ses == NULL)
+		return -EIO;
+
+	smb_buffer = cifs_buf_get();
+	if (smb_buffer == NULL)
+		return -ENOMEM;
+
+	smb_buffer_response = smb_buffer;
+
+	header_assemble(smb_buffer, SMB_COM_TREE_CONNECT_ANDX,
+			NULL /*no tid */ , 4 /*wct */ );
+
+	smb_buffer->Mid = get_next_mid(ses->server);
+	smb_buffer->Uid = ses->Suid;
+	pSMB = (TCONX_REQ *) smb_buffer;
+	pSMBr = (TCONX_RSP *) smb_buffer_response;
+
+	pSMB->AndXCommand = 0xFF;
+	pSMB->Flags = cpu_to_le16(TCON_EXTENDED_SECINFO);
+	bcc_ptr = &pSMB->Password[0];
+	if (tcon->pipe || (ses->server->sec_mode & SECMODE_USER)) {
+		pSMB->PasswordLength = cpu_to_le16(1);	/* minimum */
+		*bcc_ptr = 0; /* password is null byte */
+		bcc_ptr++;              /* skip password */
+		/* already aligned so no need to do it below */
+	} else {
+		pSMB->PasswordLength = cpu_to_le16(CIFS_AUTH_RESP_SIZE);
+		/* BB FIXME add code to fail this if NTLMv2 or Kerberos
+		   specified as required (when that support is added to
+		   the vfs in the future) as only NTLM or the much
+		   weaker LANMAN (which we do not send by default) is accepted
+		   by Samba (not sure whether other servers allow
+		   NTLMv2 password here) */
+#ifdef CONFIG_CIFS_WEAK_PW_HASH
+		if ((global_secflags & CIFSSEC_MAY_LANMAN) &&
+		    (ses->sectype == LANMAN))
+			calc_lanman_hash(tcon->password, ses->server->cryptkey,
+					 ses->server->sec_mode &
+					    SECMODE_PW_ENCRYPT ? true : false,
+					 bcc_ptr);
+		else
+#endif /* CIFS_WEAK_PW_HASH */
+		rc = SMBNTencrypt(tcon->password, ses->server->cryptkey,
+					bcc_ptr, nls_codepage);
+		if (rc) {
+			cifs_dbg(FYI, "%s Can't generate NTLM rsp. Error: %d\n",
+				 __func__, rc);
+			cifs_buf_release(smb_buffer);
+			return rc;
+		}
+
+		bcc_ptr += CIFS_AUTH_RESP_SIZE;
+		if (ses->capabilities & CAP_UNICODE) {
+			/* must align unicode strings */
+			*bcc_ptr = 0; /* null byte password */
+			bcc_ptr++;
+		}
+	}
+
+	if (ses->server->sign)
+		smb_buffer->Flags2 |= SMBFLG2_SECURITY_SIGNATURE;
+
+	if (ses->capabilities & CAP_STATUS32) {
+		smb_buffer->Flags2 |= SMBFLG2_ERR_STATUS;
+	}
+	if (ses->capabilities & CAP_DFS) {
+		smb_buffer->Flags2 |= SMBFLG2_DFS;
+	}
+	if (ses->capabilities & CAP_UNICODE) {
+		smb_buffer->Flags2 |= SMBFLG2_UNICODE;
+		length =
+		    cifs_strtoUTF16((__le16 *) bcc_ptr, tree,
+			6 /* max utf8 char length in bytes */ *
+			(/* server len*/ + 256 /* share len */), nls_codepage);
+		bcc_ptr += 2 * length;	/* convert num 16 bit words to bytes */
+		bcc_ptr += 2;	/* skip trailing null */
+	} else {		/* ASCII */
+		strcpy(bcc_ptr, tree);
+		bcc_ptr += strlen(tree) + 1;
+	}
+	strcpy(bcc_ptr, "?????");
+	bcc_ptr += strlen("?????");
+	bcc_ptr += 1;
+	count = bcc_ptr - &pSMB->Password[0];
+	be32_add_cpu(&pSMB->hdr.smb_buf_length, count);
+	pSMB->ByteCount = cpu_to_le16(count);
+
+	rc = SendReceive(xid, ses, smb_buffer, smb_buffer_response, &length,
+			 0);
+
+	/* above now done in SendReceive */
+	if (rc == 0) {
+		bool is_unicode;
+
+		tcon->tidStatus = CifsGood;
+		tcon->need_reconnect = false;
+		tcon->tid = smb_buffer_response->Tid;
+		bcc_ptr = pByteArea(smb_buffer_response);
+		bytes_left = get_bcc(smb_buffer_response);
+		length = strnlen(bcc_ptr, bytes_left - 2);
+		if (smb_buffer->Flags2 & SMBFLG2_UNICODE)
+			is_unicode = true;
+		else
+			is_unicode = false;
+
+
+		/* skip service field (NB: this field is always ASCII) */
+		if (length == 3) {
+			if ((bcc_ptr[0] == 'I') && (bcc_ptr[1] == 'P') &&
+			    (bcc_ptr[2] == 'C')) {
+				cifs_dbg(FYI, "IPC connection\n");
+				tcon->ipc = true;
+				tcon->pipe = true;
+			}
+		} else if (length == 2) {
+			if ((bcc_ptr[0] == 'A') && (bcc_ptr[1] == ':')) {
+				/* the most common case */
+				cifs_dbg(FYI, "disk share connection\n");
+			}
+		}
+		bcc_ptr += length + 1;
+		bytes_left -= (length + 1);
+		strlcpy(tcon->treeName, tree, sizeof(tcon->treeName));
+
+		/* mostly informational -- no need to fail on error here */
+		kfree(tcon->nativeFileSystem);
+		tcon->nativeFileSystem = cifs_strndup_from_utf16(bcc_ptr,
+						      bytes_left, is_unicode,
+						      nls_codepage);
+
+		cifs_dbg(FYI, "nativeFileSystem=%s\n", tcon->nativeFileSystem);
+
+		if ((smb_buffer_response->WordCount == 3) ||
+			 (smb_buffer_response->WordCount == 7))
+			/* field is in same location */
+			tcon->Flags = le16_to_cpu(pSMBr->OptionalSupport);
+		else
+			tcon->Flags = 0;
+		cifs_dbg(FYI, "Tcon flags: 0x%x\n", tcon->Flags);
+	}
+
+	cifs_buf_release(smb_buffer);
+	return rc;
+}
+
+/* first calculate 24 bytes ntlm response and then 16 byte session key */
+int setup_ntlm_response(struct cifs_ses *ses, const struct nls_table *nls_cp)
+{
+	int rc = 0;
+	unsigned int temp_len = CIFS_SESS_KEY_SIZE + CIFS_AUTH_RESP_SIZE;
+	char temp_key[CIFS_SESS_KEY_SIZE];
+
+	if (!ses)
+		return -EINVAL;
+
+	ses->auth_key.response = kmalloc(temp_len, GFP_KERNEL);
+	if (!ses->auth_key.response)
+		return -ENOMEM;
+
+	ses->auth_key.len = temp_len;
+
+	rc = SMBNTencrypt(ses->password, ses->server->cryptkey,
+			ses->auth_key.response + CIFS_SESS_KEY_SIZE, nls_cp);
+	if (rc) {
+		cifs_dbg(FYI, "%s Can't generate NTLM response, error: %d\n",
+			 __func__, rc);
+		return rc;
+	}
+
+	rc = E_md4hash(ses->password, temp_key, nls_cp);
+	if (rc) {
+		cifs_dbg(FYI, "%s Can't generate NT hash, error: %d\n",
+			 __func__, rc);
+		return rc;
+	}
+
+	rc = mdfour(ses->auth_key.response, temp_key, CIFS_SESS_KEY_SIZE);
+	if (rc)
+		cifs_dbg(FYI, "%s Can't generate NTLM session key, error: %d\n",
+			 __func__, rc);
+
+	return rc;
+}
 
 /*
  * An NT cancel request header looks just like the original request except:

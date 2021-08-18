@@ -8,7 +8,7 @@ obj-$(CONFIG_CIFS) += cifs.o
 cifs-y := trace.o cifsfs.o cifssmb.o cifs_debug.o connect.o dir.o file.o \
 	  inode.o link.o misc.o netmisc.o smbencrypt.o transport.o \
 	  cifs_unicode.o nterr.o cifsencrypt.o \
-	  readdir.o ioctl.o sess.o export.o smb1ops.o unc.o winucase.o \
+	  readdir.o ioctl.o sess.o export.o unc.o winucase.o \
 	  smb2ops.o smb2maperror.o smb2transport.o \
 	  smb2misc.o smb2pdu.o smb2inode.o smb2file.o cifsacl.o fs_context.o \
 	  dns_resolve.o cifs_spnego_negtokeninit.asn1.o asn1.o
@@ -16,6 +16,8 @@ cifs-y := trace.o cifsfs.o cifssmb.o cifs_debug.o connect.o dir.o file.o \
 $(obj)/asn1.o: $(obj)/cifs_spnego_negtokeninit.asn1.h
 
 $(obj)/cifs_spnego_negtokeninit.asn1.o: $(obj)/cifs_spnego_negtokeninit.asn1.c $(obj)/cifs_spnego_negtokeninit.asn1.h
+
+cifs-$(CONFIG_CIFS_ALLOW_INSECURE_LEGACY) += smb1ops.o
 
 cifs-$(CONFIG_CIFS_XATTR) += xattr.o
 
