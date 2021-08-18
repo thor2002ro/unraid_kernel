@@ -58,18 +58,18 @@ static void __wbuf(struct ksmbd_work *work, void **req, void **rsp)
  *
  * Return:      1 if valid session id, otherwise 0
  */
-static inline int check_session_id(struct ksmbd_conn *conn, u64 id)
+static inline bool check_session_id(struct ksmbd_conn *conn, u64 id)
 {
 	struct ksmbd_session *sess;
 
 	if (id == 0 || id == -1)
-		return 0;
+		return false;
 
 	sess = ksmbd_session_lookup_all(conn, id);
 	if (sess)
-		return 1;
+		return true;
 	pr_err("Invalid user session id: %llu\n", id);
-	return 0;
+	return false;
 }
 
 struct channel *lookup_chann_list(struct ksmbd_session *sess, struct ksmbd_conn *conn)
@@ -85,10 +85,11 @@ struct channel *lookup_chann_list(struct ksmbd_session *sess, struct ksmbd_conn 
 }
 
 /**
- * smb2_get_ksmbd_tcon() - get tree connection information for a tree id
+ * smb2_get_ksmbd_tcon() - get tree connection information using a tree id.
  * @work:	smb work
  *
- * Return:      matching tree connection on success, otherwise error
+ * Return:	0 if there is a tree connection matched or these are
+ *		skipable commands, otherwise error
  */
 int smb2_get_ksmbd_tcon(struct ksmbd_work *work)
 {
@@ -105,14 +106,14 @@ int smb2_get_ksmbd_tcon(struct ksmbd_work *work)
 
 	if (xa_empty(&work->sess->tree_conns)) {
 		ksmbd_debug(SMB, "NO tree connected\n");
-		return -1;
+		return -ENOENT;
 	}
 
 	tree_id = le32_to_cpu(req_hdr->Id.SyncId.TreeId);
 	work->tcon = ksmbd_tree_conn_lookup(work->sess, tree_id);
 	if (!work->tcon) {
 		pr_err("Invalid tid %d\n", tree_id);
-		return -1;
+		return -EINVAL;
 	}
 
 	return 1;
@@ -145,45 +146,45 @@ void smb2_set_err_rsp(struct ksmbd_work *work)
  * is_smb2_neg_cmd() - is it smb2 negotiation command
  * @work:	smb work containing smb header
  *
- * Return:      1 if smb2 negotiation command, otherwise 0
+ * Return:      true if smb2 negotiation command, otherwise false
  */
-int is_smb2_neg_cmd(struct ksmbd_work *work)
+bool is_smb2_neg_cmd(struct ksmbd_work *work)
 {
 	struct smb2_hdr *hdr = work->request_buf;
 
 	/* is it SMB2 header ? */
 	if (hdr->ProtocolId != SMB2_PROTO_NUMBER)
-		return 0;
+		return false;
 
 	/* make sure it is request not response message */
 	if (hdr->Flags & SMB2_FLAGS_SERVER_TO_REDIR)
-		return 0;
+		return false;
 
 	if (hdr->Command != SMB2_NEGOTIATE)
-		return 0;
+		return false;
 
-	return 1;
+	return true;
 }
 
 /**
  * is_smb2_rsp() - is it smb2 response
  * @work:	smb work containing smb response buffer
  *
- * Return:      1 if smb2 response, otherwise 0
+ * Return:      true if smb2 response, otherwise false
  */
-int is_smb2_rsp(struct ksmbd_work *work)
+bool is_smb2_rsp(struct ksmbd_work *work)
 {
 	struct smb2_hdr *hdr = work->response_buf;
 
 	/* is it SMB2 header ? */
 	if (hdr->ProtocolId != SMB2_PROTO_NUMBER)
-		return 0;
+		return false;
 
 	/* make sure it is response not request message */
 	if (!(hdr->Flags & SMB2_FLAGS_SERVER_TO_REDIR))
-		return 0;
+		return false;
 
-	return 1;
+	return true;
 }
 
 /**
@@ -2385,11 +2386,14 @@ static void ksmbd_acls_fattr(struct smb_fattr *fattr, struct inode *inode)
 	fattr->cf_uid = inode->i_uid;
 	fattr->cf_gid = inode->i_gid;
 	fattr->cf_mode = inode->i_mode;
+	fattr->cf_acls = NULL;
 	fattr->cf_dacls = NULL;
 
-	fattr->cf_acls = get_acl(inode, ACL_TYPE_ACCESS);
-	if (S_ISDIR(inode->i_mode))
-		fattr->cf_dacls = get_acl(inode, ACL_TYPE_DEFAULT);
+	if (IS_ENABLED(CONFIG_FS_POSIX_ACL)) {
+		fattr->cf_acls = get_acl(inode, ACL_TYPE_ACCESS);
+		if (S_ISDIR(inode->i_mode))
+			fattr->cf_dacls = get_acl(inode, ACL_TYPE_DEFAULT);
+	}
 }
 
 /**
@@ -3539,9 +3543,9 @@ static int process_query_dir_entries(struct smb2_query_dir_private *priv)
 			return -EINVAL;
 
 		lock_dir(priv->dir_fp);
-		dent = lookup_one_len(priv->d_info->name,
-				      priv->dir_fp->filp->f_path.dentry,
-				      priv->d_info->name_len);
+		dent = lookup_one(user_ns, priv->d_info->name,
+				  priv->dir_fp->filp->f_path.dentry,
+				  priv->d_info->name_len);
 		unlock_dir(priv->dir_fp);
 
 		if (IS_ERR(dent)) {
@@ -5242,7 +5246,9 @@ int smb2_echo(struct ksmbd_work *work)
 	return 0;
 }
 
-static int smb2_rename(struct ksmbd_work *work, struct ksmbd_file *fp,
+static int smb2_rename(struct ksmbd_work *work,
+		       struct ksmbd_file *fp,
+		       struct user_namespace *user_ns,
 		       struct smb2_file_rename_info *file_info,
 		       struct nls_table *local_nls)
 {
@@ -5306,7 +5312,7 @@ static int smb2_rename(struct ksmbd_work *work, struct ksmbd_file *fp,
 		if (rc)
 			goto out;
 
-		rc = ksmbd_vfs_setxattr(file_mnt_user_ns(fp->filp),
+		rc = ksmbd_vfs_setxattr(user_ns,
 					fp->filp->f_path.dentry,
 					xattr_stream_name,
 					NULL, 0, 0);
@@ -5620,6 +5626,7 @@ static int set_end_of_file_info(struct ksmbd_work *work, struct ksmbd_file *fp,
 static int set_rename_info(struct ksmbd_work *work, struct ksmbd_file *fp,
 			   char *buf)
 {
+	struct user_namespace *user_ns;
 	struct ksmbd_file *parent_fp;
 	struct dentry *parent;
 	struct dentry *dentry = fp->filp->f_path.dentry;
@@ -5633,8 +5640,9 @@ static int set_rename_info(struct ksmbd_work *work, struct ksmbd_file *fp,
 	if (ksmbd_stream_fd(fp))
 		goto next;
 
+	user_ns = file_mnt_user_ns(fp->filp);
 	parent = dget_parent(dentry);
-	ret = ksmbd_vfs_lock_parent(parent, dentry);
+	ret = ksmbd_vfs_lock_parent(user_ns, parent, dentry);
 	if (ret) {
 		dput(parent);
 		return ret;
@@ -5651,7 +5659,7 @@ static int set_rename_info(struct ksmbd_work *work, struct ksmbd_file *fp,
 		}
 	}
 next:
-	return smb2_rename(work, fp,
+	return smb2_rename(work, fp, user_ns,
 			   (struct smb2_file_rename_info *)buf,
 			   work->sess->conn->local_nls);
 }
@@ -8291,7 +8299,7 @@ int smb3_encrypt_resp(struct ksmbd_work *work)
 	return rc;
 }
 
-int smb3_is_transform_hdr(void *buf)
+bool smb3_is_transform_hdr(void *buf)
 {
 	struct smb2_transform_hdr *trhdr = buf;
 
