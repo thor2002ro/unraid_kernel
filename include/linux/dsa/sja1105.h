@@ -59,7 +59,6 @@ struct sja1105_skb_cb {
 	((struct sja1105_skb_cb *)((skb)->cb))
 
 struct sja1105_port {
-	u16 subvlan_map[DSA_8021Q_N_SUBVLAN];
 	struct kthread_worker *xmit_worker;
 	struct kthread_work xmit_work;
 	struct sk_buff_head xmit_queue;
@@ -88,5 +87,23 @@ static inline void sja1110_process_meta_tstamp(struct dsa_switch *ds, int port,
 }
 
 #endif /* IS_ENABLED(CONFIG_NET_DSA_SJA1105_PTP) */
+
+#if IS_ENABLED(CONFIG_NET_DSA_SJA1105)
+
+extern const struct dsa_switch_ops sja1105_switch_ops;
+
+static inline bool dsa_port_is_sja1105(struct dsa_port *dp)
+{
+	return dp->ds->ops == &sja1105_switch_ops;
+}
+
+#else
+
+static inline bool dsa_port_is_sja1105(struct dsa_port *dp)
+{
+	return false;
+}
+
+#endif
 
 #endif /* _NET_DSA_SJA1105_H */

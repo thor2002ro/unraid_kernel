@@ -8,6 +8,7 @@
 #include <linux/phy.h>
 #include <linux/if_vlan.h>
 #include <linux/kfifo.h>
+#include <net/devlink.h>
 
 #include "hclge_cmd.h"
 #include "hclge_ptp.h"
@@ -193,6 +194,7 @@ enum HLCGE_PORT_TYPE {
 #define HCLGE_VECTOR0_IMP_CMDQ_ERR_B	4U
 #define HCLGE_VECTOR0_IMP_RD_POISON_B	5U
 #define HCLGE_VECTOR0_ALL_MSIX_ERR_B	6U
+#define HCLGE_TRIGGER_IMP_RESET_B	7U
 
 #define HCLGE_MAC_DEFAULT_FRAME \
 	(ETH_HLEN + ETH_FCS_LEN + 2 * VLAN_HLEN + ETH_DATA_LEN)
@@ -943,6 +945,7 @@ struct hclge_dev {
 	cpumask_t affinity_mask;
 	struct irq_affinity_notify affinity_notify;
 	struct hclge_ptp *ptp;
+	struct devlink *devlink;
 };
 
 /* VPort level vlan tag configuration for TX direction */

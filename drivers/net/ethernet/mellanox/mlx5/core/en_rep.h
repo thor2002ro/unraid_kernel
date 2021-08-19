@@ -146,7 +146,7 @@ struct mlx5e_neigh_hash_entry {
 	 */
 	refcount_t refcnt;
 
-	/* Save the last reported time offloaded trafic pass over one of the
+	/* Save the last reported time offloaded traffic pass over one of the
 	 * neigh hash entry flows. Use it to periodically update the neigh
 	 * 'used' value and avoid neigh deleting by the kernel.
 	 */
@@ -207,6 +207,8 @@ struct mlx5e_encap_entry {
 
 struct mlx5e_rep_sq {
 	struct mlx5_flow_handle	*send_to_vport_rule;
+	struct mlx5_flow_handle *send_to_vport_rule_peer;
+	u32 sqn;
 	struct list_head	 list;
 };
 

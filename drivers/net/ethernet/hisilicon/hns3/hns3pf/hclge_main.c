@@ -23,6 +23,7 @@
 #include "hclge_tm.h"
 #include "hclge_err.h"
 #include "hnae3.h"
+#include "hclge_devlink.h"
 
 #define HCLGE_NAME			"hclge"
 #define HCLGE_STATS_READ(p, offset) (*(u64 *)((u8 *)(p) + (offset)))
@@ -3788,6 +3789,12 @@ static void hclge_do_reset(struct hclge_dev *hdev)
 	}
 
 	switch (hdev->reset_type) {
+	case HNAE3_IMP_RESET:
+		dev_info(&pdev->dev, "IMP reset requested\n");
+		val = hclge_read_dev(&hdev->hw, HCLGE_PF_OTHER_INT_REG);
+		hnae3_set_bit(val, HCLGE_TRIGGER_IMP_RESET_B, 1);
+		hclge_write_dev(&hdev->hw, HCLGE_PF_OTHER_INT_REG, val);
+		break;
 	case HNAE3_GLOBAL_RESET:
 		dev_info(&pdev->dev, "global reset requested\n");
 		val = hclge_read_dev(&hdev->hw, HCLGE_GLOBAL_RESET_REG);
@@ -11482,10 +11489,14 @@ static int hclge_init_ae_dev(struct hnae3_ae_dev *ae_dev)
 	if (ret)
 		goto out;
 
+	ret = hclge_devlink_init(hdev);
+	if (ret)
+		goto err_pci_uninit;
+
 	/* Firmware command queue initialize */
 	ret = hclge_cmd_queue_init(hdev);
 	if (ret)
-		goto err_pci_uninit;
+		goto err_devlink_uninit;
 
 	/* Firmware command initialize */
 	ret = hclge_cmd_init(hdev);
@@ -11658,6 +11669,8 @@ err_msi_uninit:
 	pci_free_irq_vectors(pdev);
 err_cmd_uninit:
 	hclge_cmd_uninit(hdev);
+err_devlink_uninit:
+	hclge_devlink_uninit(hdev);
 err_pci_uninit:
 	pcim_iounmap(pdev, hdev->hw.io_base);
 	pci_clear_master(pdev);
@@ -12048,6 +12061,7 @@ static void hclge_uninit_ae_dev(struct hnae3_ae_dev *ae_dev)
 
 	hclge_cmd_uninit(hdev);
 	hclge_misc_irq_uninit(hdev);
+	hclge_devlink_uninit(hdev);
 	hclge_pci_uninit(hdev);
 	mutex_destroy(&hdev->vport_lock);
 	hclge_uninit_vport_vlan_table(hdev);
@@ -12829,6 +12843,29 @@ static int hclge_get_module_eeprom(struct hnae3_handle *handle, u32 offset,
 	return 0;
 }
 
+static int hclge_get_link_diagnosis_info(struct hnae3_handle *handle,
+					 u32 *status_code)
+{
+	struct hclge_vport *vport = hclge_get_vport(handle);
+	struct hclge_dev *hdev = vport->back;
+	struct hclge_desc desc;
+	int ret;
+
+	if (hdev->ae_dev->dev_version <= HNAE3_DEVICE_VERSION_V2)
+		return -EOPNOTSUPP;
+
+	hclge_cmd_setup_basic_desc(&desc, HCLGE_OPC_QUERY_LINK_DIAGNOSIS, true);
+	ret = hclge_cmd_send(&hdev->hw, &desc, 1);
+	if (ret) {
+		dev_err(&hdev->pdev->dev,
+			"failed to query link diagnosis info, ret = %d\n", ret);
+		return ret;
+	}
+
+	*status_code = le32_to_cpu(desc.data[0]);
+	return 0;
+}
+
 static const struct hnae3_ae_ops hclge_ops = {
 	.init_ae_dev = hclge_init_ae_dev,
 	.uninit_ae_dev = hclge_uninit_ae_dev,
@@ -12929,6 +12966,7 @@ static const struct hnae3_ae_ops hclge_ops = {
 	.set_tx_hwts_info = hclge_ptp_set_tx_info,
 	.get_rx_hwts = hclge_ptp_get_rx_hwts,
 	.get_ts_info = hclge_ptp_get_ts_info,
+	.get_link_diagnosis_info = hclge_get_link_diagnosis_info,
 };
 
 static struct hnae3_ae_algo ae_algo = {

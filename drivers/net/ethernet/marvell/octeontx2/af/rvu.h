@@ -329,6 +329,7 @@ struct hw_cap {
 	bool	nix_shaping;		 /* Is shaping and coloring supported */
 	bool	nix_tx_link_bp;		 /* Can link backpressure TL queues ? */
 	bool	nix_rx_multicast;	 /* Rx packet replication support */
+	bool	nix_common_dwrr_mtu;	 /* Common DWRR MTU for quantum config */
 	bool	per_pf_mbox_regs; /* PF mbox specified in per PF registers ? */
 	bool	programmable_chans; /* Channels programmable ? */
 	bool	ipolicer;
@@ -355,6 +356,7 @@ struct rvu_hwinfo {
 	u16	npc_counters;	   /* No of match stats counters */
 	u32	lbk_bufsize;	   /* FIFO size supported by LBK */
 	bool	npc_ext_set;	   /* Extended register set */
+	u64     npc_stat_ena;      /* Match stats enable bit */
 
 	struct hw_cap    cap;
 	struct rvu_block block[BLK_COUNT]; /* Block info */
@@ -706,6 +708,8 @@ int nix_aq_context_read(struct rvu *rvu, struct nix_hw *nix_hw,
 			struct nix_cn10k_aq_enq_rsp *aq_rsp,
 			u16 pcifunc, u8 ctype, u32 qidx);
 int rvu_get_nix_blkaddr(struct rvu *rvu, u16 pcifunc);
+u32 convert_dwrr_mtu_to_bytes(u8 dwrr_mtu);
+u32 convert_bytes_to_dwrr_mtu(u32 bytes);
 
 /* NPC APIs */
 int rvu_npc_init(struct rvu *rvu);

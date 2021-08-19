@@ -1032,8 +1032,12 @@ struct nix_bp_cfg_rsp {
 
 struct nix_hw_info {
 	struct mbox_msghdr hdr;
+	u16 rsvs16;
 	u16 max_mtu;
 	u16 min_mtu;
+	u32 rpm_dwrr_mtu;
+	u32 sdp_dwrr_mtu;
+	u64 rsvd[16]; /* Add reserved fields for future expansion */
 };
 
 struct nix_bandprof_alloc_req {
@@ -1074,6 +1078,13 @@ enum npc_af_status {
 	NPC_MCAM_ALLOC_DENIED	= -702,
 	NPC_MCAM_ALLOC_FAILED	= -703,
 	NPC_MCAM_PERM_DENIED	= -704,
+	NPC_FLOW_INTF_INVALID	= -707,
+	NPC_FLOW_CHAN_INVALID	= -708,
+	NPC_FLOW_NO_NIXLF	= -709,
+	NPC_FLOW_NOT_SUPPORTED	= -710,
+	NPC_FLOW_VF_PERM_DENIED	= -711,
+	NPC_FLOW_VF_NOT_INIT	= -712,
+	NPC_FLOW_VF_OVERLAP	= -713,
 };
 
 struct npc_mcam_alloc_entry_req {
@@ -1420,6 +1431,15 @@ struct cpt_rxc_time_cfg_req {
 	u16 zombie_limit;
 	u16 active_thres;
 	u16 active_limit;
+};
+
+/* CGX mailbox error codes
+ * Range 1101 - 1200.
+ */
+enum cgx_af_status {
+	LMAC_AF_ERR_INVALID_PARAM	= -1101,
+	LMAC_AF_ERR_PF_NOT_MAPPED	= -1102,
+	LMAC_AF_ERR_PERM_DENIED		= -1103,
 };
 
 #endif /* MBOX_H */
