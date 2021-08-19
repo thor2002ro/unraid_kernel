@@ -9,6 +9,8 @@ arm/soc
 		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.15/soc-late-signed
 	ixp4xx/soc
 		git://git.kernel.org/pub/scm/linux/kernel/git/linusw/linux-nomadik tags/ixp4xx-del-boardfiles-v5.15
+	aspeed/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/joel/bmc tags/aspeed-5.15-soc
 
 arm/dt
 	patch
@@ -127,4 +129,8 @@ arm/fixes
 		git://git.kernel.org/pub/scm/linux/kernel/git/leo/linux tags/soc-fsl-fix-v5.14
 	<no branch> (d77c95bf9a64d8620662151b2b10efd8221f4bcc)
 		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-fixes-for-5.14
+	<no branch> (06a089ef644934372a3062528244fca3417d3430)
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.14/gpt12-fix-signed
+	patch
+		ARM: s3c: delete unneed local variable "delay"
 
