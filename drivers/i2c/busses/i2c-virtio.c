@@ -205,7 +205,6 @@ static const struct i2c_adapter_quirks virtio_i2c_quirks = {
 
 static int virtio_i2c_probe(struct virtio_device *vdev)
 {
-	struct device *pdev = vdev->dev.parent;
 	struct virtio_i2c *vi;
 	int ret;
 
@@ -228,13 +227,14 @@ static int virtio_i2c_probe(struct virtio_device *vdev)
 	vi->adap.algo = &virtio_algorithm;
 	vi->adap.quirks = &virtio_i2c_quirks;
 	vi->adap.dev.parent = &vdev->dev;
+	vi->adap.dev.of_node = vdev->dev.of_node;
 	i2c_set_adapdata(&vi->adap, vi);
 
 	/*
 	 * Setup ACPI node for controlled devices which will be probed through
 	 * ACPI.
 	 */
-	ACPI_COMPANION_SET(&vi->adap.dev, ACPI_COMPANION(pdev));
+	ACPI_COMPANION_SET(&vi->adap.dev, ACPI_COMPANION(vdev->dev.parent));
 
 	ret = i2c_add_adapter(&vi->adap);
 	if (ret)
