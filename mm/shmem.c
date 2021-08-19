@@ -38,8 +38,7 @@
 #include <linux/hugetlb.h>
 #include <linux/frontswap.h>
 #include <linux/fs_parser.h>
-
-#include <asm/tlbflush.h> /* for arch/microblaze update_mmu_cache() */
+#include <linux/swapfile.h>
 
 static struct vfsmount *shm_mnt;
 
@@ -137,9 +136,6 @@ static unsigned long shmem_default_max_inodes(void)
 }
 #endif
 
-static bool shmem_should_replace_page(struct page *page, gfp_t gfp);
-static int shmem_replace_page(struct page **pagep, gfp_t gfp,
-				struct shmem_inode_info *info, pgoff_t index);
 static int shmem_swapin_page(struct inode *inode, pgoff_t index,
 			     struct page **pagep, enum sgp_type sgp,
 			     gfp_t gfp, struct vm_area_struct *vma,
@@ -278,10 +274,10 @@ static int shmem_reserve_inode(struct super_block *sb, ino_t *inop)
 	ino_t ino;
 
 	if (!(sb->s_flags & SB_KERNMOUNT)) {
-		spin_lock(&sbinfo->stat_lock);
+		raw_spin_lock(&sbinfo->stat_lock);
 		if (sbinfo->max_inodes) {
 			if (!sbinfo->free_inodes) {
-				spin_unlock(&sbinfo->stat_lock);
+				raw_spin_unlock(&sbinfo->stat_lock);
 				return -ENOSPC;
 			}
 			sbinfo->free_inodes--;
@@ -304,7 +300,7 @@ static int shmem_reserve_inode(struct super_block *sb, ino_t *inop)
 			}
 			*inop = ino;
 		}
-		spin_unlock(&sbinfo->stat_lock);
+		raw_spin_unlock(&sbinfo->stat_lock);
 	} else if (inop) {
 		/*
 		 * __shmem_file_setup, one of our callers, is lock-free: it
@@ -319,13 +315,14 @@ static int shmem_reserve_inode(struct super_block *sb, ino_t *inop)
 		 * to worry about things like glibc compatibility.
 		 */
 		ino_t *next_ino;
+
 		next_ino = per_cpu_ptr(sbinfo->ino_batch, get_cpu());
 		ino = *next_ino;
 		if (unlikely(ino % SHMEM_INO_BATCH == 0)) {
-			spin_lock(&sbinfo->stat_lock);
+			raw_spin_lock(&sbinfo->stat_lock);
 			ino = sbinfo->next_ino;
 			sbinfo->next_ino += SHMEM_INO_BATCH;
-			spin_unlock(&sbinfo->stat_lock);
+			raw_spin_unlock(&sbinfo->stat_lock);
 			if (unlikely(is_zero_ino(ino)))
 				ino++;
 		}
@@ -341,9 +338,9 @@ static void shmem_free_inode(struct super_block *sb)
 {
 	struct shmem_sb_info *sbinfo = SHMEM_SB(sb);
 	if (sbinfo->max_inodes) {
-		spin_lock(&sbinfo->stat_lock);
+		raw_spin_lock(&sbinfo->stat_lock);
 		sbinfo->free_inodes++;
-		spin_unlock(&sbinfo->stat_lock);
+		raw_spin_unlock(&sbinfo->stat_lock);
 	}
 }
 
@@ -1156,8 +1153,6 @@ static void shmem_evict_inode(struct inode *inode)
 	clear_inode(inode);
 }
 
-extern struct swap_info_struct *swap_info[];
-
 static int shmem_find_swap_entries(struct address_space *mapping,
 				   pgoff_t start, unsigned int nr_entries,
 				   struct page **entries, pgoff_t *indices,
@@ -1453,10 +1448,10 @@ static struct mempolicy *shmem_get_sbmpol(struct shmem_sb_info *sbinfo)
 {
 	struct mempolicy *mpol = NULL;
 	if (sbinfo->mpol) {
-		spin_lock(&sbinfo->stat_lock);	/* prevent replace/use races */
+		raw_spin_lock(&sbinfo->stat_lock);	/* prevent replace/use races */
 		mpol = sbinfo->mpol;
 		mpol_get(mpol);
-		spin_unlock(&sbinfo->stat_lock);
+		raw_spin_unlock(&sbinfo->stat_lock);
 	}
 	return mpol;
 }
@@ -1699,8 +1694,7 @@ static int shmem_swapin_page(struct inode *inode, pgoff_t index,
 	struct address_space *mapping = inode->i_mapping;
 	struct shmem_inode_info *info = SHMEM_I(inode);
 	struct mm_struct *charge_mm = vma ? vma->vm_mm : NULL;
-	struct swap_info_struct *si;
-	struct page *page = NULL;
+	struct page *page;
 	swp_entry_t swap;
 	int error;
 
@@ -1708,12 +1702,6 @@ static int shmem_swapin_page(struct inode *inode, pgoff_t index,
 	swap = radix_to_swp_entry(*pagep);
 	*pagep = NULL;
 
-	/* Prevent swapoff from happening to us. */
-	si = get_swap_device(swap);
-	if (!si) {
-		error = EINVAL;
-		goto failed;
-	}
 	/* Look it up and read it in.. */
 	page = lookup_swap_cache(swap, NULL, 0);
 	if (!page) {
@@ -1775,8 +1763,6 @@ static int shmem_swapin_page(struct inode *inode, pgoff_t index,
 	swap_free(swap);
 
 	*pagep = page;
-	if (si)
-		put_swap_device(si);
 	return 0;
 failed:
 	if (!shmem_confirm_swap(mapping, index, swap))
@@ -1786,9 +1772,6 @@ unlock:
 		unlock_page(page);
 		put_page(page);
 	}
-
-	if (si)
-		put_swap_device(si);
 
 	return error;
 }
@@ -3503,9 +3486,10 @@ static int shmem_reconfigure(struct fs_context *fc)
 	struct shmem_options *ctx = fc->fs_private;
 	struct shmem_sb_info *sbinfo = SHMEM_SB(fc->root->d_sb);
 	unsigned long inodes;
+	struct mempolicy *mpol = NULL;
 	const char *err;
 
-	spin_lock(&sbinfo->stat_lock);
+	raw_spin_lock(&sbinfo->stat_lock);
 	inodes = sbinfo->max_inodes - sbinfo->free_inodes;
 	if ((ctx->seen & SHMEM_SEEN_BLOCKS) && ctx->blocks) {
 		if (!sbinfo->max_blocks) {
@@ -3550,14 +3534,15 @@ static int shmem_reconfigure(struct fs_context *fc)
 	 * Preserve previous mempolicy unless mpol remount option was specified.
 	 */
 	if (ctx->mpol) {
-		mpol_put(sbinfo->mpol);
+		mpol = sbinfo->mpol;
 		sbinfo->mpol = ctx->mpol;	/* transfers initial ref */
 		ctx->mpol = NULL;
 	}
-	spin_unlock(&sbinfo->stat_lock);
+	raw_spin_unlock(&sbinfo->stat_lock);
+	mpol_put(mpol);
 	return 0;
 out:
-	spin_unlock(&sbinfo->stat_lock);
+	raw_spin_unlock(&sbinfo->stat_lock);
 	return invalfc(fc, "%s", err);
 }
 
@@ -3628,7 +3613,6 @@ static int shmem_fill_super(struct super_block *sb, struct fs_context *fc)
 	struct shmem_options *ctx = fc->fs_private;
 	struct inode *inode;
 	struct shmem_sb_info *sbinfo;
-	int err = -ENOMEM;
 
 	/* Round up to L1_CACHE_BYTES to resist false sharing */
 	sbinfo = kzalloc(max((int)sizeof(struct shmem_sb_info),
@@ -3674,7 +3658,7 @@ static int shmem_fill_super(struct super_block *sb, struct fs_context *fc)
 	sbinfo->mpol = ctx->mpol;
 	ctx->mpol = NULL;
 
-	spin_lock_init(&sbinfo->stat_lock);
+	raw_spin_lock_init(&sbinfo->stat_lock);
 	if (percpu_counter_init(&sbinfo->used_blocks, 0, GFP_KERNEL))
 		goto failed;
 	spin_lock_init(&sbinfo->shrinklist_lock);
@@ -3706,7 +3690,7 @@ static int shmem_fill_super(struct super_block *sb, struct fs_context *fc)
 
 failed:
 	shmem_put_super(sb);
-	return err;
+	return -ENOMEM;
 }
 
 static int shmem_get_tree(struct fs_context *fc)
