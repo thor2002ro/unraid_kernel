@@ -193,16 +193,12 @@ static void populate_properties(const void *blob,
 			pp->length = len;
 			pp->value  = pp + 1;
 			*pprev     = pp;
-			pprev      = &pp->next;
 			memcpy(pp->value, ps, len - 1);
 			((char *)pp->value)[len - 1] = 0;
 			pr_debug("fixed up name for %s -> %s\n",
 				 nodename, (char *)pp->value);
 		}
 	}
-
-	if (!dryrun)
-		*pprev = NULL;
 }
 
 static int populate_node(const void *blob,
@@ -478,6 +474,22 @@ void *initial_boot_params __ro_after_init;
 #ifdef CONFIG_OF_EARLY_FLATTREE
 
 static u32 of_fdt_crc32;
+
+static int __init early_init_dt_reserve_memory_arch(phys_addr_t base,
+					phys_addr_t size, bool nomap)
+{
+	if (nomap) {
+		/*
+		 * If the memory is already reserved (by another region), we
+		 * should not allow it to be marked nomap.
+		 */
+		if (memblock_is_region_reserved(base, size))
+			return -EBUSY;
+
+		return memblock_mark_nomap(base, size);
+	}
+	return memblock_reserve(base, size);
+}
 
 /*
  * __reserved_mem_reserve_reg() - reserve all memory described in 'reg' property
@@ -1033,7 +1045,7 @@ int __init early_init_dt_scan_memory(unsigned long node, const char *uname,
 		if (!hotpluggable)
 			continue;
 
-		if (early_init_dt_mark_hotplug_memory_arch(base, size))
+		if (memblock_mark_hotplug(base, size))
 			pr_warn("failed to mark hotplug range 0x%llx - 0x%llx\n",
 				base, base + size);
 	}
@@ -1144,27 +1156,6 @@ void __init __weak early_init_dt_add_memory_arch(u64 base, u64 size)
 		base = phys_offset;
 	}
 	memblock_add(base, size);
-}
-
-int __init __weak early_init_dt_mark_hotplug_memory_arch(u64 base, u64 size)
-{
-	return memblock_mark_hotplug(base, size);
-}
-
-int __init __weak early_init_dt_reserve_memory_arch(phys_addr_t base,
-					phys_addr_t size, bool nomap)
-{
-	if (nomap) {
-		/*
-		 * If the memory is already reserved (by another region), we
-		 * should not allow it to be marked nomap.
-		 */
-		if (memblock_is_region_reserved(base, size))
-			return -EBUSY;
-
-		return memblock_mark_nomap(base, size);
-	}
-	return memblock_reserve(base, size);
 }
 
 static void * __init early_init_dt_alloc_memory_arch(u64 size, u64 align)
