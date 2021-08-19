@@ -9484,10 +9484,10 @@ F:	include/linux/mfd/intel-m10-bmc.h
 
 INTEL MENLOW THERMAL DRIVER
 M:	Sujith Thomas <sujith.thomas@intel.com>
-L:	platform-driver-x86@vger.kernel.org
+L:	linux-pm@vger.kernel.org
 S:	Supported
 W:	https://01.org/linux-acpi
-F:	drivers/platform/x86/intel_menlow.c
+F:	drivers/thermal/intel/intel_menlow.c
 
 INTEL P-Unit IPC DRIVER
 M:	Zha Qipeng <qipeng.zha@intel.com>
@@ -9520,7 +9520,7 @@ INTEL PMT DRIVER
 M:	"David E. Box" <david.e.box@linux.intel.com>
 S:	Maintained
 F:	drivers/mfd/intel_pmt.c
-F:	drivers/platform/x86/intel_pmt_*
+F:	drivers/platform/x86/intel/pmt/
 
 INTEL PRO/WIRELESS 2100, 2200BG, 2915ABG NETWORK CONNECTION SUPPORT
 M:	Stanislav Yakovlev <stas.yakovlev@gmail.com>
