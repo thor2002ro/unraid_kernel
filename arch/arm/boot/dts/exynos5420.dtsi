@@ -302,7 +302,7 @@
 			clocks = <&clock CLK_PCLK_PPMU_DREX0_0>;
 			clock-names = "ppmu";
 			events {
-				ppmu_event3_dmc0_0: ppmu-event3-dmc0_0 {
+				ppmu_event3_dmc0_0: ppmu-event3-dmc0-0 {
 					event-name = "ppmu-event3-dmc0_0";
 				};
 			};
@@ -314,7 +314,7 @@
 			clocks = <&clock CLK_PCLK_PPMU_DREX0_1>;
 			clock-names = "ppmu";
 			events {
-				ppmu_event3_dmc0_1: ppmu-event3-dmc0_1 {
+				ppmu_event3_dmc0_1: ppmu-event3-dmc0-1 {
 					event-name = "ppmu-event3-dmc0_1";
 				};
 			};
@@ -326,7 +326,7 @@
 			clocks = <&clock CLK_PCLK_PPMU_DREX1_0>;
 			clock-names = "ppmu";
 			events {
-				ppmu_event3_dmc1_0: ppmu-event3-dmc1_0 {
+				ppmu_event3_dmc1_0: ppmu-event3-dmc1-0 {
 					event-name = "ppmu-event3-dmc1_0";
 				};
 			};
@@ -338,7 +338,7 @@
 			clocks = <&clock CLK_PCLK_PPMU_DREX1_1>;
 			clock-names = "ppmu";
 			events {
-				ppmu_event3_dmc1_1: ppmu-event3-dmc1_1 {
+				ppmu_event3_dmc1_1: ppmu-event3-dmc1-1 {
 					event-name = "ppmu-event3-dmc1_1";
 				};
 			};
