@@ -3181,7 +3181,7 @@ sub process {
 # possible SHA-1 matches.
 # A commit match can span multiple lines so this block attempts to find a
 # complete typical commit on a maximum of 3 lines
-		if ($perl_version_ok
+		if ($perl_version_ok &&
 		    $in_commit_log && !$commit_log_possible_stack_dump &&
 		    $line !~ /^\s*(?:Link|Patchwork|http|https|BugLink|base-commit):/i &&
 		    $line !~ /^This reverts commit [0-9a-f]{7,40}/ &&
