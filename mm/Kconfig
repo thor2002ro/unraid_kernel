@@ -740,7 +740,7 @@ config DEFERRED_STRUCT_PAGE_INIT
 	  initialisation.
 
 config PAGE_IDLE_FLAG
-	bool "Add PG_idle and PG_young flags"
+	bool
 	select PAGE_EXTENSION if !64BIT
 	help
 	  This adds PG_idle and PG_young flags to 'struct page'.  PTE Accessed
