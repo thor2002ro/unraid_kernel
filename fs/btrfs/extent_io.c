@@ -3777,12 +3777,14 @@ static void update_nr_written(struct writeback_control *wbc,
  */
 static noinline_for_stack int writepage_delalloc(struct btrfs_inode *inode,
 		struct page *page, struct writeback_control *wbc,
-		u64 delalloc_start, unsigned long *nr_written)
+		u64 delalloc_start)
 {
 	u64 page_end = delalloc_start + PAGE_SIZE - 1;
 	bool found;
 	u64 delalloc_to_write = 0;
 	u64 delalloc_end = 0;
+	/* Number of pages started by the delalloc range */
+	unsigned long nr_written = 0;
 	int ret;
 	int page_started = 0;
 
@@ -3796,7 +3798,7 @@ static noinline_for_stack int writepage_delalloc(struct btrfs_inode *inode,
 			continue;
 		}
 		ret = btrfs_run_delalloc_range(inode, page, delalloc_start,
-				delalloc_end, &page_started, nr_written, wbc);
+				delalloc_end, &page_started, &nr_written, wbc);
 		if (ret) {
 			btrfs_page_set_error(inode->root->fs_info, page,
 					     page_offset(page), PAGE_SIZE);
@@ -3828,7 +3830,7 @@ static noinline_for_stack int writepage_delalloc(struct btrfs_inode *inode,
 		 * the mapping's writeback index, just update
 		 * nr_to_write.
 		 */
-		wbc->nr_to_write -= *nr_written;
+		wbc->nr_to_write -= nr_written;
 		return 1;
 	}
 
@@ -3900,7 +3902,6 @@ static noinline_for_stack int __extent_writepage_io(struct btrfs_inode *inode,
 				 struct writeback_control *wbc,
 				 struct extent_page_data *epd,
 				 loff_t i_size,
-				 unsigned long nr_written,
 				 int *nr_ret)
 {
 	struct btrfs_fs_info *fs_info = inode->root->fs_info;
@@ -3919,7 +3920,6 @@ static noinline_for_stack int __extent_writepage_io(struct btrfs_inode *inode,
 	if (ret) {
 		/* Fixup worker will requeue */
 		redirty_page_for_writepage(wbc, page);
-		update_nr_written(wbc, nr_written);
 		unlock_page(page);
 		return 1;
 	}
@@ -3928,7 +3928,7 @@ static noinline_for_stack int __extent_writepage_io(struct btrfs_inode *inode,
 	 * we don't want to touch the inode after unlocking the page,
 	 * so we update the mapping writeback index now
 	 */
-	update_nr_written(wbc, nr_written + 1);
+	update_nr_written(wbc, 1);
 
 	while (cur <= end) {
 		u64 disk_bytenr;
@@ -4065,7 +4065,6 @@ static int __extent_writepage(struct page *page, struct writeback_control *wbc,
 	size_t pg_offset;
 	loff_t i_size = i_size_read(inode);
 	unsigned long end_index = i_size >> PAGE_SHIFT;
-	unsigned long nr_written = 0;
 
 	trace___extent_writepage(page, inode, wbc);
 
@@ -4094,8 +4093,7 @@ static int __extent_writepage(struct page *page, struct writeback_control *wbc,
 	}
 
 	if (!epd->extent_locked) {
-		ret = writepage_delalloc(BTRFS_I(inode), page, wbc, start,
-					 &nr_written);
+		ret = writepage_delalloc(BTRFS_I(inode), page, wbc, start);
 		if (ret == 1)
 			return 0;
 		if (ret)
@@ -4103,7 +4101,7 @@ static int __extent_writepage(struct page *page, struct writeback_control *wbc,
 	}
 
 	ret = __extent_writepage_io(BTRFS_I(inode), page, wbc, epd, i_size,
-				    nr_written, &nr);
+				    &nr);
 	if (ret == 1)
 		return 0;
 
