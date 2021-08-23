@@ -1261,7 +1261,7 @@ char *bitmap_list_string(char *buf, char *end, unsigned long *bitmap,
 
 		if (buf < end)
 			*buf = '-';
-		buf = number(++buf, end, rtop - 1, default_dec_spec);
+		buf = number(buf + 1, end, rtop - 1, default_dec_spec);
 	}
 	return buf;
 }
