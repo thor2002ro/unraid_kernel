@@ -3010,8 +3010,12 @@ static int btrfs_finish_ordered_io(struct btrfs_ordered_extent *ordered_extent)
 		goto out;
 	}
 
-	if (ordered_extent->bdev)
+	/* Non-null bdev implies a write on a sequential zone */
+	if (ordered_extent->bdev) {
 		btrfs_rewrite_logical_zoned(ordered_extent);
+		btrfs_zone_finish_endio(fs_info, ordered_extent->disk_bytenr,
+					ordered_extent->disk_num_bytes);
+	}
 
 	btrfs_free_io_failure_record(inode, start, end);
 
@@ -4368,7 +4372,7 @@ static void btrfs_prune_dentries(struct btrfs_root *root)
 	struct inode *inode;
 	u64 objectid = 0;
 
-	if (!test_bit(BTRFS_FS_STATE_ERROR, &fs_info->fs_state))
+	if (!btrfs_has_fs_error(fs_info))
 		WARN_ON(btrfs_root_refs(&root->root_item) != 0);
 
 	spin_lock(&root->inode_lock);
@@ -7961,7 +7965,7 @@ static int btrfs_dio_iomap_begin(struct inode *inode, loff_t start,
 		iomap->type = IOMAP_MAPPED;
 	}
 	iomap->offset = start;
-	iomap->bdev = fs_info->fs_devices->latest_bdev;
+	iomap->bdev = fs_info->fs_devices->latest_dev->bdev;
 	iomap->length = len;
 
 	if (write && btrfs_use_zone_append(BTRFS_I(inode), em->block_start))
@@ -9978,7 +9982,7 @@ int btrfs_start_delalloc_snapshot(struct btrfs_root *root, bool in_reclaim_conte
 	};
 	struct btrfs_fs_info *fs_info = root->fs_info;
 
-	if (test_bit(BTRFS_FS_STATE_ERROR, &fs_info->fs_state))
+	if (btrfs_has_fs_error(fs_info))
 		return -EROFS;
 
 	return start_delalloc_inodes(root, &wbc, true, in_reclaim_context);
@@ -9997,7 +10001,7 @@ int btrfs_start_delalloc_roots(struct btrfs_fs_info *fs_info, long nr,
 	struct list_head splice;
 	int ret;
 
-	if (test_bit(BTRFS_FS_STATE_ERROR, &fs_info->fs_state))
+	if (btrfs_has_fs_error(fs_info))
 		return -EROFS;
 
 	INIT_LIST_HEAD(&splice);

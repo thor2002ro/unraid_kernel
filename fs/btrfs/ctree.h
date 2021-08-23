@@ -1018,6 +1018,9 @@ struct btrfs_fs_info {
 	spinlock_t treelog_bg_lock;
 	u64 treelog_bg;
 
+	spinlock_t zone_active_bgs_lock;
+	struct list_head zone_active_bgs;
+
 #ifdef CONFIG_BTRFS_FS_REF_VERIFY
 	spinlock_t ref_verify_lock;
 	struct rb_root block_tree;
@@ -3243,9 +3246,9 @@ int btrfs_fileattr_set(struct user_namespace *mnt_userns,
 int btrfs_ioctl_get_supported_features(void __user *arg);
 void btrfs_sync_inode_flags_to_i_flags(struct inode *inode);
 int __pure btrfs_is_empty_uuid(u8 *uuid);
-int btrfs_defrag_file(struct inode *inode, struct file *file,
+int btrfs_defrag_file(struct inode *inode, struct file_ra_state *ra,
 		      struct btrfs_ioctl_defrag_range_args *range,
-		      u64 newer_than, unsigned long max_pages);
+		      u64 newer_than, unsigned long max_to_defrag);
 void btrfs_get_block_group_info(struct list_head *groups_list,
 				struct btrfs_ioctl_space_info *space);
 void btrfs_update_ioctl_balance_args(struct btrfs_fs_info *fs_info,
@@ -3563,6 +3566,11 @@ do {								\
 	__btrfs_handle_fs_error((fs_info), __func__, __LINE__,	\
 			  (errno), fmt, ##args);		\
 } while (0)
+
+static inline bool btrfs_has_fs_error(struct btrfs_fs_info *fs_info)
+{
+	return test_bit(BTRFS_FS_STATE_ERROR, &fs_info->fs_state);
+}
 
 __printf(5, 6)
 __cold
