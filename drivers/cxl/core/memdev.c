@@ -149,7 +149,6 @@ static void cxl_memdev_unregister(void *_cxlmd)
 static struct cxl_memdev *cxl_memdev_alloc(struct cxl_mem *cxlm,
 					   const struct file_operations *fops)
 {
-	struct pci_dev *pdev = cxlm->pdev;
 	struct cxl_memdev *cxlmd;
 	struct device *dev;
 	struct cdev *cdev;
@@ -166,7 +165,7 @@ static struct cxl_memdev *cxl_memdev_alloc(struct cxl_mem *cxlm,
 
 	dev = &cxlmd->dev;
 	device_initialize(dev);
-	dev->parent = &pdev->dev;
+	dev->parent = cxlm->dev;
 	dev->bus = &cxl_bus_type;
 	dev->devt = MKDEV(cxl_mem_major, cxlmd->id);
 	dev->type = &cxl_memdev_type;
