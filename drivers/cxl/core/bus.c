@@ -636,6 +636,8 @@ static __init int cxl_core_init(void)
 {
 	int rc;
 
+	cxl_mbox_init();
+
 	rc = cxl_memdev_init();
 	if (rc)
 		return rc;
@@ -647,6 +649,7 @@ static __init int cxl_core_init(void)
 
 err:
 	cxl_memdev_exit();
+	cxl_mbox_exit();
 	return rc;
 }
 
@@ -654,6 +657,7 @@ static void cxl_core_exit(void)
 {
 	bus_unregister(&cxl_bus_type);
 	cxl_memdev_exit();
+	cxl_mbox_exit();
 }
 
 module_init(cxl_core_init);

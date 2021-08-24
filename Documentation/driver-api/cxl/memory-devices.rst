@@ -45,6 +45,9 @@ CXL Core
 .. kernel-doc:: drivers/cxl/core/regs.c
    :internal:
 
+.. kernel-doc:: drivers/cxl/core/mbox.c
+   :doc: cxl mbox
+
 External Interfaces
 ===================
 
