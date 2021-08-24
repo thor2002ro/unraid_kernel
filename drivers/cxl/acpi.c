@@ -182,15 +182,7 @@ static resource_size_t get_chbcr(struct acpi_cedt_chbs *chbs)
 	return IS_ERR(chbs) ? CXL_RESOURCE_NONE : chbs->base;
 }
 
-struct cxl_walk_context {
-	struct device *dev;
-	struct pci_bus *root;
-	struct cxl_port *port;
-	int error;
-	int count;
-};
-
-static int match_add_root_ports(struct pci_dev *pdev, void *data)
+__mock int match_add_root_ports(struct pci_dev *pdev, void *data)
 {
 	struct cxl_walk_context *ctx = data;
 	struct pci_bus *root_bus = ctx->root;
@@ -214,6 +206,8 @@ static int match_add_root_ports(struct pci_dev *pdev, void *data)
 	port_num = FIELD_GET(PCI_EXP_LNKCAP_PN, lnkcap);
 	rc = cxl_add_dport(port, &pdev->dev, port_num, CXL_RESOURCE_NONE);
 	if (rc) {
+		dev_err(dev, "failed to add dport: %s (%d)\n",
+			dev_name(&pdev->dev), rc);
 		ctx->error = rc;
 		return rc;
 	}
@@ -239,15 +233,18 @@ static struct cxl_dport *find_dport_by_dev(struct cxl_port *port, struct device 
 	return NULL;
 }
 
-static struct acpi_device *to_cxl_host_bridge(struct device *dev)
+__mock struct acpi_device *to_cxl_host_bridge(struct device *host,
+					      struct device *dev)
 {
 	struct acpi_device *adev = to_acpi_device(dev);
 
 	if (!acpi_pci_find_root(adev->handle))
 		return NULL;
 
-	if (strcmp(acpi_device_hid(adev), "ACPI0016") == 0)
+	if (strcmp(acpi_device_hid(adev), "ACPI0016") == 0) {
+		dev_dbg(host, "found host bridge %s\n", dev_name(&adev->dev));
 		return adev;
+	}
 	return NULL;
 }
 
@@ -257,14 +254,14 @@ static struct acpi_device *to_cxl_host_bridge(struct device *dev)
  */
 static int add_host_bridge_uport(struct device *match, void *arg)
 {
-	struct acpi_device *bridge = to_cxl_host_bridge(match);
+	struct cxl_port *port;
+	struct cxl_dport *dport;
+	struct cxl_decoder *cxld;
+	struct cxl_walk_context ctx;
+	struct acpi_pci_root *pci_root;
 	struct cxl_port *root_port = arg;
 	struct device *host = root_port->dev.parent;
-	struct acpi_pci_root *pci_root;
-	struct cxl_walk_context ctx;
-	struct cxl_decoder *cxld;
-	struct cxl_dport *dport;
-	struct cxl_port *port;
+	struct acpi_device *bridge = to_cxl_host_bridge(host, match);
 
 	if (!bridge)
 		return 0;
@@ -319,7 +316,7 @@ static int add_host_bridge_dport(struct device *match, void *arg)
 	struct acpi_cedt_chbs *chbs;
 	struct cxl_port *root_port = arg;
 	struct device *host = root_port->dev.parent;
-	struct acpi_device *bridge = to_cxl_host_bridge(match);
+	struct acpi_device *bridge = to_cxl_host_bridge(host, match);
 
 	if (!bridge)
 		return 0;
@@ -371,6 +368,17 @@ static int add_root_nvdimm_bridge(struct device *match, void *data)
 	return 1;
 }
 
+static u32 cedt_instance(struct platform_device *pdev)
+{
+	const bool *native_acpi0017 = acpi_device_get_match_data(&pdev->dev);
+
+	if (native_acpi0017 && *native_acpi0017)
+		return 0;
+
+	/* for cxl_test request a non-canonical instance */
+	return U32_MAX;
+}
+
 static int cxl_acpi_probe(struct platform_device *pdev)
 {
 	int rc;
@@ -384,7 +392,7 @@ static int cxl_acpi_probe(struct platform_device *pdev)
 		return PTR_ERR(root_port);
 	dev_dbg(host, "add: %s\n", dev_name(&root_port->dev));
 
-	status = acpi_get_table(ACPI_SIG_CEDT, 0, &acpi_cedt);
+	status = acpi_get_table(ACPI_SIG_CEDT, cedt_instance(pdev), &acpi_cedt);
 	if (ACPI_FAILURE(status))
 		return -ENXIO;
 
@@ -415,9 +423,11 @@ out:
 	return 0;
 }
 
+static bool native_acpi0017 = true;
+
 static const struct acpi_device_id cxl_acpi_ids[] = {
-	{ "ACPI0017", 0 },
-	{ "", 0 },
+	{ "ACPI0017", (unsigned long) &native_acpi0017 },
+	{ },
 };
 MODULE_DEVICE_TABLE(acpi, cxl_acpi_ids);
 
