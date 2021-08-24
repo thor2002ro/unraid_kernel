@@ -22,6 +22,9 @@ static uuid_t nvdimm_btt2_uuid;
 static uuid_t nvdimm_pfn_uuid;
 static uuid_t nvdimm_dax_uuid;
 
+static uuid_t cxl_region_uuid;
+static uuid_t cxl_namespace_uuid;
+
 static const char NSINDEX_SIGNATURE[] = "NAMESPACE_INDEX\0";
 
 static u32 best_seq(u32 a, u32 b)
@@ -357,7 +360,7 @@ static bool nsl_validate_checksum(struct nvdimm_drvdata *ndd,
 {
 	u64 sum, sum_save;
 
-	if (!namespace_label_has(ndd, checksum))
+	if (!ndd->cxl && !efi_namespace_label_has(ndd, checksum))
 		return true;
 
 	sum_save = nsl_get_checksum(ndd, nd_label);
@@ -372,7 +375,7 @@ static void nsl_calculate_checksum(struct nvdimm_drvdata *ndd,
 {
 	u64 sum;
 
-	if (!namespace_label_has(ndd, checksum))
+	if (!ndd->cxl && !efi_namespace_label_has(ndd, checksum))
 		return;
 	nsl_set_checksum(ndd, nd_label, 0);
 	sum = nd_fletcher64(nd_label, sizeof_namespace_label(ndd), 1);
@@ -785,7 +788,6 @@ static const guid_t *to_abstraction_guid(enum nvdimm_claim_class claim_class,
 }
 
 /* CXL labels store UUIDs instead of GUIDs for the same data */
-__maybe_unused
 static const uuid_t *to_abstraction_uuid(enum nvdimm_claim_class claim_class,
 					 uuid_t *target)
 {
@@ -821,18 +823,18 @@ static void reap_victim(struct nd_mapping *nd_mapping,
 static void nsl_set_type_guid(struct nvdimm_drvdata *ndd,
 			      struct nd_namespace_label *nd_label, guid_t *guid)
 {
-	if (namespace_label_has(ndd, type_guid))
-		guid_copy(&nd_label->type_guid, guid);
+	if (efi_namespace_label_has(ndd, type_guid))
+		guid_copy(&nd_label->efi.type_guid, guid);
 }
 
 bool nsl_validate_type_guid(struct nvdimm_drvdata *ndd,
 			    struct nd_namespace_label *nd_label, guid_t *guid)
 {
-	if (!namespace_label_has(ndd, type_guid))
+	if (ndd->cxl || !efi_namespace_label_has(ndd, type_guid))
 		return true;
-	if (!guid_equal(&nd_label->type_guid, guid)) {
+	if (!guid_equal(&nd_label->efi.type_guid, guid)) {
 		dev_dbg(ndd->dev, "expect type_guid %pUb got %pUb\n", guid,
-			&nd_label->type_guid);
+			&nd_label->efi.type_guid);
 		return false;
 	}
 	return true;
@@ -842,19 +844,34 @@ static void nsl_set_claim_class(struct nvdimm_drvdata *ndd,
 				struct nd_namespace_label *nd_label,
 				enum nvdimm_claim_class claim_class)
 {
-	if (!namespace_label_has(ndd, abstraction_guid))
+	if (ndd->cxl) {
+		uuid_t uuid;
+
+		import_uuid(&uuid, nd_label->cxl.abstraction_uuid);
+		export_uuid(nd_label->cxl.abstraction_uuid,
+			    to_abstraction_uuid(claim_class, &uuid));
 		return;
-	guid_copy(&nd_label->abstraction_guid,
+	}
+
+	if (!efi_namespace_label_has(ndd, abstraction_guid))
+		return;
+	guid_copy(&nd_label->efi.abstraction_guid,
 		  to_abstraction_guid(claim_class,
-				      &nd_label->abstraction_guid));
+				      &nd_label->efi.abstraction_guid));
 }
 
 enum nvdimm_claim_class nsl_get_claim_class(struct nvdimm_drvdata *ndd,
 					    struct nd_namespace_label *nd_label)
 {
-	if (!namespace_label_has(ndd, abstraction_guid))
+	if (ndd->cxl) {
+		uuid_t uuid;
+
+		import_uuid(&uuid, nd_label->cxl.abstraction_uuid);
+		return uuid_to_nvdimm_cclass(&uuid);
+	}
+	if (!efi_namespace_label_has(ndd, abstraction_guid))
 		return NVDIMM_CCLASS_NONE;
-	return guid_to_nvdimm_cclass(&nd_label->abstraction_guid);
+	return guid_to_nvdimm_cclass(&nd_label->efi.abstraction_guid);
 }
 
 static int __pmem_label_update(struct nd_region *nd_region,
@@ -987,7 +1004,7 @@ static void nsl_set_blk_isetcookie(struct nvdimm_drvdata *ndd,
 				   struct nd_namespace_label *nd_label,
 				   u64 isetcookie)
 {
-	if (namespace_label_has(ndd, type_guid)) {
+	if (efi_namespace_label_has(ndd, type_guid)) {
 		nsl_set_isetcookie(ndd, nd_label, isetcookie);
 		return;
 	}
@@ -998,7 +1015,7 @@ bool nsl_validate_blk_isetcookie(struct nvdimm_drvdata *ndd,
 				 struct nd_namespace_label *nd_label,
 				 u64 isetcookie)
 {
-	if (!namespace_label_has(ndd, type_guid))
+	if (!efi_namespace_label_has(ndd, type_guid))
 		return true;
 
 	if (nsl_get_isetcookie(ndd, nd_label) != isetcookie) {
@@ -1014,7 +1031,7 @@ static void nsl_set_blk_nlabel(struct nvdimm_drvdata *ndd,
 			       struct nd_namespace_label *nd_label, int nlabel,
 			       bool first)
 {
-	if (!namespace_label_has(ndd, type_guid)) {
+	if (!efi_namespace_label_has(ndd, type_guid)) {
 		nsl_set_nlabel(ndd, nd_label, 0); /* N/A */
 		return;
 	}
@@ -1025,7 +1042,7 @@ static void nsl_set_blk_position(struct nvdimm_drvdata *ndd,
 				 struct nd_namespace_label *nd_label,
 				 bool first)
 {
-	if (!namespace_label_has(ndd, type_guid)) {
+	if (!efi_namespace_label_has(ndd, type_guid)) {
 		nsl_set_position(ndd, nd_label, 0);
 		return;
 	}
@@ -1439,6 +1456,9 @@ int __init nd_label_init(void)
 	WARN_ON(uuid_parse(NVDIMM_BTT2_GUID, &nvdimm_btt2_uuid));
 	WARN_ON(uuid_parse(NVDIMM_PFN_GUID, &nvdimm_pfn_uuid));
 	WARN_ON(uuid_parse(NVDIMM_DAX_GUID, &nvdimm_dax_uuid));
+
+	WARN_ON(uuid_parse(CXL_REGION_UUID, &cxl_region_uuid));
+	WARN_ON(uuid_parse(CXL_NAMESPACE_UUID, &cxl_namespace_uuid));
 
 	return 0;
 }
