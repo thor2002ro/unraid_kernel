@@ -16,9 +16,21 @@
  */
 static struct workqueue_struct *cxl_pmem_wq;
 
-static void unregister_nvdimm(void *nvdimm)
+static __read_mostly DECLARE_BITMAP(exclusive_cmds, CXL_MEM_COMMAND_ID_MAX);
+
+static void unregister_nvdimm(void *_cxl_nvd)
 {
-	nvdimm_delete(nvdimm);
+	struct cxl_nvdimm *cxl_nvd = _cxl_nvd;
+	struct cxl_memdev *cxlmd = cxl_nvd->cxlmd;
+	struct cxl_mem *cxlm = cxlmd->cxlm;
+	struct device *dev = &cxl_nvd->dev;
+	struct nvdimm *nvdimm;
+
+	nvdimm = dev_get_drvdata(dev);
+	if (nvdimm)
+		nvdimm_delete(nvdimm);
+
+	clear_exclusive_cxl_commands(cxlm, exclusive_cmds);
 }
 
 static int match_nvdimm_bridge(struct device *dev, const void *data)
@@ -39,9 +51,11 @@ static struct cxl_nvdimm_bridge *cxl_find_nvdimm_bridge(void)
 static int cxl_nvdimm_probe(struct device *dev)
 {
 	struct cxl_nvdimm *cxl_nvd = to_cxl_nvdimm(dev);
+	struct cxl_memdev *cxlmd = cxl_nvd->cxlmd;
+	struct cxl_mem *cxlm = cxlmd->cxlm;
 	struct cxl_nvdimm_bridge *cxl_nvb;
+	struct nvdimm *nvdimm = NULL;
 	unsigned long flags = 0;
-	struct nvdimm *nvdimm;
 	int rc = -ENXIO;
 
 	cxl_nvb = cxl_find_nvdimm_bridge();
@@ -52,16 +66,19 @@ static int cxl_nvdimm_probe(struct device *dev)
 	if (!cxl_nvb->nvdimm_bus)
 		goto out;
 
+	set_exclusive_cxl_commands(cxlm, exclusive_cmds);
+
 	set_bit(NDD_LABELING, &flags);
 	nvdimm = nvdimm_create(cxl_nvb->nvdimm_bus, cxl_nvd, NULL, flags, 0, 0,
 			       NULL);
-	if (!nvdimm)
-		goto out;
-
-	rc = devm_add_action_or_reset(dev, unregister_nvdimm, nvdimm);
+	dev_set_drvdata(dev, nvdimm);
+	rc = devm_add_action_or_reset(dev, unregister_nvdimm, cxl_nvd);
 out:
 	device_unlock(&cxl_nvb->dev);
 	put_device(&cxl_nvb->dev);
+
+	if (!nvdimm && rc == 0)
+		rc = -ENOMEM;
 
 	return rc;
 }
@@ -193,6 +210,10 @@ static struct cxl_driver cxl_nvdimm_bridge_driver = {
 static __init int cxl_pmem_init(void)
 {
 	int rc;
+
+	set_bit(CXL_MEM_COMMAND_ID_SET_PARTITION_INFO, exclusive_cmds);
+	set_bit(CXL_MEM_COMMAND_ID_SET_SHUTDOWN_STATE, exclusive_cmds);
+	set_bit(CXL_MEM_COMMAND_ID_SET_LSA, exclusive_cmds);
 
 	cxl_pmem_wq = alloc_ordered_workqueue("cxl_pmem", 0);
 	if (!cxl_pmem_wq)
