@@ -31,6 +31,7 @@
 		serial1 = &uart1;
 		serial2 = &dcc;
 		spi0 = &qspi;
+		usb0 = &usb0;
 	};
 
 	chosen {
@@ -937,9 +938,8 @@
 
 &qspi {
 	status = "okay";
-	is-dual = <1>;
 	flash@0 {
-		compatible = "m25p80", "jedec,spi-nor"; /* 32MB */
+		compatible = "m25p80", "jedec,spi-nor"; /* 16MB + 16MB */
 		#address-cells = <1>;
 		#size-cells = <1>;
 		reg = <0x0>;
@@ -998,9 +998,14 @@
 	status = "okay";
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_usb0_default>;
-	dr_mode = "host";
 	phy-names = "usb3-phy";
 	phys = <&psgtr 2 PHY_TYPE_USB3 0 2>;
+};
+
+&dwc3_0 {
+	status = "okay";
+	dr_mode = "host";
+	snps,usb3_lpm_capable;
 	maximum-speed = "super-speed";
 };
 
