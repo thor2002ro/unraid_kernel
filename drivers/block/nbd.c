@@ -120,7 +120,6 @@ struct nbd_device {
 	struct task_struct *task_recv;
 	struct task_struct *task_setup;
 
-	struct completion *destroy_complete;
 	unsigned long flags;
 
 	char *backend;
@@ -235,19 +234,6 @@ static const struct device_attribute backend_attr = {
 	.show = backend_show,
 };
 
-/*
- * Place this in the last just before the nbd is freed to
- * make sure that the disk and the related kobject are also
- * totally removed to avoid duplicate creation of the same
- * one.
- */
-static void nbd_notify_destroy_completion(struct nbd_device *nbd)
-{
-	if (test_bit(NBD_DESTROY_ON_DISCONNECT, &nbd->flags) &&
-	    nbd->destroy_complete)
-		complete(nbd->destroy_complete);
-}
-
 static void nbd_dev_remove(struct nbd_device *nbd)
 {
 	struct gendisk *disk = nbd->disk;
@@ -262,7 +248,6 @@ static void nbd_dev_remove(struct nbd_device *nbd)
 	 */
 	mutex_lock(&nbd_index_mutex);
 	idr_remove(&nbd_index_idr, nbd->index);
-	nbd_notify_destroy_completion(nbd);
 	mutex_unlock(&nbd_index_mutex);
 
 	kfree(nbd);
@@ -1706,7 +1691,6 @@ static struct nbd_device *nbd_dev_add(int index, unsigned int refs)
 		BLK_MQ_F_BLOCKING;
 	nbd->tag_set.driver_data = nbd;
 	INIT_WORK(&nbd->remove_work, nbd_dev_remove_work);
-	nbd->destroy_complete = NULL;
 	nbd->backend = NULL;
 
 	err = blk_mq_alloc_tag_set(&nbd->tag_set);
@@ -1724,10 +1708,10 @@ static struct nbd_device *nbd_dev_add(int index, unsigned int refs)
 		if (err >= 0)
 			index = err;
 	}
+	nbd->index = index;
 	mutex_unlock(&nbd_index_mutex);
 	if (err < 0)
 		goto out_free_tags;
-	nbd->index = index;
 
 	disk = blk_mq_alloc_disk(&nbd->tag_set, NULL);
 	if (IS_ERR(disk)) {
@@ -1751,7 +1735,11 @@ static struct nbd_device *nbd_dev_add(int index, unsigned int refs)
 
 	mutex_init(&nbd->config_lock);
 	refcount_set(&nbd->config_refs, 0);
-	refcount_set(&nbd->refs, refs);
+	/*
+	 * Start out with a zero references to keep other threads from using
+	 * this device until it is fully initialized.
+	 */
+	refcount_set(&nbd->refs, 0);
 	INIT_LIST_HEAD(&nbd->list);
 	disk->major = NBD_MAJOR;
 
@@ -1770,17 +1758,42 @@ static struct nbd_device *nbd_dev_add(int index, unsigned int refs)
 	disk->private_data = nbd;
 	sprintf(disk->disk_name, "nbd%d", index);
 	add_disk(disk);
+
+	/*
+	 * Now publish the device.
+	 */
+	refcount_set(&nbd->refs, refs);
 	nbd_total_devices++;
 	return nbd;
 
 out_free_idr:
+	mutex_lock(&nbd_index_mutex);
 	idr_remove(&nbd_index_idr, index);
+	mutex_unlock(&nbd_index_mutex);
 out_free_tags:
 	blk_mq_free_tag_set(&nbd->tag_set);
 out_free_nbd:
 	kfree(nbd);
 out:
 	return ERR_PTR(err);
+}
+
+static struct nbd_device *nbd_find_get_unused(void)
+{
+	struct nbd_device *nbd;
+	int id;
+
+	lockdep_assert_held(&nbd_index_mutex);
+
+	idr_for_each_entry(&nbd_index_idr, nbd, id) {
+		if (refcount_read(&nbd->config_refs) ||
+		    test_bit(NBD_DESTROY_ON_DISCONNECT, &nbd->flags))
+			continue;
+		if (refcount_inc_not_zero(&nbd->refs))
+			return nbd;
+	}
+
+	return NULL;
 }
 
 /* Netlink interface. */
@@ -1829,8 +1842,7 @@ static int nbd_genl_size_set(struct genl_info *info, struct nbd_device *nbd)
 
 static int nbd_genl_connect(struct sk_buff *skb, struct genl_info *info)
 {
-	DECLARE_COMPLETION_ONSTACK(destroy_complete);
-	struct nbd_device *nbd = NULL;
+	struct nbd_device *nbd;
 	struct nbd_config *config;
 	int index = -1;
 	int ret;
@@ -1852,42 +1864,23 @@ static int nbd_genl_connect(struct sk_buff *skb, struct genl_info *info)
 again:
 	mutex_lock(&nbd_index_mutex);
 	if (index == -1) {
-		struct nbd_device *tmp;
-		int id;
-
-		idr_for_each_entry(&nbd_index_idr, tmp, id) {
-			if (!refcount_read(&tmp->config_refs)) {
-				nbd = tmp;
-				break;
-			}
-		}
+		nbd = nbd_find_get_unused();
 	} else {
 		nbd = idr_find(&nbd_index_idr, index);
+		if (nbd) {
+			if ((test_bit(NBD_DESTROY_ON_DISCONNECT, &nbd->flags) &&
+			     test_bit(NBD_DISCONNECT_REQUESTED, &nbd->flags)) ||
+			    !refcount_inc_not_zero(&nbd->refs)) {
+				mutex_unlock(&nbd_index_mutex);
+				pr_err("nbd: device at index %d is going down\n",
+					index);
+				return -EINVAL;
+			}
+		}
 	}
+	mutex_unlock(&nbd_index_mutex);
 
-	if (nbd) {
-		if (test_bit(NBD_DESTROY_ON_DISCONNECT, &nbd->flags) &&
-		    test_bit(NBD_DISCONNECT_REQUESTED, &nbd->flags)) {
-			nbd->destroy_complete = &destroy_complete;
-			mutex_unlock(&nbd_index_mutex);
-
-			/* wait until the nbd device is completely destroyed */
-			wait_for_completion(&destroy_complete);
-			goto again;
-		}
-
-		if (!refcount_inc_not_zero(&nbd->refs)) {
-			mutex_unlock(&nbd_index_mutex);
-			if (index == -1)
-				goto again;
-			pr_err("nbd: device at index %d is going down\n",
-				index);
-			return -EINVAL;
-		}
-		mutex_unlock(&nbd_index_mutex);
-	} else {
-		mutex_unlock(&nbd_index_mutex);
-
+	if (!nbd) {
 		nbd = nbd_dev_add(index, 2);
 		if (IS_ERR(nbd)) {
 			pr_err("nbd: failed to add new device\n");
