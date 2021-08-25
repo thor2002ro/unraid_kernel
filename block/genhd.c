@@ -313,54 +313,19 @@ void unregister_blkdev(unsigned int major, const char *name)
 
 EXPORT_SYMBOL(unregister_blkdev);
 
-/**
- * blk_mangle_minor - scatter minor numbers apart
- * @minor: minor number to mangle
- *
- * Scatter consecutively allocated @minor number apart if MANGLE_DEVT
- * is enabled.  Mangling twice gives the original value.
- *
- * RETURNS:
- * Mangled value.
- *
- * CONTEXT:
- * Don't care.
- */
-static int blk_mangle_minor(int minor)
-{
-#ifdef CONFIG_DEBUG_BLOCK_EXT_DEVT
-	int i;
-
-	for (i = 0; i < MINORBITS / 2; i++) {
-		int low = minor & (1 << i);
-		int high = minor & (1 << (MINORBITS - 1 - i));
-		int distance = MINORBITS - 1 - 2 * i;
-
-		minor ^= low | high;	/* clear both bits */
-		low <<= distance;	/* swap the positions */
-		high >>= distance;
-		minor |= low | high;	/* and set */
-	}
-#endif
-	return minor;
-}
-
 int blk_alloc_ext_minor(void)
 {
 	int idx;
 
 	idx = ida_alloc_range(&ext_devt_ida, 0, NR_EXT_DEVT, GFP_KERNEL);
-	if (idx < 0) {
-		if (idx == -ENOSPC)
-			return -EBUSY;
-		return idx;
-	}
-	return blk_mangle_minor(idx);
+	if (idx == -ENOSPC)
+		return -EBUSY;
+	return idx;
 }
 
 void blk_free_ext_minor(unsigned int minor)
 {
-	ida_free(&ext_devt_ida, blk_mangle_minor(minor));
+	ida_free(&ext_devt_ida, minor);
 }
 
 static char *bdevt_str(dev_t devt, char *buf)
@@ -457,7 +422,7 @@ int device_add_disk(struct device *parent, struct gendisk *disk,
 		if (ret < 0)
 			return ret;
 		disk->major = BLOCK_EXT_MAJOR;
-		disk->first_minor = MINOR(ret);
+		disk->first_minor = ret;
 		disk->flags |= GENHD_FL_EXT_DEVT;
 	}
 
@@ -591,7 +556,7 @@ void del_gendisk(struct gendisk *disk)
 {
 	might_sleep();
 
-	if (WARN_ON_ONCE(!disk_live(disk)))
+	if (WARN_ON_ONCE(!disk_live(disk) && !(disk->flags & GENHD_FL_HIDDEN)))
 		return;
 
 	blk_integrity_del(disk);
