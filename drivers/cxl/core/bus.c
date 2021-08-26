@@ -491,10 +491,10 @@ err:
 }
 EXPORT_SYMBOL_GPL(cxl_decoder_alloc);
 
-int devm_cxl_add_decoder(struct device *host, struct cxl_decoder *cxld,
-			 int *target_map)
+int cxl_decoder_add(struct device *host, struct cxl_decoder *cxld,
+		    int *target_map)
 {
-	struct cxl_port *port = to_cxl_port(cxld->dev.parent);
+	struct cxl_port *port;
 	struct device *dev;
 	int rc = 0, i;
 
@@ -504,44 +504,51 @@ int devm_cxl_add_decoder(struct device *host, struct cxl_decoder *cxld,
 	if (IS_ERR(cxld))
 		return PTR_ERR(cxld);
 
-	if (cxld->interleave_ways < 1) {
-		rc = -EINVAL;
-		goto err;
-	}
+	if (cxld->interleave_ways < 1)
+		return -EINVAL;
 
+	port = to_cxl_port(cxld->dev.parent);
 	device_lock(&port->dev);
-	if (list_empty(&port->dports))
+	if (list_empty(&port->dports)) {
 		rc = -EINVAL;
+		goto out_unlock;
+	}
 
 	for (i = 0; rc == 0 && target_map && i < cxld->nr_targets; i++) {
 		struct cxl_dport *dport = find_dport(port, target_map[i]);
 
 		if (!dport) {
 			rc = -ENXIO;
-			break;
+			goto out_unlock;
 		}
 		dev_dbg(host, "%s: target: %d\n", dev_name(dport->dport), i);
 		cxld->target[i] = dport;
 	}
 	device_unlock(&port->dev);
-	if (rc)
-		goto err;
 
 	dev = &cxld->dev;
 	rc = dev_set_name(dev, "decoder%d.%d", port->id, cxld->id);
 	if (rc)
-		goto err;
+		return rc;
 
-	rc = device_add(dev);
-	if (rc)
-		goto err;
+	return device_add(dev);
 
-	return devm_add_action_or_reset(host, unregister_cxl_dev, dev);
-err:
-	put_device(dev);
+out_unlock:
+	device_unlock(&port->dev);
 	return rc;
 }
-EXPORT_SYMBOL_GPL(devm_cxl_add_decoder);
+EXPORT_SYMBOL_GPL(cxl_decoder_add);
+
+static void cxld_unregister(void *dev)
+{
+	device_unregister(dev);
+}
+
+int cxl_decoder_autoremove(struct device *host, struct cxl_decoder *cxld)
+{
+	return devm_add_action_or_reset(host, cxld_unregister, &cxld->dev);
+}
+EXPORT_SYMBOL_GPL(cxl_decoder_autoremove);
 
 /**
  * __cxl_driver_register - register a driver for the cxl bus

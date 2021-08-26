@@ -133,7 +133,11 @@ static void cxl_add_cfmws_decoders(struct device *dev,
 		cxld->interleave_granularity =
 			CFMWS_INTERLEAVE_GRANULARITY(cfmws);
 
-		rc = devm_cxl_add_decoder(dev, cxld, target_map);
+		rc = cxl_decoder_add(dev, cxld, target_map);
+		if (rc)
+			put_device(&cxld->dev);
+		else
+			rc = cxl_decoder_autoremove(dev, cxld);
 		if (rc) {
 			dev_err(dev, "Failed to add decoder for %#llx-%#llx\n",
 				cfmws->base_hpa, cfmws->base_hpa +
@@ -340,10 +344,14 @@ static int add_host_bridge_uport(struct device *match, void *arg)
 
 	single_port_map[0] = dport->port_id;
 
-	rc = devm_cxl_add_decoder(host, cxld, single_port_map);
+	rc = cxl_decoder_add(host, cxld, single_port_map);
+	if (rc)
+		put_device(&cxld->dev);
+	else
+		rc = cxl_decoder_autoremove(host, cxld);
+
 	if (rc == 0)
 		dev_dbg(host, "add: %s\n", dev_name(&cxld->dev));
-
 	return rc;
 }
 
