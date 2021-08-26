@@ -11,6 +11,9 @@ arm/soc
 		git://git.kernel.org/pub/scm/linux/kernel/git/linusw/linux-nomadik tags/ixp4xx-del-boardfiles-v5.15
 	aspeed/soc
 		git://git.kernel.org/pub/scm/linux/kernel/git/joel/bmc tags/aspeed-5.15-soc
+	patch
+		ARM: s3c: delete unneed local variable "delay"
+		soc: aspeed-lpc-ctrl: Fix clock cleanup in error path
 
 arm/dt
 	patch
@@ -76,6 +79,10 @@ arm/dt
 		git://github.com/hisilicon/linux-hisi tags/hisi-arm64-dt-for-5.15
 	mvebu/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/gclement/mvebu tags/mvebu-dt64-5.15-1
+	rockchip/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.15-rockchip-dts32-1
+	zynq/dt
+		https://github.com/Xilinx/linux-xlnx tags/zynq-dt-for-v5.15
 
 arm/drivers
 	renesas/driver
@@ -104,6 +111,10 @@ arm/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-drivers-for-v5.15-tag2
 	qcom/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-drivers-for-5.15
+	rockchip/driver
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.15-rockchip-driver1
+	drivers/reset
+		git://git.pengutronix.de/pza/linux tags/reset-for-v5.15
 
 arm/defconfig
 	at91/defconfig
@@ -116,6 +127,10 @@ arm/defconfig
 		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-defconfig-5.15
 	qcom/defconfig
 		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-defconfig-for-5.15
+	aspeed/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/joel/bmc tags/aspeed-5.15-defconfig
+	xilinx/defconfig
+		https://github.com/Xilinx/linux-xlnx tags/zynq-soc-for-v5.15
 
 arm/newsoc
 
@@ -123,14 +138,7 @@ arm/late
 
 arm/fixes
 	patch
-		ARM: configs: Update the nhk8815_defconfig
-		ARM: ixp4xx: fix building both pci drivers
-	<no branch> (c1e64c0aec8cb0499e61af7ea086b59abba97945)
-		git://git.kernel.org/pub/scm/linux/kernel/git/leo/linux tags/soc-fsl-fix-v5.14
-	<no branch> (d77c95bf9a64d8620662151b2b10efd8221f4bcc)
-		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-fixes-for-5.14
-	<no branch> (06a089ef644934372a3062528244fca3417d3430)
-		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.14/gpt12-fix-signed
-	patch
-		ARM: s3c: delete unneed local variable "delay"
+		arm/arm64: dts: Fix remaining dtc 'unit_address_format' warnings
+	<no branch> (ed104ca4bd9c405b41e968ad4ece51f6462e90b6)
+		git://git.pengutronix.de/pza/linux tags/reset-fixes-for-v5.14
 
