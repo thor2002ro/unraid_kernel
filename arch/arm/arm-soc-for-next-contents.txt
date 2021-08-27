@@ -67,7 +67,7 @@ arm/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-dt64-5.15
 	imx/dt-2
 		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-dt-5.15
-	<no branch> (f95c4c56d65225a537a2d88735fde7ec4d37641d)
+	qcom/dts
 		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-dts-for-5.15
 	qcom/arm64
 		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-for-5.15
@@ -83,6 +83,8 @@ arm/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.15-rockchip-dts32-1
 	zynq/dt
 		https://github.com/Xilinx/linux-xlnx tags/zynq-dt-for-v5.15
+	patch
+		arm/arm64: dts: Fix remaining dtc 'unit_address_format' warnings
 
 arm/drivers
 	renesas/driver
@@ -135,10 +137,14 @@ arm/defconfig
 arm/newsoc
 
 arm/late
+	zynqmp/dt-late
+		https://github.com/Xilinx/linux-xlnx tags/zynqmp-dt-for-v5.15
+	rockchips/dt64-late
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.15-rockchip-dts64-1
+	rockchips/dt64-late-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.15-rockchip-dts64-2
 
 arm/fixes
-	patch
-		arm/arm64: dts: Fix remaining dtc 'unit_address_format' warnings
 	<no branch> (ed104ca4bd9c405b41e968ad4ece51f6462e90b6)
 		git://git.pengutronix.de/pza/linux tags/reset-fixes-for-v5.14
 
