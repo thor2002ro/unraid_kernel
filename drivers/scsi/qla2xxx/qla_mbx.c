@@ -663,6 +663,7 @@ qla2x00_load_ram(scsi_qla_host_t *vha, dma_addr_t req_dma, uint32_t risc_addr,
 }
 
 #define	NVME_ENABLE_FLAG	BIT_3
+#define	EDIF_HW_SUPPORT		BIT_10
 
 /*
  * qla2x00_execute_fw
@@ -795,10 +796,10 @@ again:
 		}
 	}
 
-	if (IS_QLA28XX(ha) && (mcp->mb[5] & BIT_10) && ql2xsecenable) {
-		ha->flags.edif_enabled = 1;
+	if (IS_QLA28XX(ha) && (mcp->mb[5] & EDIF_HW_SUPPORT)) {
+		ha->flags.edif_hw = 1;
 		ql_log(ql_log_info, vha, 0xffff,
-		    "%s: edif is enabled\n", __func__);
+		    "%s: edif HW\n", __func__);
 	}
 
 done:
@@ -1135,6 +1136,13 @@ qla2x00_get_fw_version(scsi_qla_host_t *vha)
 			       "Firmware supports NVMe2 0x%x\n",
 			       ha->fw_attributes_ext[0]);
 			vha->flags.nvme2_enabled = 1;
+		}
+
+		if (IS_QLA28XX(ha) && ha->flags.edif_hw && ql2xsecenable &&
+		    (ha->fw_attributes_ext[0] & FW_ATTR_EXT0_EDIF)) {
+			ha->flags.edif_enabled = 1;
+			ql_log(ql_log_info, vha, 0xffff,
+			       "%s: edif is enabled\n", __func__);
 		}
 	}
 
@@ -3237,7 +3245,7 @@ qla24xx_abort_command(srb_t *sp)
 	if (sp->qpair)
 		req = sp->qpair->req;
 	else
-		return QLA_FUNCTION_FAILED;
+		return QLA_ERR_NO_QPAIR;
 
 	if (ql2xasynctmfenable)
 		return qla24xx_async_abort_command(sp);
@@ -3250,7 +3258,7 @@ qla24xx_abort_command(srb_t *sp)
 	spin_unlock_irqrestore(qpair->qp_lock_ptr, flags);
 	if (handle == req->num_outstanding_cmds) {
 		/* Command not found. */
-		return QLA_FUNCTION_FAILED;
+		return QLA_ERR_NOT_FOUND;
 	}
 
 	abt = dma_pool_zalloc(ha->s_dma_pool, GFP_KERNEL, &abt_dma);
@@ -4041,6 +4049,10 @@ qla24xx_report_id_acquisition(scsi_qla_host_t *vha,
 				fcport->scan_state = QLA_FCPORT_FOUND;
 				fcport->n2n_flag = 1;
 				fcport->keep_nport_handle = 1;
+				fcport->login_retry = vha->hw->login_retry_count;
+				fcport->fc4_type = FS_FC4TYPE_FCP;
+				if (vha->flags.nvme_enabled)
+					fcport->fc4_type |= FS_FC4TYPE_NVME;
 
 				if (wwn_to_u64(vha->port_name) >
 				    wwn_to_u64(fcport->port_name)) {
@@ -4178,6 +4190,16 @@ qla24xx_report_id_acquisition(scsi_qla_host_t *vha,
 				rptid_entry->u.f2.remote_nport_id[1];
 			fcport->d_id.b.al_pa =
 				rptid_entry->u.f2.remote_nport_id[0];
+
+			/*
+			 * For the case where remote port sending PRLO, FW
+			 * sends up RIDA Format 2 as an indication of session
+			 * loss. In other word, FW state change from PRLI
+			 * complete back to PLOGI complete. Delete the
+			 * session and let relogin drive the reconnect.
+			 */
+			if (atomic_read(&fcport->state) == FCS_ONLINE)
+				qlt_schedule_sess_for_deletion(fcport);
 		}
 	}
 }

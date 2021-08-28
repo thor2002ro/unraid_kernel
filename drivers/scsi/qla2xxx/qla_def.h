@@ -2517,6 +2517,8 @@ typedef struct fc_port {
 	unsigned int n2n_flag:1;
 	unsigned int explicit_logout:1;
 	unsigned int prli_pend_timer:1;
+	unsigned int do_prli_nvme:1;
+
 	uint8_t nvme_flag;
 
 	uint8_t node_name[WWN_SIZE];
@@ -2620,7 +2622,6 @@ typedef struct fc_port {
 		uint32_t	enable:1;	/* device is edif enabled/req'd */
 		uint32_t	app_stop:2;
 		uint32_t	app_started:1;
-		uint32_t	secured_login:1;
 		uint32_t	aes_gmac:1;
 		uint32_t	app_sess_online:1;
 		uint32_t	tx_sa_set:1;
@@ -2631,8 +2632,8 @@ typedef struct fc_port {
 		uint32_t	rx_rekey_cnt;
 		uint64_t	tx_bytes;
 		uint64_t	rx_bytes;
-		uint8_t		non_secured_login;
 		uint8_t		auth_state;
+		uint16_t	authok:1;
 		uint16_t	rekey_cnt;
 		struct list_head edif_indx_list;
 		spinlock_t  indx_list_lock;
@@ -4021,7 +4022,9 @@ struct qla_hw_data {
 		uint32_t	scm_supported_f:1;
 				/* Enabled in Driver */
 		uint32_t	scm_enabled:1;
+		uint32_t	edif_hw:1;
 		uint32_t	edif_enabled:1;
+		uint32_t	n2n_fw_acc_sec:1;
 		uint32_t	plogi_template_valid:1;
 		uint32_t	port_isolated:1;
 	} flags;
@@ -4433,6 +4436,7 @@ struct qla_hw_data {
 	/* Cisco fabric attached */
 #define FW_ATTR_EXT0_SCM_CISCO		0x00002000
 #define FW_ATTR_EXT0_NVME2	BIT_13
+#define FW_ATTR_EXT0_EDIF	BIT_5
 	uint16_t	fw_attributes_ext[2];
 	uint32_t	fw_memory_size;
 	uint32_t	fw_transfer_size;
@@ -4718,6 +4722,7 @@ struct qla_hw_data {
 	struct list_head sadb_rx_index_list;
 	spinlock_t sadb_lock;	/* protects list */
 	struct els_reject elsrej;
+	u8 edif_post_stop_cnt_down;
 };
 
 #define RX_ELS_SIZE (roundup(sizeof(struct enode) + ELS_MAX_PAYLOAD, SMP_CACHE_BYTES))
@@ -5163,6 +5168,9 @@ struct secure_flash_update_block_pk {
 #define QLA_BUSY			0x107
 #define QLA_ALREADY_REGISTERED		0x109
 #define QLA_OS_TIMER_EXPIRED		0x10a
+#define QLA_ERR_NO_QPAIR		0x10b
+#define QLA_ERR_NOT_FOUND		0x10c
+#define QLA_ERR_FROM_FW			0x10d
 
 #define NVRAM_DELAY()		udelay(10)
 
@@ -5345,9 +5353,12 @@ struct sff_8247_a0 {
 #define NVME_FCP_TARGET(fcport) \
 	(FCP_TYPE(fcport) && NVME_TYPE(fcport)) \
 
+#define NVME_PRIORITY(ha, fcport) \
+	(NVME_FCP_TARGET(fcport) && \
+	 (ha->fc4_type_priority == FC4_PRIORITY_NVME))
+
 #define NVME_TARGET(ha, fcport) \
-	((NVME_FCP_TARGET(fcport) && \
-	(ha->fc4_type_priority == FC4_PRIORITY_NVME)) || \
+	(fcport->do_prli_nvme || \
 	NVME_ONLY_TARGET(fcport)) \
 
 #define PRLI_PHASE(_cls) \
