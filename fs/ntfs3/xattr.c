@@ -539,8 +539,11 @@ static struct posix_acl *ntfs_get_acl_ex(struct user_namespace *mnt_userns,
  *
  * inode_operations::get_acl
  */
-struct posix_acl *ntfs_get_acl(struct inode *inode, int type)
+struct posix_acl *ntfs_get_acl(struct inode *inode, int type, bool rcu)
 {
+	if (rcu)
+		return ERR_PTR(-ECHILD);
+
 	/* TODO: init_user_ns? */
 	return ntfs_get_acl_ex(&init_user_ns, inode, type, 0);
 }
@@ -640,7 +643,7 @@ static int ntfs_xattr_get_acl(struct user_namespace *mnt_userns,
 	if (!(inode->i_sb->s_flags & SB_POSIXACL))
 		return -EOPNOTSUPP;
 
-	acl = ntfs_get_acl(inode, type);
+	acl = ntfs_get_acl(inode, type, false);
 	if (IS_ERR(acl))
 		return PTR_ERR(acl);
 
