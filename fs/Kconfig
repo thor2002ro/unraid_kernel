@@ -366,6 +366,7 @@ config CIFS_COMMON
 	default y if CIFS=y
 	default m if CIFS=m
 
+source "fs/ksmbd/Kconfig"
 source "fs/coda/Kconfig"
 source "fs/afs/Kconfig"
 source "fs/9p/Kconfig"
