@@ -182,6 +182,7 @@ static int __init pdc_console_tty_driver_init(void)
 	if (err) {
 		printk(KERN_ERR "Unable to register the PDC console TTY driver\n");
 		tty_port_destroy(&tty_port);
+		tty_driver_kref_put(pdc_console_tty_driver);
 		return err;
 	}
 
