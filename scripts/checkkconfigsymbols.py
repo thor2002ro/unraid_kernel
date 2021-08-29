@@ -102,6 +102,9 @@ def parse_options():
                      "continue.")
 
     if args.commit:
+        if args.commit.startswith('HEAD'):
+            sys.exit("The --commit option can't get use the HEAD ref")
+
         args.find = False
 
     if args.ignore:
@@ -329,7 +332,7 @@ def check_symbols_helper(pool, ignore):
         if REGEX_FILE_KCONFIG.match(gitfile):
             kconfig_files.append(gitfile)
         else:
-            if ignore and not re.match(ignore, gitfile):
+            if ignore and re.match(ignore, gitfile):
                 continue
             # add source files that do not match the ignore pattern
             source_files.append(gitfile)
