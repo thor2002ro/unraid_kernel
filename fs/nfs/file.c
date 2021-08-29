@@ -809,10 +809,6 @@ int nfs_lock(struct file *filp, int cmd, struct file_lock *fl)
 	if (fl->fl_flags & FL_RECLAIM)
 		return -ENOGRACE;
 
-	/* No mandatory locks over NFS */
-	if (__mandatory_lock(inode) && fl->fl_type != F_UNLCK)
-		goto out_err;
-
 	if (NFS_SERVER(inode)->flags & NFS_MOUNT_LOCAL_FCNTL)
 		is_local = 1;
 
