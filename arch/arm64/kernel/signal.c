@@ -290,6 +290,11 @@ static int restore_sve_fpsimd_context(struct user_ctxs *user)
 	/* From now, fpsimd_thread_switch() won't touch thread.sve_state */
 
 	sve_alloc(current);
+	if (!current->thread.sve_state) {
+		clear_thread_flag(TIF_SVE);
+		return -ENOMEM;
+	}
+
 	err = __copy_from_user(current->thread.sve_state,
 			       (char __user const *)user->sve +
 					SVE_SIG_REGS_OFFSET,
@@ -925,8 +930,7 @@ static bool cpu_affinity_invalid(struct pt_regs *regs)
 				 system_32bit_el0_cpumask());
 }
 
-asmlinkage void do_notify_resume(struct pt_regs *regs,
-				 unsigned long thread_flags)
+void do_notify_resume(struct pt_regs *regs, unsigned long thread_flags)
 {
 	do {
 		if (thread_flags & _TIF_NEED_RESCHED) {
