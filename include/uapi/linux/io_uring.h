@@ -153,9 +153,13 @@ enum {
 /*
  * sqe->timeout_flags
  */
-#define IORING_TIMEOUT_ABS	(1U << 0)
-#define IORING_TIMEOUT_UPDATE	(1U << 1)
-
+#define IORING_TIMEOUT_ABS		(1U << 0)
+#define IORING_TIMEOUT_UPDATE		(1U << 1)
+#define IORING_TIMEOUT_BOOTTIME		(1U << 2)
+#define IORING_TIMEOUT_REALTIME		(1U << 3)
+#define IORING_LINK_TIMEOUT_UPDATE	(1U << 4)
+#define IORING_TIMEOUT_CLOCK_MASK	(IORING_TIMEOUT_BOOTTIME | IORING_TIMEOUT_REALTIME)
+#define IORING_TIMEOUT_UPDATE_MASK	(IORING_TIMEOUT_UPDATE | IORING_LINK_TIMEOUT_UPDATE)
 /*
  * sqe->splice_flags
  * extends splice(2) flags
@@ -312,6 +316,9 @@ enum {
 	/* set/clear io-wq thread affinities */
 	IORING_REGISTER_IOWQ_AFF		= 17,
 	IORING_UNREGISTER_IOWQ_AFF		= 18,
+
+	/* set/get max number of workers */
+	IORING_REGISTER_IOWQ_MAX_WORKERS	= 19,
 
 	/* this goes last */
 	IORING_REGISTER_LAST
