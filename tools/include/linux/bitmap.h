@@ -1,9 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-#ifndef _PERF_BITOPS_H
-#define _PERF_BITOPS_H
+#ifndef _TOOLS_LINUX_BITMAP_H
+#define _TOOLS_LINUX_BITMAP_H
 
 #include <string.h>
 #include <linux/bitops.h>
+#include <linux/find.h>
 #include <stdlib.h>
 #include <linux/kernel.h>
 
@@ -111,10 +112,10 @@ static inline int test_and_clear_bit(int nr, unsigned long *addr)
 }
 
 /**
- * bitmap_alloc - Allocate bitmap
+ * bitmap_zalloc - Allocate bitmap
  * @nbits: Number of bits
  */
-static inline unsigned long *bitmap_alloc(int nbits)
+static inline unsigned long *bitmap_zalloc(int nbits)
 {
 	return calloc(1, BITS_TO_LONGS(nbits) * sizeof(unsigned long));
 }
@@ -181,4 +182,4 @@ static inline int bitmap_intersects(const unsigned long *src1,
 		return __bitmap_intersects(src1, src2, nbits);
 }
 
-#endif /* _PERF_BITOPS_H */
+#endif /* _TOOLS_LINUX_BITMAP_H */
