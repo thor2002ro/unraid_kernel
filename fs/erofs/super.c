@@ -526,6 +526,7 @@ static int erofs_fc_fill_super(struct super_block *sb, struct fs_context *fc)
 	struct inode *inode;
 	struct erofs_sb_info *sbi;
 	struct erofs_fs_context *ctx = fc->fs_private;
+	struct dax_device *dax_dev = fs_dax_get_by_bdev(sb->s_bdev);
 	int err;
 
 	sb->s_magic = EROFS_SUPER_MAGIC;
@@ -540,13 +541,14 @@ static int erofs_fc_fill_super(struct super_block *sb, struct fs_context *fc)
 		return -ENOMEM;
 
 	sb->s_fs_info = sbi;
-	sbi->dax_dev = fs_dax_get_by_bdev(sb->s_bdev);
+	sbi->dax_dev = dax_dev;
 	err = erofs_read_superblock(sb);
 	if (err)
 		return err;
 
 	if (test_opt(ctx, DAX_ALWAYS) &&
-	    !bdev_dax_supported(sb->s_bdev, EROFS_BLKSIZ)) {
+	    !dax_supported(dax_dev, sb->s_bdev, EROFS_BLKSIZ, 0,
+			   bdev_nr_sectors(sb->s_bdev))) {
 		errorfc(fc, "DAX unsupported by block device. Turning off DAX.");
 		clear_opt(ctx, DAX_ALWAYS);
 	}
