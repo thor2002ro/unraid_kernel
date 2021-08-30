@@ -6,7 +6,7 @@
 #include <linux/ndctl.h>
 #include <linux/async.h>
 #include <linux/slab.h>
-#include "mem.h"
+#include "cxlmem.h"
 #include "cxl.h"
 
 /*
@@ -16,35 +16,34 @@
  */
 static struct workqueue_struct *cxl_pmem_wq;
 
-static void unregister_nvdimm(void *nvdimm)
-{
-	nvdimm_delete(nvdimm);
-}
+static __read_mostly DECLARE_BITMAP(exclusive_cmds, CXL_MEM_COMMAND_ID_MAX);
 
-static int match_nvdimm_bridge(struct device *dev, const void *data)
+static void unregister_nvdimm(void *_cxl_nvd)
 {
-	return strcmp(dev_name(dev), "nvdimm-bridge") == 0;
-}
+	struct cxl_nvdimm *cxl_nvd = _cxl_nvd;
+	struct cxl_memdev *cxlmd = cxl_nvd->cxlmd;
+	struct cxl_mem *cxlm = cxlmd->cxlm;
+	struct device *dev = &cxl_nvd->dev;
+	struct nvdimm *nvdimm;
 
-static struct cxl_nvdimm_bridge *cxl_find_nvdimm_bridge(void)
-{
-	struct device *dev;
+	nvdimm = dev_get_drvdata(dev);
+	if (nvdimm)
+		nvdimm_delete(nvdimm);
 
-	dev = bus_find_device(&cxl_bus_type, NULL, NULL, match_nvdimm_bridge);
-	if (!dev)
-		return NULL;
-	return to_cxl_nvdimm_bridge(dev);
+	clear_exclusive_cxl_commands(cxlm, exclusive_cmds);
 }
 
 static int cxl_nvdimm_probe(struct device *dev)
 {
 	struct cxl_nvdimm *cxl_nvd = to_cxl_nvdimm(dev);
+	struct cxl_memdev *cxlmd = cxl_nvd->cxlmd;
+	unsigned long flags = 0, cmd_mask = 0;
+	struct cxl_mem *cxlm = cxlmd->cxlm;
 	struct cxl_nvdimm_bridge *cxl_nvb;
-	unsigned long flags = 0;
-	struct nvdimm *nvdimm;
+	struct nvdimm *nvdimm = NULL;
 	int rc = -ENXIO;
 
-	cxl_nvb = cxl_find_nvdimm_bridge();
+	cxl_nvb = cxl_find_nvdimm_bridge(cxl_nvd);
 	if (!cxl_nvb)
 		return -ENXIO;
 
@@ -52,16 +51,22 @@ static int cxl_nvdimm_probe(struct device *dev)
 	if (!cxl_nvb->nvdimm_bus)
 		goto out;
 
-	set_bit(NDD_LABELING, &flags);
-	nvdimm = nvdimm_create(cxl_nvb->nvdimm_bus, cxl_nvd, NULL, flags, 0, 0,
-			       NULL);
-	if (!nvdimm)
-		goto out;
+	set_exclusive_cxl_commands(cxlm, exclusive_cmds);
 
-	rc = devm_add_action_or_reset(dev, unregister_nvdimm, nvdimm);
+	set_bit(NDD_LABELING, &flags);
+	set_bit(ND_CMD_GET_CONFIG_SIZE, &cmd_mask);
+	set_bit(ND_CMD_GET_CONFIG_DATA, &cmd_mask);
+	set_bit(ND_CMD_SET_CONFIG_DATA, &cmd_mask);
+	nvdimm = nvdimm_create(cxl_nvb->nvdimm_bus, cxl_nvd, NULL, flags,
+			       cmd_mask, 0, NULL);
+	dev_set_drvdata(dev, nvdimm);
+	rc = devm_add_action_or_reset(dev, unregister_nvdimm, cxl_nvd);
 out:
 	device_unlock(&cxl_nvb->dev);
 	put_device(&cxl_nvb->dev);
+
+	if (!nvdimm && rc == 0)
+		rc = -ENOMEM;
 
 	return rc;
 }
@@ -72,11 +77,114 @@ static struct cxl_driver cxl_nvdimm_driver = {
 	.id = CXL_DEVICE_NVDIMM,
 };
 
+static int cxl_pmem_get_config_size(struct cxl_mem *cxlm,
+				    struct nd_cmd_get_config_size *cmd,
+				    unsigned int buf_len, int *cmd_rc)
+{
+	if (sizeof(*cmd) > buf_len)
+		return -EINVAL;
+
+	*cmd = (struct nd_cmd_get_config_size) {
+		 .config_size = cxlm->lsa_size,
+		 .max_xfer = cxlm->payload_size,
+	};
+	*cmd_rc = 0;
+
+	return 0;
+}
+
+static int cxl_pmem_get_config_data(struct cxl_mem *cxlm,
+				    struct nd_cmd_get_config_data_hdr *cmd,
+				    unsigned int buf_len, int *cmd_rc)
+{
+	struct cxl_mbox_get_lsa get_lsa;
+	int rc;
+
+	if (sizeof(*cmd) > buf_len)
+		return -EINVAL;
+	if (struct_size(cmd, out_buf, cmd->in_length) > buf_len)
+		return -EINVAL;
+
+	get_lsa = (struct cxl_mbox_get_lsa) {
+		.offset = cmd->in_offset,
+		.length = cmd->in_length,
+	};
+
+	rc = cxl_mem_mbox_send_cmd(cxlm, CXL_MBOX_OP_GET_LSA, &get_lsa,
+				   sizeof(get_lsa), cmd->out_buf,
+				   cmd->in_length);
+	cmd->status = 0;
+	*cmd_rc = 0;
+
+	return rc;
+}
+
+static int cxl_pmem_set_config_data(struct cxl_mem *cxlm,
+				    struct nd_cmd_set_config_hdr *cmd,
+				    unsigned int buf_len, int *cmd_rc)
+{
+	struct cxl_mbox_set_lsa *set_lsa;
+	int rc;
+
+	if (sizeof(*cmd) > buf_len)
+		return -EINVAL;
+
+	/* 4-byte status follows the input data in the payload */
+	if (struct_size(cmd, in_buf, cmd->in_length) + 4 > buf_len)
+		return -EINVAL;
+
+	set_lsa =
+		kvzalloc(struct_size(set_lsa, data, cmd->in_length), GFP_KERNEL);
+	if (!set_lsa)
+		return -ENOMEM;
+
+	*set_lsa = (struct cxl_mbox_set_lsa) {
+		.offset = cmd->in_offset,
+	};
+	memcpy(set_lsa->data, cmd->in_buf, cmd->in_length);
+
+	rc = cxl_mem_mbox_send_cmd(cxlm, CXL_MBOX_OP_SET_LSA, set_lsa,
+				   struct_size(set_lsa, data, cmd->in_length),
+				   NULL, 0);
+
+	/* set "firmware" status */
+	*(u32 *) &cmd->in_buf[cmd->in_length] = 0;
+	*cmd_rc = 0;
+	kvfree(set_lsa);
+
+	return rc;
+}
+
+static int cxl_pmem_nvdimm_ctl(struct nvdimm *nvdimm, unsigned int cmd,
+			       void *buf, unsigned int buf_len, int *cmd_rc)
+{
+	struct cxl_nvdimm *cxl_nvd = nvdimm_provider_data(nvdimm);
+	unsigned long cmd_mask = nvdimm_cmd_mask(nvdimm);
+	struct cxl_memdev *cxlmd = cxl_nvd->cxlmd;
+	struct cxl_mem *cxlm = cxlmd->cxlm;
+
+	if (!test_bit(cmd, &cmd_mask))
+		return -ENOTTY;
+
+	switch (cmd) {
+	case ND_CMD_GET_CONFIG_SIZE:
+		return cxl_pmem_get_config_size(cxlm, buf, buf_len, cmd_rc);
+	case ND_CMD_GET_CONFIG_DATA:
+		return cxl_pmem_get_config_data(cxlm, buf, buf_len, cmd_rc);
+	case ND_CMD_SET_CONFIG_DATA:
+		return cxl_pmem_set_config_data(cxlm, buf, buf_len, cmd_rc);
+	default:
+		return -ENOTTY;
+	}
+}
+
 static int cxl_pmem_ctl(struct nvdimm_bus_descriptor *nd_desc,
 			struct nvdimm *nvdimm, unsigned int cmd, void *buf,
 			unsigned int buf_len, int *cmd_rc)
 {
-	return -ENOTTY;
+	if (!nvdimm)
+		return -ENOTTY;
+	return cxl_pmem_nvdimm_ctl(nvdimm, cmd, buf, buf_len, cmd_rc);
 }
 
 static bool online_nvdimm_bus(struct cxl_nvdimm_bridge *cxl_nvb)
@@ -193,6 +301,10 @@ static struct cxl_driver cxl_nvdimm_bridge_driver = {
 static __init int cxl_pmem_init(void)
 {
 	int rc;
+
+	set_bit(CXL_MEM_COMMAND_ID_SET_PARTITION_INFO, exclusive_cmds);
+	set_bit(CXL_MEM_COMMAND_ID_SET_SHUTDOWN_STATE, exclusive_cmds);
+	set_bit(CXL_MEM_COMMAND_ID_SET_LSA, exclusive_cmds);
 
 	cxl_pmem_wq = alloc_ordered_workqueue("cxl_pmem", 0);
 	if (!cxl_pmem_wq)

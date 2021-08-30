@@ -66,46 +66,116 @@ struct nd_namespace_index {
 };
 
 /**
- * struct nd_namespace_label - namespace superblock
- * @uuid: UUID per RFC 4122
- * @name: optional name (NULL-terminated)
- * @flags: see NSLABEL_FLAG_*
- * @nlabel: num labels to describe this ns
- * @position: labels position in set
- * @isetcookie: interleave set cookie
- * @lbasize: LBA size in bytes or 0 for pmem
- * @dpa: DPA of NVM range on this DIMM
- * @rawsize: size of namespace
- * @slot: slot of this label in label area
- * @unused: must be zero
+ * struct cxl_region_label - CXL 2.0 Table 211
+ * @type: uuid identifying this label format (region)
+ * @uuid: uuid for the region this label describes
+ * @flags: NSLABEL_FLAG_UPDATING (all other flags reserved)
+ * @position: this label's position in the set
+ * @dpa: start address in device-local capacity for this label
+ * @rawsize: size of this label's contribution to region
+ * @hpa: mandatory system physical address to map this region
+ * @slot: slot id of this label in label area
+ * @ig: interleave granularity (1 << @ig) * 256 bytes
+ * @align: alignment in SZ_256M blocks
+ * @checksum: fletcher64 sum of this label
  */
-struct nd_namespace_label {
+struct cxl_region_label {
+	u8 type[NSLABEL_UUID_LEN];
 	u8 uuid[NSLABEL_UUID_LEN];
-	u8 name[NSLABEL_NAME_LEN];
 	__le32 flags;
 	__le16 nlabel;
 	__le16 position;
-	__le64 isetcookie;
-	__le64 lbasize;
 	__le64 dpa;
 	__le64 rawsize;
+	__le64 hpa;
 	__le32 slot;
-	/*
-	 * Accessing fields past this point should be gated by a
-	 * namespace_label_has() check.
-	 */
-	u8 align;
-	u8 reserved[3];
-	guid_t type_guid;
-	guid_t abstraction_guid;
-	u8 reserved2[88];
+	__le32 ig;
+	__le32 align;
+	u8 reserved[0xac];
 	__le64 checksum;
+};
+
+struct nd_namespace_label {
+	union {
+		/**
+		 * struct nvdimm_cxl_label - CXL 2.0 Table 212
+		 * @type: uuid identifying this label format (namespace)
+		 * @uuid: uuid for the namespace this label describes
+		 * @name: friendly name for the namespace
+		 * @flags: NSLABEL_FLAG_UPDATING (all other flags reserved)
+		 * @nrange: discontiguous namespace support
+		 * @position: this label's position in the set
+		 * @dpa: start address in device-local capacity for this label
+		 * @rawsize: size of this label's contribution to namespace
+		 * @slot: slot id of this label in label area
+		 * @align: alignment in SZ_256M blocks
+		 * @region_uuid: host interleave set identifier
+		 * @abstraction_uuid: personality driver for this namespace
+		 * @lbasize: address geometry for disk-like personalities
+		 * @checksum: fletcher64 sum of this label
+		 */
+		struct nvdimm_cxl_label {
+			u8 type[NSLABEL_UUID_LEN];
+			u8 uuid[NSLABEL_UUID_LEN];
+			u8 name[NSLABEL_NAME_LEN];
+			__le32 flags;
+			__le16 nrange;
+			__le16 position;
+			__le64 dpa;
+			__le64 rawsize;
+			__le32 slot;
+			__le32 align;
+			u8 region_uuid[16];
+			u8 abstraction_uuid[16];
+			__le16 lbasize;
+			u8 reserved[0x56];
+			__le64 checksum;
+		} cxl;
+		/**
+		 * struct nvdimm_efi_label - namespace superblock
+		 * @uuid: UUID per RFC 4122
+		 * @name: optional name (NULL-terminated)
+		 * @flags: see NSLABEL_FLAG_*
+		 * @nlabel: interleave set width
+		 * @position: this label's position in the set
+		 * @isetcookie: interleave set cookie
+		 * @lbasize: address geometry for disk-like personalities
+		 * @dpa: start address in device-local capacity for this label
+		 * @rawsize: size of namespace
+		 * @slot: slot id of this label in label area
+		 */
+		struct nvdimm_efi_label {
+			u8 uuid[NSLABEL_UUID_LEN];
+			u8 name[NSLABEL_NAME_LEN];
+			__le32 flags;
+			__le16 nlabel;
+			__le16 position;
+			__le64 isetcookie;
+			__le64 lbasize;
+			__le64 dpa;
+			__le64 rawsize;
+			__le32 slot;
+			/*
+			 * Accessing fields past this point should be
+			 * gated by a efi_namespace_label_has() check.
+			 */
+			u8 align;
+			u8 reserved[3];
+			guid_t type_guid;
+			guid_t abstraction_guid;
+			u8 reserved2[88];
+			__le64 checksum;
+		} efi;
+	};
 };
 
 #define NVDIMM_BTT_GUID "8aed63a2-29a2-4c66-8b12-f05d15d3922a"
 #define NVDIMM_BTT2_GUID "18633bfc-1735-4217-8ac9-17239282d3f8"
 #define NVDIMM_PFN_GUID "266400ba-fb9f-4677-bcb0-968f11d0d225"
 #define NVDIMM_DAX_GUID "97a86d9c-3cdd-4eda-986f-5068b4f80088"
+
+#define CXL_REGION_UUID "529d7c61-da07-47c4-a93f-ecdf2c06f444"
+#define CXL_NAMESPACE_UUID "68bb2c0a-5a77-4937-9f85-3caf41a0f93c"
 
 /**
  * struct nd_label_id - identifier string for dpa allocation
@@ -135,7 +205,6 @@ struct nd_namespace_label *nd_label_active(struct nvdimm_drvdata *ndd, int n);
 u32 nd_label_alloc_slot(struct nvdimm_drvdata *ndd);
 bool nd_label_free_slot(struct nvdimm_drvdata *ndd, u32 slot);
 u32 nd_label_nfree(struct nvdimm_drvdata *ndd);
-enum nvdimm_claim_class to_nvdimm_cclass(guid_t *guid);
 struct nd_region;
 struct nd_namespace_pmem;
 struct nd_namespace_blk;
