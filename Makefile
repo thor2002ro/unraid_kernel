@@ -838,6 +838,11 @@ endif
 # for the randomize_kstack_offset feature. Disable it for all compilers.
 KBUILD_CFLAGS	+= $(call cc-option, -fno-stack-clash-protection)
 
+# Clear used registers at func exit (to reduce data lifetime and ROP gadgets).
+ifdef CONFIG_ZERO_CALL_USED_REGS
+KBUILD_CFLAGS	+= -fzero-call-used-regs=used-gpr
+endif
+
 DEBUG_CFLAGS	:=
 
 # Workaround for GCC versions < 5.0
@@ -993,8 +998,6 @@ KBUILD_CFLAGS += -Wno-pointer-sign
 KBUILD_CFLAGS += $(call cc-disable-warning, stringop-truncation)
 
 # We'll want to enable this eventually, but it's not going away for 5.7 at least
-KBUILD_CFLAGS += $(call cc-disable-warning, zero-length-bounds)
-KBUILD_CFLAGS += -Wno-array-bounds
 KBUILD_CFLAGS += $(call cc-disable-warning, stringop-overflow)
 
 # Another good warning that we'll want to enable eventually
