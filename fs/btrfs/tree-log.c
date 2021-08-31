@@ -3864,17 +3864,21 @@ again:
  * This cannot be run for file data extents because it does not
  * free the extents they point to.
  */
-static int drop_objectid_items(struct btrfs_trans_handle *trans,
+static int drop_inode_items(struct btrfs_trans_handle *trans,
 				  struct btrfs_root *log,
 				  struct btrfs_path *path,
-				  u64 objectid, int max_key_type)
+				  struct btrfs_inode *inode,
+				  int max_key_type)
 {
 	int ret;
 	struct btrfs_key key;
 	struct btrfs_key found_key;
 	int start_slot;
 
-	key.objectid = objectid;
+	if (!inode_logged(trans, inode))
+		return 0;
+
+	key.objectid = btrfs_ino(inode);
 	key.type = max_key_type;
 	key.offset = (u64)-1;
 
@@ -3891,7 +3895,7 @@ static int drop_objectid_items(struct btrfs_trans_handle *trans,
 		btrfs_item_key_to_cpu(path->nodes[0], &found_key,
 				      path->slots[0]);
 
-		if (found_key.objectid != objectid)
+		if (found_key.objectid != key.objectid)
 			break;
 
 		found_key.offset = 0;
@@ -5425,7 +5429,7 @@ static int btrfs_log_inode(struct btrfs_trans_handle *trans,
 		clear_bit(BTRFS_INODE_COPY_EVERYTHING, &inode->runtime_flags);
 		if (inode_only == LOG_INODE_EXISTS)
 			max_key_type = BTRFS_XATTR_ITEM_KEY;
-		ret = drop_objectid_items(trans, log, path, ino, max_key_type);
+		ret = drop_inode_items(trans, log, path, inode, max_key_type);
 	} else {
 		if (inode_only == LOG_INODE_EXISTS) {
 			/*
@@ -5449,8 +5453,8 @@ static int btrfs_log_inode(struct btrfs_trans_handle *trans,
 			     &inode->runtime_flags)) {
 			if (inode_only == LOG_INODE_EXISTS) {
 				max_key.type = BTRFS_XATTR_ITEM_KEY;
-				ret = drop_objectid_items(trans, log, path, ino,
-							  max_key.type);
+				ret = drop_inode_items(trans, log, path, inode,
+						       max_key.type);
 			} else {
 				clear_bit(BTRFS_INODE_NEEDS_FULL_SYNC,
 					  &inode->runtime_flags);
@@ -5469,8 +5473,8 @@ static int btrfs_log_inode(struct btrfs_trans_handle *trans,
 			if (inode_only == LOG_INODE_ALL)
 				fast_search = true;
 			max_key.type = BTRFS_XATTR_ITEM_KEY;
-			ret = drop_objectid_items(trans, log, path, ino,
-						  max_key.type);
+			ret = drop_inode_items(trans, log, path, inode,
+					       max_key.type);
 		} else {
 			if (inode_only == LOG_INODE_ALL)
 				fast_search = true;
