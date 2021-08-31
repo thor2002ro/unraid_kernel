@@ -67,6 +67,14 @@ config SOC_SAMA7G5
 	help
 	  Select this if you are using one of Microchip's SAMA7G5 family SoC.
 
+config SOC_LAN966X
+	bool "ARMv7 based Microchip LAN966X SoC family"
+	depends on ARCH_MULTI_V7
+	select SOC_LAN966
+	select DW_APB_TIMER_OF
+	help
+	  This enables support for ARMv7 based Microchip LAN966X SoC family.
+
 config SOC_AT91RM9200
 	bool "AT91RM9200"
 	depends on ARCH_MULTI_V4T
@@ -209,4 +217,9 @@ config SOC_SAMA7
 	select MEMORY
 	select SOC_SAM_V7
 	select SRAM if PM
+
+config SOC_LAN966
+	bool
+	select ARM_GIC
+	select MEMORY
 endif
