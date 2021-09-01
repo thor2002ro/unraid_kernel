@@ -21,9 +21,12 @@
 #define TUSB320_REG9_INTERRUPT_STATUS		BIT(4)
 
 #define TUSB320_REGA				0xa
+#define TUSB320L_REGA_DISABLE_TERM		BIT(0)
 #define TUSB320_REGA_I2C_SOFT_RESET		BIT(3)
 #define TUSB320_REGA_MODE_SELECT_SHIFT		4
 #define TUSB320_REGA_MODE_SELECT_MASK		0x3
+
+#define TUSB320L_REGA0_REVISION			0xa0
 
 enum tusb320_attached_state {
 	TUSB320_ATTACHED_STATE_NONE,
@@ -39,9 +42,15 @@ enum tusb320_mode {
 	TUSB320_MODE_DRP,
 };
 
+enum tusb320_type {
+	TYPE_TUSB320,
+	TYPE_TUSB320L,
+};
+
 struct tusb320_priv {
 	struct device *dev;
 	struct regmap *regmap;
+	enum tusb320_type type;
 	struct extcon_dev *edev;
 
 	enum tusb320_attached_state state;
@@ -99,12 +108,53 @@ static int tusb320_set_mode(struct tusb320_priv *priv, enum tusb320_mode mode)
 	return 0;
 }
 
+static int tusb320l_set_mode(struct tusb320_priv *priv, enum tusb320_mode mode)
+{
+	int ret;
+
+	/* Disable CC state machine */
+	ret = regmap_write_bits(priv->regmap, TUSB320_REGA,
+		TUSB320L_REGA_DISABLE_TERM, 1);
+	if (ret) {
+		dev_err(priv->dev,
+			"failed to disable CC state machine: %d\n", ret);
+		return ret;
+	}
+
+	/* Write mode */
+	ret = regmap_write_bits(priv->regmap, TUSB320_REGA,
+		TUSB320_REGA_MODE_SELECT_MASK << TUSB320_REGA_MODE_SELECT_SHIFT,
+		mode << TUSB320_REGA_MODE_SELECT_SHIFT);
+	if (ret) {
+		dev_err(priv->dev, "failed to write mode: %d\n", ret);
+		goto err;
+	}
+
+	msleep(5);
+err:
+	/* Re-enable CC state machine */
+	ret = regmap_write_bits(priv->regmap, TUSB320_REGA,
+		TUSB320L_REGA_DISABLE_TERM, 0);
+	if (ret)
+		dev_err(priv->dev,
+			"failed to re-enable CC state machine: %d\n", ret);
+
+	return ret;
+}
+
 static int tusb320_reset(struct tusb320_priv *priv)
 {
 	int ret;
 
 	/* Set mode to default (follow PORT pin) */
-	ret = tusb320_set_mode(priv, TUSB320_MODE_PORT);
+	switch (priv->type) {
+	case TYPE_TUSB320:
+		ret = tusb320_set_mode(priv, TUSB320_MODE_PORT);
+		break;
+	case TYPE_TUSB320L:
+		ret = tusb320l_set_mode(priv, TUSB320_MODE_PORT);
+		break;
+	}
 	if (ret && ret != -EBUSY) {
 		dev_err(priv->dev,
 			"failed to set mode to PORT: %d\n", ret);
@@ -176,6 +226,8 @@ static int tusb320_extcon_probe(struct i2c_client *client,
 				const struct i2c_device_id *id)
 {
 	struct tusb320_priv *priv;
+	const void *match_data;
+	unsigned int revision;
 	int ret;
 
 	priv = devm_kzalloc(&client->dev, sizeof(*priv), GFP_KERNEL);
@@ -191,10 +243,26 @@ static int tusb320_extcon_probe(struct i2c_client *client,
 	if (ret)
 		return ret;
 
+	match_data = device_get_match_data(&client->dev);
+	if (!match_data)
+		return -EINVAL;
+
+	priv->type = (enum tusb320_type)match_data;
+
 	priv->edev = devm_extcon_dev_allocate(priv->dev, tusb320_extcon_cable);
 	if (IS_ERR(priv->edev)) {
 		dev_err(priv->dev, "failed to allocate extcon device\n");
 		return PTR_ERR(priv->edev);
+	}
+
+	if (priv->type == TYPE_TUSB320L) {
+		ret = regmap_read(priv->regmap, TUSB320L_REGA0_REVISION, &revision);
+
+		if (ret)
+			dev_warn(priv->dev,
+				"failed to read revision register: %d\n", ret);
+		else
+			dev_info(priv->dev, "chip revision %d\n", revision);
 	}
 
 	ret = devm_extcon_dev_register(priv->dev, priv->edev);
@@ -231,7 +299,8 @@ static int tusb320_extcon_probe(struct i2c_client *client,
 }
 
 static const struct of_device_id tusb320_extcon_dt_match[] = {
-	{ .compatible = "ti,tusb320", },
+	{ .compatible = "ti,tusb320", .data = (void *)TYPE_TUSB320, },
+	{ .compatible = "ti,tusb320l", .data = (void *)TYPE_TUSB320L, },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, tusb320_extcon_dt_match);
