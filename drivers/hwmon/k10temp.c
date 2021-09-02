@@ -85,6 +85,9 @@ struct k10temp_data {
 	u32 show_temp;
 	bool is_zen;
 	u32 ccd_offset;
+	bool show_power;
+	char pwr_label[20];
+	u32 power_cap_max;
 };
 
 #define TCTL_BIT	0
@@ -177,9 +180,13 @@ static int k10temp_read_labels(struct device *dev,
 			       enum hwmon_sensor_types type,
 			       u32 attr, int channel, const char **str)
 {
+	struct k10temp_data *data = dev_get_drvdata(dev);
 	switch (type) {
 	case hwmon_temp:
 		*str = k10temp_temp_label[channel];
+		break;
+	case hwmon_power:
+		*str = data->pwr_label;
 		break;
 	default:
 		return -EOPNOTSUPP;
@@ -234,12 +241,43 @@ static int k10temp_read_temp(struct device *dev, u32 attr, int channel,
 	return 0;
 }
 
+static int k10temp_read_power(struct device *dev, u32 attr, int channel, long *val)
+{
+	struct k10temp_data *data = dev_get_drvdata(dev);
+	struct hsmp_message msg = { 0 };
+	int err;
+
+	switch (attr) {
+	case hwmon_power_input:
+		msg.msg_id = HSMP_GET_SOCKET_POWER;
+		break;
+	case hwmon_power_cap:
+		msg.msg_id = HSMP_GET_SOCKET_POWER_LIMIT;
+		break;
+	case hwmon_power_cap_max:
+		/* power_cap_max does not change dynamically, hence return the cached value */
+		*val = data->power_cap_max * 1000;
+		return 0;
+	default:
+		return -EOPNOTSUPP;
+	}
+	msg.response_sz = 1;
+	err = hsmp_send_message(amd_pci_dev_to_node_id(data->pdev), &msg);
+	if (!err)
+		/* power metric is reported in micro watts. hence multiply by 1000 */
+		*val = msg.response[0] * 1000;
+
+	return err;
+}
+
 static int k10temp_read(struct device *dev, enum hwmon_sensor_types type,
 			u32 attr, int channel, long *val)
 {
 	switch (type) {
 	case hwmon_temp:
 		return k10temp_read_temp(dev, attr, channel, val);
+	case hwmon_power:
+		return k10temp_read_power(dev, attr, channel, val);
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -288,10 +326,43 @@ static umode_t k10temp_is_visible(const void *_data,
 			return 0;
 		}
 		break;
+	case hwmon_power:
+		switch (attr) {
+		case hwmon_power_input:
+		case hwmon_power_cap_max:
+		case hwmon_power_label:
+			/* Show power attributes only if show_power is available */
+			if (data->show_power)
+				break;
+			return 0;
+		case hwmon_power_cap:
+			if (data->show_power)
+				return 0644;
+			return 0;
+		default:
+			return -EOPNOTSUPP;
+		}
+		break;
 	default:
 		return 0;
 	}
 	return 0444;
+}
+
+static int k10temp_write(struct device *dev, enum hwmon_sensor_types type,
+			 u32 attr, int channel, long val)
+{
+	struct hsmp_message msg = { 0 };
+	struct k10temp_data *data = dev_get_drvdata(dev);
+
+	if (type == hwmon_power && attr == hwmon_power_cap) {
+		msg.response_sz = 1;
+		msg.num_args	= 1;
+		msg.msg_id	= HSMP_SET_SOCKET_POWER_LIMIT;
+		msg.args[0]	= val / 1000;
+		return hsmp_send_message(amd_pci_dev_to_node_id(data->pdev), &msg);
+	}
+	return -EOPNOTSUPP;
 }
 
 static bool has_erratum_319(struct pci_dev *pdev)
@@ -342,6 +413,9 @@ static const struct hwmon_channel_info *k10temp_info[] = {
 			   HWMON_T_INPUT | HWMON_T_LABEL,
 			   HWMON_T_INPUT | HWMON_T_LABEL,
 			   HWMON_T_INPUT | HWMON_T_LABEL),
+	HWMON_CHANNEL_INFO(power,
+			   HWMON_P_INPUT | HWMON_P_LABEL |
+			   HWMON_P_CAP | HWMON_P_CAP_MAX),
 	NULL
 };
 
@@ -349,6 +423,7 @@ static const struct hwmon_ops k10temp_hwmon_ops = {
 	.is_visible = k10temp_is_visible,
 	.read = k10temp_read,
 	.read_string = k10temp_read_labels,
+	.write = k10temp_write,
 };
 
 static const struct hwmon_chip_info k10temp_chip_info = {
@@ -368,6 +443,32 @@ static void k10temp_get_ccd_support(struct pci_dev *pdev,
 		if (regval & ZEN_CCD_TEMP_VALID)
 			data->show_temp |= BIT(TCCD_BIT(i));
 	}
+}
+
+static int k10temp_get_max_power(struct k10temp_data *data)
+{
+	int err;
+	struct hsmp_message msg = { 0 };
+
+	msg.msg_id = HSMP_GET_SOCKET_POWER_LIMIT_MAX;
+	msg.response_sz = 1;
+	err = hsmp_send_message(amd_pci_dev_to_node_id(data->pdev), &msg);
+	if (!err)
+		data->power_cap_max = msg.response[0];
+	return err;
+}
+
+static void check_power_support(struct k10temp_data *data)
+{
+	/* HSMP support is required to obtain power metrics */
+	if (!amd_nb_has_feature(AMD_NB_HSMP))
+		return;
+
+	if (k10temp_get_max_power(data))
+		return;
+
+	sprintf(data->pwr_label, "socket%d_pwr", amd_pci_dev_to_node_id(data->pdev));
+	data->show_power = true;
 }
 
 static int k10temp_probe(struct pci_dev *pdev, const struct pci_device_id *id)
@@ -428,6 +529,11 @@ static int k10temp_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 		switch (boot_cpu_data.x86_model) {
 		case 0x0 ... 0x1:	/* Zen3 SP3/TR */
+		case 0x30 ... 0x31:
+			check_power_support(data);
+			data->ccd_offset = 0x154;
+			k10temp_get_ccd_support(pdev, data, 8);
+			break;
 		case 0x21:		/* Zen3 Ryzen Desktop */
 		case 0x50 ... 0x5f:	/* Green Sardine */
 			data->ccd_offset = 0x154;

@@ -132,3 +132,21 @@ On Family 17h and Family 18h CPUs, additional temperature sensors may report
 Core Complex Die (CCD) temperatures. Up to 8 such temperatures are reported
 as temp{3..10}_input, labeled Tccd{1..8}. Actual support depends on the CPU
 variant.
+
+On Family 19h server line of CPUs, additionally driver may report socket
+current power consumption with power cap and power cap max. This requires the
+HSMP support exported in the amd_nb module.
+
+The power1_cap can be set to any value, SMU FW will limit the maximum cap to
+the value reported by power1_cap_max entry. The SMU FW may not take any action
+if the power1_cap is set to a value lesser than the minimum socket consumption.
+
+The following attributes may be reported.
+
+================ ===== ========================================================
+Name             Perm  Description
+================ ===== ========================================================
+power1_input     RO    Socket current Power consumed
+power1_cap       RW    Socket Power limit can be set between 0 and power1_cap_max
+power1_cap_max   RO    Maximum powerlimit calculated and reported by the SMU FW
+================ ===== ========================================================

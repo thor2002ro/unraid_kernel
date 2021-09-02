@@ -6,6 +6,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
+#include <linux/delay.h>
 #include <linux/types.h>
 #include <linux/slab.h>
 #include <linux/init.h>
@@ -30,6 +31,22 @@
 #define PCI_DEVICE_ID_AMD_19H_M40H_ROOT	0x14b5
 #define PCI_DEVICE_ID_AMD_19H_M40H_DF_F4 0x167d
 #define PCI_DEVICE_ID_AMD_19H_M50H_DF_F4 0x166e
+
+/*
+ * HSMP Status / Error codes
+ */
+#define HSMP_STATUS_NOT_READY	0x00
+#define HSMP_STATUS_OK		0x01
+#define HSMP_ERR_INVALID_MSG	0xFE
+#define HSMP_ERR_INVALID_INPUT	0xFF
+
+/* To access specific HSMP mailbox register, s/w writes the SMN address of HSMP mailbox
+ * register into the SMN_INDEX register, and reads/writes the SMN_DATA reg.
+ * Below are required SMN address for HSMP Mailbox register offsets in SMU address space
+ */
+#define SMN_HSMP_MSG_ID	0x3B10534
+#define SMN_HSMP_MSG_RESP	0x3B10980
+#define SMN_HSMP_MSG_DATA	0x3B109E0
 
 /* Protect the PCI config register pairs used for SMN and DF indirect access. */
 static DEFINE_MUTEX(smn_mutex);
@@ -113,6 +130,9 @@ const struct amd_nb_bus_dev_range amd_nb_bus_dev_ranges[] __initconst = {
 
 static struct amd_northbridge_info amd_northbridges;
 
+/* Timeout in millsec */
+#define HSMP_MSG_TIMEOUT	100
+
 u16 amd_nb_num(void)
 {
 	return amd_northbridges.num;
@@ -186,6 +206,194 @@ int amd_smn_write(u16 node, u32 address, u32 value)
 	return __amd_smn_rw(node, address, &value, true);
 }
 EXPORT_SYMBOL_GPL(amd_smn_write);
+
+#define HSMP_WR true
+#define HSMP_RD false
+
+static int __amd_hsmp_rdwr(struct pci_dev *root, u32 address,
+			   u32 *value, bool write)
+{
+	int err;
+
+	err = pci_write_config_dword(root, 0xc4, address);
+	if (err) {
+		pr_warn("Error programming SMN address 0x%x.\n", address);
+		return err;
+	}
+
+	err = (write ? pci_write_config_dword(root, 0xc8, *value)
+		     : pci_read_config_dword(root, 0xc8, value));
+	if (err)
+		pr_warn("Error %s SMN address 0x%x.\n",
+			(write ? "writing to" : "reading from"), address);
+
+	return err;
+}
+
+/*
+ * Send a message to the HSMP port via PCI-e config space registers.
+ *
+ * The caller is expected to zero out any unused arguments.
+ * If a response is expected, the number of response words should be greater than 0.
+ *
+ * Returns 0 for success and populates the requested number of arguments.
+ * Returns a negative error code for failure.
+ */
+static int __hsmp_send_message(struct pci_dev *root, struct hsmp_message *msg)
+{
+	u64 timeout = HSMP_MSG_TIMEOUT;
+	u32 mbox_status;
+	u32 arg_num;
+	int err;
+
+	/* Clear the status register */
+	mbox_status = HSMP_STATUS_NOT_READY;
+	err = __amd_hsmp_rdwr(root, SMN_HSMP_MSG_RESP, &mbox_status, HSMP_WR);
+	if (err) {
+		pr_err("Error %d clearing mailbox status register.\n", err);
+		return err;
+	}
+
+	arg_num = 0;
+	/* Write any message arguments */
+	while (arg_num < msg->num_args) {
+		err = __amd_hsmp_rdwr(root, SMN_HSMP_MSG_DATA + (arg_num << 2),
+				      &msg->args[arg_num], HSMP_WR);
+		if (err) {
+			pr_err("Error %d writing message argument %d\n",
+			       err, arg_num);
+			return err;
+		}
+		arg_num++;
+	}
+
+	/* Write the message ID which starts the operation */
+	err = __amd_hsmp_rdwr(root, SMN_HSMP_MSG_ID, &msg->msg_id, HSMP_WR);
+	if (err) {
+		pr_err("Error %d writing message ID %u\n", err, msg->msg_id);
+		return err;
+	}
+
+	/*
+	 * Depending on when the trigger write completes relative to the SMU
+	 * firmware 1 ms cycle, the operation may take from tens of us to 1 ms
+	 * to complete. Some operations may take more. Therefore we will try
+	 * a few short duration sleeps and switch to long sleeps if we don't
+	 * succeed quickly.
+	 */
+	do {
+		if (likely(timeout > 90))
+			usleep_range(50, 100);
+		else
+			usleep_range(100, 500);
+
+		err = __amd_hsmp_rdwr(root, SMN_HSMP_MSG_RESP, &mbox_status, HSMP_RD);
+		if (err) {
+			pr_err("Error %d reading mailbox status\n", err);
+			return err;
+		}
+
+		if (mbox_status != HSMP_STATUS_NOT_READY)
+			break;
+
+	} while (--timeout);
+
+	if (unlikely(mbox_status == HSMP_ERR_INVALID_MSG)) {
+		pr_err("Invalid message ID %u\n", msg->msg_id);
+		err = -ENOMSG;
+		return err;
+	} else if (unlikely(mbox_status == HSMP_ERR_INVALID_INPUT)) {
+		pr_err("Invalid arguments for %d\n", msg->msg_id);
+		err = -EINVAL;
+		return err;
+	} else if (unlikely(mbox_status != HSMP_STATUS_OK)) {
+		pr_err("Message ID %u unknown failure (status = 0x%X), timedout\n",
+		       msg->msg_id, mbox_status);
+		err = -ETIMEDOUT;
+		return err;
+	}
+
+	/* SMU has responded OK. Read response data */
+	arg_num = 0;
+	while (arg_num < msg->response_sz) {
+		err = __amd_hsmp_rdwr(root, SMN_HSMP_MSG_DATA + (arg_num << 2),
+				      &msg->response[arg_num], HSMP_RD);
+		if (err) {
+			pr_err("Error %d reading response %u for message ID:%u\n",
+			       err, arg_num, msg->msg_id);
+			break;
+		}
+		arg_num++;
+	}
+
+	return err;
+}
+
+/* Verify the HSMP test message */
+static bool amd_hsmp_support(void)
+{
+	struct hsmp_message msg = { 0 };
+	int err = 0;
+	struct pci_dev *root;
+
+	/*
+	 * Check HSMP support on socket 0. the test message takes one argument
+	 * and returns the value of that argument + 1.
+	 */
+	root = node_to_amd_nb(0)->root;
+	if (!root)
+		return false;
+
+	msg.args[0]     = 0xDEADBEEF;
+	msg.response_sz = 1;
+	msg.msg_id	= HSMP_TEST;
+	msg.num_args	= 1;
+
+	err = __hsmp_send_message(root, &msg);
+	if (err)
+		return false;
+
+	if (msg.response[0] != msg.args[0] + 1)
+		return false;
+
+	return true;
+}
+
+int hsmp_send_message(int node, struct hsmp_message *msg)
+{
+	struct pci_dev *root;
+	int err;
+
+	if (!amd_nb_has_feature(AMD_NB_HSMP))
+		return -ENODEV;
+
+	root = node_to_amd_nb(node)->root;
+	if (!root || !msg)
+		return -ENODEV;
+
+	if (msg->msg_id < HSMP_TEST || msg->msg_id >= HSMP_MSG_ID_MAX)
+		return -EINVAL;
+
+	if (msg->num_args > HSMP_MAX_MSG_LEN || msg->response_sz > HSMP_MAX_MSG_LEN)
+		return -EINVAL;
+
+	/*
+	 * The time taken by smu operation to complete is between
+	 * 10us to 1ms. Sometime it may take more time.
+	 * In SMP system timeout of 100 millisecs should
+	 * be enough for the previous thread to finish the operation
+	 */
+	err = down_timeout(&(node_to_amd_nb(node)->hsmp_sem_lock),
+			   msecs_to_jiffies(HSMP_MSG_TIMEOUT));
+	if (err < 0)
+		return err;
+
+	err = __hsmp_send_message(root, msg);
+	up(&(node_to_amd_nb(node)->hsmp_sem_lock));
+
+	return err;
+}
+EXPORT_SYMBOL_GPL(hsmp_send_message);
 
 /*
  * Data Fabric Indirect Access uses FICAA/FICAD.
@@ -311,6 +519,15 @@ int amd_cache_northbridges(void)
 
 	if (amd_gart_present())
 		amd_northbridges.flags |= AMD_NB_GART;
+
+	if (boot_cpu_data.x86 >= 0x19 && amd_hsmp_support()) {
+		amd_northbridges.flags |= AMD_NB_HSMP;
+
+		/* Protect the PCI config register pairs used for HSMP mailbox access, */
+		/* by initialising  semaphore for each socket */
+		for (i = 0; i < amd_northbridges.num; i++)
+			sema_init(&(node_to_amd_nb(i)->hsmp_sem_lock), 1);
+	}
 
 	/*
 	 * Check for L3 cache presence.

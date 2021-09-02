@@ -66,6 +66,7 @@ struct amd_northbridge {
 	struct pci_dev *link;
 	struct amd_l3_cache l3_cache;
 	struct threshold_bank *bank4;
+	struct semaphore hsmp_sem_lock;
 };
 
 struct amd_northbridge_info {
@@ -77,6 +78,7 @@ struct amd_northbridge_info {
 #define AMD_NB_GART			BIT(0)
 #define AMD_NB_L3_INDEX_DISABLE		BIT(1)
 #define AMD_NB_L3_PARTITIONING		BIT(2)
+#define AMD_NB_HSMP			BIT(3)
 
 #ifdef CONFIG_AMD_NB
 
@@ -123,5 +125,43 @@ static inline bool amd_gart_present(void)
 
 #endif
 
+/*
+ * HSMP Message types supported
+ */
+enum hsmp_message_ids {
+	HSMP_TEST = 1,
+	HSMP_GET_SMU_VER,
+	HSMP_GET_PROTO_VER,
+	HSMP_GET_SOCKET_POWER,
+	HSMP_SET_SOCKET_POWER_LIMIT,
+	HSMP_GET_SOCKET_POWER_LIMIT,
+	HSMP_GET_SOCKET_POWER_LIMIT_MAX,
+	HSMP_SET_BOOST_LIMIT,
+	HSMP_SET_BOOST_LIMIT_SOCKET,
+	HSMP_GET_BOOST_LIMIT,
+	HSMP_GET_PROC_HOT,
+	HSMP_SET_XGMI_LINK_WIDTH,
+	HSMP_SET_DF_PSTATE,
+	HSMP_AUTO_DF_PSTATE,
+	HSMP_GET_FCLK_MCLK,
+	HSMP_GET_CCLK_THROTTLE_LIMIT,
+	HSMP_GET_C0_PERCENT,
+	HSMP_SET_NBIO_DPM_LEVEL,
+	HSMP_RESERVED,
+	HSMP_GET_DDR_BANDWIDTH,
+	HSMP_MSG_ID_MAX,
+};
+
+#define HSMP_MAX_MSG_LEN	8
+
+struct hsmp_message {
+	u32	msg_id;			/* Message ID */
+	u16	num_args;		/* Number of arguments in message */
+	u16	response_sz;		/* Number of expected response words */
+	u32	args[HSMP_MAX_MSG_LEN];	/* Argument(s) */
+	u32	response[HSMP_MAX_MSG_LEN];	/* Response word(s) */
+};
+
+int hsmp_send_message(int socket_id, struct hsmp_message *msg);
 
 #endif /* _ASM_X86_AMD_NB_H */
