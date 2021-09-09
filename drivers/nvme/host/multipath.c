@@ -760,14 +760,21 @@ void nvme_mpath_add_disk(struct nvme_ns *ns, struct nvme_id_ns *id)
 #endif
 }
 
+void nvme_mpath_shutdown_disk(struct nvme_ns_head *head)
+{
+	if (!head->disk)
+		return;
+	kblockd_schedule_work(&head->requeue_work);
+	if (test_bit(NVME_NSHEAD_DISK_LIVE, &head->flags)) {
+		nvme_cdev_del(&head->cdev, &head->cdev_device);
+		del_gendisk(head->disk);
+	}
+}
+
 void nvme_mpath_remove_disk(struct nvme_ns_head *head)
 {
 	if (!head->disk)
 		return;
-	if (head->disk->flags & GENHD_FL_UP) {
-		nvme_cdev_del(&head->cdev, &head->cdev_device);
-		del_gendisk(head->disk);
-	}
 	blk_set_queue_dying(head->disk->queue);
 	/* make sure all pending bios are cleaned up */
 	kblockd_schedule_work(&head->requeue_work);

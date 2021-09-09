@@ -129,9 +129,9 @@ static void sum_vm_events(unsigned long *ret)
 */
 void all_vm_events(unsigned long *ret)
 {
-	get_online_cpus();
+	cpus_read_lock();
 	sum_vm_events(ret);
-	put_online_cpus();
+	cpus_read_unlock();
 }
 EXPORT_SYMBOL_GPL(all_vm_events);
 
@@ -204,7 +204,7 @@ int calculate_normal_threshold(struct zone *zone)
 	 *
 	 * Some sample thresholds:
 	 *
-	 * Threshold	Processors	(fls)	Zonesize	fls(mem+1)
+	 * Threshold	Processors	(fls)	Zonesize	fls(mem)+1
 	 * ------------------------------------------------------------------
 	 * 8		1		1	0.9-1 GB	4
 	 * 16		2		2	0.9-1 GB	4
@@ -1217,6 +1217,8 @@ const char * const vmstat_text[] = {
 	"pgreuse",
 	"pgsteal_kswapd",
 	"pgsteal_direct",
+	"pgdemote_kswapd",
+	"pgdemote_direct",
 	"pgscan_kswapd",
 	"pgscan_direct",
 	"pgscan_direct_throttle",
@@ -1452,7 +1454,7 @@ static void pagetypeinfo_showfree_print(struct seq_file *m,
 }
 
 /* Print out the free pages at each order for each migatetype */
-static int pagetypeinfo_showfree(struct seq_file *m, void *arg)
+static void pagetypeinfo_showfree(struct seq_file *m, void *arg)
 {
 	int order;
 	pg_data_t *pgdat = (pg_data_t *)arg;
@@ -1464,8 +1466,6 @@ static int pagetypeinfo_showfree(struct seq_file *m, void *arg)
 	seq_putc(m, '\n');
 
 	walk_zones_in_node(m, pgdat, true, false, pagetypeinfo_showfree_print);
-
-	return 0;
 }
 
 static void pagetypeinfo_showblockcount_print(struct seq_file *m,
@@ -1501,7 +1501,7 @@ static void pagetypeinfo_showblockcount_print(struct seq_file *m,
 }
 
 /* Print out the number of pageblocks for each migratetype */
-static int pagetypeinfo_showblockcount(struct seq_file *m, void *arg)
+static void pagetypeinfo_showblockcount(struct seq_file *m, void *arg)
 {
 	int mtype;
 	pg_data_t *pgdat = (pg_data_t *)arg;
@@ -1512,8 +1512,6 @@ static int pagetypeinfo_showblockcount(struct seq_file *m, void *arg)
 	seq_putc(m, '\n');
 	walk_zones_in_node(m, pgdat, true, false,
 		pagetypeinfo_showblockcount_print);
-
-	return 0;
 }
 
 /*
@@ -1874,11 +1872,6 @@ static void vmstat_update(struct work_struct *w)
 }
 
 /*
- * Switch off vmstat processing and then fold all the remaining differentials
- * until the diffs stay at zero. The function is used by NOHZ and can only be
- * invoked when tick processing is not active.
- */
-/*
  * Check if the diffs for a certain cpu indicate that
  * an update is needed.
  */
@@ -1894,17 +1887,15 @@ static bool need_update(int cpu)
 		/*
 		 * The fast way of checking if there are any vmstat diffs.
 		 */
-		if (memchr_inv(pzstats->vm_stat_diff, 0, NR_VM_ZONE_STAT_ITEMS *
-			       sizeof(pzstats->vm_stat_diff[0])))
+		if (memchr_inv(pzstats->vm_stat_diff, 0, sizeof(pzstats->vm_stat_diff)))
 			return true;
 
 		if (last_pgdat == zone->zone_pgdat)
 			continue;
 		last_pgdat = zone->zone_pgdat;
 		n = per_cpu_ptr(zone->zone_pgdat->per_cpu_nodestats, cpu);
-		if (memchr_inv(n->vm_node_stat_diff, 0, NR_VM_NODE_STAT_ITEMS *
-			       sizeof(n->vm_node_stat_diff[0])))
-		    return true;
+		if (memchr_inv(n->vm_node_stat_diff, 0, sizeof(n->vm_node_stat_diff)))
+			return true;
 	}
 	return false;
 }
@@ -1948,7 +1939,7 @@ static void vmstat_shepherd(struct work_struct *w)
 {
 	int cpu;
 
-	get_online_cpus();
+	cpus_read_lock();
 	/* Check processors whose vmstat worker threads have been disabled */
 	for_each_online_cpu(cpu) {
 		struct delayed_work *dw = &per_cpu(vmstat_work, cpu);
@@ -1958,7 +1949,7 @@ static void vmstat_shepherd(struct work_struct *w)
 
 		cond_resched();
 	}
-	put_online_cpus();
+	cpus_read_unlock();
 
 	schedule_delayed_work(&shepherd,
 		round_jiffies_relative(sysctl_stat_interval));
@@ -2037,9 +2028,9 @@ void __init init_mm_internals(void)
 	if (ret < 0)
 		pr_err("vmstat: failed to register 'online' hotplug state\n");
 
-	get_online_cpus();
+	cpus_read_lock();
 	init_cpu_node_state();
-	put_online_cpus();
+	cpus_read_unlock();
 
 	start_shepherd_timer();
 #endif

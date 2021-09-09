@@ -445,15 +445,15 @@ struct kvm_vcpu_stat {
 	u64 instruction_sigp_init_cpu_reset;
 	u64 instruction_sigp_cpu_reset;
 	u64 instruction_sigp_unknown;
-	u64 diagnose_10;
-	u64 diagnose_44;
-	u64 diagnose_9c;
-	u64 diagnose_9c_ignored;
-	u64 diagnose_9c_forward;
-	u64 diagnose_258;
-	u64 diagnose_308;
-	u64 diagnose_500;
-	u64 diagnose_other;
+	u64 instruction_diagnose_10;
+	u64 instruction_diagnose_44;
+	u64 instruction_diagnose_9c;
+	u64 diag_9c_ignored;
+	u64 diag_9c_forward;
+	u64 instruction_diagnose_258;
+	u64 instruction_diagnose_308;
+	u64 instruction_diagnose_500;
+	u64 instruction_diagnose_other;
 	u64 pfault_sync;
 };
 
@@ -798,14 +798,12 @@ struct kvm_s390_cpu_model {
 	unsigned short ibc;
 };
 
-struct kvm_s390_module_hook {
-	int (*hook)(struct kvm_vcpu *vcpu);
-	struct module *owner;
-};
+typedef int (*crypto_hook)(struct kvm_vcpu *vcpu);
 
 struct kvm_s390_crypto {
 	struct kvm_s390_crypto_cb *crycb;
-	struct kvm_s390_module_hook *pqap_hook;
+	struct rw_semaphore pqap_hook_rwsem;
+	crypto_hook *pqap_hook;
 	__u32 crycbd;
 	__u8 aes_kw;
 	__u8 dea_kw;

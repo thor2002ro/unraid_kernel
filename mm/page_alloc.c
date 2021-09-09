@@ -840,20 +840,23 @@ void init_mem_debugging_and_hardening(void)
 	}
 #endif
 
-	if (_init_on_alloc_enabled_early) {
-		if (page_poisoning_requested)
-			pr_info("mem auto-init: CONFIG_PAGE_POISONING is on, "
-				"will take precedence over init_on_alloc\n");
-		else
-			static_branch_enable(&init_on_alloc);
+	if ((_init_on_alloc_enabled_early || _init_on_free_enabled_early) &&
+	    page_poisoning_requested) {
+		pr_info("mem auto-init: CONFIG_PAGE_POISONING is on, "
+			"will take precedence over init_on_alloc and init_on_free\n");
+		_init_on_alloc_enabled_early = false;
+		_init_on_free_enabled_early = false;
 	}
-	if (_init_on_free_enabled_early) {
-		if (page_poisoning_requested)
-			pr_info("mem auto-init: CONFIG_PAGE_POISONING is on, "
-				"will take precedence over init_on_free\n");
-		else
-			static_branch_enable(&init_on_free);
-	}
+
+	if (_init_on_alloc_enabled_early)
+		static_branch_enable(&init_on_alloc);
+	else
+		static_branch_disable(&init_on_alloc);
+
+	if (_init_on_free_enabled_early)
+		static_branch_enable(&init_on_free);
+	else
+		static_branch_disable(&init_on_free);
 
 #ifdef CONFIG_DEBUG_PAGEALLOC
 	if (!debug_pagealloc_enabled())
@@ -3450,19 +3453,10 @@ void free_unref_page_list(struct list_head *list)
 		 * comment in free_unref_page.
 		 */
 		migratetype = get_pcppage_migratetype(page);
-		if (unlikely(migratetype >= MIGRATE_PCPTYPES)) {
-			if (unlikely(is_migrate_isolate(migratetype))) {
-				list_del(&page->lru);
-				free_one_page(page_zone(page), page, pfn, 0,
-							migratetype, FPI_NONE);
-				continue;
-			}
-
-			/*
-			 * Non-isolated types over MIGRATE_PCPTYPES get added
-			 * to the MIGRATE_MOVABLE pcp list.
-			 */
-			set_pcppage_migratetype(page, MIGRATE_MOVABLE);
+		if (unlikely(is_migrate_isolate(migratetype))) {
+			list_del(&page->lru);
+			free_one_page(page_zone(page), page, pfn, 0, migratetype, FPI_NONE);
+			continue;
 		}
 
 		set_page_private(page, pfn);
@@ -3472,7 +3466,15 @@ void free_unref_page_list(struct list_head *list)
 	list_for_each_entry_safe(page, next, list, lru) {
 		pfn = page_private(page);
 		set_page_private(page, 0);
+
+		/*
+		 * Non-isolated types over MIGRATE_PCPTYPES get added
+		 * to the MIGRATE_MOVABLE pcp list.
+		 */
 		migratetype = get_pcppage_migratetype(page);
+		if (unlikely(migratetype >= MIGRATE_PCPTYPES))
+			migratetype = MIGRATE_MOVABLE;
+
 		trace_mm_page_free_batched(page);
 		free_unref_page_commit(page, pfn, migratetype, 0);
 
@@ -3820,7 +3822,7 @@ static inline bool __should_fail_alloc_page(gfp_t gfp_mask, unsigned int order)
 
 #endif /* CONFIG_FAIL_PAGE_ALLOC */
 
-static noinline bool should_fail_alloc_page(gfp_t gfp_mask, unsigned int order)
+noinline bool should_fail_alloc_page(gfp_t gfp_mask, unsigned int order)
 {
 	return __should_fail_alloc_page(gfp_mask, order);
 }
@@ -4209,7 +4211,7 @@ static void warn_alloc_show_mem(gfp_t gfp_mask, nodemask_t *nodemask)
 		if (tsk_is_oom_victim(current) ||
 		    (current->flags & (PF_MEMALLOC | PF_EXITING)))
 			filter &= ~SHOW_MEM_FILTER_NODES;
-	if (in_interrupt() || !(gfp_mask & __GFP_DIRECT_RECLAIM))
+	if (!in_task() || !(gfp_mask & __GFP_DIRECT_RECLAIM))
 		filter &= ~SHOW_MEM_FILTER_NODES;
 
 	show_mem(filter, nodemask);
@@ -4547,14 +4549,14 @@ static bool __need_reclaim(gfp_t gfp_mask)
 	return true;
 }
 
-void __fs_reclaim_acquire(void)
+void __fs_reclaim_acquire(unsigned long ip)
 {
-	lock_map_acquire(&__fs_reclaim_map);
+	lock_acquire_exclusive(&__fs_reclaim_map, 0, 0, NULL, ip);
 }
 
-void __fs_reclaim_release(void)
+void __fs_reclaim_release(unsigned long ip)
 {
-	lock_map_release(&__fs_reclaim_map);
+	lock_release(&__fs_reclaim_map, ip);
 }
 
 void fs_reclaim_acquire(gfp_t gfp_mask)
@@ -4563,7 +4565,7 @@ void fs_reclaim_acquire(gfp_t gfp_mask)
 
 	if (__need_reclaim(gfp_mask)) {
 		if (gfp_mask & __GFP_FS)
-			__fs_reclaim_acquire();
+			__fs_reclaim_acquire(_RET_IP_);
 
 #ifdef CONFIG_MMU_NOTIFIER
 		lock_map_acquire(&__mmu_notifier_invalidate_range_start_map);
@@ -4580,7 +4582,7 @@ void fs_reclaim_release(gfp_t gfp_mask)
 
 	if (__need_reclaim(gfp_mask)) {
 		if (gfp_mask & __GFP_FS)
-			__fs_reclaim_release();
+			__fs_reclaim_release(_RET_IP_);
 	}
 }
 EXPORT_SYMBOL_GPL(fs_reclaim_release);
@@ -4695,7 +4697,7 @@ gfp_to_alloc_flags(gfp_t gfp_mask)
 		 * comment for __cpuset_node_allowed().
 		 */
 		alloc_flags &= ~ALLOC_CPUSET;
-	} else if (unlikely(rt_task(current)) && !in_interrupt())
+	} else if (unlikely(rt_task(current)) && in_task())
 		alloc_flags |= ALLOC_HARDER;
 
 	alloc_flags = gfp_to_alloc_flags_cma(gfp_mask, alloc_flags);
@@ -5155,7 +5157,7 @@ static inline bool prepare_alloc_pages(gfp_t gfp_mask, unsigned int order,
 		 * When we are in the interrupt context, it is irrelevant
 		 * to the current task context. It means that any node ok.
 		 */
-		if (!in_interrupt() && !ac->nodemask)
+		if (in_task() && !ac->nodemask)
 			ac->nodemask = &cpuset_current_mems_allowed;
 		else
 			*alloc_flags |= ALLOC_CPUSET;
@@ -5221,9 +5223,6 @@ unsigned long __alloc_pages_bulk(gfp_t gfp, int preferred_nid,
 	unsigned int alloc_flags = ALLOC_WMARK_LOW;
 	int nr_populated = 0, nr_account = 0;
 
-	if (unlikely(nr_pages <= 0))
-		return 0;
-
 	/*
 	 * Skip populated array elements to determine if any pages need
 	 * to be allocated before disabling IRQs.
@@ -5231,19 +5230,35 @@ unsigned long __alloc_pages_bulk(gfp_t gfp, int preferred_nid,
 	while (page_array && nr_populated < nr_pages && page_array[nr_populated])
 		nr_populated++;
 
+	/* No pages requested? */
+	if (unlikely(nr_pages <= 0))
+		goto out;
+
 	/* Already populated array? */
 	if (unlikely(page_array && nr_pages - nr_populated == 0))
-		return nr_populated;
+		goto out;
 
 	/* Use the single page allocator for one page. */
 	if (nr_pages - nr_populated == 1)
 		goto failed;
 
+#ifdef CONFIG_PAGE_OWNER
+	/*
+	 * PAGE_OWNER may recurse into the allocator to allocate space to
+	 * save the stack with pagesets.lock held. Releasing/reacquiring
+	 * removes much of the performance benefit of bulk allocation so
+	 * force the caller to allocate one page at a time as it'll have
+	 * similar performance to added complexity to the bulk allocator.
+	 */
+	if (static_branch_unlikely(&page_owner_inited))
+		goto failed;
+#endif
+
 	/* May set ALLOC_NOFRAGMENT, fragmentation will return 1 page. */
 	gfp &= gfp_allowed_mask;
 	alloc_gfp = gfp;
 	if (!prepare_alloc_pages(gfp, 0, preferred_nid, nodemask, &ac, &alloc_gfp, &alloc_flags))
-		return 0;
+		goto out;
 	gfp = alloc_gfp;
 
 	/* Find an allowed local zone that meets the low watermark. */
@@ -5311,6 +5326,7 @@ unsigned long __alloc_pages_bulk(gfp_t gfp, int preferred_nid,
 	__count_zid_vm_events(PGALLOC, zone_idx(zone), nr_account);
 	zone_statistics(ac.preferred_zoneref->zone, zone, nr_account);
 
+out:
 	return nr_populated;
 
 failed_irq:
@@ -5326,7 +5342,7 @@ failed:
 		nr_populated++;
 	}
 
-	return nr_populated;
+	goto out;
 }
 EXPORT_SYMBOL_GPL(__alloc_pages_bulk);
 
@@ -5887,6 +5903,7 @@ void show_free_areas(unsigned int filter, nodemask_t *nodemask)
 		" unevictable:%lu dirty:%lu writeback:%lu\n"
 		" slab_reclaimable:%lu slab_unreclaimable:%lu\n"
 		" mapped:%lu shmem:%lu pagetables:%lu bounce:%lu\n"
+		" kernel_misc_reclaimable:%lu\n"
 		" free:%lu free_pcp:%lu free_cma:%lu\n",
 		global_node_page_state(NR_ACTIVE_ANON),
 		global_node_page_state(NR_INACTIVE_ANON),
@@ -5903,6 +5920,7 @@ void show_free_areas(unsigned int filter, nodemask_t *nodemask)
 		global_node_page_state(NR_SHMEM),
 		global_node_page_state(NR_PAGETABLE),
 		global_zone_page_state(NR_BOUNCE),
+		global_node_page_state(NR_KERNEL_MISC_RECLAIMABLE),
 		global_zone_page_state(NR_FREE_PAGES),
 		free_pcp,
 		global_zone_page_state(NR_FREE_CMA_PAGES));
@@ -6139,7 +6157,7 @@ static int node_load[MAX_NUMNODES];
  *
  * Return: node id of the found node or %NUMA_NO_NODE if no node is found.
  */
-static int find_next_best_node(int node, nodemask_t *used_node_mask)
+int find_next_best_node(int node, nodemask_t *used_node_mask)
 {
 	int n, val;
 	int min_val = INT_MAX;
@@ -6624,7 +6642,6 @@ static void __meminit zone_init_free_lists(struct zone *zone)
 	}
 }
 
-#if !defined(CONFIG_FLATMEM)
 /*
  * Only struct pages that correspond to ranges defined by memblock.memory
  * are zeroed and initialized by going through __init_single_page() during
@@ -6669,13 +6686,6 @@ static void __init init_unavailable_range(unsigned long spfn,
 		pr_info("On node %d, zone %s: %lld pages in unavailable ranges",
 			node, zone_names[zone], pgcnt);
 }
-#else
-static inline void init_unavailable_range(unsigned long spfn,
-					  unsigned long epfn,
-					  int zone, int node)
-{
-}
-#endif
 
 static void __init memmap_init_zone_range(struct zone *zone,
 					  unsigned long start_pfn,
@@ -6705,7 +6715,7 @@ static void __init memmap_init(void)
 {
 	unsigned long start_pfn, end_pfn;
 	unsigned long hole_pfn = 0;
-	int i, j, zone_id, nid;
+	int i, j, zone_id = 0, nid;
 
 	for_each_mem_pfn_range(i, MAX_NUMNODES, &start_pfn, &end_pfn, &nid) {
 		struct pglist_data *node = NODE_DATA(nid);
@@ -6736,6 +6746,26 @@ static void __init memmap_init(void)
 	if (hole_pfn < end_pfn)
 #endif
 		init_unavailable_range(hole_pfn, end_pfn, zone_id, nid);
+}
+
+void __init *memmap_alloc(phys_addr_t size, phys_addr_t align,
+			  phys_addr_t min_addr, int nid, bool exact_nid)
+{
+	void *ptr;
+
+	if (exact_nid)
+		ptr = memblock_alloc_exact_nid_raw(size, align, min_addr,
+						   MEMBLOCK_ALLOC_ACCESSIBLE,
+						   nid);
+	else
+		ptr = memblock_alloc_try_nid_raw(size, align, min_addr,
+						 MEMBLOCK_ALLOC_ACCESSIBLE,
+						 nid);
+
+	if (ptr && size > 0)
+		page_init_poison(ptr, size);
+
+	return ptr;
 }
 
 static int zone_batchsize(struct zone *zone)
@@ -7485,7 +7515,7 @@ static void __init free_area_init_core(struct pglist_data *pgdat)
 }
 
 #ifdef CONFIG_FLATMEM
-static void __ref alloc_node_mem_map(struct pglist_data *pgdat)
+static void __init alloc_node_mem_map(struct pglist_data *pgdat)
 {
 	unsigned long __maybe_unused start = 0;
 	unsigned long __maybe_unused offset = 0;
@@ -7509,8 +7539,8 @@ static void __ref alloc_node_mem_map(struct pglist_data *pgdat)
 		end = pgdat_end_pfn(pgdat);
 		end = ALIGN(end, MAX_ORDER_NR_PAGES);
 		size =  (end - start) * sizeof(struct page);
-		map = memblock_alloc_node(size, SMP_CACHE_BYTES,
-					  pgdat->node_id);
+		map = memmap_alloc(size, SMP_CACHE_BYTES, MEMBLOCK_LOW_LIMIT,
+				   pgdat->node_id, false);
 		if (!map)
 			panic("Failed to allocate %ld bytes for node %d memory map\n",
 			      size, pgdat->node_id);
@@ -7531,7 +7561,7 @@ static void __ref alloc_node_mem_map(struct pglist_data *pgdat)
 #endif
 }
 #else
-static void __ref alloc_node_mem_map(struct pglist_data *pgdat) { }
+static inline void alloc_node_mem_map(struct pglist_data *pgdat) { }
 #endif /* CONFIG_FLATMEM */
 
 #ifdef CONFIG_DEFERRED_STRUCT_PAGE_INIT
@@ -8960,7 +8990,7 @@ static int __alloc_contig_migrate_range(struct compact_control *cc,
 		cc->nr_migratepages -= nr_reclaimed;
 
 		ret = migrate_pages(&cc->migratepages, alloc_migration_target,
-				NULL, (unsigned long)&mtc, cc->mode, MR_CONTIG_RANGE);
+			NULL, (unsigned long)&mtc, cc->mode, MR_CONTIG_RANGE, NULL);
 
 		/*
 		 * On -ENOMEM, migrate_pages() bails out right away. It is pointless

@@ -397,6 +397,12 @@ static int __init bootconfig_params(char *param, char *val,
 	return 0;
 }
 
+static int __init warn_bootconfig(char *str)
+{
+	/* The 'bootconfig' has been handled by bootconfig_params(). */
+	return 0;
+}
+
 static void __init setup_boot_config(void)
 {
 	static char tmp_cmdline[COMMAND_LINE_SIZE] __initdata;
@@ -475,9 +481,8 @@ static int __init warn_bootconfig(char *str)
 	pr_warn("WARNING: 'bootconfig' found on the kernel command line but CONFIG_BOOT_CONFIG is not set.\n");
 	return 0;
 }
-early_param("bootconfig", warn_bootconfig);
-
 #endif
+early_param("bootconfig", warn_bootconfig);
 
 /* Change NUL term back to "=", to make "param" the whole string. */
 static void __init repair_env_string(char *param, char *val)
@@ -1221,7 +1226,7 @@ trace_initcall_start_cb(void *data, initcall_t fn)
 {
 	ktime_t *calltime = (ktime_t *)data;
 
-	printk(KERN_DEBUG "calling  %pS @ %i\n", fn, task_pid_nr(current));
+	printk(KERN_DEBUG "calling  %pS @ %i irqs_disabled() %d\n", fn, task_pid_nr(current), irqs_disabled());
 	*calltime = ktime_get();
 }
 
@@ -1235,8 +1240,8 @@ trace_initcall_finish_cb(void *data, initcall_t fn, int ret)
 	rettime = ktime_get();
 	delta = ktime_sub(rettime, *calltime);
 	duration = (unsigned long long) ktime_to_ns(delta) >> 10;
-	printk(KERN_DEBUG "initcall %pS returned %d after %lld usecs\n",
-		 fn, ret, duration);
+	printk(KERN_DEBUG "initcall %pS returned %d after %lld usecs, irqs_disabled() %d\n",
+		 fn, ret, duration, irqs_disabled());
 }
 
 static ktime_t initcall_calltime;

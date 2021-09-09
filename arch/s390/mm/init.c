@@ -34,6 +34,7 @@
 #include <asm/processor.h>
 #include <linux/uaccess.h>
 #include <asm/pgalloc.h>
+#include <asm/kfence.h>
 #include <asm/ptdump.h>
 #include <asm/dma.h>
 #include <asm/lowcore.h>
@@ -186,9 +187,9 @@ static void pv_init(void)
 		return;
 
 	/* make sure bounce buffers are shared */
+	swiotlb_force = SWIOTLB_FORCE;
 	swiotlb_init(1);
 	swiotlb_update_mem_attributes();
-	swiotlb_force = SWIOTLB_FORCE;
 }
 
 void __init mem_init(void)
@@ -200,7 +201,7 @@ void __init mem_init(void)
         high_memory = (void *) __va(max_low_pfn * PAGE_SIZE);
 
 	pv_init();
-
+	kfence_split_mapping();
 	/* Setup guest page hinting */
 	cmma_init();
 
