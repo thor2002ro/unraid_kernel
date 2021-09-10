@@ -47,7 +47,7 @@ if "$@" -Werror -c "$IN" -o "$OUT".o 2> "$TMP" ; then
 	fi
 else
 	# If the build failed, check for the warning in the stderr (gcc).
-	if ! grep -q -m1 "error: call to '${WANT}'" "$TMP" ; then
+	if ! grep -q -m1 "error: call to .\b${WANT}\b." "$TMP" ; then
 		status="warning: unsafe ${FUNC}() usage lacked '$WANT' warning in $IN"
 	fi
 fi
@@ -55,9 +55,8 @@ fi
 if [ -n "$status" ]; then
 	# Report on failure results, including compilation warnings.
 	echo "$status" | tee "$OUT" >&2
-	cat "$TMP" | tee -a "$OUT" >&2
 else
 	# Report on good results, and save any compilation output to log.
 	echo "ok: unsafe ${FUNC}() usage correctly detected with '$WANT' in $IN" >"$OUT"
-	cat "$TMP" >>"$OUT"
 fi
+cat "$TMP" >>"$OUT"
