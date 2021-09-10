@@ -57,10 +57,7 @@ static size_t pci_vpd_size(struct pci_dev *dev)
 	size_t off = 0, size;
 	unsigned char tag, header[1+2];	/* 1 byte tag, 2 bytes length */
 
-	/* Otherwise the following reads would fail. */
-	dev->vpd.len = PCI_VPD_MAX_SIZE;
-
-	while (pci_read_vpd(dev, off, 1, header) == 1) {
+	while (pci_read_vpd_any(dev, off, 1, header) == 1) {
 		size = 0;
 
 		if (off == 0 && (header[0] == 0x00 || header[0] == 0xff))
@@ -68,7 +65,7 @@ static size_t pci_vpd_size(struct pci_dev *dev)
 
 		if (header[0] & PCI_VPD_LRDT) {
 			/* Large Resource Data Type Tag */
-			if (pci_read_vpd(dev, off + 1, 2, &header[1]) != 2) {
+			if (pci_read_vpd_any(dev, off + 1, 2, &header[1]) != 2) {
 				pci_warn(dev, "failed VPD read at offset %zu\n",
 					 off + 1);
 				return off ?: PCI_VPD_SZ_INVALID;
