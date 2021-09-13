@@ -218,8 +218,8 @@ static void pdc_console_init_force(void)
 	++pdc_console_initialized;
 	
 	/* If the console is duplex then copy the COUT parameters to CIN. */
-	if (PAGE0->mem_cons.cl_class == CL_DUPLEX)
-		memcpy(&PAGE0->mem_kbd, &PAGE0->mem_cons, sizeof(PAGE0->mem_cons));
+	if (PAGE0.mem_cons.cl_class == CL_DUPLEX)
+		memcpy(&PAGE0.mem_kbd, &PAGE0.mem_cons, sizeof(PAGE0.mem_cons));
 
 	/* register the pdc console */
 	register_console(&pdc_cons);

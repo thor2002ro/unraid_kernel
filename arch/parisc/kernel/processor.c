@@ -234,7 +234,7 @@ void __init collect_boot_cpu_data(void)
 	cr16_seed = get_cycles();
 	add_device_randomness(&cr16_seed, sizeof(cr16_seed));
 
-	boot_cpu_data.cpu_hz = 100 * PAGE0->mem_10msec; /* Hz of this PARISC */
+	boot_cpu_data.cpu_hz = 100 * PAGE0.mem_10msec; /* Hz of this PARISC */
 
 	/* get CPU-Model Information... */
 #define p ((unsigned long *)&boot_cpu_data.pdc.model)

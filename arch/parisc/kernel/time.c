@@ -237,10 +237,10 @@ void __init time_init(void)
 {
 	unsigned long cr16_hz;
 
-	clocktick = (100 * PAGE0->mem_10msec) / HZ;
+	clocktick = (100 * PAGE0.mem_10msec) / HZ;
 	start_cpu_itimer();	/* get CPU 0 started */
 
-	cr16_hz = 100 * PAGE0->mem_10msec;  /* Hz */
+	cr16_hz = 100 * PAGE0.mem_10msec;  /* Hz */
 
 	/* register as sched_clock source */
 	sched_clock_register(read_cr16_sched_clock, BITS_PER_LONG, cr16_hz);
@@ -277,7 +277,7 @@ static int __init init_cr16_clocksource(void)
 
 	/* register at clocksource framework */
 	clocksource_register_hz(&clocksource_cr16,
-		100 * PAGE0->mem_10msec);
+		100 * PAGE0.mem_10msec);
 
 	return 0;
 }

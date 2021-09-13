@@ -96,7 +96,7 @@ void machine_kexec(struct kimage *image)
 	*(unsigned long *)(virt + kexec_cmdline_offset) = arch->cmdline;
 	*(unsigned long *)(virt + kexec_initrd_start_offset) = arch->initrd_start;
 	*(unsigned long *)(virt + kexec_initrd_end_offset) = arch->initrd_end;
-	*(unsigned long *)(virt + kexec_free_mem_offset) = PAGE0->mem_free;
+	*(unsigned long *)(virt + kexec_free_mem_offset) = PAGE0.mem_free;
 
 	flush_cache_all();
 	flush_tlb_all();

@@ -384,7 +384,7 @@ void __init start_parisc(void)
 	struct pdc_coproc_cfg coproc_cfg;
 
 	/* check QEMU/SeaBIOS marker in PAGE0 */
-	running_on_qemu = (memcmp(&PAGE0->pad0, "SeaBIOS", 8) == 0);
+	running_on_qemu = (memcmp(&PAGE0.pad0, "SeaBIOS", 8) == 0);
 
 	cpunum = smp_processor_id();
 

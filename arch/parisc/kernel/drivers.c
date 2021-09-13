@@ -944,9 +944,9 @@ static __init void qemu_header(void)
 
 	pr_info("#define PARISC_PDC_ENTRY_ORG 0x%04lx\n\n",
 #ifdef CONFIG_64BIT
-		(unsigned long)(PAGE0->mem_pdc_hi) << 32 |
+		(unsigned long)(PAGE0.mem_pdc_hi) << 32 |
 #endif
-		(unsigned long)PAGE0->mem_pdc);
+		(unsigned long)PAGE0.mem_pdc);
 
 	pr_info("#define PARISC_PDC_CACHE_INFO");
 	p = (unsigned long *) &cache_info;

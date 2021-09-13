@@ -966,7 +966,7 @@ static int __init sticore_pa_init(struct parisc_device *dev)
 	if (!sti)
 		sti = sti_try_rom_generic(hpa, hpa, NULL);
 	if (!sti)
-		sti = sti_try_rom_generic(PAGE0->proc_sti, hpa, NULL);
+		sti = sti_try_rom_generic(PAGE0.proc_sti, hpa, NULL);
 	if (!sti)
 		return 1;
 
