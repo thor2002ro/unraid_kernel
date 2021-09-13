@@ -2076,6 +2076,8 @@ static const char *hflags2str(char *buf, u16 flags, unsigned long iflags)
 		*p++ = 'H';
 	if (test_bit(HIF_WAIT, &iflags))
 		*p++ = 'W';
+	if (flags & GL_SKIP)
+		*p++ = 's';
 	*p = 0;
 	return buf;
 }
