@@ -2081,8 +2081,6 @@ int btrfs_rm_device(struct btrfs_fs_info *fs_info, const char *device_path,
 	u64 num_devices;
 	int ret = 0;
 
-	mutex_lock(&uuid_mutex);
-
 	num_devices = btrfs_num_devices(fs_info);
 
 	ret = btrfs_check_raid_min_devices(fs_info, num_devices - 1);
@@ -2126,11 +2124,9 @@ int btrfs_rm_device(struct btrfs_fs_info *fs_info, const char *device_path,
 		mutex_unlock(&fs_info->chunk_mutex);
 	}
 
-	mutex_unlock(&uuid_mutex);
 	ret = btrfs_shrink_device(device, 0);
 	if (!ret)
 		btrfs_reada_remove_dev(device);
-	mutex_lock(&uuid_mutex);
 	if (ret)
 		goto error_undo;
 
@@ -2210,14 +2206,21 @@ int btrfs_rm_device(struct btrfs_fs_info *fs_info, const char *device_path,
 	synchronize_rcu();
 	btrfs_free_device(device);
 
+	/*
+	 * This can happen if cur_devices is the private seed devices list.  We
+	 * cannot call close_fs_devices() here because it expects the uuid_mutex
+	 * to be held, but in fact we don't need that for the private
+	 * seed_devices, we can simply decrement cur_devices->opened and then
+	 * remove it from our list and free the fs_devices.
+	 */
 	if (cur_devices->open_devices == 0) {
+		ASSERT(cur_devices->opened == 1);
 		list_del_init(&cur_devices->seed_list);
-		close_fs_devices(cur_devices);
+		cur_devices->opened--;
 		free_fs_devices(cur_devices);
 	}
 
 out:
-	mutex_unlock(&uuid_mutex);
 	return ret;
 
 error_undo:
@@ -2313,37 +2316,22 @@ void btrfs_destroy_dev_replace_tgtdev(struct btrfs_device *tgtdev)
 	btrfs_free_device(tgtdev);
 }
 
-static struct btrfs_device *btrfs_find_device_by_path(
-		struct btrfs_fs_info *fs_info, const char *device_path)
+static struct btrfs_device *find_device_by_path(
+					struct btrfs_fs_devices *fs_devices,
+					const char *path)
 {
-	int ret = 0;
-	struct btrfs_super_block *disk_super;
-	u64 devid;
-	u8 *dev_uuid;
-	struct block_device *bdev;
 	struct btrfs_device *device;
+	bool missing = !strcmp(path, "missing");
 
-	ret = btrfs_get_bdev_and_sb(device_path, FMODE_READ,
-				    fs_info->bdev_holder, 0, &bdev, &disk_super);
-	if (ret)
-		return ERR_PTR(ret);
-
-	devid = btrfs_stack_device_id(&disk_super->dev_item);
-	dev_uuid = disk_super->dev_item.uuid;
-	if (btrfs_fs_incompat(fs_info, METADATA_UUID))
-		device = btrfs_find_device(fs_info->fs_devices, devid, dev_uuid,
-					   disk_super->metadata_uuid);
-	else
-		device = btrfs_find_device(fs_info->fs_devices, devid, dev_uuid,
-					   disk_super->fsid);
-
-	btrfs_release_disk_super(disk_super);
-	if (!device)
-		device = ERR_PTR(-ENOENT);
-	blkdev_put(bdev, FMODE_READ);
-	return device;
+	list_for_each_entry(device, &fs_devices->devices, dev_list) {
+		if (missing && test_bit(BTRFS_DEV_STATE_IN_FS_METADATA,
+					&device->dev_state) && !device->bdev)
+			return device;
+		if (!missing && device_path_matched(path, device))
+			return device;
+	}
+	return NULL;
 }
-
 /*
  * Lookup a device given by device id, or the path if the id is 0.
  */
@@ -2351,6 +2339,7 @@ struct btrfs_device *btrfs_find_device_by_devspec(
 		struct btrfs_fs_info *fs_info, u64 devid,
 		const char *device_path)
 {
+	struct btrfs_fs_devices *seed_devs;
 	struct btrfs_device *device;
 
 	if (devid) {
@@ -2364,18 +2353,17 @@ struct btrfs_device *btrfs_find_device_by_devspec(
 	if (!device_path || !device_path[0])
 		return ERR_PTR(-EINVAL);
 
-	if (strcmp(device_path, "missing") == 0) {
-		/* Find first missing device */
-		list_for_each_entry(device, &fs_info->fs_devices->devices,
-				    dev_list) {
-			if (test_bit(BTRFS_DEV_STATE_IN_FS_METADATA,
-				     &device->dev_state) && !device->bdev)
-				return device;
-		}
-		return ERR_PTR(-ENOENT);
-	}
+	device = find_device_by_path(fs_info->fs_devices, device_path);
+	if (device)
+		return device;
 
-	return btrfs_find_device_by_path(fs_info, device_path);
+	list_for_each_entry(seed_devs, &fs_info->fs_devices->seed_list,
+			    seed_list) {
+		device = find_device_by_path(seed_devs, device_path);
+		if (device)
+			return device;
+	}
+	return ERR_PTR(-ENOENT);
 }
 
 /*
