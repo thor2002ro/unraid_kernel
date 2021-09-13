@@ -2465,11 +2465,6 @@ static int btrfs_show_devname(struct seq_file *m, struct dentry *root)
 	struct btrfs_fs_info *fs_info = btrfs_sb(root->d_sb);
 
 	/*
-	 * Even if a device is deleted during the list
-	 * traversals, we'll get valid data, the freeing callback will wait at
-	 * least until the rcu_read_unlock.
-	 */
-	/*
 	 * There should be always a valid pointer in latest_dev, it may be stale
 	 * for a short moment in case it's being deleted but still valid until
 	 * the end of RCU grace period.
