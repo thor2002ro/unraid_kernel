@@ -364,7 +364,7 @@ config NFS_V4_2_SSC_HELPER
 source "net/sunrpc/Kconfig"
 source "fs/ceph/Kconfig"
 
-source "fs/cifs/Kconfig"
+source "fs/smbfs_client/Kconfig"
 source "fs/ksmbd/Kconfig"
 
 config SMBFS_COMMON
