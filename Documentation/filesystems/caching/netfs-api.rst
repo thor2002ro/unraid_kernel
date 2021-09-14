@@ -32,15 +32,13 @@ This API is declared in <linux/fscache.h>.
 	 (7) Data file registration
 	 (8) Miscellaneous object registration
  	 (9) Setting the data file size
-	(10) Page alloc/read/write
-	(11) Page uncaching
-	(12) Index and data file consistency
-	(13) Cookie enablement
-	(14) Miscellaneous cookie operations
-	(15) Cookie unregistration
-	(16) Index invalidation
-	(17) Data file invalidation
-	(18) FS-Cache specific page flags.
+	(10) Page read/write
+	(11) Index and data file consistency
+	(12) Cookie enablement
+	(13) Miscellaneous cookie operations
+	(14) Cookie unregistration
+	(15) Index invalidation
+	(16) Data file invalidation
 
 
 Network Filesystem Definition
@@ -132,14 +130,6 @@ To define an object, a structure of the following type should be filled out::
 						   const void *data,
 						   uint16_t datalen,
 						   loff_t object_size);
-
-		void (*get_context)(void *cookie_netfs_data, void *context);
-
-		void (*put_context)(void *cookie_netfs_data, void *context);
-
-		void (*mark_pages_cached)(void *cookie_netfs_data,
-					  struct address_space *mapping,
-					  struct pagevec *cached_pvec);
 	};
 
 This has the following fields:
@@ -199,42 +189,6 @@ This has the following fields:
 
      This function can also be used to extract data from the auxiliary data in
      the cache and copy it into the netfs's structures.
-
- (5) A pair of functions to manage contexts for the completion callback
-     [optional].
-
-     The cache read/write functions are passed a context which is then passed
-     to the I/O completion callback function.  To ensure this context remains
-     valid until after the I/O completion is called, two functions may be
-     provided: one to get an extra reference on the context, and one to drop a
-     reference to it.
-
-     If the context is not used or is a type of object that won't go out of
-     scope, then these functions are not required.  These functions are not
-     required for indices as indices may not contain data.  These functions may
-     be called in interrupt context and so may not sleep.
-
- (6) A function to mark a page as retaining cache metadata [optional].
-
-     This is called by the cache to indicate that it is retaining in-memory
-     information for this page and that the netfs should uncache the page when
-     it has finished.  This does not indicate whether there's data on the disk
-     or not.  Note that several pages at once may be presented for marking.
-
-     The PG_fscache bit is set on the pages before this function would be
-     called, so the function need not be provided if this is sufficient.
-
-     This function is not required for indices as they're not permitted data.
-
- (7) A function to unmark all the pages retaining cache metadata [mandatory].
-
-     This is called by FS-Cache to indicate that a backing store is being
-     unbound from a cookie and that all the marks on the pages should be
-     cleared to prevent confusion.  Note that the cache will have torn down all
-     its tracking information so that the pages don't need to be explicitly
-     uncached.
-
-     This function is not required for indices as they're not permitted data.
 
 
 Network Filesystem (Un)registration
@@ -412,277 +366,56 @@ some point in the future, and as such, it may happen after the function returns
 to the caller.  The attribute adjustment excludes read and write operations.
 
 
-Page alloc/read/write
+Page Read/Write
 =====================
 
-And the sixth step is to store and retrieve pages in the cache.  There are
-three functions that are used to do this.
+And the sixth step is to store and retrieve pages in the cache.  The functions
+provided may do direct I/O calls on the backing filesystem and it is up to the
+network filesystem to prevent clashes.  Typically, a page would be locked for
+the duration of a read and a page would be marked with PageFsCache whilst it is
+being written out.
 
-Note:
+By preference, reading would be performed through the netfs library's helper
+functions, but there is a fallback API, though this should be considered
+deprecated as it may lead to data corruption, depending on the characteristics
+of the backing filesystem.  If the fallback API is to be used, the filesystem
+must do::
 
- (1) A page should not be re-read or re-allocated without uncaching it first.
-
- (2) A read or allocated page must be uncached when the netfs page is released
-     from the pagecache.
-
- (3) A page should only be written to the cache if previous read or allocated.
-
-This permits the cache to maintain its page tracking in proper order.
-
-
-PAGE READ
----------
-
-Firstly, the netfs should ask FS-Cache to examine the caches and read the
-contents cached for a particular page of a particular file if present, or else
-allocate space to store the contents if not::
-
-	typedef
-	void (*fscache_rw_complete_t)(struct page *page,
-				      void *context,
-				      int error);
-
-	int fscache_read_or_alloc_page(struct fscache_cookie *cookie,
-				       struct page *page,
-				       fscache_rw_complete_t end_io_func,
-				       void *context,
-				       gfp_t gfp);
-
-The cookie argument must specify a cookie for an object that isn't an index,
-the page specified will have the data loaded into it (and is also used to
-specify the page number), and the gfp argument is used to control how any
-memory allocations made are satisfied.
-
-If the cookie indicates the inode is not cached:
-
- (1) The function will return -ENOBUFS.
-
-Else if there's a copy of the page resident in the cache:
-
- (1) The mark_pages_cached() cookie operation will be called on that page.
-
- (2) The function will submit a request to read the data from the cache's
-     backing device directly into the page specified.
-
- (3) The function will return 0.
-
- (4) When the read is complete, end_io_func() will be invoked with:
-
-       * The netfs data supplied when the cookie was created.
-
-       * The page descriptor.
-
-       * The context argument passed to the above function.  This will be
-         maintained with the get_context/put_context functions mentioned above.
-
-       * An argument that's 0 on success or negative for an error code.
-
-     If an error occurs, it should be assumed that the page contains no usable
-     data.  fscache_readpages_cancel() may need to be called.
-
-     end_io_func() will be called in process context if the read is results in
-     an error, but it might be called in interrupt context if the read is
-     successful.
-
-Otherwise, if there's not a copy available in cache, but the cache may be able
-to store the page:
-
- (1) The mark_pages_cached() cookie operation will be called on that page.
-
- (2) A block may be reserved in the cache and attached to the object at the
-     appropriate place.
-
- (3) The function will return -ENODATA.
-
-This function may also return -ENOMEM or -EINTR, in which case it won't have
-read any data from the cache.
+	#define FSCACHE_USE_FALLBACK_IO_API
+	#include <linux/fscache.h>
 
 
-Page Allocate
--------------
-
-Alternatively, if there's not expected to be any data in the cache for a page
-because the file has been extended, a block can simply be allocated instead::
-
-	int fscache_alloc_page(struct fscache_cookie *cookie,
-			       struct page *page,
-			       gfp_t gfp);
-
-This is similar to the fscache_read_or_alloc_page() function, except that it
-never reads from the cache.  It will return 0 if a block has been allocated,
-rather than -ENODATA as the other would.  One or the other must be performed
-before writing to the cache.
-
-The mark_pages_cached() cookie operation will be called on the page if
-successful.
-
-
-Page Write
-----------
-
-Secondly, if the netfs changes the contents of the page (either due to an
-initial download or if a user performs a write), then the page should be
-written back to the cache::
-
-	int fscache_write_page(struct fscache_cookie *cookie,
-			       struct page *page,
-			       loff_t object_size,
-			       gfp_t gfp);
-
-The cookie argument must specify a data file cookie, the page specified should
-contain the data to be written (and is also used to specify the page number),
-object_size is the revised size of the object and the gfp argument is used to
-control how any memory allocations made are satisfied.
-
-The page must have first been read or allocated successfully and must not have
-been uncached before writing is performed.
-
-If the cookie indicates the inode is not cached then:
-
- (1) The function will return -ENOBUFS.
-
-Else if space can be allocated in the cache to hold this page:
-
- (1) PG_fscache_write will be set on the page.
-
- (2) The function will submit a request to write the data to cache's backing
-     device directly from the page specified.
-
- (3) The function will return 0.
-
- (4) When the write is complete PG_fscache_write is cleared on the page and
-     anyone waiting for that bit will be woken up.
-
-Else if there's no space available in the cache, -ENOBUFS will be returned.  It
-is also possible for the PG_fscache_write bit to be cleared when no write took
-place if unforeseen circumstances arose (such as a disk error).
-
-Writing takes place asynchronously.
-
-
-Multiple Page Read
+Fallback Page Read
 ------------------
 
-A facility is provided to read several pages at once, as requested by the
-readpages() address space operation::
+A page may be synchronously read from the backing filesystem::
 
-	int fscache_read_or_alloc_pages(struct fscache_cookie *cookie,
-					struct address_space *mapping,
-					struct list_head *pages,
-					int *nr_pages,
-					fscache_rw_complete_t end_io_func,
-					void *context,
-					gfp_t gfp);
+	int fscache_fallback_read_page(struct fscache_cookie *cookie,
+				       struct page *page);
 
-This works in a similar way to fscache_read_or_alloc_page(), except:
-
- (1) Any page it can retrieve data for is removed from pages and nr_pages and
-     dispatched for reading to the disk.  Reads of adjacent pages on disk may
-     be merged for greater efficiency.
-
- (2) The mark_pages_cached() cookie operation will be called on several pages
-     at once if they're being read or allocated.
-
- (3) If there was an general error, then that error will be returned.
-
-     Else if some pages couldn't be allocated or read, then -ENOBUFS will be
-     returned.
-
-     Else if some pages couldn't be read but were allocated, then -ENODATA will
-     be returned.
-
-     Otherwise, if all pages had reads dispatched, then 0 will be returned, the
-     list will be empty and ``*nr_pages`` will be 0.
-
- (4) end_io_func will be called once for each page being read as the reads
-     complete.  It will be called in process context if error != 0, but it may
-     be called in interrupt context if there is no error.
-
-Note that a return of -ENODATA, -ENOBUFS or any other error does not preclude
-some of the pages being read and some being allocated.  Those pages will have
-been marked appropriately and will need uncaching.
+The cookie argument must specify a cookie for an object that isn't an index and
+the page specified will have the data loaded into it (and is also used to
+specify the page number).  The function will return 0 if the page was
+read, -ENODATA if there was no data and -ENOBUFS if there was no cache
+attached.  It may also return errors such as -ENOMEM or -EINTR.  It might also
+return some other error from the backing filesystem, but this should be treated
+as -ENOBUS.
 
 
-Cancellation of Unread Pages
-----------------------------
+Fallback Page Write
+-------------------
 
-If one or more pages are passed to fscache_read_or_alloc_pages() but not then
-read from the cache and also not read from the underlying filesystem then
-those pages will need to have any marks and reservations removed.  This can be
-done by calling::
+A page may be synchronously written to the backing filesystem::
 
-	void fscache_readpages_cancel(struct fscache_cookie *cookie,
-				      struct list_head *pages);
-
-prior to returning to the caller.  The cookie argument should be as passed to
-fscache_read_or_alloc_pages().  Every page in the pages list will be examined
-and any that have PG_fscache set will be uncached.
-
-
-Page Uncaching
-==============
-
-To uncache a page, this function should be called::
-
-	void fscache_uncache_page(struct fscache_cookie *cookie,
-				  struct page *page);
-
-This function permits the cache to release any in-memory representation it
-might be holding for this netfs page.  This function must be called once for
-each page on which the read or write page functions above have been called to
-make sure the cache's in-memory tracking information gets torn down.
-
-Note that pages can't be explicitly deleted from the a data file.  The whole
-data file must be retired (see the relinquish cookie function below).
-
-Furthermore, note that this does not cancel the asynchronous read or write
-operation started by the read/alloc and write functions, so the page
-invalidation functions must use::
-
-	bool fscache_check_page_write(struct fscache_cookie *cookie,
-				      struct page *page);
-
-to see if a page is being written to the cache, and::
-
-	void fscache_wait_on_page_write(struct fscache_cookie *cookie,
+	int fscache_fallback_write_page(struct fscache_cookie *cookie,
 					struct page *page);
 
-to wait for it to finish if it is.
-
-
-When releasepage() is being implemented, a special FS-Cache function exists to
-manage the heuristics of coping with vmscan trying to eject pages, which may
-conflict with the cache trying to write pages to the cache (which may itself
-need to allocate memory)::
-
-	bool fscache_maybe_release_page(struct fscache_cookie *cookie,
-					struct page *page,
-					gfp_t gfp);
-
-This takes the netfs cookie, and the page and gfp arguments as supplied to
-releasepage().  It will return false if the page cannot be released yet for
-some reason and if it returns true, the page has been uncached and can now be
-released.
-
-To make a page available for release, this function may wait for an outstanding
-storage request to complete, or it may attempt to cancel the storage request -
-in which case the page will not be stored in the cache this time.
-
-
-Bulk Image Page Uncache
------------------------
-
-A convenience routine is provided to perform an uncache on all the pages
-attached to an inode.  This assumes that the pages on the inode correspond on a
-1:1 basis with the pages in the cache::
-
-	void fscache_uncache_all_inode_pages(struct fscache_cookie *cookie,
-					     struct inode *inode);
-
-This takes the netfs cookie that the pages were cached with and the inode that
-the pages are attached to.  This function will wait for pages to finish being
-written to the cache and for the cache to finish with the page generally.  No
-error is returned.
+The cookie argument must specify a cookie for an object that isn't an index and
+the page specified will have the data written from it (and is also used to
+specify the page number).  The function will return 0 if the page was read
+and -ENOBUFS if there was no cache attached or no space available in the cache.
+It may also return errors such as -ENOMEM or -EINTR.  It might also return some
+other error from the backing filesystem, but this should be treated as -ENOBUS.
 
 
 Index and Data File consistency
@@ -858,39 +591,3 @@ to have reached a point at which it can start submitting ordinary operations
 once again::
 
 	void fscache_wait_on_invalidate(struct fscache_cookie *cookie);
-
-
-FS-cache Specific Page Flag
-===========================
-
-FS-Cache makes use of a page flag, PG_private_2, for its own purpose.  This is
-given the alternative name PG_fscache.
-
-PG_fscache is used to indicate that the page is known by the cache, and that
-the cache must be informed if the page is going to go away.  It's an indication
-to the netfs that the cache has an interest in this page, where an interest may
-be a pointer to it, resources allocated or reserved for it, or I/O in progress
-upon it.
-
-The netfs can use this information in methods such as releasepage() to
-determine whether it needs to uncache a page or update it.
-
-Furthermore, if this bit is set, releasepage() and invalidatepage() operations
-will be called on a page to get rid of it, even if PG_private is not set.  This
-allows caching to attempted on a page before read_cache_pages() to be called
-after fscache_read_or_alloc_pages() as the former will try and release pages it
-was given under certain circumstances.
-
-This bit does not overlap with such as PG_private.  This means that FS-Cache
-can be used with a filesystem that uses the block buffering code.
-
-There are a number of operations defined on this flag::
-
-	int PageFsCache(struct page *page);
-	void SetPageFsCache(struct page *page)
-	void ClearPageFsCache(struct page *page)
-	int TestSetPageFsCache(struct page *page)
-	int TestClearPageFsCache(struct page *page)
-
-These functions are bit test, bit set, bit clear, bit test and set and bit
-test and clear operations on PG_fscache.
