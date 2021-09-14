@@ -54,12 +54,15 @@ atomic_t fscache_n_stores;
 atomic_t fscache_n_stores_ok;
 atomic_t fscache_n_stores_again;
 atomic_t fscache_n_stores_nobufs;
+atomic_t fscache_n_stores_intr;
 atomic_t fscache_n_stores_oom;
 atomic_t fscache_n_store_ops;
 atomic_t fscache_n_store_calls;
 atomic_t fscache_n_store_pages;
 atomic_t fscache_n_store_radix_deletes;
 atomic_t fscache_n_store_pages_over_limit;
+atomic_t fscache_n_stores_object_dead;
+atomic_t fscache_n_store_op_waits;
 
 atomic_t fscache_n_store_vmscan_not_storing;
 atomic_t fscache_n_store_vmscan_gone;
@@ -221,18 +224,21 @@ int fscache_stats_show(struct seq_file *m, void *v)
 		   atomic_read(&fscache_n_retrieval_op_waits),
 		   atomic_read(&fscache_n_retrievals_object_dead));
 
-	seq_printf(m, "Stores : n=%u ok=%u agn=%u nbf=%u oom=%u\n",
+	seq_printf(m, "Stores : n=%u ok=%u agn=%u nbf=%u int=%u oom=%u\n",
 		   atomic_read(&fscache_n_stores),
 		   atomic_read(&fscache_n_stores_ok),
 		   atomic_read(&fscache_n_stores_again),
 		   atomic_read(&fscache_n_stores_nobufs),
+		   atomic_read(&fscache_n_stores_intr),
 		   atomic_read(&fscache_n_stores_oom));
-	seq_printf(m, "Stores : ops=%u run=%u pgs=%u rxd=%u olm=%u\n",
+	seq_printf(m, "Stores : ops=%u owt=%u run=%u pgs=%u rxd=%u olm=%u abt=%u\n",
 		   atomic_read(&fscache_n_store_ops),
+		   atomic_read(&fscache_n_store_op_waits),
 		   atomic_read(&fscache_n_store_calls),
 		   atomic_read(&fscache_n_store_pages),
 		   atomic_read(&fscache_n_store_radix_deletes),
-		   atomic_read(&fscache_n_store_pages_over_limit));
+		   atomic_read(&fscache_n_store_pages_over_limit),
+		   atomic_read(&fscache_n_stores_object_dead));
 
 	seq_printf(m, "VmScan : nos=%u gon=%u bsy=%u can=%u wt=%u\n",
 		   atomic_read(&fscache_n_store_vmscan_not_storing),

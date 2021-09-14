@@ -180,12 +180,15 @@ extern atomic_t fscache_n_stores;
 extern atomic_t fscache_n_stores_ok;
 extern atomic_t fscache_n_stores_again;
 extern atomic_t fscache_n_stores_nobufs;
+extern atomic_t fscache_n_stores_intr;
 extern atomic_t fscache_n_stores_oom;
 extern atomic_t fscache_n_store_ops;
 extern atomic_t fscache_n_store_calls;
 extern atomic_t fscache_n_store_pages;
 extern atomic_t fscache_n_store_radix_deletes;
 extern atomic_t fscache_n_store_pages_over_limit;
+extern atomic_t fscache_n_stores_object_dead;
+extern atomic_t fscache_n_store_op_waits;
 
 extern atomic_t fscache_n_store_vmscan_not_storing;
 extern atomic_t fscache_n_store_vmscan_gone;
