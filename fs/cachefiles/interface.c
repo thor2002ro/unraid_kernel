@@ -568,5 +568,5 @@ const struct fscache_cache_ops cachefiles_cache_ops = {
 	.uncache_page		= cachefiles_uncache_page,
 	.dissociate_pages	= cachefiles_dissociate_pages,
 	.check_consistency	= cachefiles_check_consistency,
-	.begin_read_operation	= cachefiles_begin_read_operation,
+	.begin_operation	= cachefiles_begin_operation,
 };
