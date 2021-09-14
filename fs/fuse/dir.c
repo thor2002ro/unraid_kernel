@@ -740,6 +740,7 @@ static int fuse_symlink(struct user_namespace *mnt_userns, struct inode *dir,
 
 void fuse_update_ctime(struct inode *inode)
 {
+	fuse_invalidate_attr(inode);
 	if (!IS_NOCMTIME(inode)) {
 		inode->i_ctime = current_time(inode);
 		mark_inode_dirty_sync(inode);
@@ -776,7 +777,6 @@ static int fuse_unlink(struct inode *dir, struct dentry *entry)
 		if (inode->i_nlink > 0)
 			drop_nlink(inode);
 		spin_unlock(&fi->lock);
-		fuse_invalidate_attr(inode);
 		fuse_dir_changed(dir);
 		fuse_invalidate_entry_cache(entry);
 		fuse_update_ctime(inode);
@@ -833,13 +833,10 @@ static int fuse_rename_common(struct inode *olddir, struct dentry *oldent,
 	err = fuse_simple_request(fm, &args);
 	if (!err) {
 		/* ctime changes */
-		fuse_invalidate_attr(d_inode(oldent));
 		fuse_update_ctime(d_inode(oldent));
 
-		if (flags & RENAME_EXCHANGE) {
-			fuse_invalidate_attr(d_inode(newent));
+		if (flags & RENAME_EXCHANGE)
 			fuse_update_ctime(d_inode(newent));
-		}
 
 		fuse_dir_changed(olddir);
 		if (olddir != newdir)
@@ -847,7 +844,6 @@ static int fuse_rename_common(struct inode *olddir, struct dentry *oldent,
 
 		/* newent will end up negative */
 		if (!(flags & RENAME_EXCHANGE) && d_really_is_positive(newent)) {
-			fuse_invalidate_attr(d_inode(newent));
 			fuse_invalidate_entry_cache(newent);
 			fuse_update_ctime(d_inode(newent));
 		}
@@ -930,7 +926,6 @@ static int fuse_link(struct dentry *entry, struct inode *newdir,
 		if (likely(inode->i_nlink < UINT_MAX))
 			inc_nlink(inode);
 		spin_unlock(&fi->lock);
-		fuse_invalidate_attr(inode);
 		fuse_update_ctime(inode);
 	} else if (err == -EINTR) {
 		fuse_invalidate_attr(inode);
