@@ -9,6 +9,7 @@
 #ifndef _CIFS_FSCACHE_H
 #define _CIFS_FSCACHE_H
 
+#define FSCACHE_USE_OLD_IO_API
 #include <linux/fscache.h>
 
 #include "cifsglob.h"
