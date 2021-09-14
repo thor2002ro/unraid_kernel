@@ -7,6 +7,7 @@
 
 #define FSCACHE_DEBUG_LEVEL PAGE
 #include <linux/module.h>
+#define FSCACHE_USE_OLD_IO_API
 #include <linux/fscache-cache.h>
 #include <linux/buffer_head.h>
 #include <linux/pagevec.h>

@@ -8,7 +8,10 @@
 #define FSCACHE_DEBUG_LEVEL PAGE
 #include <linux/module.h>
 #define FSCACHE_USE_NEW_IO_API
+#define FSCACHE_USE_FALLBACK_IO_API
 #include <linux/fscache-cache.h>
+#include <linux/uio.h>
+#include <linux/bvec.h>
 #include <linux/slab.h>
 #include <linux/netfs.h>
 #include "internal.h"
@@ -35,7 +38,10 @@ int __fscache_begin_operation(struct netfs_cache_resources *cres,
 
 	_enter("c=%08x", cres->debug_id);
 
-	fscache_stat(&fscache_n_retrievals);
+	if (for_write)
+		fscache_stat(&fscache_n_stores);
+	else
+		fscache_stat(&fscache_n_retrievals);
 
 	if (hlist_empty(&cookie->backing_objects))
 		goto nobufs;
@@ -77,14 +83,23 @@ int __fscache_begin_operation(struct netfs_cache_resources *cres,
 		goto nobufs_unlock_dec;
 	spin_unlock(&cookie->lock);
 
-	fscache_stat(&fscache_n_retrieval_ops);
-
 	/* we wait for the operation to become active, and then process it
 	 * *here*, in this thread, and not in the thread pool */
-	ret = fscache_wait_for_operation_activation(
-		object, op,
-		__fscache_stat(&fscache_n_retrieval_op_waits),
-		__fscache_stat(&fscache_n_retrievals_object_dead));
+	if (for_write) {
+		fscache_stat(&fscache_n_store_ops);
+
+		ret = fscache_wait_for_operation_activation(
+			object, op,
+			__fscache_stat(&fscache_n_store_op_waits),
+			__fscache_stat(&fscache_n_stores_object_dead));
+	} else {
+		fscache_stat(&fscache_n_retrieval_ops);
+
+		ret = fscache_wait_for_operation_activation(
+			object, op,
+			__fscache_stat(&fscache_n_retrieval_op_waits),
+			__fscache_stat(&fscache_n_retrievals_object_dead));
+	}
 	if (ret < 0)
 		goto error;
 
@@ -92,16 +107,27 @@ int __fscache_begin_operation(struct netfs_cache_resources *cres,
 	ret = object->cache->ops->begin_operation(cres, op);
 
 error:
-	if (ret == -ENOMEM)
-		fscache_stat(&fscache_n_retrievals_nomem);
-	else if (ret == -ERESTARTSYS)
-		fscache_stat(&fscache_n_retrievals_intr);
-	else if (ret == -ENODATA)
-		fscache_stat(&fscache_n_retrievals_nodata);
-	else if (ret < 0)
-		fscache_stat(&fscache_n_retrievals_nobufs);
-	else
-		fscache_stat(&fscache_n_retrievals_ok);
+	if (for_write) {
+		if (ret == -ENOMEM)
+			fscache_stat(&fscache_n_stores_oom);
+		else if (ret == -ERESTARTSYS)
+			fscache_stat(&fscache_n_stores_intr);
+		else if (ret < 0)
+			fscache_stat(&fscache_n_stores_nobufs);
+		else
+			fscache_stat(&fscache_n_stores_ok);
+	} else {
+		if (ret == -ENOMEM)
+			fscache_stat(&fscache_n_retrievals_nomem);
+		else if (ret == -ERESTARTSYS)
+			fscache_stat(&fscache_n_retrievals_intr);
+		else if (ret == -ENODATA)
+			fscache_stat(&fscache_n_retrievals_nodata);
+		else if (ret < 0)
+			fscache_stat(&fscache_n_retrievals_nobufs);
+		else
+			fscache_stat(&fscache_n_retrievals_ok);
+	}
 
 	fscache_put_operation(op);
 	_leave(" = %d", ret);
@@ -116,8 +142,83 @@ nobufs_unlock:
 	if (wake_cookie)
 		__fscache_wake_unused_cookie(cookie);
 nobufs:
-	fscache_stat(&fscache_n_retrievals_nobufs);
+	if (for_write)
+		fscache_stat(&fscache_n_stores_nobufs);
+	else
+		fscache_stat(&fscache_n_retrievals_nobufs);
 	_leave(" = -ENOBUFS");
 	return -ENOBUFS;
 }
 EXPORT_SYMBOL(__fscache_begin_operation);
+
+/*
+ * Clean up an operation.
+ */
+static void fscache_end_operation(struct netfs_cache_resources *cres)
+{
+	cres->ops->end_operation(cres);
+}
+
+/*
+ * Fallback page reading interface.
+ */
+int __fscache_fallback_read_page(struct fscache_cookie *cookie, struct page *page)
+{
+	struct netfs_cache_resources cres;
+	struct iov_iter iter;
+	struct bio_vec bvec[1];
+	int ret;
+
+	_enter("%lx", page->index);
+
+	memset(&cres, 0, sizeof(cres));
+	bvec[0].bv_page		= page;
+	bvec[0].bv_offset	= 0;
+	bvec[0].bv_len		= PAGE_SIZE;
+	iov_iter_bvec(&iter, READ, bvec, ARRAY_SIZE(bvec), PAGE_SIZE);
+
+	ret = fscache_begin_read_operation(&cres, cookie);
+	if (ret < 0)
+		return ret;
+
+	ret = fscache_read(&cres, page_offset(page), &iter, NETFS_READ_HOLE_FAIL,
+			   NULL, NULL);
+	fscache_end_operation(&cres);
+	_leave(" = %d", ret);
+	return ret;
+}
+EXPORT_SYMBOL(__fscache_fallback_read_page);
+
+/*
+ * Fallback page writing interface.
+ */
+int __fscache_fallback_write_page(struct fscache_cookie *cookie, struct page *page)
+{
+	struct netfs_cache_resources cres;
+	struct iov_iter iter;
+	struct bio_vec bvec[1];
+	int ret;
+
+	_enter("%lx", page->index);
+
+	memset(&cres, 0, sizeof(cres));
+	bvec[0].bv_page		= page;
+	bvec[0].bv_offset	= 0;
+	bvec[0].bv_len		= PAGE_SIZE;
+	iov_iter_bvec(&iter, WRITE, bvec, ARRAY_SIZE(bvec), PAGE_SIZE);
+
+	ret = __fscache_begin_operation(&cres, cookie, true);
+	if (ret < 0)
+		return ret;
+
+	ret = cres.ops->prepare_fallback_write(&cres, page_index(page));
+	if (ret < 0)
+		goto out;
+
+	ret = fscache_write(&cres, page_offset(page), &iter, NULL, NULL);
+out:
+	fscache_end_operation(&cres);
+	_leave(" = %d", ret);
+	return ret;
+}
+EXPORT_SYMBOL(__fscache_fallback_write_page);
