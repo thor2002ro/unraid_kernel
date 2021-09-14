@@ -196,7 +196,8 @@ extern void __fscache_invalidate(struct fscache_cookie *);
 extern void __fscache_wait_on_invalidate(struct fscache_cookie *);
 
 #ifdef FSCACHE_USE_NEW_IO_API
-extern int __fscache_begin_read_operation(struct netfs_read_request *, struct fscache_cookie *);
+extern int __fscache_begin_operation(struct netfs_cache_resources *, struct fscache_cookie *,
+				     bool);
 #else
 extern int __fscache_read_or_alloc_page(struct fscache_cookie *,
 					struct page *,
@@ -511,12 +512,12 @@ int fscache_reserve_space(struct fscache_cookie *cookie, loff_t size)
 
 /**
  * fscache_begin_read_operation - Begin a read operation for the netfs lib
- * @rreq: The read request being undertaken
+ * @cres: The cache resources for the read being performed
  * @cookie: The cookie representing the cache object
  *
- * Begin a read operation on behalf of the netfs helper library.  @rreq
- * indicates the read request to which the operation state should be attached;
- * @cookie indicates the cache object that will be accessed.
+ * Begin a read operation on behalf of the netfs helper library.  @cres
+ * indicates the cache resources to which the operation state should be
+ * attached; @cookie indicates the cache object that will be accessed.
  *
  * This is intended to be called from the ->begin_cache_operation() netfs lib
  * operation as implemented by the network filesystem.
@@ -527,11 +528,11 @@ int fscache_reserve_space(struct fscache_cookie *cookie, loff_t size)
  * * Other error code from the cache, such as -ENOMEM.
  */
 static inline
-int fscache_begin_read_operation(struct netfs_read_request *rreq,
+int fscache_begin_read_operation(struct netfs_cache_resources *cres,
 				 struct fscache_cookie *cookie)
 {
 	if (fscache_cookie_valid(cookie) && fscache_cookie_enabled(cookie))
-		return __fscache_begin_read_operation(rreq, cookie);
+		return __fscache_begin_operation(cres, cookie, false);
 	return -ENOBUFS;
 }
 
