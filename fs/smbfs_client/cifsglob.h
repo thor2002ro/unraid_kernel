@@ -19,7 +19,7 @@
 #include "cifsacl.h"
 #include <crypto/internal/hash.h>
 #include <linux/scatterlist.h>
-#include <uapi/linux/cifs/cifs_mount.h>
+#include <uapi/linux/smbfs_client/cifs_mount.h>
 #include "smb2pdu.h"
 
 #define CIFS_MAGIC_NUMBER 0xFF534D42      /* the first four bytes of SMB PDUs */

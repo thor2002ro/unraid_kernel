@@ -6,7 +6,7 @@
  */
 
 #include <net/genetlink.h>
-#include <uapi/linux/cifs/cifs_netlink.h>
+#include <uapi/linux/smbfs_client/cifs_netlink.h>
 
 #include "netlink.h"
 #include "cifsglob.h"
