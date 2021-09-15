@@ -253,6 +253,17 @@ static inline void snd_sof_ipc_dump(struct snd_sof_dev *sdev)
 		sof_ops(sdev)->ipc_dump(sdev);
 }
 
+static inline int snd_sof_debugfs_add_region_item(struct snd_sof_dev *sdev,
+		enum snd_sof_fw_blk_type blk_type, u32 offset, size_t size,
+		const char *name, enum sof_debugfs_access_type access_type)
+{
+	if (sof_ops(sdev) && sof_ops(sdev)->debugfs_add_region_item)
+		return sof_ops(sdev)->debugfs_add_region_item(sdev, blk_type, offset,
+							      size, name, access_type);
+
+	return 0;
+}
+
 /* register IO */
 static inline void snd_sof_dsp_write(struct snd_sof_dev *sdev, u32 bar,
 				     u32 offset, u32 value)
@@ -297,16 +308,18 @@ static inline u64 snd_sof_dsp_read64(struct snd_sof_dev *sdev, u32 bar,
 }
 
 /* block IO */
-static inline void snd_sof_dsp_block_read(struct snd_sof_dev *sdev, u32 bar,
-					  u32 offset, void *dest, size_t bytes)
+static inline int snd_sof_dsp_block_read(struct snd_sof_dev *sdev,
+					 enum snd_sof_fw_blk_type blk_type,
+					 u32 offset, void *dest, size_t bytes)
 {
-	sof_ops(sdev)->block_read(sdev, bar, offset, dest, bytes);
+	return sof_ops(sdev)->block_read(sdev, blk_type, offset, dest, bytes);
 }
 
-static inline void snd_sof_dsp_block_write(struct snd_sof_dev *sdev, u32 bar,
-					   u32 offset, void *src, size_t bytes)
+static inline int snd_sof_dsp_block_write(struct snd_sof_dev *sdev,
+					  enum snd_sof_fw_blk_type blk_type,
+					  u32 offset, void *src, size_t bytes)
 {
-	sof_ops(sdev)->block_write(sdev, bar, offset, src, bytes);
+	return sof_ops(sdev)->block_write(sdev, blk_type, offset, src, bytes);
 }
 
 /* ipc */
@@ -398,6 +411,14 @@ snd_sof_pcm_platform_trigger(struct snd_sof_dev *sdev,
 		return sof_ops(sdev)->pcm_trigger(sdev, substream, cmd);
 
 	return 0;
+}
+
+/* Firmware loading */
+static inline int snd_sof_load_firmware(struct snd_sof_dev *sdev)
+{
+	dev_dbg(sdev->dev, "loading firmware\n");
+
+	return sof_ops(sdev)->load_firmware(sdev);
 }
 
 /* host DSP message data */

@@ -369,6 +369,32 @@ void snd_sof_ipc_reply(struct snd_sof_dev *sdev, u32 msg_id)
 }
 EXPORT_SYMBOL(snd_sof_ipc_reply);
 
+static void ipc_comp_notification(struct snd_sof_dev *sdev,
+				  struct sof_ipc_cmd_hdr *hdr)
+{
+	u32 msg_type = hdr->cmd & SOF_CMD_TYPE_MASK;
+	struct sof_ipc_ctrl_data *cdata;
+
+	switch (msg_type) {
+	case SOF_IPC_COMP_GET_VALUE:
+	case SOF_IPC_COMP_GET_DATA:
+		cdata = kmalloc(hdr->size, GFP_KERNEL);
+		if (!cdata)
+			return;
+
+		/* read back full message */
+		snd_sof_ipc_msg_data(sdev, NULL, cdata, hdr->size);
+		break;
+	default:
+		dev_err(sdev->dev, "error: unhandled component message %#x\n", msg_type);
+		return;
+	}
+
+	snd_sof_control_notify(sdev, cdata);
+
+	kfree(cdata);
+}
+
 /* DSP firmware has sent host a message  */
 void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
 {
@@ -404,7 +430,9 @@ void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev)
 	case SOF_IPC_GLB_COMPOUND:
 	case SOF_IPC_GLB_TPLG_MSG:
 	case SOF_IPC_GLB_PM_MSG:
+		break;
 	case SOF_IPC_GLB_COMP_MSG:
+		ipc_comp_notification(sdev, &hdr);
 		break;
 	case SOF_IPC_GLB_STREAM_MSG:
 		/* need to pass msg id into the function */
@@ -681,15 +709,19 @@ int snd_sof_ipc_set_get_comp_data(struct snd_sof_control *scontrol,
 		send_bytes = sizeof(struct sof_ipc_ctrl_value_chan) *
 		cdata->num_elems;
 		if (send)
-			snd_sof_dsp_block_write(sdev, sdev->mmio_bar,
-						scontrol->readback_offset,
-						cdata->chanv, send_bytes);
+			err = snd_sof_dsp_block_write(sdev, SOF_FW_BLK_TYPE_IRAM,
+						      scontrol->readback_offset,
+						      cdata->chanv, send_bytes);
 
 		else
-			snd_sof_dsp_block_read(sdev, sdev->mmio_bar,
-					       scontrol->readback_offset,
-					       cdata->chanv, send_bytes);
-		return 0;
+			err = snd_sof_dsp_block_read(sdev, SOF_FW_BLK_TYPE_IRAM,
+						     scontrol->readback_offset,
+						     cdata->chanv, send_bytes);
+
+		if (err)
+			dev_err_once(sdev->dev, "error: %s TYPE_IRAM failed\n",
+				     send ? "write to" :  "read from");
+		return err;
 	}
 
 	cdata->rhdr.hdr.cmd = SOF_IPC_GLB_COMP_MSG | ipc_cmd;
@@ -761,22 +793,6 @@ int snd_sof_ipc_set_get_comp_data(struct snd_sof_control *scontrol,
 	return err;
 }
 EXPORT_SYMBOL(snd_sof_ipc_set_get_comp_data);
-
-/*
- * IPC layer enumeration.
- */
-
-int snd_sof_dsp_mailbox_init(struct snd_sof_dev *sdev, u32 dspbox,
-			     size_t dspbox_size, u32 hostbox,
-			     size_t hostbox_size)
-{
-	sdev->dsp_box.offset = dspbox;
-	sdev->dsp_box.size = dspbox_size;
-	sdev->host_box.offset = hostbox;
-	sdev->host_box.size = hostbox_size;
-	return 0;
-}
-EXPORT_SYMBOL(snd_sof_dsp_mailbox_init);
 
 int snd_sof_ipc_valid(struct snd_sof_dev *sdev)
 {
