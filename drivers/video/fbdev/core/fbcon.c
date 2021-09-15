@@ -115,7 +115,7 @@ static int logo_lines;
    enums.  */
 static int logo_shown = FBCON_LOGO_CANSHOW;
 /* Software scrollback */
-static int fbcon_softback_size = 32768;
+static int fbcon_softback_size = 32768*2;
 static unsigned long softback_buf, softback_curr;
 static unsigned long softback_in;
 static unsigned long softback_top, softback_end;
