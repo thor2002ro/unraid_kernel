@@ -1156,7 +1156,7 @@ static void rcu_tasks_trace_postgp(struct rcu_tasks *rtp)
 	// Yes, this assumes that CPUs process IPIs in order.  If that ever
 	// changes, there will need to be a recheck and/or timed wait.
 	for_each_online_cpu(cpu)
-		if (smp_load_acquire(per_cpu_ptr(&trc_ipi_to_cpu, cpu)))
+		if (WARN_ON_ONCE(smp_load_acquire(per_cpu_ptr(&trc_ipi_to_cpu, cpu))))
 			smp_call_function_single(cpu, rcu_tasks_trace_empty_fn, NULL, 1);
 
 	// Remove the safety count.
