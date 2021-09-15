@@ -120,7 +120,7 @@ static irqreturn_t mpc8xxx_gpio_irq_cascade(int irq, void *data)
 	mask = gc->read_reg(mpc8xxx_gc->regs + GPIO_IER)
 		& gc->read_reg(mpc8xxx_gc->regs + GPIO_IMR);
 	for_each_set_bit(i, &mask, 32)
-		generic_handle_irq(irq_linear_revmap(mpc8xxx_gc->irq, 31 - i));
+		generic_handle_domain_irq(mpc8xxx_gc->irq, 31 - i);
 
 	return IRQ_HANDLED;
 }
@@ -405,7 +405,7 @@ static int mpc8xxx_probe(struct platform_device *pdev)
 
 	ret = devm_request_irq(&pdev->dev, mpc8xxx_gc->irqn,
 			       mpc8xxx_gpio_irq_cascade,
-			       IRQF_SHARED, "gpio-cascade",
+			       IRQF_NO_THREAD | IRQF_SHARED, "gpio-cascade",
 			       mpc8xxx_gc);
 	if (ret) {
 		dev_err(&pdev->dev,

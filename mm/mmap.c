@@ -1352,9 +1352,8 @@ static inline unsigned long round_hint_to_min(unsigned long hint)
 	return hint;
 }
 
-static inline int mlock_future_check(struct mm_struct *mm,
-				     unsigned long flags,
-				     unsigned long len)
+int mlock_future_check(struct mm_struct *mm, unsigned long flags,
+		       unsigned long len)
 {
 	unsigned long locked, lock_limit;
 
@@ -1517,12 +1516,6 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 			 */
 			if (IS_APPEND(inode) && (file->f_mode & FMODE_WRITE))
 				return -EACCES;
-
-			/*
-			 * Make sure there are no mandatory locks on the file.
-			 */
-			if (locks_verify_locked(file))
-				return -EAGAIN;
 
 			vm_flags |= VM_SHARED | VM_MAYSHARE;
 			if (!(file->f_mode & FMODE_WRITE))

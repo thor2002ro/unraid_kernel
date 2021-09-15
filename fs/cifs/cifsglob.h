@@ -75,6 +75,9 @@
 #define SMB_ECHO_INTERVAL_MAX 600
 #define SMB_ECHO_INTERVAL_DEFAULT 60
 
+/* dns resolution interval in seconds */
+#define SMB_DNS_RESOLVE_INTERVAL_DEFAULT 600
+
 /* maximum number of PDUs in one compound */
 #define MAX_COMPOUND 5
 
@@ -111,8 +114,6 @@ enum statusEnum {
 
 enum securityEnum {
 	Unspecified = 0,	/* not specified */
-	LANMAN,			/* Legacy LANMAN auth */
-	NTLM,			/* Legacy NTLM012 auth with NTLM hash */
 	NTLMv2,			/* Legacy NTLM auth with NTLMv2 hash */
 	RawNTLMSSP,		/* NTLMSSP without SPNEGO, NTLMv2 hash */
 	Kerberos,		/* Kerberos via SPNEGO */
@@ -577,6 +578,7 @@ struct TCP_Server_Info {
 	char server_RFC1001_name[RFC1001_NAME_LEN_WITH_NULL];
 	struct smb_version_operations	*ops;
 	struct smb_version_values	*vals;
+	/* updates to tcpStatus protected by GlobalMid_Lock */
 	enum statusEnum tcpStatus; /* what we think the status is */
 	char *hostname; /* hostname portion of UNC string */
 	struct socket *ssocket;
@@ -630,7 +632,6 @@ struct TCP_Server_Info {
 	struct session_key session_key;
 	unsigned long lstrp; /* when we got last response from this server */
 	struct cifs_secmech secmech; /* crypto sec mech functs, descriptors */
-#define	CIFS_NEGFLAVOR_LANMAN	0	/* wct == 13, LANMAN */
 #define	CIFS_NEGFLAVOR_UNENCAP	1	/* wct == 17, but no ext_sec */
 #define	CIFS_NEGFLAVOR_EXTENDED	2	/* wct == 17, ext_sec bit set */
 	char	negflavor;	/* NEGOTIATE response flavor */
@@ -645,6 +646,7 @@ struct TCP_Server_Info {
 	/* point to the SMBD connection if RDMA is used instead of socket */
 	struct smbd_connection *smbd_conn;
 	struct delayed_work	echo; /* echo ping workqueue job */
+	struct delayed_work	resolve; /* dns resolution workqueue job */
 	char	*smallbuf;	/* pointer to current "small" buffer */
 	char	*bigbuf;	/* pointer to current "big" buffer */
 	/* Total size of this PDU. Only valid from cifs_demultiplex_thread */
@@ -666,9 +668,11 @@ struct TCP_Server_Info {
 	unsigned int	max_write;
 	unsigned int	min_offload;
 	__le16	compress_algorithm;
+	__u16	signing_algorithm;
 	__le16	cipher_type;
 	 /* save initital negprot hash */
 	__u8	preauth_sha_hash[SMB2_PREAUTH_HASH_SIZE];
+	bool	signing_negotiated; /* true if valid signing context rcvd from server */
 	bool	posix_ext_supported;
 	struct delayed_work reconnect; /* reconnect workqueue job */
 	struct mutex reconnect_mutex; /* prevent simultaneous reconnects */
@@ -685,6 +689,9 @@ struct TCP_Server_Info {
 #ifdef CONFIG_CIFS_SWN_UPCALL
 	bool use_swn_dstaddr;
 	struct sockaddr_storage swn_dstaddr;
+#endif
+#ifdef CONFIG_CIFS_DFS_UPCALL
+	bool is_dfs_conn; /* if a dfs connection */
 #endif
 };
 
@@ -1601,6 +1608,11 @@ struct dfs_info3_param {
 	int ttl;
 };
 
+struct file_list {
+	struct list_head list;
+	struct cifsFileInfo *cfile;
+};
+
 /*
  * common struct for holding inode info when searching for or updating an
  * inode with new info
@@ -1719,16 +1731,8 @@ static inline bool is_retryable_error(int error)
 
 /* Security Flags: indicate type of session setup needed */
 #define   CIFSSEC_MAY_SIGN	0x00001
-#define   CIFSSEC_MAY_NTLM	0x00002
 #define   CIFSSEC_MAY_NTLMV2	0x00004
 #define   CIFSSEC_MAY_KRB5	0x00008
-#ifdef CONFIG_CIFS_WEAK_PW_HASH
-#define   CIFSSEC_MAY_LANMAN	0x00010
-#define   CIFSSEC_MAY_PLNTXT	0x00020
-#else
-#define   CIFSSEC_MAY_LANMAN    0
-#define   CIFSSEC_MAY_PLNTXT    0
-#endif /* weak passwords */
 #define   CIFSSEC_MAY_SEAL	0x00040 /* not supported yet */
 #define   CIFSSEC_MAY_NTLMSSP	0x00080 /* raw ntlmssp with ntlmv2 */
 
@@ -1736,32 +1740,19 @@ static inline bool is_retryable_error(int error)
 /* note that only one of the following can be set so the
 result of setting MUST flags more than once will be to
 require use of the stronger protocol */
-#define   CIFSSEC_MUST_NTLM	0x02002
 #define   CIFSSEC_MUST_NTLMV2	0x04004
 #define   CIFSSEC_MUST_KRB5	0x08008
-#ifdef CONFIG_CIFS_WEAK_PW_HASH
-#define   CIFSSEC_MUST_LANMAN	0x10010
-#define   CIFSSEC_MUST_PLNTXT	0x20020
-#ifdef CONFIG_CIFS_UPCALL
-#define   CIFSSEC_MASK          0xBF0BF /* allows weak security but also krb5 */
-#else
-#define   CIFSSEC_MASK          0xB70B7 /* current flags supported if weak */
-#endif /* UPCALL */
-#else /* do not allow weak pw hash */
-#define   CIFSSEC_MUST_LANMAN	0
-#define   CIFSSEC_MUST_PLNTXT	0
 #ifdef CONFIG_CIFS_UPCALL
 #define   CIFSSEC_MASK          0x8F08F /* flags supported if no weak allowed */
 #else
 #define	  CIFSSEC_MASK          0x87087 /* flags supported if no weak allowed */
 #endif /* UPCALL */
-#endif /* WEAK_PW_HASH */
 #define   CIFSSEC_MUST_SEAL	0x40040 /* not supported yet */
 #define   CIFSSEC_MUST_NTLMSSP	0x80080 /* raw ntlmssp with ntlmv2 */
 
 #define   CIFSSEC_DEF (CIFSSEC_MAY_SIGN | CIFSSEC_MAY_NTLMV2 | CIFSSEC_MAY_NTLMSSP)
-#define   CIFSSEC_MAX (CIFSSEC_MUST_SIGN | CIFSSEC_MUST_NTLMV2)
-#define   CIFSSEC_AUTH_MASK (CIFSSEC_MAY_NTLM | CIFSSEC_MAY_NTLMV2 | CIFSSEC_MAY_LANMAN | CIFSSEC_MAY_PLNTXT | CIFSSEC_MAY_KRB5 | CIFSSEC_MAY_NTLMSSP)
+#define   CIFSSEC_MAX (CIFSSEC_MUST_NTLMV2)
+#define   CIFSSEC_AUTH_MASK (CIFSSEC_MAY_NTLMV2 | CIFSSEC_MAY_KRB5 | CIFSSEC_MAY_NTLMSSP)
 /*
  *****************************************************************
  * All constants go here
@@ -1785,7 +1776,7 @@ require use of the stronger protocol */
  *	list operations on pending_mid_q and oplockQ
  *      updates to XID counters, multiplex id  and SMB sequence numbers
  *      list operations on global DnotifyReqList
- *      updates to ses->status
+ *      updates to ses->status and TCP_Server_Info->tcpStatus
  *      updates to server->CurrentMid
  *  tcp_ses_lock protects:
  *	list operations on tcp and SMB session lists
@@ -1868,6 +1859,7 @@ extern unsigned int global_secflags;	/* if on, session setup sent
 extern unsigned int sign_CIFS_PDUs;  /* enable smb packet signing */
 extern bool enable_gcm_256; /* allow optional negotiate of strongest signing (aes-gcm-256) */
 extern bool require_gcm_256; /* require use of strongest signing (aes-gcm-256) */
+extern bool enable_negotiate_signing; /* request use of faster (GMAC) signing if available */
 extern bool linuxExtEnabled;/*enable Linux/Unix CIFS extensions*/
 extern unsigned int CIFSMaxBufSize;  /* max size not including hdr */
 extern unsigned int cifs_min_rcv;    /* min size of big ntwrk buf pool */
@@ -1924,10 +1916,6 @@ static inline char *get_security_type_str(enum securityEnum sectype)
 		return "Kerberos";
 	case NTLMv2:
 		return "NTLMv2";
-	case NTLM:
-		return "NTLM";
-	case LANMAN:
-		return "LANMAN";
 	default:
 		return "Unknown";
 	}

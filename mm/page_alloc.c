@@ -124,17 +124,6 @@ static DEFINE_MUTEX(pcp_batch_high_lock);
 
 struct pagesets {
 	local_lock_t lock;
-#if defined(CONFIG_DEBUG_INFO_BTF) &&				\
-	!defined(CONFIG_DEBUG_LOCK_ALLOC) &&			\
-	!defined(CONFIG_PAHOLE_HAS_ZEROSIZE_PERCPU_SUPPORT)
-	/*
-	 * pahole 1.21 and earlier gets confused by zero-sized per-CPU
-	 * variables and produces invalid BTF. Ensure that
-	 * sizeof(struct pagesets) != 0 for older versions of pahole.
-	 */
-	char __pahole_hack;
-	#warning "pahole too old to support zero-sized struct pagesets"
-#endif
 };
 static DEFINE_PER_CPU(struct pagesets, pagesets) = {
 	.lock = INIT_LOCAL_LOCK(lock),
@@ -749,7 +738,6 @@ void prep_compound_page(struct page *page, unsigned int order)
 	__SetPageHead(page);
 	for (i = 1; i < nr_pages; i++) {
 		struct page *p = page + i;
-		set_page_count(p, 0);
 		p->mapping = TAIL_MAPPING;
 		set_compound_head(p, page);
 	}
@@ -852,20 +840,23 @@ void init_mem_debugging_and_hardening(void)
 	}
 #endif
 
-	if (_init_on_alloc_enabled_early) {
-		if (page_poisoning_requested)
-			pr_info("mem auto-init: CONFIG_PAGE_POISONING is on, "
-				"will take precedence over init_on_alloc\n");
-		else
-			static_branch_enable(&init_on_alloc);
+	if ((_init_on_alloc_enabled_early || _init_on_free_enabled_early) &&
+	    page_poisoning_requested) {
+		pr_info("mem auto-init: CONFIG_PAGE_POISONING is on, "
+			"will take precedence over init_on_alloc and init_on_free\n");
+		_init_on_alloc_enabled_early = false;
+		_init_on_free_enabled_early = false;
 	}
-	if (_init_on_free_enabled_early) {
-		if (page_poisoning_requested)
-			pr_info("mem auto-init: CONFIG_PAGE_POISONING is on, "
-				"will take precedence over init_on_free\n");
-		else
-			static_branch_enable(&init_on_free);
-	}
+
+	if (_init_on_alloc_enabled_early)
+		static_branch_enable(&init_on_alloc);
+	else
+		static_branch_disable(&init_on_alloc);
+
+	if (_init_on_free_enabled_early)
+		static_branch_enable(&init_on_free);
+	else
+		static_branch_disable(&init_on_free);
 
 #ifdef CONFIG_DEBUG_PAGEALLOC
 	if (!debug_pagealloc_enabled())
@@ -3193,7 +3184,7 @@ static void __drain_all_pages(struct zone *zone, bool force_all_cpus)
 	int cpu;
 
 	/*
-	 * Allocate in the BSS so we wont require allocation in
+	 * Allocate in the BSS so we won't require allocation in
 	 * direct reclaim path for CONFIG_CPUMASK_OFFSTACK=y
 	 */
 	static cpumask_t cpus_with_pcps;
@@ -3462,19 +3453,10 @@ void free_unref_page_list(struct list_head *list)
 		 * comment in free_unref_page.
 		 */
 		migratetype = get_pcppage_migratetype(page);
-		if (unlikely(migratetype >= MIGRATE_PCPTYPES)) {
-			if (unlikely(is_migrate_isolate(migratetype))) {
-				list_del(&page->lru);
-				free_one_page(page_zone(page), page, pfn, 0,
-							migratetype, FPI_NONE);
-				continue;
-			}
-
-			/*
-			 * Non-isolated types over MIGRATE_PCPTYPES get added
-			 * to the MIGRATE_MOVABLE pcp list.
-			 */
-			set_pcppage_migratetype(page, MIGRATE_MOVABLE);
+		if (unlikely(is_migrate_isolate(migratetype))) {
+			list_del(&page->lru);
+			free_one_page(page_zone(page), page, pfn, 0, migratetype, FPI_NONE);
+			continue;
 		}
 
 		set_page_private(page, pfn);
@@ -3484,7 +3466,15 @@ void free_unref_page_list(struct list_head *list)
 	list_for_each_entry_safe(page, next, list, lru) {
 		pfn = page_private(page);
 		set_page_private(page, 0);
+
+		/*
+		 * Non-isolated types over MIGRATE_PCPTYPES get added
+		 * to the MIGRATE_MOVABLE pcp list.
+		 */
 		migratetype = get_pcppage_migratetype(page);
+		if (unlikely(migratetype >= MIGRATE_PCPTYPES))
+			migratetype = MIGRATE_MOVABLE;
+
 		trace_mm_page_free_batched(page);
 		free_unref_page_commit(page, pfn, migratetype, 0);
 
@@ -5233,9 +5223,6 @@ unsigned long __alloc_pages_bulk(gfp_t gfp, int preferred_nid,
 	unsigned int alloc_flags = ALLOC_WMARK_LOW;
 	int nr_populated = 0, nr_account = 0;
 
-	if (unlikely(nr_pages <= 0))
-		return 0;
-
 	/*
 	 * Skip populated array elements to determine if any pages need
 	 * to be allocated before disabling IRQs.
@@ -5243,19 +5230,35 @@ unsigned long __alloc_pages_bulk(gfp_t gfp, int preferred_nid,
 	while (page_array && nr_populated < nr_pages && page_array[nr_populated])
 		nr_populated++;
 
+	/* No pages requested? */
+	if (unlikely(nr_pages <= 0))
+		goto out;
+
 	/* Already populated array? */
 	if (unlikely(page_array && nr_pages - nr_populated == 0))
-		return nr_populated;
+		goto out;
 
 	/* Use the single page allocator for one page. */
 	if (nr_pages - nr_populated == 1)
 		goto failed;
 
+#ifdef CONFIG_PAGE_OWNER
+	/*
+	 * PAGE_OWNER may recurse into the allocator to allocate space to
+	 * save the stack with pagesets.lock held. Releasing/reacquiring
+	 * removes much of the performance benefit of bulk allocation so
+	 * force the caller to allocate one page at a time as it'll have
+	 * similar performance to added complexity to the bulk allocator.
+	 */
+	if (static_branch_unlikely(&page_owner_inited))
+		goto failed;
+#endif
+
 	/* May set ALLOC_NOFRAGMENT, fragmentation will return 1 page. */
 	gfp &= gfp_allowed_mask;
 	alloc_gfp = gfp;
 	if (!prepare_alloc_pages(gfp, 0, preferred_nid, nodemask, &ac, &alloc_gfp, &alloc_flags))
-		return 0;
+		goto out;
 	gfp = alloc_gfp;
 
 	/* Find an allowed local zone that meets the low watermark. */
@@ -5323,6 +5326,7 @@ unsigned long __alloc_pages_bulk(gfp_t gfp, int preferred_nid,
 	__count_zid_vm_events(PGALLOC, zone_idx(zone), nr_account);
 	zone_statistics(ac.preferred_zoneref->zone, zone, nr_account);
 
+out:
 	return nr_populated;
 
 failed_irq:
@@ -5338,7 +5342,7 @@ failed:
 		nr_populated++;
 	}
 
-	return nr_populated;
+	goto out;
 }
 EXPORT_SYMBOL_GPL(__alloc_pages_bulk);
 

@@ -485,8 +485,8 @@ asmlinkage long sys_pipe2(int __user *fildes, int flags);
 /* fs/quota.c */
 asmlinkage long sys_quotactl(unsigned int cmd, const char __user *special,
 				qid_t id, void __user *addr);
-asmlinkage long sys_quotactl_path(unsigned int cmd, const char __user *mountpoint,
-				  qid_t id, void __user *addr);
+asmlinkage long sys_quotactl_fd(unsigned int fd, unsigned int cmd, qid_t id,
+				void __user *addr);
 
 /* fs/readdir.c */
 asmlinkage long sys_getdents64(unsigned int fd,
@@ -1050,6 +1050,7 @@ asmlinkage long sys_landlock_create_ruleset(const struct landlock_ruleset_attr _
 asmlinkage long sys_landlock_add_rule(int ruleset_fd, enum landlock_rule_type rule_type,
 		const void __user *rule_attr, __u32 flags);
 asmlinkage long sys_landlock_restrict_self(int ruleset_fd, __u32 flags);
+asmlinkage long sys_memfd_secret(unsigned int flags);
 
 /*
  * Architecture-specific system calls
@@ -1157,7 +1158,6 @@ asmlinkage long sys_ustat(unsigned dev, struct ustat __user *ubuf);
 asmlinkage long sys_vfork(void);
 asmlinkage long sys_recv(int, void __user *, size_t, unsigned);
 asmlinkage long sys_send(int, void __user *, size_t, unsigned);
-asmlinkage long sys_bdflush(int func, long data);
 asmlinkage long sys_oldumount(char __user *name);
 asmlinkage long sys_uselib(const char __user *library);
 asmlinkage long sys_sysfs(int option,

@@ -13048,7 +13048,7 @@ static const struct net_device_ops bnx2x_netdev_ops = {
 	.ndo_set_rx_mode	= bnx2x_set_rx_mode,
 	.ndo_set_mac_address	= bnx2x_change_mac_addr,
 	.ndo_validate_addr	= bnx2x_validate_addr,
-	.ndo_do_ioctl		= bnx2x_ioctl,
+	.ndo_eth_ioctl		= bnx2x_ioctl,
 	.ndo_change_mtu		= bnx2x_change_mtu,
 	.ndo_fix_features	= bnx2x_fix_features,
 	.ndo_set_features	= bnx2x_set_features,
@@ -13586,7 +13586,7 @@ static int bnx2x_set_qm_cid_count(struct bnx2x *bp)
 }
 
 /**
- * bnx2x_get_num_none_def_sbs - return the number of none default SBs
+ * bnx2x_get_num_non_def_sbs - return the number of none default SBs
  * @pdev: pci device
  * @cnic_cnt: count
  *

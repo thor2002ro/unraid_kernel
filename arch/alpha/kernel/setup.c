@@ -28,6 +28,7 @@
 #include <linux/init.h>
 #include <linux/string.h>
 #include <linux/ioport.h>
+#include <linux/panic_notifier.h>
 #include <linux/platform_device.h>
 #include <linux/memblock.h>
 #include <linux/pci.h>
@@ -46,7 +47,6 @@
 #include <linux/log2.h>
 #include <linux/export.h>
 
-extern struct atomic_notifier_head panic_notifier_list;
 static int alpha_panic_event(struct notifier_block *, unsigned long, void *);
 static struct notifier_block alpha_panic_block = {
 	alpha_panic_event,
@@ -319,18 +319,19 @@ setup_memory(void *kernel_end)
 		       i, cluster->usage, cluster->start_pfn,
 		       cluster->start_pfn + cluster->numpages);
 
-		/* Bit 0 is console/PALcode reserved.  Bit 1 is
-		   non-volatile memory -- we might want to mark
-		   this for later.  */
-		if (cluster->usage & 3)
-			continue;
-
 		end = cluster->start_pfn + cluster->numpages;
 		if (end > max_low_pfn)
 			max_low_pfn = end;
 
 		memblock_add(PFN_PHYS(cluster->start_pfn),
 			     cluster->numpages << PAGE_SHIFT);
+
+		/* Bit 0 is console/PALcode reserved.  Bit 1 is
+		   non-volatile memory -- we might want to mark
+		   this for later.  */
+		if (cluster->usage & 3)
+			memblock_reserve(PFN_PHYS(cluster->start_pfn),
+				         cluster->numpages << PAGE_SHIFT);
 	}
 
 	/*

@@ -32,6 +32,7 @@
 #include <asm/cpu_device_id.h>
 #include <asm/cpufeature.h>
 #include <asm/intel-family.h>
+#include "../drivers/thermal/intel/thermal_interrupt.h"
 
 #define INTEL_PSTATE_SAMPLING_INTERVAL	(10 * NSEC_PER_MSEC)
 
@@ -219,6 +220,7 @@ struct global_params {
  * @sched_flags:	Store scheduler flags for possible cross CPU update
  * @hwp_boost_min:	Last HWP boosted min performance
  * @suspended:		Whether or not the driver has been suspended.
+ * @hwp_notify_work:	workqueue for HWP notifications.
  *
  * This structure stores per CPU instance data for all CPUs.
  */
@@ -257,6 +259,7 @@ struct cpudata {
 	unsigned int sched_flags;
 	u32 hwp_boost_min;
 	bool suspended;
+	struct delayed_work hwp_notify_work;
 };
 
 static struct cpudata **all_cpu_data;
@@ -1625,6 +1628,40 @@ static void intel_pstate_sysfs_hide_hwp_dynamic_boost(void)
 
 /************************** sysfs end ************************/
 
+static void intel_pstate_notify_work(struct work_struct *work)
+{
+	mutex_lock(&intel_pstate_driver_lock);
+	cpufreq_update_policy(smp_processor_id());
+	wrmsrl(MSR_HWP_STATUS, 0);
+	mutex_unlock(&intel_pstate_driver_lock);
+}
+
+void notify_hwp_interrupt(void)
+{
+	unsigned int this_cpu = smp_processor_id();
+	struct cpudata *cpudata;
+	u64 value;
+
+	if (!hwp_active || !boot_cpu_has(X86_FEATURE_HWP_NOTIFY))
+		return;
+
+	rdmsrl(MSR_HWP_STATUS, value);
+	if (!(value & 0x01))
+		return;
+
+	cpudata = all_cpu_data[this_cpu];
+	schedule_delayed_work_on(this_cpu, &cpudata->hwp_notify_work, msecs_to_jiffies(10));
+}
+
+static void intel_pstate_enable_hwp_interrupt(struct cpudata *cpudata)
+{
+	/* Enable HWP notification interrupt for guaranteed performance change */
+	if (boot_cpu_has(X86_FEATURE_HWP_NOTIFY)) {
+		INIT_DELAYED_WORK(&cpudata->hwp_notify_work, intel_pstate_notify_work);
+		wrmsrl_on_cpu(cpudata->cpu, MSR_HWP_INTERRUPT, 0x01);
+	}
+}
+
 static void intel_pstate_hwp_enable(struct cpudata *cpudata)
 {
 	/* First disable HWP notification interrupt as we don't process them */
@@ -1634,6 +1671,8 @@ static void intel_pstate_hwp_enable(struct cpudata *cpudata)
 	wrmsrl_on_cpu(cpudata->cpu, MSR_PM_ENABLE, 0x1);
 	if (cpudata->epp_default == -EINVAL)
 		cpudata->epp_default = intel_pstate_get_epp(cpudata, 0);
+
+	intel_pstate_enable_hwp_interrupt(cpudata);
 }
 
 static int atom_get_min_pstate(void)
@@ -2532,7 +2571,7 @@ static int intel_pstate_verify_policy(struct cpufreq_policy_data *policy)
 	return 0;
 }
 
-static int intel_pstate_cpu_offline(struct cpufreq_policy *policy)
+static int intel_cpufreq_cpu_offline(struct cpufreq_policy *policy)
 {
 	struct cpudata *cpu = all_cpu_data[policy->cpu];
 
@@ -2577,11 +2616,11 @@ static int intel_pstate_cpu_online(struct cpufreq_policy *policy)
 	return 0;
 }
 
-static void intel_pstate_stop_cpu(struct cpufreq_policy *policy)
+static int intel_pstate_cpu_offline(struct cpufreq_policy *policy)
 {
-	pr_debug("CPU %d stopping\n", policy->cpu);
-
 	intel_pstate_clear_update_util_hook(policy->cpu);
+
+	return intel_cpufreq_cpu_offline(policy);
 }
 
 static int intel_pstate_cpu_exit(struct cpufreq_policy *policy)
@@ -2654,7 +2693,6 @@ static struct cpufreq_driver intel_pstate = {
 	.resume		= intel_pstate_resume,
 	.init		= intel_pstate_cpu_init,
 	.exit		= intel_pstate_cpu_exit,
-	.stop_cpu	= intel_pstate_stop_cpu,
 	.offline	= intel_pstate_cpu_offline,
 	.online		= intel_pstate_cpu_online,
 	.update_limits	= intel_pstate_update_limits,
@@ -2956,7 +2994,7 @@ static struct cpufreq_driver intel_cpufreq = {
 	.fast_switch	= intel_cpufreq_fast_switch,
 	.init		= intel_cpufreq_cpu_init,
 	.exit		= intel_cpufreq_cpu_exit,
-	.offline	= intel_pstate_cpu_offline,
+	.offline	= intel_cpufreq_cpu_offline,
 	.online		= intel_pstate_cpu_online,
 	.suspend	= intel_pstate_suspend,
 	.resume		= intel_pstate_resume,
@@ -2970,7 +3008,7 @@ static void intel_pstate_driver_cleanup(void)
 {
 	unsigned int cpu;
 
-	get_online_cpus();
+	cpus_read_lock();
 	for_each_online_cpu(cpu) {
 		if (all_cpu_data[cpu]) {
 			if (intel_pstate_driver == &intel_pstate)
@@ -2980,7 +3018,7 @@ static void intel_pstate_driver_cleanup(void)
 			all_cpu_data[cpu] = NULL;
 		}
 	}
-	put_online_cpus();
+	cpus_read_unlock();
 
 	intel_pstate_driver = NULL;
 }

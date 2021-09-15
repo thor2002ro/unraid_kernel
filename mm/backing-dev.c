@@ -398,12 +398,12 @@ static void cgwb_release_workfn(struct work_struct *work)
 	blkcg_unpin_online(blkcg);
 
 	fprop_local_destroy_percpu(&wb->memcg_completions);
-	percpu_ref_exit(&wb->refcnt);
 
 	spin_lock_irq(&cgwb_lock);
 	list_del(&wb->offline_node);
 	spin_unlock_irq(&cgwb_lock);
 
+	percpu_ref_exit(&wb->refcnt);
 	wb_exit(wb);
 	WARN_ON_ONCE(!list_empty(&wb->b_attached));
 	kfree_rcu(wb, rcu);
@@ -807,6 +807,7 @@ struct backing_dev_info *bdi_alloc(int node_id)
 	bdi->capabilities = BDI_CAP_WRITEBACK | BDI_CAP_WRITEBACK_ACCT;
 	bdi->ra_pages = VM_READAHEAD_PAGES;
 	bdi->io_pages = VM_READAHEAD_PAGES;
+	timer_setup(&bdi->laptop_mode_wb_timer, laptop_mode_timer_fn, 0);
 	return bdi;
 }
 EXPORT_SYMBOL(bdi_alloc);
@@ -928,6 +929,8 @@ static void bdi_remove_from_list(struct backing_dev_info *bdi)
 
 void bdi_unregister(struct backing_dev_info *bdi)
 {
+	del_timer_sync(&bdi->laptop_mode_wb_timer);
+
 	/* make sure nobody finds us on the bdi_list anymore */
 	bdi_remove_from_list(bdi);
 	wb_shutdown(&bdi->wb);

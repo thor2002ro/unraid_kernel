@@ -43,6 +43,7 @@ struct msm_gem_submit;
 struct msm_fence_context;
 struct msm_gem_address_space;
 struct msm_gem_vma;
+struct msm_disp_state;
 
 #define MAX_CRTCS      8
 #define MAX_PLANES     20
@@ -167,6 +168,7 @@ struct msm_drm_private {
 	struct msm_file_private *lastctx;
 	/* gpu is only set on open(), but we need this info earlier */
 	bool is_a2xx;
+	bool has_cached_coherent;
 
 	struct drm_fb_helper *fbdev;
 
@@ -242,6 +244,9 @@ struct msm_drm_private {
 	struct shrinker shrinker;
 
 	struct drm_atomic_state *pm_state;
+
+	/* For hang detection, in ms */
+	unsigned int hangcheck_period;
 };
 
 struct msm_format {
@@ -294,13 +299,16 @@ bool msm_use_mmu(struct drm_device *dev);
 int msm_ioctl_gem_submit(struct drm_device *dev, void *data,
 		struct drm_file *file);
 
+#ifdef CONFIG_DEBUG_FS
+unsigned long msm_gem_shrinker_shrink(struct drm_device *dev, unsigned long nr_to_scan);
+#endif
+
 void msm_gem_shrinker_init(struct drm_device *dev);
 void msm_gem_shrinker_cleanup(struct drm_device *dev);
 
 struct sg_table *msm_gem_prime_get_sg_table(struct drm_gem_object *obj);
 int msm_gem_prime_vmap(struct drm_gem_object *obj, struct dma_buf_map *map);
 void msm_gem_prime_vunmap(struct drm_gem_object *obj, struct dma_buf_map *map);
-int msm_gem_prime_mmap(struct drm_gem_object *obj, struct vm_area_struct *vma);
 struct drm_gem_object *msm_gem_prime_import_sg_table(struct drm_device *dev,
 		struct dma_buf_attachment *attach, struct sg_table *sg);
 int msm_gem_prime_pin(struct drm_gem_object *obj);
@@ -340,6 +348,10 @@ void __init msm_dsi_register(void);
 void __exit msm_dsi_unregister(void);
 int msm_dsi_modeset_init(struct msm_dsi *msm_dsi, struct drm_device *dev,
 			 struct drm_encoder *encoder);
+void msm_dsi_snapshot(struct msm_disp_state *disp_state, struct msm_dsi *msm_dsi);
+bool msm_dsi_is_cmd_mode(struct msm_dsi *msm_dsi);
+bool msm_dsi_is_bonded_dsi(struct msm_dsi *msm_dsi);
+bool msm_dsi_is_master_dsi(struct msm_dsi *msm_dsi);
 #else
 static inline void __init msm_dsi_register(void)
 {
@@ -352,6 +364,21 @@ static inline int msm_dsi_modeset_init(struct msm_dsi *msm_dsi,
 				       struct drm_encoder *encoder)
 {
 	return -EINVAL;
+}
+static inline void msm_dsi_snapshot(struct msm_disp_state *disp_state, struct msm_dsi *msm_dsi)
+{
+}
+static inline bool msm_dsi_is_cmd_mode(struct msm_dsi *msm_dsi)
+{
+	return false;
+}
+static inline bool msm_dsi_is_bonded_dsi(struct msm_dsi *msm_dsi)
+{
+	return false;
+}
+static inline bool msm_dsi_is_master_dsi(struct msm_dsi *msm_dsi)
+{
+	return false;
 }
 #endif
 
@@ -367,6 +394,7 @@ void msm_dp_display_mode_set(struct msm_dp *dp, struct drm_encoder *encoder,
 				struct drm_display_mode *mode,
 				struct drm_display_mode *adjusted_mode);
 void msm_dp_irq_postinstall(struct msm_dp *dp_display);
+void msm_dp_snapshot(struct msm_disp_state *disp_state, struct msm_dp *dp_display);
 
 void msm_dp_debugfs_init(struct msm_dp *dp_display, struct drm_minor *minor);
 
@@ -410,6 +438,10 @@ static inline void msm_dp_irq_postinstall(struct msm_dp *dp_display)
 {
 }
 
+static inline void msm_dp_snapshot(struct msm_disp_state *disp_state, struct msm_dp *dp_display)
+{
+}
+
 static inline void msm_dp_debugfs_init(struct msm_dp *dp_display,
 		struct drm_minor *minor)
 {
@@ -448,6 +480,8 @@ struct clk *msm_clk_bulk_get_clock(struct clk_bulk_data *bulk, int count,
 	const char *name);
 void __iomem *msm_ioremap(struct platform_device *pdev, const char *name,
 		const char *dbgname);
+void __iomem *msm_ioremap_size(struct platform_device *pdev, const char *name,
+		const char *dbgname, phys_addr_t *size);
 void __iomem *msm_ioremap_quiet(struct platform_device *pdev, const char *name,
 		const char *dbgname);
 void msm_writel(u32 data, void __iomem *addr);
@@ -502,7 +536,7 @@ static inline int align_pitch(int width, int bpp)
 /* for the generated headers: */
 #define INVALID_IDX(idx) ({BUG(); 0;})
 #define fui(x)                ({BUG(); 0;})
-#define util_float_to_half(x) ({BUG(); 0;})
+#define _mesa_float_to_half(x) ({BUG(); 0;})
 
 
 #define FIELD(val, name) (((val) & name ## __MASK) >> name ## __SHIFT)

@@ -11,7 +11,6 @@
 #include <linux/minmax.h>
 #include <linux/timer.h>
 #include <linux/workqueue.h>
-#include <linux/backing-dev-defs.h>
 #include <linux/wait.h>
 #include <linux/mempool.h>
 #include <linux/pfn.h>
@@ -25,6 +24,7 @@
 #include <linux/scatterlist.h>
 #include <linux/blkzoned.h>
 #include <linux/pm.h>
+#include <linux/sbitmap.h>
 
 struct module;
 struct scsi_ioctl_command;
@@ -56,7 +56,7 @@ struct blk_keyslot_manager;
  * Maximum number of blkcg policies allowed to be registered concurrently.
  * Defined here to simplify include dependency.
  */
-#define BLKCG_MAX_POLS		5
+#define BLKCG_MAX_POLS		6
 
 typedef void (rq_end_io_fn)(struct request *, blk_status_t);
 
@@ -239,42 +239,15 @@ struct request {
 	void *end_io_data;
 };
 
-static inline bool blk_op_is_scsi(unsigned int op)
+static inline bool blk_op_is_passthrough(unsigned int op)
 {
-	return op == REQ_OP_SCSI_IN || op == REQ_OP_SCSI_OUT;
-}
-
-static inline bool blk_op_is_private(unsigned int op)
-{
+	op &= REQ_OP_MASK;
 	return op == REQ_OP_DRV_IN || op == REQ_OP_DRV_OUT;
-}
-
-static inline bool blk_rq_is_scsi(struct request *rq)
-{
-	return blk_op_is_scsi(req_op(rq));
-}
-
-static inline bool blk_rq_is_private(struct request *rq)
-{
-	return blk_op_is_private(req_op(rq));
 }
 
 static inline bool blk_rq_is_passthrough(struct request *rq)
 {
-	return blk_rq_is_scsi(rq) || blk_rq_is_private(rq);
-}
-
-static inline bool bio_is_passthrough(struct bio *bio)
-{
-	unsigned op = bio_op(bio);
-
-	return blk_op_is_scsi(op) || blk_op_is_private(op);
-}
-
-static inline bool blk_op_is_passthrough(unsigned int op)
-{
-	return (blk_op_is_scsi(op & REQ_OP_MASK) ||
-			blk_op_is_private(op & REQ_OP_MASK));
+	return blk_op_is_passthrough(req_op(rq));
 }
 
 static inline unsigned short req_get_ioprio(struct request *req)
@@ -424,8 +397,6 @@ struct request_queue {
 	struct blk_mq_hw_ctx	**queue_hw_ctx;
 	unsigned int		nr_hw_queues;
 
-	struct backing_dev_info	*backing_dev_info;
-
 	/*
 	 * The queue owner gets to use this for whatever they like.
 	 * ll_rw_blk doesn't touch it.
@@ -449,6 +420,8 @@ struct request_queue {
 	int			id;
 
 	spinlock_t		queue_lock;
+
+	struct gendisk		*disk;
 
 	/*
 	 * queue kobject
@@ -492,6 +465,9 @@ struct request_queue {
 	struct work_struct	timeout_work;
 
 	atomic_t		nr_active_requests_shared_sbitmap;
+
+	struct sbitmap_queue	sched_bitmap_tags;
+	struct sbitmap_queue	sched_breserved_tags;
 
 	struct list_head	icq_list;
 #ifdef CONFIG_BLK_CGROUP
@@ -686,8 +662,6 @@ extern void blk_clear_pm_only(struct request_queue *q);
 #define dma_map_bvec(dev, bv, dir, attrs) \
 	dma_map_page_attrs(dev, (bv)->bv_page, (bv)->bv_offset, (bv)->bv_len, \
 	(dir), (attrs))
-
-#define queue_to_disk(q)	(dev_to_disk(kobj_to_dev((q)->kobj.parent)))
 
 static inline bool queue_is_mq(struct request_queue *q)
 {
@@ -932,9 +906,11 @@ extern int blk_rq_map_kern(struct request_queue *, struct request *, void *, uns
 extern int blk_rq_map_user_iov(struct request_queue *, struct request *,
 			       struct rq_map_data *, const struct iov_iter *,
 			       gfp_t);
-extern void blk_execute_rq(struct gendisk *, struct request *, int);
 extern void blk_execute_rq_nowait(struct gendisk *,
 				  struct request *, int, rq_end_io_fn *);
+
+blk_status_t blk_execute_rq(struct gendisk *bd_disk, struct request *rq,
+			    int at_head);
 
 /* Helper to convert REQ_OP_XXX to its string format XXX */
 extern const char *blk_op_str(unsigned int op);
@@ -961,6 +937,10 @@ static inline struct request_queue *bdev_get_queue(struct block_device *bdev)
 #ifndef SECTOR_SIZE
 #define SECTOR_SIZE (1 << SECTOR_SHIFT)
 #endif
+
+#define PAGE_SECTORS_SHIFT	(PAGE_SHIFT - SECTOR_SHIFT)
+#define PAGE_SECTORS		(1 << PAGE_SECTORS_SHIFT)
+#define SECTOR_MASK		(PAGE_SECTORS - 1)
 
 /*
  * blk_rq_pos()			: the current sector
@@ -1007,6 +987,18 @@ static inline unsigned int blk_rq_stats_sectors(const struct request *rq)
 
 /* Helper to convert BLK_ZONE_ZONE_XXX to its string format XXX */
 const char *blk_zone_cond_str(enum blk_zone_cond zone_cond);
+
+static inline unsigned int bio_zone_no(struct bio *bio)
+{
+	return blk_queue_zone_no(bdev_get_queue(bio->bi_bdev),
+				 bio->bi_iter.bi_sector);
+}
+
+static inline unsigned int bio_zone_is_seq(struct bio *bio)
+{
+	return blk_queue_zone_is_seq(bdev_get_queue(bio->bi_bdev),
+				     bio->bi_iter.bi_sector);
+}
 
 static inline unsigned int blk_rq_zone_no(struct request *rq)
 {
@@ -1148,7 +1140,7 @@ void blk_queue_zone_write_granularity(struct request_queue *q,
 				      unsigned int size);
 extern void blk_queue_alignment_offset(struct request_queue *q,
 				       unsigned int alignment);
-void blk_queue_update_readahead(struct request_queue *q);
+void disk_update_readahead(struct gendisk *disk);
 extern void blk_limits_io_min(struct queue_limits *limits, unsigned int min);
 extern void blk_queue_io_min(struct request_queue *q, unsigned int min);
 extern void blk_limits_io_opt(struct queue_limits *limits, unsigned int opt);
@@ -1209,7 +1201,6 @@ static inline int blk_rq_map_sg(struct request_queue *q, struct request *rq,
 extern void blk_dump_rq_flags(struct request *, char *);
 
 bool __must_check blk_get_queue(struct request_queue *);
-struct request_queue *blk_alloc_queue(int node_id);
 extern void blk_put_queue(struct request_queue *);
 extern void blk_set_queue_dying(struct request_queue *);
 
@@ -1529,6 +1520,22 @@ static inline int queue_limit_discard_alignment(struct queue_limits *lim, sector
 
 	/* Turn it back into bytes, gaah */
 	return offset << SECTOR_SHIFT;
+}
+
+/*
+ * Two cases of handling DISCARD merge:
+ * If max_discard_segments > 1, the driver takes every bio
+ * as a range and send them to controller together. The ranges
+ * needn't to be contiguous.
+ * Otherwise, the bios/requests will be handled as same as
+ * others which should be contiguous.
+ */
+static inline bool blk_discard_mergable(struct request *req)
+{
+	if (req_op(req) == REQ_OP_DISCARD &&
+	    queue_max_discard_segments(req->q) > 1)
+		return true;
+	return false;
 }
 
 static inline int bdev_discard_alignment(struct block_device *bdev)
@@ -1865,6 +1872,13 @@ struct block_device_operations {
 	char *(*devnode)(struct gendisk *disk, umode_t *mode);
 	struct module *owner;
 	const struct pr_ops *pr_ops;
+
+	/*
+	 * Special callback for probing GPT entry at a given sector.
+	 * Needed by Android devices, used by GPT scanner and MMC blk
+	 * driver.
+	 */
+	int (*alternative_gpt_sector)(struct gendisk *disk, sector_t *sector);
 };
 
 #ifdef CONFIG_COMPAT
@@ -1994,8 +2008,6 @@ void blkdev_put_no_open(struct block_device *bdev);
 struct block_device *bdev_alloc(struct gendisk *disk, u8 partno);
 void bdev_add(struct block_device *bdev, dev_t dev);
 struct block_device *I_BDEV(struct inode *inode);
-struct block_device *bdgrab(struct block_device *bdev);
-void bdput(struct block_device *);
 int truncate_bdev_range(struct block_device *bdev, fmode_t mode, loff_t lstart,
 		loff_t lend);
 

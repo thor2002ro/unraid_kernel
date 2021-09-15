@@ -153,7 +153,7 @@ NOKPROBE_SYMBOL(walk_stackframe);
 
 static void dump_backtrace_entry(unsigned long where, const char *loglvl)
 {
-	printk("%s %pS\n", loglvl, (void *)where);
+	printk("%s %pSb\n", loglvl, (void *)where);
 }
 
 void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk,
@@ -218,7 +218,7 @@ void show_stack(struct task_struct *tsk, unsigned long *sp, const char *loglvl)
 
 #ifdef CONFIG_STACKTRACE
 
-noinline void arch_stack_walk(stack_trace_consume_fn consume_entry,
+noinline notrace void arch_stack_walk(stack_trace_consume_fn consume_entry,
 			      void *cookie, struct task_struct *task,
 			      struct pt_regs *regs)
 {

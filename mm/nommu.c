@@ -223,7 +223,7 @@ long vread(char *buf, char *addr, unsigned long count)
  */
 void *vmalloc(unsigned long size)
 {
-       return __vmalloc(size, GFP_KERNEL | __GFP_HIGHMEM);
+	return __vmalloc(size, GFP_KERNEL);
 }
 EXPORT_SYMBOL(vmalloc);
 
@@ -241,7 +241,7 @@ EXPORT_SYMBOL(vmalloc);
  */
 void *vzalloc(unsigned long size)
 {
-	return __vmalloc(size, GFP_KERNEL | __GFP_HIGHMEM | __GFP_ZERO);
+	return __vmalloc(size, GFP_KERNEL | __GFP_ZERO);
 }
 EXPORT_SYMBOL(vzalloc);
 
@@ -825,9 +825,6 @@ static int validate_mmap_request(struct file *file,
 			if (IS_APPEND(file_inode(file)) &&
 			    (file->f_mode & FMODE_WRITE))
 				return -EACCES;
-
-			if (locks_verify_locked(file))
-				return -EAGAIN;
 
 			if (!(capabilities & NOMMU_MAP_DIRECT))
 				return -ENODEV;
@@ -1501,7 +1498,6 @@ erase_whole_vma:
 	delete_vma(mm, vma);
 	return 0;
 }
-EXPORT_SYMBOL(do_munmap);
 
 int vm_munmap(unsigned long addr, size_t len)
 {

@@ -435,7 +435,7 @@ static void genpd_restore_performance_state(struct device *dev,
 int dev_pm_genpd_set_performance_state(struct device *dev, unsigned int state)
 {
 	struct generic_pm_domain *genpd;
-	int ret;
+	int ret = 0;
 
 	genpd = dev_to_genpd_safe(dev);
 	if (!genpd)
@@ -446,7 +446,13 @@ int dev_pm_genpd_set_performance_state(struct device *dev, unsigned int state)
 		return -EINVAL;
 
 	genpd_lock(genpd);
-	ret = genpd_set_performance_state(dev, state);
+	if (pm_runtime_suspended(dev)) {
+		dev_gpd_data(dev)->rpm_pstate = state;
+	} else {
+		ret = genpd_set_performance_state(dev, state);
+		if (!ret)
+			dev_gpd_data(dev)->rpm_pstate = 0;
+	}
 	genpd_unlock(genpd);
 
 	return ret;
@@ -2018,8 +2024,8 @@ int pm_genpd_init(struct generic_pm_domain *genpd,
 
 	mutex_lock(&gpd_list_lock);
 	list_add(&genpd->gpd_list_node, &gpd_list);
-	genpd_debug_add(genpd);
 	mutex_unlock(&gpd_list_lock);
+	genpd_debug_add(genpd);
 
 	return 0;
 }
@@ -2206,12 +2212,19 @@ static int genpd_add_provider(struct device_node *np, genpd_xlate_t xlate,
 
 static bool genpd_present(const struct generic_pm_domain *genpd)
 {
+	bool ret = false;
 	const struct generic_pm_domain *gpd;
 
-	list_for_each_entry(gpd, &gpd_list, gpd_list_node)
-		if (gpd == genpd)
-			return true;
-	return false;
+	mutex_lock(&gpd_list_lock);
+	list_for_each_entry(gpd, &gpd_list, gpd_list_node) {
+		if (gpd == genpd) {
+			ret = true;
+			break;
+		}
+	}
+	mutex_unlock(&gpd_list_lock);
+
+	return ret;
 }
 
 /**
@@ -2222,15 +2235,13 @@ static bool genpd_present(const struct generic_pm_domain *genpd)
 int of_genpd_add_provider_simple(struct device_node *np,
 				 struct generic_pm_domain *genpd)
 {
-	int ret = -EINVAL;
+	int ret;
 
 	if (!np || !genpd)
 		return -EINVAL;
 
-	mutex_lock(&gpd_list_lock);
-
 	if (!genpd_present(genpd))
-		goto unlock;
+		return -EINVAL;
 
 	genpd->dev.of_node = np;
 
@@ -2241,7 +2252,7 @@ int of_genpd_add_provider_simple(struct device_node *np,
 			if (ret != -EPROBE_DEFER)
 				dev_err(&genpd->dev, "Failed to add OPP table: %d\n",
 					ret);
-			goto unlock;
+			return ret;
 		}
 
 		/*
@@ -2259,16 +2270,13 @@ int of_genpd_add_provider_simple(struct device_node *np,
 			dev_pm_opp_of_remove_table(&genpd->dev);
 		}
 
-		goto unlock;
+		return ret;
 	}
 
 	genpd->provider = &np->fwnode;
 	genpd->has_provider = true;
 
-unlock:
-	mutex_unlock(&gpd_list_lock);
-
-	return ret;
+	return 0;
 }
 EXPORT_SYMBOL_GPL(of_genpd_add_provider_simple);
 
@@ -2286,8 +2294,6 @@ int of_genpd_add_provider_onecell(struct device_node *np,
 
 	if (!np || !data)
 		return -EINVAL;
-
-	mutex_lock(&gpd_list_lock);
 
 	if (!data->xlate)
 		data->xlate = genpd_xlate_onecell;
@@ -2328,8 +2334,6 @@ int of_genpd_add_provider_onecell(struct device_node *np,
 	if (ret < 0)
 		goto error;
 
-	mutex_unlock(&gpd_list_lock);
-
 	return 0;
 
 error:
@@ -2347,8 +2351,6 @@ error:
 			dev_pm_opp_of_remove_table(&genpd->dev);
 		}
 	}
-
-	mutex_unlock(&gpd_list_lock);
 
 	return ret;
 }
@@ -2602,6 +2604,12 @@ static void genpd_dev_pm_detach(struct device *dev, bool power_off)
 
 	dev_dbg(dev, "removing from PM domain %s\n", pd->name);
 
+	/* Drop the default performance state */
+	if (dev_gpd_data(dev)->default_pstate) {
+		dev_pm_genpd_set_performance_state(dev, 0);
+		dev_gpd_data(dev)->default_pstate = 0;
+	}
+
 	for (i = 1; i < GENPD_RETRY_MAX_MS; i <<= 1) {
 		ret = genpd_remove_device(pd, dev);
 		if (ret != -EAGAIN)
@@ -2641,6 +2649,7 @@ static int __genpd_dev_pm_attach(struct device *dev, struct device *base_dev,
 {
 	struct of_phandle_args pd_args;
 	struct generic_pm_domain *pd;
+	int pstate;
 	int ret;
 
 	ret = of_parse_phandle_with_args(dev->of_node, "power-domains",
@@ -2679,10 +2688,29 @@ static int __genpd_dev_pm_attach(struct device *dev, struct device *base_dev,
 		genpd_unlock(pd);
 	}
 
-	if (ret)
+	if (ret) {
 		genpd_remove_device(pd, dev);
+		return -EPROBE_DEFER;
+	}
 
-	return ret ? -EPROBE_DEFER : 1;
+	/* Set the default performance state */
+	pstate = of_get_required_opp_performance_state(dev->of_node, index);
+	if (pstate < 0 && pstate != -ENODEV && pstate != -EOPNOTSUPP) {
+		ret = pstate;
+		goto err;
+	} else if (pstate > 0) {
+		ret = dev_pm_genpd_set_performance_state(dev, pstate);
+		if (ret)
+			goto err;
+		dev_gpd_data(dev)->default_pstate = pstate;
+	}
+	return 1;
+
+err:
+	dev_err(dev, "failed to set required performance state for power-domain %s: %d\n",
+		pd->name, ret);
+	genpd_remove_device(pd, dev);
+	return ret;
 }
 
 /**

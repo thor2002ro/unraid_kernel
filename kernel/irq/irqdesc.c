@@ -188,7 +188,7 @@ static ssize_t hwirq_show(struct kobject *kobj,
 
 	raw_spin_lock_irq(&desc->lock);
 	if (desc->irq_data.domain)
-		ret = sprintf(buf, "%d\n", (int)desc->irq_data.hwirq);
+		ret = sprintf(buf, "%lu\n", desc->irq_data.hwirq);
 	raw_spin_unlock_irq(&desc->lock);
 
 	return ret;
@@ -682,7 +682,6 @@ EXPORT_SYMBOL_GPL(generic_handle_domain_irq);
  *                     usually for a root interrupt controller
  * @domain:	The domain where to perform the lookup
  * @hwirq:	The HW irq number to convert to a logical one
- * @lookup:	Whether to perform the domain lookup or not
  * @regs:	Register file coming from the low-level handling code
  *
  * Returns:	0 on success, or -EINVAL if conversion has failed

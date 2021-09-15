@@ -5,6 +5,7 @@
  * This file contains the setup_arch() code, which handles the architecture-dependent
  * parts of early kernel initialization.
  */
+#include <linux/acpi.h>
 #include <linux/console.h>
 #include <linux/crash_dump.h>
 #include <linux/dma-map-ops.h>
@@ -14,6 +15,7 @@
 #include <linux/initrd.h>
 #include <linux/iscsi_ibft.h>
 #include <linux/memblock.h>
+#include <linux/panic_notifier.h>
 #include <linux/pci.h>
 #include <linux/root_dev.h>
 #include <linux/hugetlb.h>
@@ -571,16 +573,6 @@ void __init reserve_standard_io_resources(void)
 
 }
 
-static __init void reserve_ibft_region(void)
-{
-	unsigned long addr, size = 0;
-
-	addr = find_ibft_region(&size);
-
-	if (size)
-		memblock_reserve(addr, size);
-}
-
 static bool __init snb_gfx_workaround_needed(void)
 {
 #ifdef CONFIG_PCI
@@ -846,10 +838,7 @@ void __init setup_arch(char **cmdline_p)
 
 	if (!boot_params.hdr.root_flags)
 		root_mountflags &= ~MS_RDONLY;
-	init_mm.start_code = (unsigned long) _text;
-	init_mm.end_code = (unsigned long) _etext;
-	init_mm.end_data = (unsigned long) _edata;
-	init_mm.brk = _brk_end;
+	setup_initial_init_mm(_text, _etext, _edata, (void *)_brk_end);
 
 	code_resource.start = __pa_symbol(_text);
 	code_resource.end = __pa_symbol(_etext)-1;

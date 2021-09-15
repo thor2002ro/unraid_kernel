@@ -855,7 +855,7 @@ in-kernel irqchip (GIC), and for in-kernel irqchip can tell the GIC to
 use PPIs designated for specific cpus.  The irq field is interpreted
 like this::
 
-  bits:  |  31 ... 28  | 27 ... 24 | 23  ... 16 | 15 ... 0 |
+  bits:  |  31 ... 28  | 27 ... 24 | 23  ... 16 | 15 ... 0 |
   field: | vcpu2_index | irq_type  | vcpu_index |  irq_id  |
 
 The irq_type field has the following values:
@@ -2149,10 +2149,10 @@ prior to calling the KVM_RUN ioctl.
 Errors:
 
   ======   ============================================================
-  ENOENT   no such register
-  EINVAL   invalid register ID, or no such register or used with VMs in
+  ENOENT   no such register
+  EINVAL   invalid register ID, or no such register or used with VMs in
            protected virtualization mode on s390
-  EPERM    (arm64) register access not allowed before vcpu finalization
+  EPERM    (arm64) register access not allowed before vcpu finalization
   ======   ============================================================
 
 (These error codes are indicative only: do not rely on a specific error
@@ -2590,10 +2590,10 @@ following id bit patterns::
 Errors include:
 
   ======== ============================================================
-  ENOENT   no such register
-  EINVAL   invalid register ID, or no such register or used with VMs in
+  ENOENT   no such register
+  EINVAL   invalid register ID, or no such register or used with VMs in
            protected virtualization mode on s390
-  EPERM    (arm64) register access not allowed before vcpu finalization
+  EPERM    (arm64) register access not allowed before vcpu finalization
   ======== ============================================================
 
 (These error codes are indicative only: do not rely on a specific error
@@ -3112,13 +3112,13 @@ current state.  "addr" is ignored.
 Errors:
 
   ======     =================================================================
-  EINVAL     the target is unknown, or the combination of features is invalid.
-  ENOENT     a features bit specified is unknown.
+  EINVAL     the target is unknown, or the combination of features is invalid.
+  ENOENT     a features bit specified is unknown.
   ======     =================================================================
 
 This tells KVM what type of CPU to present to the guest, and what
-optional features it should have.  This will cause a reset of the cpu
-registers to their initial values.  If this is not called, KVM_RUN will
+optional features it should have.  This will cause a reset of the cpu
+registers to their initial values.  If this is not called, KVM_RUN will
 return ENOEXEC for that vcpu.
 
 The initial values are defined as:
@@ -3239,8 +3239,8 @@ VCPU matching underlying host.
 Errors:
 
   =====      ==============================================================
-  E2BIG      the reg index list is too big to fit in the array specified by
-             the user (the number required will be written into n).
+  E2BIG      the reg index list is too big to fit in the array specified by
+             the user (the number required will be written into n).
   =====      ==============================================================
 
 ::
@@ -3288,7 +3288,7 @@ specific device.
 ARM/arm64 divides the id field into two parts, a device id and an
 address type id specific to the individual device::
 
-  bits:  | 63        ...       32 | 31    ...    16 | 15    ...    0 |
+  bits:  | 63        ...       32 | 31    ...    16 | 15    ...    0 |
   field: |        0x00000000      |     device id   |  addr type id  |
 
 ARM/arm64 currently only require this when using the in-kernel GIC
@@ -5077,7 +5077,7 @@ of bytes successfully copied is returned. If the call completes successfully
 then ``length`` is returned.
 
 4.131 KVM_GET_SREGS2
-------------------
+--------------------
 
 :Capability: KVM_CAP_SREGS2
 :Architectures: x86
@@ -5090,17 +5090,17 @@ This ioctl (when supported) replaces the KVM_GET_SREGS.
 
 ::
 
-struct kvm_sregs2 {
-	/* out (KVM_GET_SREGS2) / in (KVM_SET_SREGS2) */
-	struct kvm_segment cs, ds, es, fs, gs, ss;
-	struct kvm_segment tr, ldt;
-	struct kvm_dtable gdt, idt;
-	__u64 cr0, cr2, cr3, cr4, cr8;
-	__u64 efer;
-	__u64 apic_base;
-	__u64 flags;
-	__u64 pdptrs[4];
-};
+        struct kvm_sregs2 {
+                /* out (KVM_GET_SREGS2) / in (KVM_SET_SREGS2) */
+                struct kvm_segment cs, ds, es, fs, gs, ss;
+                struct kvm_segment tr, ldt;
+                struct kvm_dtable gdt, idt;
+                __u64 cr0, cr2, cr3, cr4, cr8;
+                __u64 efer;
+                __u64 apic_base;
+                __u64 flags;
+                __u64 pdptrs[4];
+        };
 
 flags values for ``kvm_sregs2``:
 
@@ -5110,7 +5110,7 @@ flags values for ``kvm_sregs2``:
 
 
 4.132 KVM_SET_SREGS2
-------------------
+--------------------
 
 :Capability: KVM_CAP_SREGS2
 :Architectures: x86
@@ -5201,6 +5201,7 @@ trailing ``'\0'``, is indicated by the ``name_size`` field in the header.
 The descriptors block is only needed to be read once for the lifetime of the
 file descriptor contains a sequence of ``struct kvm_stats_desc``, each followed
 by a string of size ``name_size``.
+::
 
 	#define KVM_STATS_TYPE_SHIFT		0
 	#define KVM_STATS_TYPE_MASK		(0xF << KVM_STATS_TYPE_SHIFT)
@@ -5234,6 +5235,7 @@ by this descriptor. Its endianness is CPU native.
 The following flags are supported:
 
 Bits 0-3 of ``flags`` encode the type:
+
   * ``KVM_STATS_TYPE_CUMULATIVE``
     The statistics data is cumulative. The value of data can only be increased.
     Most of the counters used in KVM are of this type.
@@ -5252,6 +5254,7 @@ Bits 0-3 of ``flags`` encode the type:
     The corresponding ``size`` field for this type is always 1.
 
 Bits 4-7 of ``flags`` encode the unit:
+
   * ``KVM_STATS_UNIT_NONE``
     There is no unit for the value of statistics data. This usually means that
     the value is a simple counter of an event.
@@ -5266,6 +5269,7 @@ Bits 4-7 of ``flags`` encode the unit:
 
 Bits 8-11 of ``flags``, together with ``exponent``, encode the scale of the
 unit:
+
   * ``KVM_STATS_BASE_POW10``
     The scale is based on power of 10. It is used for measurement of time and
     CPU clock cycles.  For example, an exponent of -9 can be used with
@@ -7049,7 +7053,7 @@ In combination with KVM_CAP_X86_USER_SPACE_MSR, this allows user space to
 trap and emulate MSRs that are outside of the scope of KVM as well as
 limit the attack surface on KVM's MSR emulation code.
 
-8.28 KVM_CAP_ENFORCE_PV_CPUID
+8.28 KVM_CAP_ENFORCE_PV_FEATURE_CPUID
 -----------------------------
 
 Architectures: x86
@@ -7213,7 +7217,7 @@ supported in the host. A VMM can check whether the service is
 available to the guest on migration.
 
 8.33 KVM_CAP_HYPERV_ENFORCE_CPUID
------------------------------
+---------------------------------
 
 Architectures: x86
 

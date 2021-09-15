@@ -497,7 +497,7 @@ struct pci_dev {
 	u16		pasid_features;
 #endif
 #ifdef CONFIG_PCI_P2PDMA
-	struct pci_p2pdma *p2pdma;
+	struct pci_p2pdma __rcu *p2pdma;
 #endif
 	u16		acs_cap;	/* ACS Capability offset */
 	phys_addr_t	rom;		/* Physical address if not from BAR */
@@ -862,6 +862,8 @@ struct module;
  *              MSI-X vectors available for distribution to the VFs.
  * @err_handler: See Documentation/PCI/pci-error-recovery.rst
  * @groups:	Sysfs attribute groups.
+ * @dev_groups: Attributes attached to the device that will be
+ *              created once it is bound to the driver.
  * @driver:	Driver model structure.
  * @dynids:	List of dynamically added device IDs.
  */
@@ -879,6 +881,7 @@ struct pci_driver {
 	u32  (*sriov_get_vf_total_msix)(struct pci_dev *pf);
 	const struct pci_error_handlers *err_handler;
 	const struct attribute_group **groups;
+	const struct attribute_group **dev_groups;
 	struct device_driver	driver;
 	struct pci_dynids	dynids;
 };
@@ -897,6 +900,35 @@ struct pci_driver {
 #define PCI_DEVICE(vend,dev) \
 	.vendor = (vend), .device = (dev), \
 	.subvendor = PCI_ANY_ID, .subdevice = PCI_ANY_ID
+
+/**
+ * PCI_DEVICE_DRIVER_OVERRIDE - macro used to describe a PCI device with
+ *                              override_only flags.
+ * @vend: the 16 bit PCI Vendor ID
+ * @dev: the 16 bit PCI Device ID
+ * @driver_override: the 32 bit PCI Device override_only
+ *
+ * This macro is used to create a struct pci_device_id that matches only a
+ * driver_override device. The subvendor and subdevice fields will be set to
+ * PCI_ANY_ID.
+ */
+#define PCI_DEVICE_DRIVER_OVERRIDE(vend, dev, driver_override) \
+	.vendor = (vend), .device = (dev), .subvendor = PCI_ANY_ID, \
+	.subdevice = PCI_ANY_ID, .override_only = (driver_override)
+
+/**
+ * PCI_DRIVER_OVERRIDE_DEVICE_VFIO - macro used to describe a VFIO
+ *                                   "driver_override" PCI device.
+ * @vend: the 16 bit PCI Vendor ID
+ * @dev: the 16 bit PCI Device ID
+ *
+ * This macro is used to create a struct pci_device_id that matches a
+ * specific device. The subvendor and subdevice fields will be set to
+ * PCI_ANY_ID and the driver_override will be set to
+ * PCI_ID_F_VFIO_DRIVER_OVERRIDE.
+ */
+#define PCI_DRIVER_OVERRIDE_DEVICE_VFIO(vend, dev) \
+	PCI_DEVICE_DRIVER_OVERRIDE(vend, dev, PCI_ID_F_VFIO_DRIVER_OVERRIDE)
 
 /**
  * PCI_DEVICE_SUB - macro used to describe a specific PCI device with subsystem
@@ -1617,9 +1649,22 @@ static inline bool pci_aer_available(void) { return false; }
 
 bool pci_ats_disabled(void);
 
+#ifdef CONFIG_PCIE_PTM
+int pci_enable_ptm(struct pci_dev *dev, u8 *granularity);
+bool pcie_ptm_enabled(struct pci_dev *dev);
+#else
+static inline int pci_enable_ptm(struct pci_dev *dev, u8 *granularity)
+{ return -EINVAL; }
+static inline bool pcie_ptm_enabled(struct pci_dev *dev)
+{ return false; }
+#endif
+
 void pci_cfg_access_lock(struct pci_dev *dev);
 bool pci_cfg_access_trylock(struct pci_dev *dev);
 void pci_cfg_access_unlock(struct pci_dev *dev);
+
+int pci_dev_trylock(struct pci_dev *dev);
+void pci_dev_unlock(struct pci_dev *dev);
 
 /*
  * PCI domain support.  Sometimes called PCI segment (eg by ACPI),
@@ -1771,6 +1816,10 @@ static inline struct resource *pci_find_resource(struct pci_dev *dev,
 static inline int pci_request_regions(struct pci_dev *dev, const char *res_name)
 { return -EIO; }
 static inline void pci_release_regions(struct pci_dev *dev) { }
+
+static inline int pci_register_io_range(struct fwnode_handle *fwnode,
+					phys_addr_t addr, resource_size_t size)
+{ return -EINVAL; }
 
 static inline unsigned long pci_address_to_pio(phys_addr_t addr) { return -1; }
 

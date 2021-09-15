@@ -627,14 +627,15 @@ EXPORT_SYMBOL_GPL(fwnode_get_next_parent);
  */
 struct device *fwnode_get_next_parent_dev(struct fwnode_handle *fwnode)
 {
-	struct device *dev = NULL;
+	struct device *dev;
 
 	fwnode_handle_get(fwnode);
 	do {
 		fwnode = fwnode_get_next_parent(fwnode);
-		if (fwnode)
-			dev = get_dev_from_fwnode(fwnode);
-	} while (fwnode && !dev);
+		if (!fwnode)
+			return NULL;
+		dev = get_dev_from_fwnode(fwnode);
+	} while (!dev);
 	fwnode_handle_put(fwnode);
 	return dev;
 }
@@ -742,10 +743,9 @@ fwnode_get_next_available_child_node(const struct fwnode_handle *fwnode,
 
 	do {
 		next_child = fwnode_get_next_child_node(fwnode, next_child);
-
-		if (!next_child || fwnode_device_is_available(next_child))
-			break;
-	} while (next_child);
+		if (!next_child)
+			return NULL;
+	} while (!fwnode_device_is_available(next_child));
 
 	return next_child;
 }
@@ -1033,7 +1033,26 @@ struct fwnode_handle *
 fwnode_graph_get_next_endpoint(const struct fwnode_handle *fwnode,
 			       struct fwnode_handle *prev)
 {
-	return fwnode_call_ptr_op(fwnode, graph_get_next_endpoint, prev);
+	const struct fwnode_handle *parent;
+	struct fwnode_handle *ep;
+
+	/*
+	 * If this function is in a loop and the previous iteration returned
+	 * an endpoint from fwnode->secondary, then we need to use the secondary
+	 * as parent rather than @fwnode.
+	 */
+	if (prev)
+		parent = fwnode_graph_get_port_parent(prev);
+	else
+		parent = fwnode;
+
+	ep = fwnode_call_ptr_op(parent, graph_get_next_endpoint, prev);
+
+	if (IS_ERR_OR_NULL(ep) &&
+	    !IS_ERR_OR_NULL(parent) && !IS_ERR_OR_NULL(parent->secondary))
+		ep = fwnode_graph_get_next_endpoint(parent->secondary, NULL);
+
+	return ep;
 }
 EXPORT_SYMBOL_GPL(fwnode_graph_get_next_endpoint);
 
@@ -1212,14 +1231,7 @@ fwnode_graph_get_endpoint_by_id(const struct fwnode_handle *fwnode,
 		best_ep_id = fwnode_ep.id;
 	}
 
-	if (best_ep)
-		return best_ep;
-
-	if (fwnode && !IS_ERR_OR_NULL(fwnode->secondary))
-		return fwnode_graph_get_endpoint_by_id(fwnode->secondary, port,
-						       endpoint, flags);
-
-	return NULL;
+	return best_ep;
 }
 EXPORT_SYMBOL_GPL(fwnode_graph_get_endpoint_by_id);
 

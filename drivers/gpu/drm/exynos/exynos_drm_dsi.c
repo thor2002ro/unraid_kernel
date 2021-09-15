@@ -809,15 +809,15 @@ static int exynos_dsi_init_link(struct exynos_dsi *dsi)
 			reg |= DSIM_AUTO_MODE;
 		if (dsi->mode_flags & MIPI_DSI_MODE_VIDEO_HSE)
 			reg |= DSIM_HSE_MODE;
-		if (!(dsi->mode_flags & MIPI_DSI_MODE_VIDEO_HFP))
+		if (!(dsi->mode_flags & MIPI_DSI_MODE_VIDEO_NO_HFP))
 			reg |= DSIM_HFP_MODE;
-		if (!(dsi->mode_flags & MIPI_DSI_MODE_VIDEO_HBP))
+		if (!(dsi->mode_flags & MIPI_DSI_MODE_VIDEO_NO_HBP))
 			reg |= DSIM_HBP_MODE;
-		if (!(dsi->mode_flags & MIPI_DSI_MODE_VIDEO_HSA))
+		if (!(dsi->mode_flags & MIPI_DSI_MODE_VIDEO_NO_HSA))
 			reg |= DSIM_HSA_MODE;
 	}
 
-	if (!(dsi->mode_flags & MIPI_DSI_MODE_EOT_PACKET))
+	if (!(dsi->mode_flags & MIPI_DSI_MODE_NO_EOT_PACKET))
 		reg |= DSIM_EOT_DISABLE;
 
 	switch (dsi->format) {
@@ -1383,7 +1383,12 @@ static void exynos_dsi_enable(struct drm_encoder *encoder)
 	if (dsi->state & DSIM_STATE_ENABLED)
 		return;
 
-	pm_runtime_get_sync(dsi->dev);
+	ret = pm_runtime_resume_and_get(dsi->dev);
+	if (ret < 0) {
+		dev_err(dsi->dev, "failed to enable DSI device.\n");
+		return;
+	}
+
 	dsi->state |= DSIM_STATE_ENABLED;
 
 	if (dsi->panel) {

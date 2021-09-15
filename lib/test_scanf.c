@@ -271,7 +271,7 @@ static u32 __init next_test_random(u32 max_bits)
 {
 	u32 n_bits = hweight32(prandom_u32_state(&rnd_state)) % (max_bits + 1);
 
-	return prandom_u32_state(&rnd_state) & (UINT_MAX >> (32 - n_bits));
+	return prandom_u32_state(&rnd_state) & GENMASK(n_bits, 0);
 }
 
 static unsigned long long __init next_test_random_ull(void)
@@ -280,7 +280,7 @@ static unsigned long long __init next_test_random_ull(void)
 	u32 n_bits = (hweight32(rand1) * 3) % 64;
 	u64 val = (u64)prandom_u32_state(&rnd_state) * rand1;
 
-	return val & (ULLONG_MAX >> (64 - n_bits));
+	return val & GENMASK_ULL(n_bits, 0);
 }
 
 #define random_for_type(T)				\
@@ -600,7 +600,7 @@ static void __init numbers_prefix_overflow(void)
 	/*
 	 * 0x prefix in a field of width 2 using %i conversion: first field
 	 * converts to 0. Next field scan starts at the character after "0x",
-	 * which will convert if can be intepreted as decimal but will fail
+	 * which will convert if can be interpreted as decimal but will fail
 	 * if it contains any hex digits (since no 0x prefix).
 	 */
 	test_number_prefix(long long,	"0x67", "%2lli%lli", 0, 67, 2, check_ll);

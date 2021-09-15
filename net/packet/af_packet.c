@@ -250,8 +250,7 @@ static struct net_device *packet_cached_dev_get(struct packet_sock *po)
 
 	rcu_read_lock();
 	dev = rcu_dereference(po->cached_dev);
-	if (likely(dev))
-		dev_hold(dev);
+	dev_hold(dev);
 	rcu_read_unlock();
 
 	return dev;
@@ -3024,8 +3023,7 @@ static int packet_snd(struct socket *sock, struct msghdr *msg, size_t len)
 out_free:
 	kfree_skb(skb);
 out_unlock:
-	if (dev)
-		dev_put(dev);
+	dev_put(dev);
 out:
 	return err;
 }
@@ -3158,8 +3156,7 @@ static int packet_do_bind(struct sock *sk, const char *name, int ifindex,
 		}
 	}
 
-	if (dev)
-		dev_hold(dev);
+	dev_hold(dev);
 
 	proto_curr = po->prot_hook.type;
 	dev_curr = po->prot_hook.dev;
@@ -3196,8 +3193,7 @@ static int packet_do_bind(struct sock *sk, const char *name, int ifindex,
 			packet_cached_dev_assign(po, dev);
 		}
 	}
-	if (dev_curr)
-		dev_put(dev_curr);
+	dev_put(dev_curr);
 
 	if (proto == 0 || !need_rehook)
 		goto out_unlock;
@@ -3207,7 +3203,7 @@ static int packet_do_bind(struct sock *sk, const char *name, int ifindex,
 	} else {
 		sk->sk_err = ENETDOWN;
 		if (!sock_flag(sk, SOCK_DEAD))
-			sk->sk_error_report(sk);
+			sk_error_report(sk);
 	}
 
 out_unlock:
@@ -3935,12 +3931,9 @@ packet_setsockopt(struct socket *sock, int level, int optname, sockptr_t optval,
 			return -EFAULT;
 
 		lock_sock(sk);
-		if (po->rx_ring.pg_vec || po->tx_ring.pg_vec) {
-			ret = -EBUSY;
-		} else {
+		if (!po->rx_ring.pg_vec && !po->tx_ring.pg_vec)
 			po->tp_tx_has_off = !!val;
-			ret = 0;
-		}
+
 		release_sock(sk);
 		return 0;
 	}
@@ -4107,13 +4100,12 @@ static int packet_notifier(struct notifier_block *this,
 					__unregister_prot_hook(sk, false);
 					sk->sk_err = ENETDOWN;
 					if (!sock_flag(sk, SOCK_DEAD))
-						sk->sk_error_report(sk);
+						sk_error_report(sk);
 				}
 				if (msg == NETDEV_UNREGISTER) {
 					packet_cached_dev_reset(po);
 					WRITE_ONCE(po->ifindex, -1);
-					if (po->prot_hook.dev)
-						dev_put(po->prot_hook.dev);
+					dev_put(po->prot_hook.dev);
 					po->prot_hook.dev = NULL;
 				}
 				spin_unlock(&po->bind_lock);

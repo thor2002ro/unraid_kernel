@@ -65,6 +65,7 @@ bool lookupCacheEnabled = true;
 bool disable_legacy_dialects; /* false by default */
 bool enable_gcm_256 = true;
 bool require_gcm_256; /* false by default */
+bool enable_negotiate_signing; /* false by default */
 unsigned int global_secflags = CIFSSEC_DEF;
 /* unsigned int ntlmv2_support = 0; */
 unsigned int sign_CIFS_PDUs = 1;
@@ -103,6 +104,9 @@ MODULE_PARM_DESC(enable_gcm_256, "Enable requesting strongest (256 bit) GCM encr
 
 module_param(require_gcm_256, bool, 0644);
 MODULE_PARM_DESC(require_gcm_256, "Require strongest (256 bit) GCM encryption. Default: n/N/0");
+
+module_param(enable_negotiate_signing, bool, 0644);
+MODULE_PARM_DESC(enable_negotiate_signing, "Enable negotiating packet signing algorithm with server. Default: n/N/0");
 
 module_param(disable_legacy_dialects, bool, 0644);
 MODULE_PARM_DESC(disable_legacy_dialects, "To improve security it may be "
@@ -395,7 +399,6 @@ cifs_evict_inode(struct inode *inode)
 {
 	truncate_inode_pages_final(&inode->i_data);
 	clear_inode(inode);
-	cifs_fscache_release_inode_cookie(inode);
 }
 
 static void
@@ -434,14 +437,8 @@ cifs_show_security(struct seq_file *s, struct cifs_ses *ses)
 	seq_puts(s, ",sec=");
 
 	switch (ses->sectype) {
-	case LANMAN:
-		seq_puts(s, "lanman");
-		break;
 	case NTLMv2:
 		seq_puts(s, "ntlmv2");
-		break;
-	case NTLM:
-		seq_puts(s, "ntlm");
 		break;
 	case Kerberos:
 		seq_puts(s, "krb5");
@@ -1751,7 +1748,6 @@ MODULE_DESCRIPTION
 MODULE_VERSION(CIFS_VERSION);
 MODULE_SOFTDEP("ecb");
 MODULE_SOFTDEP("hmac");
-MODULE_SOFTDEP("md4");
 MODULE_SOFTDEP("md5");
 MODULE_SOFTDEP("nls");
 MODULE_SOFTDEP("aes");

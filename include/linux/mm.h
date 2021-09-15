@@ -125,16 +125,6 @@ extern int mmap_rnd_compat_bits __read_mostly;
 #endif
 
 /*
- * With CONFIG_CFI_CLANG, the compiler replaces function addresses in
- * instrumented C code with jump table addresses. Architectures that
- * support CFI can define this macro to return the actual function address
- * when needed.
- */
-#ifndef function_nocfi
-#define function_nocfi(x) (x)
-#endif
-
-/*
  * To prevent common memory management code establishing
  * a zero page mapping on a read fault.
  * This macro should be defined within <asm/pgtable.h>.
@@ -155,7 +145,7 @@ extern int mmap_rnd_compat_bits __read_mostly;
 /* This function must be updated when the size of struct page grows above 80
  * or reduces below 56. The idea that compiler optimizes out switch()
  * statement, and only leaves move/store instructions. Also the compiler can
- * combine write statments if they are both assignments and can be reordered,
+ * combine write statements if they are both assignments and can be reordered,
  * this can result in several of the writes here being dropped.
  */
 #define	mm_zero_struct_page(pp) __mm_zero_struct_page(pp)
@@ -247,6 +237,9 @@ int __add_to_page_cache_locked(struct page *page, struct address_space *mapping,
 #define PAGE_ALIGNED(addr)	IS_ALIGNED((unsigned long)(addr), PAGE_SIZE)
 
 #define lru_to_page(head) (list_entry((head)->prev, struct page, lru))
+
+void setup_initial_init_mm(void *start_code, void *end_code,
+			   void *end_data, void *brk);
 
 /*
  * Linux kernel virtual memory manager primitives.
@@ -550,7 +543,12 @@ struct vm_fault {
 	pud_t *pud;			/* Pointer to pud entry matching
 					 * the 'address'
 					 */
-	pte_t orig_pte;			/* Value of PTE at the time of fault */
+	union {
+		pte_t orig_pte;		/* Value of PTE at the time of fault */
+		pmd_t orig_pmd;		/* Value of PMD at the time of fault,
+					 * used by PMD fault only.
+					 */
+	};
 
 	struct page *cow_page;		/* Page handler may use for COW fault */
 	struct page *page;		/* ->fault handlers should return a
@@ -831,6 +829,8 @@ static inline void *kvcalloc(size_t n, size_t size, gfp_t flags)
 	return kvmalloc_array(n, size, flags | __GFP_ZERO);
 }
 
+extern void *kvrealloc(const void *p, size_t oldsize, size_t newsize,
+		gfp_t flags);
 extern void kvfree(const void *addr);
 extern void kvfree_sensitive(const void *addr, size_t len);
 
@@ -908,6 +908,7 @@ void __put_page(struct page *page);
 void put_pages_list(struct list_head *pages);
 
 void split_page(struct page *page, unsigned int order);
+void copy_huge_page(struct page *dst, struct page *src);
 
 /*
  * Compound pages have a destructor function.  Provide a
@@ -1672,10 +1673,11 @@ struct address_space *page_mapping(struct page *page);
 static inline bool page_is_pfmemalloc(const struct page *page)
 {
 	/*
-	 * Page index cannot be this large so this must be
-	 * a pfmemalloc page.
+	 * lru.next has bit 1 set if the page is allocated from the
+	 * pfmemalloc reserves.  Callers may simply overwrite it if
+	 * they do not need to preserve that information.
 	 */
-	return page->index == -1UL;
+	return (uintptr_t)page->lru.next & BIT(1);
 }
 
 /*
@@ -1684,12 +1686,12 @@ static inline bool page_is_pfmemalloc(const struct page *page)
  */
 static inline void set_page_pfmemalloc(struct page *page)
 {
-	page->index = -1UL;
+	page->lru.next = (void *)BIT(1);
 }
 
 static inline void clear_page_pfmemalloc(struct page *page)
 {
-	page->index = 0;
+	page->lru.next = NULL;
 }
 
 /*
@@ -3075,6 +3077,11 @@ static inline void print_vma_addr(char *prefix, unsigned long rip)
 {
 }
 #endif
+
+int vmemmap_remap_free(unsigned long start, unsigned long end,
+		       unsigned long reuse);
+int vmemmap_remap_alloc(unsigned long start, unsigned long end,
+			unsigned long reuse, gfp_t gfp_mask);
 
 void *sparse_buffer_alloc(unsigned long size);
 struct page * __populate_section_memmap(unsigned long pfn,

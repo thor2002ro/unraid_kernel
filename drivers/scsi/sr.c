@@ -106,6 +106,8 @@ static struct scsi_driver sr_template = {
 static unsigned long sr_index_bits[SR_DISKS / BITS_PER_LONG];
 static DEFINE_SPINLOCK(sr_index_lock);
 
+static struct lock_class_key sr_bio_compl_lkclass;
+
 /* This semaphore is used to mediate the 0->1 reference get in the
  * face of object destruction (i.e. we can't allow a get on an
  * object after last put) */
@@ -221,7 +223,7 @@ static unsigned int sr_get_events(struct scsi_device *sdev)
 	else if (med->media_event_code == 2)
 		return DISK_EVENT_MEDIA_CHANGE;
 	else if (med->media_event_code == 3)
-		return DISK_EVENT_EJECT_REQUEST;
+		return DISK_EVENT_MEDIA_CHANGE;
 	return 0;
 }
 
@@ -340,7 +342,7 @@ static int sr_done(struct scsi_cmnd *SCpnt)
 	 * care is taken to avoid unnecessary additional work such as
 	 * memcpy's that could be avoided.
 	 */
-	if (driver_byte(result) != 0 &&		/* An error occurred */
+	if (scsi_status_is_check_condition(result) &&
 	    (SCpnt->sense_buffer[0] & 0x7f) == 0x70) { /* Sense current */
 		switch (SCpnt->sense_buffer[2]) {
 		case MEDIUM_ERROR:
@@ -712,7 +714,8 @@ static int sr_probe(struct device *dev)
 
 	kref_init(&cd->kref);
 
-	disk = alloc_disk(1);
+	disk = __alloc_disk_node(sdev->request_queue, NUMA_NO_NODE,
+				 &sr_bio_compl_lkclass);
 	if (!disk)
 		goto fail_free;
 	mutex_init(&cd->lock);
@@ -729,6 +732,7 @@ static int sr_probe(struct device *dev)
 
 	disk->major = SCSI_CDROM_MAJOR;
 	disk->first_minor = minor;
+	disk->minors = 1;
 	sprintf(disk->disk_name, "sr%d", minor);
 	disk->fops = &sr_bdops;
 	disk->flags = GENHD_FL_CD | GENHD_FL_BLOCK_EVENTS_ON_EXCL_WRITE;
@@ -762,7 +766,6 @@ static int sr_probe(struct device *dev)
 
 	set_capacity(disk, cd->capacity);
 	disk->private_data = &cd->driver;
-	disk->queue = sdev->request_queue;
 
 	if (register_cdrom(disk, &cd->cdi))
 		goto fail_minor;
@@ -913,7 +916,7 @@ static void get_capabilities(struct scsi_cd *cd)
 	rc = scsi_mode_sense(cd->device, 0, 0x2a, buffer, ms_len,
 			     SR_TIMEOUT, 3, &data, NULL);
 
-	if (!scsi_status_is_good(rc) || data.length > ms_len ||
+	if (rc < 0 || data.length > ms_len ||
 	    data.header_length + data.block_descriptor_length > data.length) {
 		/* failed, drive doesn't have capabilities mode page */
 		cd->cdi.speed = 1;
