@@ -6,7 +6,6 @@
 #define READ_AND_CONFIG     READ_AND_CONFIG_MP
 
 #define READ_AND_CONFIG_MP(ic, txt) (ODM_ReadAndConfig##txt##ic(dm_odm))
-#define READ_AND_CONFIG_TC(ic, txt) (ODM_ReadAndConfig_TC##txt##ic(dm_odm))
 
 static u8 odm_QueryRxPwrPercentage(s8 AntPower)
 {
@@ -356,10 +355,6 @@ static void odm_RxPhyStatus92CSeries_Parsing(struct odm_dm_struct *dm_odm,
 	dm_odm->DM_FatTable.antsel_rx_keep_2 = pPhyStaRpt->antsel_rx_keep_2;
 }
 
-void odm_Init_RSSIForDM(struct odm_dm_struct *dm_odm)
-{
-}
-
 static void odm_Process_RSSIForDM(struct odm_dm_struct *dm_odm,
 				  struct odm_phy_status_info *pPhyInfo,
 				  struct odm_per_pkt_info *pPktinfo)
@@ -521,14 +516,6 @@ void ODM_PhyStatusQuery(struct odm_dm_struct *dm_odm,
 			struct adapter *adapt)
 {
 	ODM_PhyStatusQuery_92CSeries(dm_odm, pPhyInfo, pPhyStatus, pPktinfo, adapt);
-}
-
-/*  For future use. */
-void ODM_MacStatusQuery(struct odm_dm_struct *dm_odm, u8 *mac_stat,
-			u8 macid, bool pkt_match_bssid,
-			bool pkttoself, bool pkt_beacon)
-{
-	/*  2011/10/19 Driver team will handle in the future. */
 }
 
 enum HAL_STATUS ODM_ConfigRFWithHeaderFile(struct odm_dm_struct *dm_odm,

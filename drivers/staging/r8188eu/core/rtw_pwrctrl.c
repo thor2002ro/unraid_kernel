@@ -99,10 +99,7 @@ static bool rtw_pwr_unassociated_idle(struct adapter *adapter)
 {
 	struct adapter *buddy = adapter->pbuddy_adapter;
 	struct mlme_priv *pmlmepriv = &adapter->mlmepriv;
-#ifdef CONFIG_88EU_P2P
 	struct wifidirect_info	*pwdinfo = &adapter->wdinfo;
-#endif
-
 	bool ret = false;
 
 	if (adapter->pwrctrlpriv.ips_deny_time >= jiffies)
@@ -113,29 +110,19 @@ static bool rtw_pwr_unassociated_idle(struct adapter *adapter)
 	    check_fwstate(pmlmepriv, WIFI_UNDER_WPS) ||
 	    check_fwstate(pmlmepriv, WIFI_AP_STATE) ||
 	    check_fwstate(pmlmepriv, WIFI_ADHOC_MASTER_STATE | WIFI_ADHOC_STATE) ||
-#if defined(CONFIG_88EU_P2P)
 	    !rtw_p2p_chk_state(pwdinfo, P2P_STATE_NONE))
-#else
-	    0)
-#endif
 		goto exit;
 
 	/* consider buddy, if exist */
 	if (buddy) {
 		struct mlme_priv *b_pmlmepriv = &buddy->mlmepriv;
-		#ifdef CONFIG_88EU_P2P
 		struct wifidirect_info *b_pwdinfo = &buddy->wdinfo;
-		#endif
 
 		if (check_fwstate(b_pmlmepriv, WIFI_ASOC_STATE | WIFI_SITE_MONITOR) ||
 		    check_fwstate(b_pmlmepriv, WIFI_UNDER_LINKING | WIFI_UNDER_WPS) ||
 		    check_fwstate(b_pmlmepriv, WIFI_AP_STATE) ||
 		    check_fwstate(b_pmlmepriv, WIFI_ADHOC_MASTER_STATE | WIFI_ADHOC_STATE) ||
-#if defined(CONFIG_88EU_P2P)
 		    !rtw_p2p_chk_state(b_pwdinfo, P2P_STATE_NONE))
-#else
-		    0)
-#endif
 			goto exit;
 	}
 	ret = true;
@@ -148,31 +135,11 @@ void rtw_ps_processor(struct adapter *padapter)
 {
 	struct pwrctrl_priv *pwrpriv = &padapter->pwrctrlpriv;
 	struct mlme_priv *pmlmepriv = &padapter->mlmepriv;
-	enum rt_rf_power_state rfpwrstate;
 
 	pwrpriv->ps_processing = true;
 
 	if (pwrpriv->bips_processing)
 		goto exit;
-
-	if (padapter->pwrctrlpriv.bHWPwrPindetect) {
-		rfpwrstate = RfOnOffDetect(padapter);
-		DBG_88E("@@@@- #2  %s==> rfstate:%s\n", __func__, (rfpwrstate == rf_on) ? "rf_on" : "rf_off");
-
-		if (rfpwrstate != pwrpriv->rf_pwrstate) {
-			if (rfpwrstate == rf_off) {
-				pwrpriv->change_rfpwrstate = rf_off;
-				pwrpriv->brfoffbyhw = true;
-				padapter->bCardDisableWOHSM = true;
-				rtw_hw_suspend(padapter);
-			} else {
-				pwrpriv->change_rfpwrstate = rf_on;
-				rtw_hw_resume(padapter);
-			}
-			DBG_88E("current rf_pwrstate(%s)\n", (pwrpriv->rf_pwrstate == rf_off) ? "rf_off" : "rf_on");
-		}
-		pwrpriv->pwr_state_check_cnts++;
-	}
 
 	if (pwrpriv->ips_mode_req == IPS_NONE)
 		goto exit;
@@ -197,51 +164,6 @@ static void pwr_state_check_handler(struct timer_list *t)
 		from_timer(padapter, t,
 			   pwrctrlpriv.pwr_state_check_timer);
 	rtw_ps_cmd(padapter);
-}
-
-/*
- *
- * Parameters
- *	padapter
- *	pslv			power state level, only could be PS_STATE_S0 ~ PS_STATE_S4
- *
- */
-void rtw_set_rpwm(struct adapter *padapter, u8 pslv)
-{
-	u8	rpwm;
-	struct pwrctrl_priv *pwrpriv = &padapter->pwrctrlpriv;
-
-	pslv = PS_STATE(pslv);
-
-	if (pwrpriv->btcoex_rfon) {
-		if (pslv < PS_STATE_S4)
-			pslv = PS_STATE_S3;
-	}
-
-	if (pwrpriv->rpwm == pslv)
-		return;
-
-	if ((padapter->bSurpriseRemoved) ||
-	    (!padapter->hw_init_completed)) {
-		pwrpriv->cpwm = PS_STATE_S4;
-
-		return;
-	}
-
-	if (padapter->bDriverStopped) {
-		if (pslv < PS_STATE_S2)
-			return;
-	}
-
-	rpwm = pslv | pwrpriv->tog;
-
-	pwrpriv->rpwm = pslv;
-
-	rtw_hal_set_hwreg(padapter, HW_VAR_SET_RPWM, (u8 *)(&rpwm));
-
-	pwrpriv->tog += 0x80;
-	pwrpriv->cpwm = pslv;
-
 }
 
 static u8 PS_RDY_CHECK(struct adapter *padapter)
@@ -274,9 +196,7 @@ static u8 PS_RDY_CHECK(struct adapter *padapter)
 void rtw_set_ps_mode(struct adapter *padapter, u8 ps_mode, u8 smart_ps, u8 bcn_ant_mode)
 {
 	struct pwrctrl_priv *pwrpriv = &padapter->pwrctrlpriv;
-#ifdef CONFIG_88EU_P2P
 	struct wifidirect_info	*pwdinfo = &padapter->wdinfo;
-#endif /* CONFIG_88EU_P2P */
 
 	if (ps_mode > PM_Card_Disable)
 		return;
@@ -292,16 +212,13 @@ void rtw_set_ps_mode(struct adapter *padapter, u8 ps_mode, u8 smart_ps, u8 bcn_a
 
 	/* if (pwrpriv->pwr_mode == PS_MODE_ACTIVE) */
 	if (ps_mode == PS_MODE_ACTIVE) {
-#ifdef CONFIG_88EU_P2P
 		if (pwdinfo->opp_ps == 0) {
 			DBG_88E("rtw_set_ps_mode: Leave 802.11 power save\n");
 			pwrpriv->pwr_mode = ps_mode;
-			rtw_set_rpwm(padapter, PS_STATE_S4);
 			rtw_hal_set_hwreg(padapter, HW_VAR_H2C_FW_PWRMODE, (u8 *)(&ps_mode));
 			pwrpriv->bFwCurrentInPSMode = false;
 		}
 	} else {
-#endif /* CONFIG_88EU_P2P */
 		if (PS_RDY_CHECK(padapter)) {
 			DBG_88E("%s: Enter 802.11 power save\n", __func__);
 			pwrpriv->bFwCurrentInPSMode = true;
@@ -310,13 +227,9 @@ void rtw_set_ps_mode(struct adapter *padapter, u8 ps_mode, u8 smart_ps, u8 bcn_a
 			pwrpriv->bcn_ant_mode = bcn_ant_mode;
 			rtw_hal_set_hwreg(padapter, HW_VAR_H2C_FW_PWRMODE, (u8 *)(&ps_mode));
 
-#ifdef CONFIG_88EU_P2P
 			/*  Set CTWindow after LPS */
 			if (pwdinfo->opp_ps == 1)
 				p2p_ps_wk_cmd(padapter, P2P_PS_ENABLE, 0);
-#endif /* CONFIG_88EU_P2P */
-
-			rtw_set_rpwm(padapter, PS_STATE_S2);
 		}
 	}
 
@@ -451,40 +364,11 @@ void rtw_init_pwrctrl_priv(struct adapter *padapter)
 
 	pwrctrlpriv->bFwCurrentInPSMode = false;
 
-	pwrctrlpriv->rpwm = 0;
-	pwrctrlpriv->cpwm = PS_STATE_S4;
-
 	pwrctrlpriv->pwr_mode = PS_MODE_ACTIVE;
 	pwrctrlpriv->smart_ps = padapter->registrypriv.smart_ps;
 	pwrctrlpriv->bcn_ant_mode = 0;
 
-	pwrctrlpriv->tog = 0x80;
-
-	pwrctrlpriv->btcoex_rfon = false;
-
 	timer_setup(&pwrctrlpriv->pwr_state_check_timer, pwr_state_check_handler, 0);
-}
-
-void rtw_free_pwrctrl_priv(struct adapter *adapter)
-{
-	struct pwrctrl_priv *pwrctrlpriv = &adapter->pwrctrlpriv;
-
-	_free_pwrlock(&pwrctrlpriv->lock);
-
-}
-
-u8 rtw_interface_ps_func(struct adapter *padapter, enum hal_intf_ps_func efunc_id, u8 *val)
-{
-	u8 bResult = true;
-	rtw_hal_intf_ps_func(padapter, efunc_id, val);
-
-	return bResult;
-}
-
-inline void rtw_set_ips_deny(struct adapter *padapter, u32 ms)
-{
-	struct pwrctrl_priv *pwrpriv = &padapter->pwrctrlpriv;
-	pwrpriv->ips_deny_time = jiffies + rtw_ms_to_systime(ms);
 }
 
 /*

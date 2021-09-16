@@ -67,22 +67,6 @@ u32 _rtw_down_sema(struct semaphore *sema)
 		return _SUCCESS;
 }
 
-void	_rtw_mutex_init(struct mutex *pmutex)
-{
-	mutex_init(pmutex);
-}
-
-void	_rtw_mutex_free(struct mutex *pmutex)
-{
-	mutex_destroy(pmutex);
-}
-
-void	_rtw_init_queue(struct __queue *pqueue)
-{
-	INIT_LIST_HEAD(&pqueue->queue);
-	spin_lock_init(&pqueue->lock);
-}
-
 inline u32 rtw_systime_to_ms(u32 systime)
 {
 	return systime * 1000 / HZ;
@@ -106,8 +90,6 @@ void rtw_usleep_os(int us)
 	else
 		msleep((us / 1000) + 1);
 }
-
-#define RTW_SUSPEND_LOCK_NAME "rtw_wifi"
 
 static const struct device_type wlan_type = {
 	.name = "wlan",

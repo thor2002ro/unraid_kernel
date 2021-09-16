@@ -130,73 +130,6 @@ void Hal_MPT_CCKTxPowerAdjust(struct adapter *Adapter, bool bInCH14)
 	write_bbreg(Adapter, rCCK0_TxFilter2, bMaskDWord, TempVal2);
 	write_bbreg(Adapter, rCCK0_DebugPort, bMaskLWord, TempVal3);
 }
-
-void Hal_MPT_CCKTxPowerAdjustbyIndex(struct adapter *pAdapter, bool beven)
-{
-	struct hal_data_8188e	*pHalData = GET_HAL_DATA(pAdapter);
-	struct mpt_context *pMptCtx = &pAdapter->mppriv.MptCtx;
-	struct odm_dm_struct *pDM_Odm = &pHalData->odmpriv;
-	s32		TempCCk;
-	u8		CCK_index, CCK_index_old = 0;
-	u8		Action = 0;	/* 0: no action, 1: even->odd, 2:odd->even */
-	s32		i = 0;
-
-	if (!IS_92C_SERIAL(pHalData->VersionID))
-		return;
-	if (beven && !pMptCtx->bMptIndexEven) {
-		/* odd->even */
-		Action = 2;
-		pMptCtx->bMptIndexEven = true;
-	} else if (!beven && pMptCtx->bMptIndexEven) {
-		/* even->odd */
-		Action = 1;
-		pMptCtx->bMptIndexEven = false;
-	}
-
-	if (Action != 0) {
-		/* Query CCK default setting From 0xa24 */
-		TempCCk = read_bbreg(pAdapter, rCCK0_TxFilter2, bMaskDWord) & bMaskCCK;
-		for (i = 0; i < CCK_TABLE_SIZE; i++) {
-			if (pDM_Odm->RFCalibrateInfo.bCCKinCH14) {
-				if (!memcmp((void *)&TempCCk, (void *)&CCKSwingTable_Ch14[i][2], 4)) {
-					CCK_index_old = (u8)i;
-					break;
-				}
-			} else {
-				if (!memcmp((void *)&TempCCk, (void *)&CCKSwingTable_Ch1_Ch13[i][2], 4)) {
-					CCK_index_old = (u8)i;
-					break;
-				}
-			}
-		}
-
-		if (Action == 1)
-			CCK_index = CCK_index_old - 1;
-		else
-			CCK_index = CCK_index_old + 1;
-
-		/* Adjust CCK according to gain index */
-		if (!pDM_Odm->RFCalibrateInfo.bCCKinCH14) {
-			rtw_write8(pAdapter, 0xa22, CCKSwingTable_Ch1_Ch13[CCK_index][0]);
-			rtw_write8(pAdapter, 0xa23, CCKSwingTable_Ch1_Ch13[CCK_index][1]);
-			rtw_write8(pAdapter, 0xa24, CCKSwingTable_Ch1_Ch13[CCK_index][2]);
-			rtw_write8(pAdapter, 0xa25, CCKSwingTable_Ch1_Ch13[CCK_index][3]);
-			rtw_write8(pAdapter, 0xa26, CCKSwingTable_Ch1_Ch13[CCK_index][4]);
-			rtw_write8(pAdapter, 0xa27, CCKSwingTable_Ch1_Ch13[CCK_index][5]);
-			rtw_write8(pAdapter, 0xa28, CCKSwingTable_Ch1_Ch13[CCK_index][6]);
-			rtw_write8(pAdapter, 0xa29, CCKSwingTable_Ch1_Ch13[CCK_index][7]);
-		} else {
-			rtw_write8(pAdapter, 0xa22, CCKSwingTable_Ch14[CCK_index][0]);
-			rtw_write8(pAdapter, 0xa23, CCKSwingTable_Ch14[CCK_index][1]);
-			rtw_write8(pAdapter, 0xa24, CCKSwingTable_Ch14[CCK_index][2]);
-			rtw_write8(pAdapter, 0xa25, CCKSwingTable_Ch14[CCK_index][3]);
-			rtw_write8(pAdapter, 0xa26, CCKSwingTable_Ch14[CCK_index][4]);
-			rtw_write8(pAdapter, 0xa27, CCKSwingTable_Ch14[CCK_index][5]);
-			rtw_write8(pAdapter, 0xa28, CCKSwingTable_Ch14[CCK_index][6]);
-			rtw_write8(pAdapter, 0xa29, CCKSwingTable_Ch14[CCK_index][7]);
-		}
-	}
-}
 /*---------------------------hal\rtl8192c\MPT_HelperFunc.c---------------------------*/
 
 /*
@@ -288,31 +221,15 @@ void Hal_SetAntennaPathPower(struct adapter *pAdapter)
 {
 	struct hal_data_8188e *pHalData = GET_HAL_DATA(pAdapter);
 	u8 TxPowerLevel[RF_PATH_MAX];
-	u8 rfPath;
 
 	TxPowerLevel[RF_PATH_A] = pAdapter->mppriv.txpoweridx;
 	TxPowerLevel[RF_PATH_B] = pAdapter->mppriv.txpoweridx_b;
-
-	switch (pAdapter->mppriv.antenna_tx) {
-	case ANTENNA_A:
-	default:
-		rfPath = RF_PATH_A;
-		break;
-	case ANTENNA_B:
-		rfPath = RF_PATH_B;
-		break;
-	case ANTENNA_C:
-		rfPath = RF_PATH_C;
-		break;
-	}
 
 	switch (pHalData->rf_chip) {
 	case RF_8225:
 	case RF_8256:
 	case RF_6052:
 		Hal_SetCCKTxPower(pAdapter, TxPowerLevel);
-		if (pAdapter->mppriv.rateidx < MPT_RATE_6M)	/*  CCK rate */
-			Hal_MPT_CCKTxPowerAdjustbyIndex(pAdapter, TxPowerLevel[rfPath] % 2 == 0);
 		Hal_SetOFDMTxPower(pAdapter, TxPowerLevel);
 		break;
 	default:
@@ -325,23 +242,10 @@ void Hal_SetTxPower(struct adapter *pAdapter)
 	struct hal_data_8188e *pHalData = GET_HAL_DATA(pAdapter);
 	u8 TxPower = pAdapter->mppriv.txpoweridx;
 	u8 TxPowerLevel[RF_PATH_MAX];
-	u8 rf, rfPath;
+	u8 rf;
 
 	for (rf = 0; rf < RF_PATH_MAX; rf++)
 		TxPowerLevel[rf] = TxPower;
-
-	switch (pAdapter->mppriv.antenna_tx) {
-	case ANTENNA_A:
-	default:
-		rfPath = RF_PATH_A;
-		break;
-	case ANTENNA_B:
-		rfPath = RF_PATH_B;
-		break;
-	case ANTENNA_C:
-		rfPath = RF_PATH_C;
-		break;
-	}
 
 	switch (pHalData->rf_chip) {
 	/*  2008/09/12 MH Test only !! We enable the TX power tracking for MP!!!!! */
@@ -350,8 +254,6 @@ void Hal_SetTxPower(struct adapter *pAdapter)
 	case RF_8256:
 	case RF_6052:
 		Hal_SetCCKTxPower(pAdapter, TxPowerLevel);
-		if (pAdapter->mppriv.rateidx < MPT_RATE_6M)	/*  CCK rate */
-			Hal_MPT_CCKTxPowerAdjustbyIndex(pAdapter, TxPowerLevel[rfPath] % 2 == 0);
 		Hal_SetOFDMTxPower(pAdapter, TxPowerLevel);
 		break;
 	default:
@@ -585,9 +487,6 @@ void Hal_SetSingleCarrierTx(struct adapter *pAdapter, u8 bStart)
 
 void Hal_SetSingleToneTx(struct adapter *pAdapter, u8 bStart)
 {
-	struct hal_data_8188e	*pHalData = GET_HAL_DATA(pAdapter);
-	bool		is92C = IS_92C_SERIAL(pHalData->VersionID);
-
 	u8 rfPath;
 	u32              reg58 = 0x0;
 	switch (pAdapter->mppriv.antenna_tx) {
@@ -607,30 +506,18 @@ void Hal_SetSingleToneTx(struct adapter *pAdapter, u8 bStart)
 	if (bStart) {
 		/*  Start Single Tone. */
 		/*  <20120326, Kordan> To amplify the power of tone for Xtal calibration. (asked by Edlu) */
-		if (IS_HARDWARE_TYPE_8188E(pAdapter)) {
-			reg58 = PHY_QueryRFReg(pAdapter, RF_PATH_A, LNA_Low_Gain_3, bRFRegOffsetMask);
-			reg58 &= 0xFFFFFFF0;
-			reg58 += 2;
-			PHY_SetRFReg(pAdapter, RF_PATH_A, LNA_Low_Gain_3, bRFRegOffsetMask, reg58);
-		}
+		reg58 = PHY_QueryRFReg(pAdapter, RF_PATH_A, LNA_Low_Gain_3, bRFRegOffsetMask);
+		reg58 &= 0xFFFFFFF0;
+		reg58 += 2;
+		PHY_SetRFReg(pAdapter, RF_PATH_A, LNA_Low_Gain_3, bRFRegOffsetMask, reg58);
+
 		PHY_SetBBReg(pAdapter, rFPGA0_RFMOD, bCCKEn, 0x0);
 		PHY_SetBBReg(pAdapter, rFPGA0_RFMOD, bOFDMEn, 0x0);
 
-		if (is92C) {
-			_write_rfreg(pAdapter, RF_PATH_A, 0x21, BIT(19), 0x01);
-			rtw_usleep_os(100);
-			if (rfPath == RF_PATH_A)
-				write_rfreg(pAdapter, RF_PATH_B, 0x00, 0x10000); /*  PAD all on. */
-			else if (rfPath == RF_PATH_B)
-				write_rfreg(pAdapter, RF_PATH_A, 0x00, 0x10000); /*  PAD all on. */
-			write_rfreg(pAdapter, rfPath, 0x00, 0x2001f); /*  PAD all on. */
-			rtw_usleep_os(100);
-		} else {
-			write_rfreg(pAdapter, rfPath, 0x21, 0xd4000);
-			rtw_usleep_os(100);
-			write_rfreg(pAdapter, rfPath, 0x00, 0x2001f); /*  PAD all on. */
-			rtw_usleep_os(100);
-		}
+		write_rfreg(pAdapter, rfPath, 0x21, 0xd4000);
+		rtw_usleep_os(100);
+		write_rfreg(pAdapter, rfPath, 0x00, 0x2001f); /*  PAD all on. */
+		rtw_usleep_os(100);
 
 		/* for dynamic set Power index. */
 		write_bbreg(pAdapter, rFPGA0_XA_HSSIParameter1, bMaskDWord, 0x01000500);
@@ -640,25 +527,17 @@ void Hal_SetSingleToneTx(struct adapter *pAdapter, u8 bStart)
 		/*  Stop Single Tone. */
 		/*  <20120326, Kordan> To amplify the power of tone for Xtal calibration. (asked by Edlu) */
 		/*  <20120326, Kordan> Only in single tone mode. (asked by Edlu) */
-		if (IS_HARDWARE_TYPE_8188E(pAdapter)) {
-			reg58 = PHY_QueryRFReg(pAdapter, RF_PATH_A, LNA_Low_Gain_3, bRFRegOffsetMask);
-			reg58 &= 0xFFFFFFF0;
-			PHY_SetRFReg(pAdapter, RF_PATH_A, LNA_Low_Gain_3, bRFRegOffsetMask, reg58);
-		}
+		reg58 = PHY_QueryRFReg(pAdapter, RF_PATH_A, LNA_Low_Gain_3, bRFRegOffsetMask);
+		reg58 &= 0xFFFFFFF0;
+		PHY_SetRFReg(pAdapter, RF_PATH_A, LNA_Low_Gain_3, bRFRegOffsetMask, reg58);
+
 		write_bbreg(pAdapter, rFPGA0_RFMOD, bCCKEn, 0x1);
 		write_bbreg(pAdapter, rFPGA0_RFMOD, bOFDMEn, 0x1);
-		if (is92C) {
-			_write_rfreg(pAdapter, RF_PATH_A, 0x21, BIT(19), 0x00);
-			rtw_usleep_os(100);
-			write_rfreg(pAdapter, RF_PATH_A, 0x00, 0x32d75); /*  PAD all on. */
-			write_rfreg(pAdapter, RF_PATH_B, 0x00, 0x32d75); /*  PAD all on. */
-			rtw_usleep_os(100);
-		} else {
-			write_rfreg(pAdapter, rfPath, 0x21, 0x54000);
-			rtw_usleep_os(100);
-			write_rfreg(pAdapter, rfPath, 0x00, 0x30000); /*  PAD all on. */
-			rtw_usleep_os(100);
-		}
+
+		write_rfreg(pAdapter, rfPath, 0x21, 0x54000);
+		rtw_usleep_os(100);
+		write_rfreg(pAdapter, rfPath, 0x00, 0x30000); /*  PAD all on. */
+		rtw_usleep_os(100);
 
 		/* Stop for dynamic set Power index. */
 		write_bbreg(pAdapter, rFPGA0_XA_HSSIParameter1, bMaskDWord, 0x01000100);

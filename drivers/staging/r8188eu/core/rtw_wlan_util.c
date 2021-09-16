@@ -304,19 +304,9 @@ inline void rtw_set_oper_ch(struct adapter *adapter, u8 ch)
 	adapter->mlmeextpriv.oper_channel = ch;
 }
 
-inline u8 rtw_get_oper_bw(struct adapter *adapter)
-{
-	return adapter->mlmeextpriv.oper_bwmode;
-}
-
 inline void rtw_set_oper_bw(struct adapter *adapter, u8 bw)
 {
 	adapter->mlmeextpriv.oper_bwmode = bw;
-}
-
-inline u8 rtw_get_oper_choffset(struct adapter *adapter)
-{
-	return adapter->mlmeextpriv.oper_ch_offset;
 }
 
 inline void rtw_set_oper_choffset(struct adapter *adapter, u8 offset)
@@ -328,7 +318,7 @@ void SelectChannel(struct adapter *padapter, unsigned char channel)
 {
 	/* saved channel info */
 	rtw_set_oper_ch(padapter, channel);
-	rtw_hal_set_chan(padapter, channel);
+	PHY_SwChnl8188E(padapter, channel);
 }
 
 void SetBWMode(struct adapter *padapter, unsigned short bwmode,
@@ -338,7 +328,7 @@ void SetBWMode(struct adapter *padapter, unsigned short bwmode,
 	rtw_set_oper_bw(padapter, bwmode);
 	rtw_set_oper_choffset(padapter, channel_offset);
 
-	rtw_hal_set_bwmode(padapter, (enum ht_channel_width)bwmode, channel_offset);
+	PHY_SetBWMode8188E(padapter, (enum ht_channel_width)bwmode, channel_offset);
 }
 
 void set_channel_bwmode(struct adapter *padapter, unsigned char channel, unsigned char channel_offset, unsigned short bwmode)
@@ -369,18 +359,8 @@ void set_channel_bwmode(struct adapter *padapter, unsigned char channel, unsigne
 	rtw_set_oper_bw(padapter, bwmode);
 	rtw_set_oper_choffset(padapter, channel_offset);
 
-	rtw_hal_set_chan(padapter, center_ch); /*  set center channel */
+	PHY_SwChnl8188E(padapter, center_ch); /*  set center channel */
 	SetBWMode(padapter, bwmode, channel_offset);
-}
-
-int get_bsstype(unsigned short capability)
-{
-	if (capability & BIT(0))
-		return WIFI_FW_AP_STATE;
-	else if (capability & BIT(1))
-		return WIFI_FW_ADHOC_STATE;
-	else
-		return 0;
 }
 
 __inline u8 *get_my_bssid(struct wlan_bssid_ex *pnetwork)
@@ -445,11 +425,6 @@ unsigned int decide_wait_for_beacon_timeout(unsigned int bcn_interval)
 		return WAIT_FOR_BCN_TO_MAX;
 	else
 		return bcn_interval << 2;
-}
-
-void CAM_empty_entry(struct adapter *Adapter, u8 ucIndex)
-{
-	rtw_hal_set_hwreg(Adapter, HW_VAR_CAM_EMPTY_ENTRY, (u8 *)(&ucIndex));
 }
 
 void invalidate_cam_all(struct adapter *padapter)
@@ -1123,72 +1098,6 @@ unsigned int is_ap_in_tkip(struct adapter *padapter)
 	}
 }
 
-unsigned int should_forbid_n_rate(struct adapter *padapter)
-{
-	u32 i;
-	struct ndis_802_11_var_ie *pIE;
-	struct mlme_priv	*pmlmepriv = &padapter->mlmepriv;
-	struct wlan_bssid_ex  *cur_network = &pmlmepriv->cur_network.network;
-
-	if (rtw_get_capability((struct wlan_bssid_ex *)cur_network) & WLAN_CAPABILITY_PRIVACY) {
-		for (i = sizeof(struct ndis_802_11_fixed_ie); i < cur_network->IELength;) {
-			pIE = (struct ndis_802_11_var_ie *)(cur_network->IEs + i);
-
-			switch (pIE->ElementID) {
-			case _VENDOR_SPECIFIC_IE_:
-				if (!memcmp(pIE->data, RTW_WPA_OUI, 4) &&
-				    ((!memcmp((pIE->data + 12), WPA_CIPHER_SUITE_CCMP, 4)) ||
-				    (!memcmp((pIE->data + 16), WPA_CIPHER_SUITE_CCMP, 4))))
-					return false;
-				break;
-			case _RSN_IE_2_:
-				if  ((!memcmp((pIE->data + 8), RSN_CIPHER_SUITE_CCMP, 4))  ||
-				     (!memcmp((pIE->data + 12), RSN_CIPHER_SUITE_CCMP, 4)))
-					return false;
-				break;
-			default:
-				break;
-			}
-
-			i += (pIE->Length + 2);
-		}
-
-		return true;
-	} else {
-		return false;
-	}
-}
-
-unsigned int is_ap_in_wep(struct adapter *padapter)
-{
-	u32 i;
-	struct ndis_802_11_var_ie *pIE;
-	struct mlme_ext_priv *pmlmeext = &padapter->mlmeextpriv;
-	struct mlme_ext_info	*pmlmeinfo = &pmlmeext->mlmext_info;
-	struct wlan_bssid_ex		*cur_network = &pmlmeinfo->network;
-
-	if (rtw_get_capability((struct wlan_bssid_ex *)cur_network) & WLAN_CAPABILITY_PRIVACY) {
-		for (i = sizeof(struct ndis_802_11_fixed_ie); i < pmlmeinfo->network.IELength;) {
-			pIE = (struct ndis_802_11_var_ie *)(pmlmeinfo->network.IEs + i);
-
-			switch (pIE->ElementID) {
-			case _VENDOR_SPECIFIC_IE_:
-				if (!memcmp(pIE->data, RTW_WPA_OUI, 4))
-					return false;
-				break;
-			case _RSN_IE_2_:
-				return false;
-			default:
-				break;
-			}
-			i += (pIE->Length + 2);
-		}
-		return true;
-	} else {
-		return false;
-	}
-}
-
 int wifirate2_ratetbl_inx(unsigned char rate)
 {
 	int	inx = 0;
@@ -1324,7 +1233,6 @@ void set_sta_rate(struct adapter *padapter, struct sta_info *psta)
 void update_tx_basic_rate(struct adapter *padapter, u8 wirelessmode)
 {
 	unsigned char supported_rates[NDIS_802_11_LENGTH_RATES_EX];
-#ifdef CONFIG_88EU_P2P
 	struct wifidirect_info *pwdinfo = &padapter->wdinfo;
 
 	/* 	Added by Albert 2011/03/22 */
@@ -1332,7 +1240,6 @@ void update_tx_basic_rate(struct adapter *padapter, u8 wirelessmode)
 	/* 	So, the Tx packet shouldn't use the CCK rate */
 	if (!rtw_p2p_chk_state(pwdinfo, P2P_STATE_NONE))
 		return;
-#endif /* CONFIG_88EU_P2P */
 	memset(supported_rates, 0, NDIS_802_11_LENGTH_RATES_EX);
 
 	if ((wirelessmode & WIRELESS_11B) && (wirelessmode == WIRELESS_11B))
@@ -1616,7 +1523,7 @@ void correct_TSF(struct adapter *padapter, struct mlme_ext_priv *pmlmeext)
 
 void beacon_timing_control(struct adapter *padapter)
 {
-	rtw_hal_bcn_related_reg_setting(padapter);
+	SetBeaconRelatedRegisters8188EUsb(padapter);
 }
 
 static struct adapter *pbuddy_padapter;

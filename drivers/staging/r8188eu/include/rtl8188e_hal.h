@@ -364,9 +364,7 @@ struct hal_data_8188e {
 
 	u16	EfuseUsedBytes;
 
-#ifdef CONFIG_88EU_P2P
 	struct P2P_PS_Offload_t	p2p_ps_offload;
-#endif
 
 	/*  Auto FSM to Turn On, include clock, isolation, power control
 	 *  for MAC only */
@@ -434,15 +432,7 @@ void Hal_ReadPowerSavingMode88E(struct adapter *pAdapter, u8 *hwinfo,
 
 bool HalDetectPwrDownMode88E(struct adapter *Adapter);
 
-void Hal_InitChannelPlan(struct adapter *padapter);
-void rtl8188e_set_hal_ops(struct hal_ops *pHalFunc);
-
-/*  register */
-void SetBcnCtrlReg(struct adapter *padapter, u8 SetBits, u8 ClearBits);
-
-void rtl8188e_clone_haldata(struct adapter *dst, struct adapter *src);
-void rtl8188e_start_thread(struct adapter *padapter);
-void rtl8188e_stop_thread(struct adapter *padapter);
+void rtl8188e_read_chip_version(struct adapter *padapter);
 
 void rtw_IOL_cmd_tx_pkt_buf_dump(struct adapter  *Adapter, int len);
 s32 rtl8188e_iol_efuse_patch(struct adapter *padapter);

@@ -110,7 +110,6 @@ odm_TXPowerTrackingCallback_ThermalMeter_8188E(
 	bool is2t = false;
 
 	u8 OFDM_min_index = 6, rf; /* OFDM BB Swing should be less than +3.0dB, which is required by Arthur */
-	u8 Indexforchannel = 0/*GetRightChnlPlaceforIQK(pHalData->CurrentChannel)*/;
 	s8 OFDM_index_mapping[2][index_mapping_NUM_88E] = {
 		{0, 0, 2, 3, 4, 4, 		/* 2.4G, decrease power */
 		5, 6, 7, 7, 8, 9,
@@ -280,8 +279,8 @@ odm_TXPowerTrackingCallback_ThermalMeter_8188E(
 
 				/* Adujst OFDM Ant_A according to IQK result */
 				ele_D = (OFDMSwingTable[(u8)OFDM_index[0]] & 0xFFC00000) >> 22;
-				X = dm_odm->RFCalibrateInfo.IQKMatrixRegSetting[Indexforchannel].Value[0][0];
-				Y = dm_odm->RFCalibrateInfo.IQKMatrixRegSetting[Indexforchannel].Value[0][1];
+				X = dm_odm->RFCalibrateInfo.IQKMatrixRegSetting.Value[0][0];
+				Y = dm_odm->RFCalibrateInfo.IQKMatrixRegSetting.Value[0][1];
 
 				/*  Revse TX power table. */
 				dm_odm->BbSwingIdxOfdm		= (u8)OFDM_index[0];
@@ -315,8 +314,8 @@ odm_TXPowerTrackingCallback_ThermalMeter_8188E(
 					ele_D = (OFDMSwingTable[(u8)OFDM_index[1]] & 0xFFC00000) >> 22;
 
 					/* new element A = element D x X */
-					X = dm_odm->RFCalibrateInfo.IQKMatrixRegSetting[Indexforchannel].Value[0][4];
-					Y = dm_odm->RFCalibrateInfo.IQKMatrixRegSetting[Indexforchannel].Value[0][5];
+					X = dm_odm->RFCalibrateInfo.IQKMatrixRegSetting.Value[0][4];
+					Y = dm_odm->RFCalibrateInfo.IQKMatrixRegSetting.Value[0][5];
 
 					if ((X != 0) && (*dm_odm->pBandType == ODM_BAND_2_4G)) {
 						if ((X & 0x00000200) != 0)	/* consider minus */
@@ -1183,8 +1182,8 @@ void PHY_IQCalibrate_8188E(struct adapter *adapt, bool recovery)
 /* by sherry 20120321 */
 	if (final_candidate < 4) {
 		for (i = 0; i < IQK_Matrix_REG_NUM; i++)
-			dm_odm->RFCalibrateInfo.IQKMatrixRegSetting[0].Value[0][i] = result[final_candidate][i];
-		dm_odm->RFCalibrateInfo.IQKMatrixRegSetting[0].bIQKDone = true;
+			dm_odm->RFCalibrateInfo.IQKMatrixRegSetting.Value[0][i] = result[final_candidate][i];
+		dm_odm->RFCalibrateInfo.IQKMatrixRegSetting.bIQKDone = true;
 	}
 
 	_PHY_SaveADDARegisters(adapt, IQK_BB_REG_92C, dm_odm->RFCalibrateInfo.IQK_BB_backup_recover, 9);
@@ -1213,16 +1212,12 @@ void PHY_LCCalibrate_8188E(struct adapter *adapt)
 		timecount += 50;
 	}
 
-	dm_odm->RFCalibrateInfo.bLCKInProgress = true;
-
 	if (dm_odm->RFType == ODM_2T2R) {
 		phy_LCCalibrate_8188E(adapt, true);
 	} else {
 		/*  For 88C 1T1R */
 		phy_LCCalibrate_8188E(adapt, false);
 	}
-
-	dm_odm->RFCalibrateInfo.bLCKInProgress = false;
 }
 
 static void phy_setrfpathswitch_8188e(struct adapter *adapt, bool main, bool is2t)

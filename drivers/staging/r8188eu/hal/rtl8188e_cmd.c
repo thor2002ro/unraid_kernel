@@ -561,7 +561,7 @@ static void SetFwRsvdPagePkt(struct adapter *adapt, bool bDLFinished)
 	pattrib->pktlen = pattrib->last_txcmdsz;
 	memcpy(pmgntframe->buf_addr, ReservedPagePacket, TotalPacketLen);
 
-	rtw_hal_mgnt_xmit(adapt, pmgntframe);
+	rtl8188eu_mgnt_xmit(adapt, pmgntframe);
 
 	DBG_88E("%s: Set RSVD page location to Fw\n", __func__);
 	FillH2CCmd_88E(adapt, H2C_COM_RSVD_PAGE, sizeof(RsvdPageLoc), (u8 *)&RsvdPageLoc);
@@ -667,7 +667,6 @@ void rtl8188e_set_FwJoinBssReport_cmd(struct adapter *adapt, u8 mstatus)
 
 void rtl8188e_set_p2p_ps_offload_cmd(struct adapter *adapt, u8 p2p_ps_state)
 {
-#ifdef CONFIG_88EU_P2P
 	struct hal_data_8188e *haldata = GET_HAL_DATA(adapt);
 	struct wifidirect_info	*pwdinfo = &adapt->wdinfo;
 	struct P2P_PS_Offload_t	*p2p_ps_offload = &haldata->p2p_ps_offload;
@@ -732,6 +731,4 @@ void rtl8188e_set_p2p_ps_offload_cmd(struct adapter *adapt, u8 p2p_ps_state)
 	}
 
 	FillH2CCmd_88E(adapt, H2C_PS_P2P_OFFLOAD, 1, (u8 *)p2p_ps_offload);
-#endif
-
 }

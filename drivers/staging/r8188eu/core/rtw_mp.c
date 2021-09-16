@@ -9,22 +9,22 @@
 
 u32 read_bbreg(struct adapter *padapter, u32 addr, u32 bitmask)
 {
-	return rtw_hal_read_bbreg(padapter, addr, bitmask);
+	return rtl8188e_PHY_QueryBBReg(padapter, addr, bitmask);
 }
 
 void write_bbreg(struct adapter *padapter, u32 addr, u32 bitmask, u32 val)
 {
-	rtw_hal_write_bbreg(padapter, addr, bitmask, val);
+	rtl8188e_PHY_SetBBReg(padapter, addr, bitmask, val);
 }
 
 u32 _read_rfreg(struct adapter *padapter, u8 rfpath, u32 addr, u32 bitmask)
 {
-	return rtw_hal_read_rfreg(padapter, (enum rf_radio_path)rfpath, addr, bitmask);
+	return rtl8188e_PHY_QueryRFReg(padapter, (enum rf_radio_path)rfpath, addr, bitmask);
 }
 
 void _write_rfreg(struct adapter *padapter, u8 rfpath, u32 addr, u32 bitmask, u32 val)
 {
-	rtw_hal_write_rfreg(padapter, (enum rf_radio_path)rfpath, addr, bitmask, val);
+	rtl8188e_PHY_SetRFReg(padapter, (enum rf_radio_path)rfpath, addr, bitmask, val);
 }
 
 u32 read_rfreg(struct adapter *padapter, u8 rfpath, u32 addr)
@@ -75,7 +75,7 @@ static void _init_mp_priv_(struct mp_priv *pmp_priv)
 	memcpy(pnetwork->Ssid.Ssid, "mp_871x", pnetwork->Ssid.SsidLength);
 }
 
-static void mp_init_xmit_attrib(struct mp_tx *pmptx, struct adapter *padapter)
+static void mp_init_xmit_attrib(struct mp_tx *pmptx)
 {
 	struct pkt_attrib *pattrib;
 	struct tx_desc *desc;
@@ -107,7 +107,7 @@ s32 init_mp_priv(struct adapter *padapter)
 	pmppriv->papdater = padapter;
 
 	pmppriv->tx.stop = 1;
-	mp_init_xmit_attrib(&pmppriv->tx, padapter);
+	mp_init_xmit_attrib(&pmppriv->tx);
 
 	switch (padapter->registrypriv.rf_config) {
 	case RF_1T1R:
@@ -498,7 +498,7 @@ void PhySetTxPowerLevel(struct adapter *pAdapter)
 /*  */
 static void dump_mpframe(struct adapter *padapter, struct xmit_frame *pmpframe)
 {
-	rtw_hal_mgnt_xmit(padapter, pmpframe);
+	rtl8188eu_mgnt_xmit(padapter, pmpframe);
 }
 
 static struct xmit_frame *alloc_mp_xmitframe(struct xmit_priv *pxmitpriv)
@@ -889,7 +889,7 @@ void _rtw_mp_xmit_priv(struct xmit_priv *pxmitpriv)
 	}
 
 	/*  Init xmit extension buff */
-	_rtw_init_queue(&pxmitpriv->free_xmit_extbuf_queue);
+	rtw_init_queue(&pxmitpriv->free_xmit_extbuf_queue);
 
 	pxmitpriv->pallocated_xmit_extbuf = vzalloc(num_xmit_extbuf * sizeof(struct xmit_buf) + 4);
 
@@ -923,13 +923,4 @@ void _rtw_mp_xmit_priv(struct xmit_priv *pxmitpriv)
 
 exit:
 	;
-}
-
-void Hal_ProSetCrystalCap(struct adapter *pAdapter, u32 CrystalCapVal)
-{
-	CrystalCapVal = CrystalCapVal & 0x3F;
-
-	// write 0x24[16:11] = 0x24[22:17] = CrystalCap
-	PHY_SetBBReg(pAdapter, REG_AFE_XTAL_CTRL, 0x7FF800,
-		     (CrystalCapVal | (CrystalCapVal << 6)));
 }

@@ -71,6 +71,12 @@
 #define ANTTESTA		0x01	/* Ant A will be Testing */
 #define ANTTESTB		0x02	/* Ant B will be testing */
 
+/* RF REG */
+#define ODM_CHANNEL	0x18
+
+/* Ant Detect Reg */
+#define ODM_DPDT	0x300
+
 /*  structure and define */
 
 /*  Add for AP/ADSLpseudo DM structuer requirement. */
@@ -260,7 +266,6 @@ struct odm_rate_adapt {
 
 #define AVG_THERMAL_NUM		8
 #define IQK_Matrix_REG_NUM	8
-#define IQK_Matrix_Settings_NUM	1+24+21
 
 #define	DM_Type_ByFWi		0
 #define	DM_Type_ByDriver	1
@@ -664,7 +669,7 @@ struct odm_rf_cal {
 
 	u8	ThermalValue_HP[HP_THERMAL_NUM];
 	u8	ThermalValue_HP_index;
-	struct ijk_matrix_regs_set IQKMatrixRegSetting[IQK_Matrix_Settings_NUM];
+	struct ijk_matrix_regs_set IQKMatrixRegSetting;
 
 	u8	Delta_IQK;
 	u8	Delta_LCK;
@@ -680,7 +685,6 @@ struct odm_rf_cal {
 	u32	Reg864;
 
 	bool	bIQKInitialized;
-	bool	bLCKInProgress;
 	bool	bAntennaDetected;
 	u32	ADDA_backup[IQK_ADDA_REG_NUM];
 	u32	IQK_MAC_backup[IQK_MAC_REG_NUM];
@@ -1135,12 +1139,6 @@ void ODM_CmnInfoPtrArrayHook(struct odm_dm_struct *pDM_Odm,
 			     u16 Index, void *pValue);
 
 void ODM_CmnInfoUpdate(struct odm_dm_struct *pDM_Odm, u32 CmnInfo, u64 Value);
-
-void ODM_InitAllTimers(struct odm_dm_struct *pDM_Odm);
-
-void ODM_CancelAllTimers(struct odm_dm_struct *pDM_Odm);
-
-void ODM_ReleaseAllTimers(struct odm_dm_struct *pDM_Odm);
 
 void ODM_AntselStatistics_88C(struct odm_dm_struct *pDM_Odm, u8 MacId,
 			      u32 PWDBAll, bool isCCKrate);
