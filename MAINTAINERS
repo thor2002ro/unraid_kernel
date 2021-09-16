@@ -4656,8 +4656,8 @@ S:	Supported
 W:	http://linux-cifs.samba.org/
 T:	git git://git.samba.org/sfrench/cifs-2.6.git
 F:	Documentation/admin-guide/cifs/
-F:	fs/cifs/
-F:	fs/cifs_common/
+F:	fs/smbfs_client/
+F:	fs/smbfs_common/
 
 COMPACTPCI HOTPLUG CORE
 M:	Scott Murray <scott@spiteful.org>
