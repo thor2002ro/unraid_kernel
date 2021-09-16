@@ -403,21 +403,21 @@ restart:
 			continue;
 		if (may_grant(gl, gh)) {
 			first = gfs2_first_holder(gh);
-			if (first && glops->go_lock) {
-				if (!(gh->gh_flags & GL_SKIP)) {
-					spin_unlock(&gl->gl_lockref.lock);
-					/* FIXME: eliminate this eventually */
-					ret = glops->go_lock(gh);
-					spin_lock(&gl->gl_lockref.lock);
-					if (ret) {
-						if (ret == 1)
-							return 2;
-						gh->gh_error = ret;
-						list_del_init(&gh->gh_list);
-						trace_gfs2_glock_queue(gh, 0);
-						gfs2_holder_wake(gh);
-						goto restart;
-					}
+			if (!(gh->gh_flags & GL_SKIP) &&
+			    glops->go_lock_needed &&
+			    glops->go_lock_needed(gh)) {
+				spin_unlock(&gl->gl_lockref.lock);
+				/* FIXME: eliminate this eventually */
+				ret = glops->go_lock(gh);
+				spin_lock(&gl->gl_lockref.lock);
+				if (ret) {
+					if (ret == 1)
+						return 2;
+					gh->gh_error = ret;
+					list_del_init(&gh->gh_list);
+					trace_gfs2_glock_queue(gh, 0);
+					gfs2_holder_wake(gh);
+					goto restart;
 				}
 			}
 			set_bit(HIF_HOLDER, &gh->gh_iflags);

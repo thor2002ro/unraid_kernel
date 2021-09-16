@@ -1288,11 +1288,31 @@ static int update_rgrp_lvb(struct gfs2_rgrpd *rgd)
 	return 0;
 }
 
-int gfs2_rgrp_go_lock(struct gfs2_holder *gh)
+bool gfs2_rgrp_go_lock_needed(struct gfs2_holder *gh)
 {
 	struct gfs2_rgrpd *rgd = gh->gh_gl->gl_object;
 
-	return gfs2_rgrp_bh_get(rgd);
+	if (gh->gh_flags & GL_SKIP)
+		return false;
+
+	if (rgd->rd_bits[0].bi_bh)
+		return false;
+	return true;
+}
+
+int gfs2_rgrp_go_lock(struct gfs2_holder *gh)
+{
+	int ret;
+
+	struct gfs2_rgrpd *rgd = gh->gh_gl->gl_object;
+
+	if (gfs2_glock_is_held_excl(rgd->rd_gl))
+		rgrp_lock_local(rgd);
+	ret = gfs2_rgrp_bh_get(rgd);
+	if (gfs2_glock_is_held_excl(rgd->rd_gl))
+		rgrp_unlock_local(rgd);
+
+	return ret;
 }
 
 /**
