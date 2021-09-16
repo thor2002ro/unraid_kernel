@@ -6,12 +6,7 @@
  * TODO: Merge attr_set_size/attr_data_get_block/attr_allocate_frame?
  */
 
-#include <linux/blkdev.h>
-#include <linux/buffer_head.h>
 #include <linux/fs.h>
-#include <linux/hash.h>
-#include <linux/nls.h>
-#include <linux/ratelimit.h>
 #include <linux/slab.h>
 
 #include "debug.h"
@@ -529,7 +524,7 @@ add_alloc_in_same_attr_seg:
 		} else if (pre_alloc == -1) {
 			pre_alloc = 0;
 			if (type == ATTR_DATA && !name_len &&
-			    sbi->options.prealloc) {
+			    sbi->options->prealloc) {
 				CLST new_alen2 = bytes_to_cluster(
 					sbi, get_pre_allocated(new_size));
 				pre_alloc = new_alen2 - new_alen;

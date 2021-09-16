@@ -10,10 +10,16 @@
 #ifndef _LINUX_NTFS3_NTFS_H
 #define _LINUX_NTFS3_NTFS_H
 
-/* TODO: Check 4K MFT record and 512 bytes cluster. */
+#include <linux/blkdev.h>
+#include <linux/build_bug.h>
+#include <linux/kernel.h>
+#include <linux/stddef.h>
+#include <linux/string.h>
+#include <linux/types.h>
 
-/* Activate this define to use binary search in indexes. */
-#define NTFS3_INDEX_BINARY_SEARCH
+#include "debug.h"
+
+/* TODO: Check 4K MFT record and 512 bytes cluster. */
 
 /* Check each run for marked clusters. */
 #define NTFS3_CHECK_FREE_CLST

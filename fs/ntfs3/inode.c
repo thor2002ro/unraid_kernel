@@ -5,10 +5,8 @@
  *
  */
 
-#include <linux/blkdev.h>
 #include <linux/buffer_head.h>
 #include <linux/fs.h>
-#include <linux/iversion.h>
 #include <linux/mpage.h>
 #include <linux/namei.h>
 #include <linux/nls.h>
@@ -49,8 +47,8 @@ static struct inode *ntfs_read_mft(struct inode *inode,
 
 	inode->i_op = NULL;
 	/* Setup 'uid' and 'gid' */
-	inode->i_uid = sbi->options.fs_uid;
-	inode->i_gid = sbi->options.fs_gid;
+	inode->i_uid = sbi->options->fs_uid;
+	inode->i_gid = sbi->options->fs_gid;
 
 	err = mi_init(&ni->mi, sbi, ino);
 	if (err)
@@ -229,7 +227,7 @@ next_attr:
 			t32 = le16_to_cpu(attr->nres.run_off);
 		}
 
-		mode = S_IFREG | (0777 & sbi->options.fs_fmask_inv);
+		mode = S_IFREG | (0777 & sbi->options->fs_fmask_inv);
 
 		if (!attr->non_res) {
 			ni->ni_flags |= NI_FLAG_RESIDENT;
@@ -272,7 +270,7 @@ next_attr:
 			goto out;
 
 		mode = sb->s_root
-			       ? (S_IFDIR | (0777 & sbi->options.fs_dmask_inv))
+			       ? (S_IFDIR | (0777 & sbi->options->fs_dmask_inv))
 			       : (S_IFDIR | 0777);
 		goto next_attr;
 
@@ -443,7 +441,7 @@ end_enum:
 		goto out;
 	}
 
-	if ((sbi->options.sys_immutable &&
+	if ((sbi->options->sys_immutable &&
 	     (std5->fa & FILE_ATTRIBUTE_SYSTEM)) &&
 	    !S_ISFIFO(mode) && !S_ISSOCK(mode) && !S_ISLNK(mode)) {
 		inode->i_flags |= S_IMMUTABLE;
@@ -1244,7 +1242,7 @@ struct inode *ntfs_create_inode(struct user_namespace *mnt_userns,
 		 *	}
 		 */
 	} else if (S_ISREG(mode)) {
-		if (sbi->options.sparse) {
+		if (sbi->options->sparse) {
 			/* Sparsed regular file, cause option 'sparse'. */
 			fa = FILE_ATTRIBUTE_SPARSE_FILE |
 			     FILE_ATTRIBUTE_ARCHIVE;
