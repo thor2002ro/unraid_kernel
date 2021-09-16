@@ -103,10 +103,10 @@ long real64_call(unsigned long function, ...);
 long real32_call(unsigned long function, ...);
 
 #ifdef CONFIG_64BIT
-#   define MEM_PDC (unsigned long)(PAGE0->mem_pdc_hi) << 32 | PAGE0->mem_pdc
+#   define MEM_PDC (unsigned long)(PAGE0.mem_pdc_hi) << 32 | PAGE0.mem_pdc
 #   define mem_pdc_call(args...) unlikely(parisc_narrow_firmware) ? real32_call(MEM_PDC, args) : real64_call(MEM_PDC, args)
 #else
-#   define MEM_PDC (unsigned long)PAGE0->mem_pdc
+#   define MEM_PDC (unsigned long)PAGE0.mem_pdc
 #   define mem_pdc_call(args...) real32_call(MEM_PDC, args)
 #endif
 
@@ -1249,9 +1249,9 @@ int pdc_iodc_print(const unsigned char *str, unsigned count)
 
 print:
         spin_lock_irqsave(&pdc_lock, flags);
-        real32_call(PAGE0->mem_cons.iodc_io,
-                    (unsigned long)PAGE0->mem_cons.hpa, ENTRY_IO_COUT,
-                    PAGE0->mem_cons.spa, __pa(PAGE0->mem_cons.dp.layers),
+        real32_call(PAGE0.mem_cons.iodc_io,
+                    (unsigned long)PAGE0.mem_cons.hpa, ENTRY_IO_COUT,
+                    PAGE0.mem_cons.spa, __pa(PAGE0.mem_cons.dp.layers),
                     __pa(iodc_retbuf), 0, __pa(iodc_dbuf), i, 0);
         spin_unlock_irqrestore(&pdc_lock, flags);
 
@@ -1272,14 +1272,14 @@ int pdc_iodc_getc(void)
 	unsigned long flags;
 
 	/* Bail if no console input device. */
-	if (!PAGE0->mem_kbd.iodc_io)
+	if (!PAGE0.mem_kbd.iodc_io)
 		return 0;
 	
 	/* wait for a keyboard (rs232)-input */
 	spin_lock_irqsave(&pdc_lock, flags);
-	real32_call(PAGE0->mem_kbd.iodc_io,
-		    (unsigned long)PAGE0->mem_kbd.hpa, ENTRY_IO_CIN,
-		    PAGE0->mem_kbd.spa, __pa(PAGE0->mem_kbd.dp.layers), 
+	real32_call(PAGE0.mem_kbd.iodc_io,
+		    (unsigned long)PAGE0.mem_kbd.hpa, ENTRY_IO_CIN,
+		    PAGE0.mem_kbd.spa, __pa(PAGE0.mem_kbd.dp.layers),
 		    __pa(iodc_retbuf), 0, __pa(iodc_dbuf), 1, 0);
 
 	ch = *iodc_dbuf;

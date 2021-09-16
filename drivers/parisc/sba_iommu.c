@@ -1542,7 +1542,7 @@ static void sba_hw_init(struct sba_device *sba_dev)
 		**	o reprogram serial port
 		**	o unblock console output
 		*/
-		if (PAGE0->mem_kbd.cl_class == CL_KEYBD) {
+		if (PAGE0.mem_kbd.cl_class == CL_KEYBD) {
 			pdc_io_reset_devices();
 		}
 
@@ -1550,8 +1550,8 @@ static void sba_hw_init(struct sba_device *sba_dev)
 
 
 #if 0
-printk("sba_hw_init(): mem_boot 0x%x 0x%x 0x%x 0x%x\n", PAGE0->mem_boot.hpa,
-	PAGE0->mem_boot.spa, PAGE0->mem_boot.pad, PAGE0->mem_boot.cl_class);
+printk("sba_hw_init(): mem_boot 0x%x 0x%x 0x%x 0x%x\n", PAGE0.mem_boot.hpa,
+	PAGE0.mem_boot.spa, PAGE0.mem_boot.pad, PAGE0.mem_boot.cl_class);
 
 	/*
 	** Need to deal with DMA from LAN.
@@ -1562,8 +1562,8 @@ printk("sba_hw_init(): mem_boot 0x%x 0x%x 0x%x 0x%x\n", PAGE0->mem_boot.hpa,
 	** 	mem_boot hpa 0xf4008000 sba 0x0 pad 0x0 cl_class 0x1002
 	** ARGH! invalid class.
 	*/
-	if ((PAGE0->mem_boot.cl_class != CL_RANDOM)
-		&& (PAGE0->mem_boot.cl_class != CL_SEQU)) {
+	if ((PAGE0.mem_boot.cl_class != CL_RANDOM)
+		&& (PAGE0.mem_boot.cl_class != CL_SEQU)) {
 			pdc_io_reset();
 	}
 #endif

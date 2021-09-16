@@ -283,7 +283,7 @@ static void __init setup_bootmem(void)
 
 #define PDC_CONSOLE_IO_IODC_SIZE 32768
 
-	memblock_reserve(0UL, (unsigned long)(PAGE0->mem_free +
+	memblock_reserve(0UL, (unsigned long)(PAGE0.mem_free +
 				PDC_CONSOLE_IO_IODC_SIZE));
 	memblock_reserve(__pa(KERNEL_BINARY_TEXT_START),
 			(unsigned long)(_end - KERNEL_BINARY_TEXT_START));

@@ -14,6 +14,9 @@ ENTRY(startup)
 
 SECTIONS
 {
+        . = 0x0000;
+        PAGE0 = .;
+
 	/* palo loads at 0x60000 */
 	/* loaded kernel will move to 0x10000 */
 	. = 0xe0000;    /* should not overwrite palo code */

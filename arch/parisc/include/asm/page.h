@@ -100,6 +100,9 @@ typedef struct __physmem_range {
 extern physmem_range_t pmem_ranges[];
 extern int npmem_ranges;
 
+/* Address of PAGE0 is defined in vmlinux.lds.S */
+extern struct zeropage PAGE0;
+
 #endif /* !__ASSEMBLY__ */
 
 /* WARNING: The definitions below must match exactly to sizeof(pte_t)
@@ -183,8 +186,6 @@ extern int npmem_ranges;
 #include <asm-generic/memory_model.h>
 #include <asm-generic/getorder.h>
 #include <asm/pdc.h>
-
-#define PAGE0   ((struct zeropage *)__PAGE_OFFSET)
 
 /* DEFINITION OF THE ZERO-PAGE (PAG0) */
 /* based on work by Jason Eckhardt (jason@equator.com) */

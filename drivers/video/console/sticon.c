@@ -395,7 +395,7 @@ static int __init sticonsole_init(void)
     pr_info("sticon: Initializing STI text console.\n");
     console_lock();
     err = do_take_over_console(&sti_con, 0, MAX_NR_CONSOLES - 1,
-		PAGE0->mem_cons.cl_class != CL_DUPLEX);
+		PAGE0.mem_cons.cl_class != CL_DUPLEX);
     console_unlock();
 
     return err;

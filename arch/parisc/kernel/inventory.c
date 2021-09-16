@@ -164,7 +164,7 @@ static void __init pagezero_memconfig(void)
 	 * should be done.
 	 */
 
-	npages = (PAGE_ALIGN(PAGE0->imm_max_mem) >> PAGE_SHIFT);
+	npages = (PAGE_ALIGN(PAGE0.imm_max_mem) >> PAGE_SHIFT);
 	set_pmem_entry(pmem_ranges,0UL,npages);
 	npmem_ranges = 1;
 }
@@ -648,8 +648,8 @@ void __init do_device_inventory(void)
 		struct resource res[3] = {0,};
 		unsigned int base;
 
-		base = ((unsigned long long) PAGE0->pad0[2] << 32)
-			| PAGE0->pad0[3]; /* SeaBIOS stored it here */
+		base = ((unsigned long long) PAGE0.pad0[2] << 32)
+			| PAGE0.pad0[3]; /* SeaBIOS stored it here */
 
 		res[0].name = "fw_cfg";
 		res[0].start = base;

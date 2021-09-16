@@ -55,6 +55,9 @@ jiffies = jiffies_64;
 #endif
 SECTIONS
 {
+        . = __PAGE_OFFSET;
+        PAGE0 = .;
+
 	. = KERNEL_BINARY_TEXT_START;
 
 	__init_begin = .;

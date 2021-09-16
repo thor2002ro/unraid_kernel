@@ -319,7 +319,7 @@ unsigned long decompress_kernel(unsigned int started_wide,
 
 	/* Limit memory for bootoader to 1GB */
 	#define ARTIFICIAL_LIMIT (1*1024*1024*1024)
-	free_mem_end_ptr = PAGE0->imm_max_mem;
+	free_mem_end_ptr = PAGE0.imm_max_mem;
 	if (free_mem_end_ptr > ARTIFICIAL_LIMIT)
 		free_mem_end_ptr = ARTIFICIAL_LIMIT;
 

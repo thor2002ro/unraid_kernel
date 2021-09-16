@@ -297,8 +297,8 @@ void __init smp_callin(unsigned long pdce_proc)
 	int slave_id = cpu_now_booting;
 
 #ifdef CONFIG_64BIT
-	WARN_ON(((unsigned long)(PAGE0->mem_pdc_hi) << 32
-			| PAGE0->mem_pdc) != pdce_proc);
+	WARN_ON(((unsigned long)(PAGE0.mem_pdc_hi) << 32
+			| PAGE0.mem_pdc) != pdce_proc);
 #endif
 
 	smp_cpu_init(slave_id);
