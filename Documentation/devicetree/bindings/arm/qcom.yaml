@@ -25,6 +25,7 @@ description: |
   The 'SoC' element must be one of the following strings:
 
         apq8016
+        apq8026
         apq8074
         apq8084
         apq8096
@@ -44,6 +45,7 @@ description: |
         sdm660
         sdm845
         sdx55
+        sdx65
         sm8150
         sm8250
         sm8350
@@ -91,6 +93,11 @@ properties:
           - enum:
               - qcom,apq8016-sbc
           - const: qcom,apq8016
+
+      - items:
+          - enum:
+              - lge,lenok
+          - const: qcom,apq8026
 
       - items:
           - enum:
@@ -205,6 +212,11 @@ properties:
               - qcom,sdx55-telit-fn980-tlb
               - qcom,sdx55-t55
           - const: qcom,sdx55
+
+      - items:
+          - enum:
+              - qcom,sdx65-mtp
+          - const: qcom,sdx65
 
       - items:
           - enum:
