@@ -223,30 +223,6 @@ void cifs_fscache_reset_inode_cookie(struct inode *inode)
 	}
 }
 
-int cifs_fscache_release_page(struct page *page, gfp_t gfp)
-{
-	if (PageFsCache(page)) {
-		struct inode *inode = page->mapping->host;
-		struct cifsInodeInfo *cifsi = CIFS_I(inode);
-
-		cifs_dbg(FYI, "%s: (0x%p/0x%p)\n",
-			 __func__, page, cifsi->fscache);
-		if (!fscache_maybe_release_page(cifsi->fscache, page, gfp))
-			return 0;
-	}
-
-	return 1;
-}
-
-static void cifs_readpage_from_fscache_complete(struct page *page, void *ctx,
-						int error)
-{
-	cifs_dbg(FYI, "%s: (0x%p/%d)\n", __func__, page, error);
-	if (!error)
-		SetPageUptodate(page);
-	unlock_page(page);
-}
-
 /*
  * Retrieve a page from FS-Cache
  */
@@ -256,12 +232,9 @@ int __cifs_readpage_from_fscache(struct inode *inode, struct page *page)
 
 	cifs_dbg(FYI, "%s: (fsc:%p, p:%p, i:0x%p\n",
 		 __func__, CIFS_I(inode)->fscache, page, inode);
-	ret = fscache_read_or_alloc_page(CIFS_I(inode)->fscache, page,
-					 cifs_readpage_from_fscache_complete,
-					 NULL,
-					 GFP_KERNEL);
-	switch (ret) {
 
+	ret = fscache_fallback_read_page(cifs_inode_cookie(inode), page);
+	switch (ret) {
 	case 0: /* page found in fscache, read submitted */
 		cifs_dbg(FYI, "%s: submitted\n", __func__);
 		return ret;
@@ -276,86 +249,14 @@ int __cifs_readpage_from_fscache(struct inode *inode, struct page *page)
 	return ret;
 }
 
-/*
- * Retrieve a set of pages from FS-Cache
- */
-int __cifs_readpages_from_fscache(struct inode *inode,
-				struct address_space *mapping,
-				struct list_head *pages,
-				unsigned *nr_pages)
-{
-	int ret;
-
-	cifs_dbg(FYI, "%s: (0x%p/%u/0x%p)\n",
-		 __func__, CIFS_I(inode)->fscache, *nr_pages, inode);
-	ret = fscache_read_or_alloc_pages(CIFS_I(inode)->fscache, mapping,
-					  pages, nr_pages,
-					  cifs_readpage_from_fscache_complete,
-					  NULL,
-					  mapping_gfp_mask(mapping));
-	switch (ret) {
-	case 0:	/* read submitted to the cache for all pages */
-		cifs_dbg(FYI, "%s: submitted\n", __func__);
-		return ret;
-
-	case -ENOBUFS:	/* some pages are not cached and can't be */
-	case -ENODATA:	/* some pages are not cached */
-		cifs_dbg(FYI, "%s: no page\n", __func__);
-		return 1;
-
-	default:
-		cifs_dbg(FYI, "unknown error ret = %d\n", ret);
-	}
-
-	return ret;
-}
-
 void __cifs_readpage_to_fscache(struct inode *inode, struct page *page)
 {
 	struct cifsInodeInfo *cifsi = CIFS_I(inode);
-	int ret;
 
 	WARN_ON(!cifsi->fscache);
 
 	cifs_dbg(FYI, "%s: (fsc: %p, p: %p, i: %p)\n",
 		 __func__, cifsi->fscache, page, inode);
-	ret = fscache_write_page(cifsi->fscache, page,
-				 cifsi->vfs_inode.i_size, GFP_KERNEL);
-	if (ret != 0)
-		fscache_uncache_page(cifsi->fscache, page);
-}
 
-void __cifs_fscache_readpages_cancel(struct inode *inode, struct list_head *pages)
-{
-	cifs_dbg(FYI, "%s: (fsc: %p, i: %p)\n",
-		 __func__, CIFS_I(inode)->fscache, inode);
-	fscache_readpages_cancel(CIFS_I(inode)->fscache, pages);
-}
-
-void __cifs_fscache_invalidate_page(struct page *page, struct inode *inode)
-{
-	struct cifsInodeInfo *cifsi = CIFS_I(inode);
-	struct fscache_cookie *cookie = cifsi->fscache;
-
-	cifs_dbg(FYI, "%s: (0x%p/0x%p)\n", __func__, page, cookie);
-	fscache_wait_on_page_write(cookie, page);
-	fscache_uncache_page(cookie, page);
-}
-
-void __cifs_fscache_wait_on_page_write(struct inode *inode, struct page *page)
-{
-	struct cifsInodeInfo *cifsi = CIFS_I(inode);
-	struct fscache_cookie *cookie = cifsi->fscache;
-
-	cifs_dbg(FYI, "%s: (0x%p/0x%p)\n", __func__, page, cookie);
-	fscache_wait_on_page_write(cookie, page);
-}
-
-void __cifs_fscache_uncache_page(struct inode *inode, struct page *page)
-{
-	struct cifsInodeInfo *cifsi = CIFS_I(inode);
-	struct fscache_cookie *cookie = cifsi->fscache;
-
-	cifs_dbg(FYI, "%s: (0x%p/0x%p)\n", __func__, page, cookie);
-	fscache_uncache_page(cookie, page);
+	fscache_fallback_write_page(cifs_inode_cookie(inode), page);
 }

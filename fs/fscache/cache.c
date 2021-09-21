@@ -381,12 +381,6 @@ void fscache_withdraw_cache(struct fscache_cache *cache)
 	cache->ops->sync_cache(cache);
 	fscache_stat_d(&fscache_n_cop_sync_cache);
 
-	/* dissociate all the netfs pages backed by this cache from the block
-	 * mappings in the cache */
-	fscache_stat(&fscache_n_cop_dissociate_pages);
-	cache->ops->dissociate_pages(cache);
-	fscache_stat_d(&fscache_n_cop_dissociate_pages);
-
 	/* we now have to destroy all the active objects pertaining to this
 	 * cache - which we do by passing them off to thread pool to be
 	 * disposed of */
