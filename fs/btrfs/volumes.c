@@ -7202,6 +7202,13 @@ static int read_one_dev(struct extent_buffer *leaf,
 			set_bit(BTRFS_DEV_STATE_MISSING, &device->dev_state);
 		}
 
+		if (device->bdev &&
+		    test_bit(BTRFS_DEV_STATE_MISSING, &device->dev_state) &&
+		    device->fs_devices->missing_devices > 0) {
+			device->fs_devices->missing_devices--;
+			clear_bit(BTRFS_DEV_STATE_MISSING, &device->dev_state);
+		}
+
 		/* Move the device to its own fs_devices */
 		if (device->fs_devices != fs_devices) {
 			ASSERT(test_bit(BTRFS_DEV_STATE_MISSING,
