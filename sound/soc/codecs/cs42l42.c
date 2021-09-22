@@ -851,7 +851,7 @@ static int cs42l42_pcm_hw_params(struct snd_pcm_substream *substream,
 	if (params_width(params) == 24)
 		cs42l42->bclk = (cs42l42->bclk / 3) * 4;
 
-	switch(substream->stream) {
+	switch (substream->stream) {
 	case SNDRV_PCM_STREAM_CAPTURE:
 		if (channels == 2) {
 			val |= CS42L42_ASP_TX_CH2_AP_MASK;
@@ -935,7 +935,7 @@ static int cs42l42_mute_stream(struct snd_soc_dai *dai, int mute, int stream)
 						      CS42L42_HP_ANA_BMUTE_MASK);
 
 		cs42l42->stream_use &= ~(1 << stream);
-		if(!cs42l42->stream_use) {
+		if (!cs42l42->stream_use) {
 			/*
 			 * Switch to the internal oscillator.
 			 * SCLK must remain running until after this clock switch.
@@ -1015,7 +1015,7 @@ static int cs42l42_mute_stream(struct snd_soc_dai *dai, int mute, int stream)
 
 #define CS42L42_FORMATS (SNDRV_PCM_FMTBIT_S16_LE |\
 			 SNDRV_PCM_FMTBIT_S24_LE |\
-			 SNDRV_PCM_FMTBIT_S32_LE )
+			 SNDRV_PCM_FMTBIT_S32_LE)
 
 static const struct snd_soc_dai_ops cs42l42_ops = {
 	.startup	= cs42l42_dai_startup,
@@ -1046,10 +1046,82 @@ static struct snd_soc_dai_driver cs42l42_dai = {
 		.ops = &cs42l42_ops,
 };
 
+static void cs42l42_manual_hs_type_detect(struct cs42l42_private *cs42l42)
+{
+	unsigned int hs_det_status;
+	unsigned int hs_det_comp;
+	unsigned int hs_det_sw;
+
+	/* Set hs detect to manual, active mode */
+	regmap_update_bits(cs42l42->regmap,
+		CS42L42_HSDET_CTL2,
+		CS42L42_HSDET_CTRL_MASK |
+		CS42L42_HSDET_SET_MASK |
+		CS42L42_HSBIAS_REF_MASK |
+		CS42L42_HSDET_AUTO_TIME_MASK,
+		(1 << CS42L42_HSDET_CTRL_SHIFT) |
+		(0 << CS42L42_HSDET_SET_SHIFT) |
+		(0 << CS42L42_HSBIAS_REF_SHIFT) |
+		(0 << CS42L42_HSDET_AUTO_TIME_SHIFT));
+
+	/* Open the SW_HSB_HS3 switch and close SW_HSB_HS4 for a Type 1 headset. */
+	regmap_write(cs42l42->regmap, CS42L42_HS_SWITCH_CTL, CS42L42_HSDET_SW_COMP1);
+
+	regmap_read(cs42l42->regmap, CS42L42_HS_DET_STATUS, &hs_det_status);
+
+	hs_det_comp = (hs_det_status & CS42L42_HSDET_COMP1_OUT_MASK) >>
+			CS42L42_HSDET_COMP1_OUT_SHIFT;
+
+	/* Close the SW_HSB_HS3 switch for a Type 2 headset. */
+	regmap_write(cs42l42->regmap, CS42L42_HS_SWITCH_CTL, CS42L42_HSDET_SW_COMP2);
+
+	regmap_read(cs42l42->regmap, CS42L42_HS_DET_STATUS, &hs_det_status);
+
+	hs_det_comp |= ((hs_det_status & CS42L42_HSDET_COMP2_OUT_MASK) >>
+			CS42L42_HSDET_COMP2_OUT_SHIFT) << 1;
+
+	switch (hs_det_comp) {
+	case CS42L42_HSDET_COMP_TYPE1:
+		cs42l42->hs_type = CS42L42_PLUG_CTIA;
+		hs_det_sw = CS42L42_HSDET_SW_TYPE1;
+		break;
+	case CS42L42_HSDET_COMP_TYPE2:
+		cs42l42->hs_type = CS42L42_PLUG_OMTP;
+		hs_det_sw = CS42L42_HSDET_SW_TYPE2;
+		break;
+	case CS42L42_HSDET_COMP_TYPE3:
+		cs42l42->hs_type = CS42L42_PLUG_HEADPHONE;
+		hs_det_sw = CS42L42_HSDET_SW_TYPE3;
+		break;
+	default:
+		cs42l42->hs_type = CS42L42_PLUG_INVALID;
+		hs_det_sw = CS42L42_HSDET_SW_TYPE4;
+		break;
+	}
+
+	/* Set Switches */
+	regmap_write(cs42l42->regmap, CS42L42_HS_SWITCH_CTL, hs_det_sw);
+
+	/* Set HSDET mode to Manual—Disabled */
+	regmap_update_bits(cs42l42->regmap,
+		CS42L42_HSDET_CTL2,
+		CS42L42_HSDET_CTRL_MASK |
+		CS42L42_HSDET_SET_MASK |
+		CS42L42_HSBIAS_REF_MASK |
+		CS42L42_HSDET_AUTO_TIME_MASK,
+		(0 << CS42L42_HSDET_CTRL_SHIFT) |
+		(0 << CS42L42_HSDET_SET_SHIFT) |
+		(0 << CS42L42_HSBIAS_REF_SHIFT) |
+		(0 << CS42L42_HSDET_AUTO_TIME_SHIFT));
+}
+
 static void cs42l42_process_hs_type_detect(struct cs42l42_private *cs42l42)
 {
 	unsigned int hs_det_status;
 	unsigned int int_status;
+
+	/* Read and save the hs detection result */
+	regmap_read(cs42l42->regmap, CS42L42_HS_DET_STATUS, &hs_det_status);
 
 	/* Mask the auto detect interrupt */
 	regmap_update_bits(cs42l42->regmap,
@@ -1059,23 +1131,31 @@ static void cs42l42_process_hs_type_detect(struct cs42l42_private *cs42l42)
 		(1 << CS42L42_PDN_DONE_SHIFT) |
 		(1 << CS42L42_HSDET_AUTO_DONE_SHIFT));
 
-	/* Set hs detect to automatic, disabled mode */
-	regmap_update_bits(cs42l42->regmap,
-		CS42L42_HSDET_CTL2,
-		CS42L42_HSDET_CTRL_MASK |
-		CS42L42_HSDET_SET_MASK |
-		CS42L42_HSBIAS_REF_MASK |
-		CS42L42_HSDET_AUTO_TIME_MASK,
-		(2 << CS42L42_HSDET_CTRL_SHIFT) |
-		(2 << CS42L42_HSDET_SET_SHIFT) |
-		(0 << CS42L42_HSBIAS_REF_SHIFT) |
-		(3 << CS42L42_HSDET_AUTO_TIME_SHIFT));
-
-	/* Read and save the hs detection result */
-	regmap_read(cs42l42->regmap, CS42L42_HS_DET_STATUS, &hs_det_status);
 
 	cs42l42->hs_type = (hs_det_status & CS42L42_HSDET_TYPE_MASK) >>
 				CS42L42_HSDET_TYPE_SHIFT;
+
+	/* Run Manual detection if auto detect has not found a headset.
+	 * We Re-Run with Manual Detection if the original detection was invalid or headphones,
+	 * to ensure that a headset mic is detected in all cases.
+	 */
+	if (cs42l42->hs_type == CS42L42_PLUG_INVALID ||
+		cs42l42->hs_type == CS42L42_PLUG_HEADPHONE) {
+		dev_dbg(cs42l42->component->dev, "Running Manual Detection Fallback\n");
+		cs42l42_manual_hs_type_detect(cs42l42);
+	} else {
+		/* Set hs detect to automatic, disabled mode */
+		regmap_update_bits(cs42l42->regmap,
+			CS42L42_HSDET_CTL2,
+			CS42L42_HSDET_CTRL_MASK |
+			CS42L42_HSDET_SET_MASK |
+			CS42L42_HSBIAS_REF_MASK |
+			CS42L42_HSDET_AUTO_TIME_MASK,
+			(2 << CS42L42_HSDET_CTRL_SHIFT) |
+			(2 << CS42L42_HSDET_SET_SHIFT) |
+			(0 << CS42L42_HSBIAS_REF_SHIFT) |
+			(3 << CS42L42_HSDET_AUTO_TIME_SHIFT));
+	}
 
 	/* Set up button detection */
 	if ((cs42l42->hs_type == CS42L42_PLUG_CTIA) ||
@@ -1492,7 +1572,7 @@ static irqreturn_t cs42l42_irq_thread(int irq, void *data)
 	if ((~masks[5]) & irq_params_table[5].mask) {
 		if (stickies[5] & CS42L42_HSDET_AUTO_DONE_MASK) {
 			cs42l42_process_hs_type_detect(cs42l42);
-			switch(cs42l42->hs_type){
+			switch (cs42l42->hs_type) {
 			case CS42L42_PLUG_CTIA:
 			case CS42L42_PLUG_OMTP:
 				snd_soc_jack_report(cs42l42->jack, SND_JACK_HEADSET,
@@ -1524,7 +1604,7 @@ static irqreturn_t cs42l42_irq_thread(int irq, void *data)
 				cs42l42->plug_state = CS42L42_TS_UNPLUG;
 				cs42l42_cancel_hs_type_detect(cs42l42);
 
-				switch(cs42l42->hs_type){
+				switch (cs42l42->hs_type) {
 				case CS42L42_PLUG_CTIA:
 				case CS42L42_PLUG_OMTP:
 					snd_soc_jack_report(cs42l42->jack, 0, SND_JACK_HEADSET);
