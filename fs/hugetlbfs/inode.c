@@ -1463,18 +1463,8 @@ struct file *hugetlb_file_setup(const char *name, size_t size,
 	if (!mnt)
 		return ERR_PTR(-ENOENT);
 
-	if (creat_flags == HUGETLB_SHMFS_INODE && !can_do_hugetlb_shm()) {
-		*ucounts = current_ucounts();
-		if (user_shm_lock(size, *ucounts)) {
-			task_lock(current);
-			pr_warn_once("%s (%d): Using mlock ulimits for SHM_HUGETLB is deprecated\n",
-				current->comm, current->pid);
-			task_unlock(current);
-		} else {
-			*ucounts = NULL;
-			return ERR_PTR(-EPERM);
-		}
-	}
+	if (creat_flags == HUGETLB_SHMFS_INODE && !can_do_hugetlb_shm())
+		return ERR_PTR(-EPERM);
 
 	file = ERR_PTR(-ENOSPC);
 	inode = hugetlbfs_get_inode(mnt->mnt_sb, NULL, S_IFREG | S_IRWXUGO, 0);
