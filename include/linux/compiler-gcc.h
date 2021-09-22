@@ -144,3 +144,12 @@
 #else
 #define __diag_GCC_8(s)
 #endif
+
+/*
+ * https://gcc.gnu.org/onlinedocs/gcc/Common-Function-Attributes.html#index-alloc_005fsize-function-attribute
+ * However, prior to 9.1, -Wno-alloc-size-larger-than does not work,
+ * making this attribute unusable.
+ */
+#if GCC_VERSION < 90100
+#define __alloc_size(x, ...)	/**/
+#endif

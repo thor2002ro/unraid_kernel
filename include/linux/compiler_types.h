@@ -254,6 +254,11 @@ struct ftrace_likely_data {
 #define asm_volatile_goto(x...) asm goto(x)
 #endif
 
+/* If not specifically disabled, allow the use of __alloc_size attribute. */
+#ifndef __alloc_size
+# define __alloc_size(x, ...)		__attribute__((__alloc_size__(x, ## __VA_ARGS__)))
+#endif
+
 #ifdef CONFIG_CC_HAS_ASM_INLINE
 #define asm_inline asm __inline
 #else

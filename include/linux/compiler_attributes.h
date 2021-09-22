@@ -34,12 +34,6 @@
 #define __aligned_largest               __attribute__((__aligned__))
 
 /*
- *   gcc: https://gcc.gnu.org/onlinedocs/gcc/Common-Function-Attributes.html#index-alloc_005fsize-function-attribute
- * clang: https://clang.llvm.org/docs/AttributeReference.html#alloc-size
- */
-#define __alloc_size(x, ...)		__attribute__((__alloc_size__(x, ## __VA_ARGS__)))
-
-/*
  * Note: users of __always_inline currently do not write "inline" themselves,
  * which seems to be required by gcc to apply the attribute according
  * to its docs (and also "warning: always_inline function might not be
