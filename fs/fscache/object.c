@@ -965,14 +965,12 @@ static const struct fscache_state *_fscache_invalidate_object(struct fscache_obj
 	 * retire the object instead.
 	 */
 	if (!fscache_use_cookie(object)) {
-		ASSERT(radix_tree_empty(&object->cookie->stores));
 		set_bit(FSCACHE_OBJECT_RETIRED, &object->flags);
 		_leave(" [no cookie]");
 		return transit_to(KILL_OBJECT);
 	}
 
 	/* Reject any new read/write ops and abort any that are pending. */
-	fscache_invalidate_writes(cookie);
 	clear_bit(FSCACHE_OBJECT_PENDING_WRITE, &object->flags);
 	fscache_cancel_all_ops(object);
 
