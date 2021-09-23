@@ -710,6 +710,12 @@ Indentation and Line Breaks
 
     See: https://www.kernel.org/doc/html/latest/process/coding-style.html#breaking-long-lines-and-strings
 
+  **SPLIT_STRING**
+    Quoted strings that appear as messages in userspace and can be
+    grepped, should not be split across multiple lines.
+
+    See: https://lore.kernel.org/lkml/20120203052727.GA15035@leaf/
+
   **TRAILING_STATEMENTS**
     Trailing statements (for example after any conditional) should be
     on the next line.
@@ -845,6 +851,27 @@ Macros, Attributes and Symbols
     Use the `fallthrough;` pseudo keyword instead of
     `/* fallthrough */` like comments.
 
+  **TRAILING_SEMICOLON**
+    Macro definition should not end with a semicolon. The macro
+    invocation style should be consistent with function calls.
+    This can prevent any unexpected code paths::
+
+      #define MAC do_something;
+
+    If this macro is used within a if else statement, like::
+
+      if (some_condition)
+              MAC;
+
+      else
+              do_something;
+
+    Then there would be a compilation error, because when the macro is
+    expanded there are two trailing semicolons, so the else branch gets
+    orphaned.
+
+    See: https://lore.kernel.org/lkml/1399671106.2912.21.camel@joe-AO725/
+
   **WEAK_DECLARATION**
     Using weak declarations like __attribute__((weak)) or __weak
     can have unintended link defects.  Avoid using them.
@@ -956,6 +983,17 @@ Permissions
   **NON_OCTAL_PERMISSIONS**
     Permission bits should use 4 digit octal permissions (like 0700 or 0444).
     Avoid using any other base like decimal.
+
+  **SYMBOLIC_PERMS**
+    Permission bits in the octal form are more readable and easier to
+    understand than their symbolic counterparts because many command-line
+    tools use this notation. Experienced kernel developers have been using
+    these traditional Unix permission bits for decades and so they find it
+    easier to understand the octal notation than the symbolic macros.
+    For example, it is harder to read S_IWUSR|S_IRUGO than 0644, which
+    obscures the developer's intent rather than clarifying it.
+
+    See: https://lore.kernel.org/lkml/CA+55aFw5v23T-zvDZp-MmD_EYxF8WbafwwB59934FV7g21uMGQ@mail.gmail.com/
 
 
 Spacing and Brackets
