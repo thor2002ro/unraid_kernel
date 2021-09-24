@@ -2441,6 +2441,12 @@ static void io_iopoll_complete(struct io_ring_ctx *ctx, struct list_head *done)
 	io_req_free_batch_finish(ctx, &rb);
 }
 
+/* same as "continue" but starts from the pos, not next to it */
+#define list_for_each_entry_safe_resume(pos, n, head, member) 		\
+	for (n = list_next_entry(pos, member);				\
+	     !list_entry_is_head(pos, head, member);			\
+	     pos = n, n = list_next_entry(n, member))
+
 static int io_do_iopoll(struct io_ring_ctx *ctx, bool force_nonspin)
 {
 	struct io_kiocb *req, *tmp;
@@ -2454,7 +2460,7 @@ static int io_do_iopoll(struct io_ring_ctx *ctx, bool force_nonspin)
 	 */
 	spin = !ctx->poll_multi_queue && !force_nonspin;
 
-	list_for_each_entry_safe(req, tmp, &ctx->iopoll_list, inflight_entry) {
+	list_for_each_entry(req, &ctx->iopoll_list, inflight_entry) {
 		struct kiocb *kiocb = &req->rw.kiocb;
 		int ret;
 
@@ -2463,12 +2469,7 @@ static int io_do_iopoll(struct io_ring_ctx *ctx, bool force_nonspin)
 		 * If we find a request that requires polling, break out
 		 * and complete those lists first, if we have entries there.
 		 */
-		if (READ_ONCE(req->iopoll_completed)) {
-			list_move_tail(&req->inflight_entry, &done);
-			nr_events++;
-			continue;
-		}
-		if (!list_empty(&done))
+		if (READ_ONCE(req->iopoll_completed))
 			break;
 
 		ret = kiocb->ki_filp->f_op->iopoll(kiocb, spin);
@@ -2478,15 +2479,20 @@ static int io_do_iopoll(struct io_ring_ctx *ctx, bool force_nonspin)
 			spin = false;
 
 		/* iopoll may have completed current req */
-		if (READ_ONCE(req->iopoll_completed)) {
-			list_move_tail(&req->inflight_entry, &done);
-			nr_events++;
-		}
+		if (READ_ONCE(req->iopoll_completed))
+			break;
 	}
 
-	if (!list_empty(&done))
-		io_iopoll_complete(ctx, &done);
+	list_for_each_entry_safe_resume(req, tmp, &ctx->iopoll_list,
+					inflight_entry) {
+		if (!READ_ONCE(req->iopoll_completed))
+			break;
+		list_move_tail(&req->inflight_entry, &done);
+		nr_events++;
+	}
 
+	if (nr_events)
+		io_iopoll_complete(ctx, &done);
 	return nr_events;
 }
 
