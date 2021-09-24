@@ -971,6 +971,9 @@ static int event_ctl(struct switchtec_dev *stdev,
 		return PTR_ERR(reg);
 
 	hdr = ioread32(reg);
+	if (hdr & SWITCHTEC_EVENT_NOT_SUPP)
+		return -EOPNOTSUPP;
+
 	for (i = 0; i < ARRAY_SIZE(ctl->data); i++)
 		ctl->data[i] = ioread32(&reg[i + 1]);
 
@@ -1043,7 +1046,7 @@ static int ioctl_event_ctl(struct switchtec_dev *stdev,
 		for (ctl.index = 0; ctl.index < nr_idxs; ctl.index++) {
 			ctl.flags = event_flags;
 			ret = event_ctl(stdev, &ctl);
-			if (ret < 0)
+			if (ret < 0 && ret != -EOPNOTSUPP)
 				return ret;
 		}
 	} else {
@@ -1349,6 +1352,9 @@ static int mask_event(struct switchtec_dev *stdev, int eid, int idx)
 
 	hdr_reg = event_regs[eid].map_reg(stdev, off, idx);
 	hdr = ioread32(hdr_reg);
+
+	if (hdr & SWITCHTEC_EVENT_NOT_SUPP)
+		return 0;
 
 	if (!(hdr & SWITCHTEC_EVENT_OCCURRED && hdr & SWITCHTEC_EVENT_EN_IRQ))
 		return 0;
