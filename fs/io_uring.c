@@ -3605,7 +3605,6 @@ static int io_write(struct io_kiocb *req, unsigned int issue_flags)
 		iov_iter_save_state(iter, state);
 	}
 	req->result = iov_iter_count(iter);
-	ret2 = 0;
 
 	/* Ensure we clear previously set non-block flag */
 	if (!force_nonblock)
@@ -3670,8 +3669,6 @@ done:
 	} else {
 copy_iov:
 		iov_iter_restore(iter, state);
-		if (ret2 > 0)
-			iov_iter_advance(iter, ret2);
 		ret = io_setup_async_rw(req, iovec, inline_vecs, iter, false);
 		return ret ?: -EAGAIN;
 	}
@@ -4387,7 +4384,7 @@ static int io_add_buffers(struct io_provide_buf *pbuf, struct io_buffer **head)
 	int i, bid = pbuf->bid;
 
 	for (i = 0; i < pbuf->nbufs; i++) {
-		buf = kmalloc(sizeof(*buf), GFP_KERNEL);
+		buf = kmalloc(sizeof(*buf), GFP_KERNEL_ACCOUNT);
 		if (!buf)
 			break;
 
@@ -5338,7 +5335,7 @@ static bool __io_poll_complete(struct io_kiocb *req, __poll_t mask)
 	if (req->poll.events & EPOLLONESHOT)
 		flags = 0;
 	if (!io_cqring_fill_event(ctx, req->user_data, error, flags)) {
-		req->poll.done = true;
+		req->poll.events |= EPOLLONESHOT;
 		flags = 0;
 	}
 	if (flags & IORING_CQE_F_MORE)
@@ -5367,10 +5364,15 @@ static void io_poll_task_func(struct io_kiocb *req, bool *locked)
 	} else {
 		bool done;
 
+		if (req->poll.done) {
+			spin_unlock(&ctx->completion_lock);
+			return;
+		}
 		done = __io_poll_complete(req, req->result);
 		if (done) {
 			io_poll_remove_double(req);
 			hash_del(&req->hash_node);
+			req->poll.done = true;
 		} else {
 			req->result = 0;
 			add_wait_queue(req->poll.head, &req->poll.wait);
@@ -5508,6 +5510,7 @@ static void io_async_task_func(struct io_kiocb *req, bool *locked)
 
 	hash_del(&req->hash_node);
 	io_poll_remove_double(req);
+	apoll->poll.done = true;
 	spin_unlock(&ctx->completion_lock);
 
 	if (!READ_ONCE(apoll->poll.canceled))
@@ -5828,6 +5831,7 @@ static int io_poll_add(struct io_kiocb *req, unsigned int issue_flags)
 	struct io_ring_ctx *ctx = req->ctx;
 	struct io_poll_table ipt;
 	__poll_t mask;
+	bool done;
 
 	ipt.pt._qproc = io_poll_queue_proc;
 
@@ -5836,13 +5840,13 @@ static int io_poll_add(struct io_kiocb *req, unsigned int issue_flags)
 
 	if (mask) { /* no async, we'd stolen it */
 		ipt.error = 0;
-		io_poll_complete(req, mask);
+		done = io_poll_complete(req, mask);
 	}
 	spin_unlock(&ctx->completion_lock);
 
 	if (mask) {
 		io_cqring_ev_posted(ctx);
-		if (poll->events & EPOLLONESHOT)
+		if (done)
 			io_put_req(req);
 	}
 	return ipt.error;
@@ -6333,19 +6337,16 @@ static int io_files_update(struct io_kiocb *req, unsigned int issue_flags)
 	struct io_uring_rsrc_update2 up;
 	int ret;
 
-	if (issue_flags & IO_URING_F_NONBLOCK)
-		return -EAGAIN;
-
 	up.offset = req->rsrc_update.offset;
 	up.data = req->rsrc_update.arg;
 	up.nr = 0;
 	up.tags = 0;
 	up.resv = 0;
 
-	mutex_lock(&ctx->uring_lock);
+	io_ring_submit_lock(ctx, !(issue_flags & IO_URING_F_NONBLOCK));
 	ret = __io_register_rsrc_update(ctx, IORING_RSRC_FILE,
 					&up, req->rsrc_update.nr_args);
-	mutex_unlock(&ctx->uring_lock);
+	io_ring_submit_unlock(ctx, !(issue_flags & IO_URING_F_NONBLOCK));
 
 	if (ret < 0)
 		req_set_fail(req);
@@ -9166,8 +9167,10 @@ static void io_destroy_buffers(struct io_ring_ctx *ctx)
 	struct io_buffer *buf;
 	unsigned long index;
 
-	xa_for_each(&ctx->io_buffers, index, buf)
+	xa_for_each(&ctx->io_buffers, index, buf) {
 		__io_remove_buffers(ctx, buf, index, -1U);
+		cond_resched();
+	}
 }
 
 static void io_req_cache_free(struct list_head *list)
@@ -9665,8 +9668,10 @@ static void io_uring_clean_tctx(struct io_uring_task *tctx)
 	struct io_tctx_node *node;
 	unsigned long index;
 
-	xa_for_each(&tctx->xa, index, node)
+	xa_for_each(&tctx->xa, index, node) {
 		io_uring_del_tctx_node(index);
+		cond_resched();
+	}
 	if (wq) {
 		/*
 		 * Must be after io_uring_del_task_file() (removes nodes under
