@@ -18,7 +18,6 @@
 
 #include "odm.h"
 #include "odm_HWConfig.h"
-#include "odm_RegDefine11AC.h"
 #include "odm_RegDefine11N.h"
 
 #include "HalPhyRf_8188e.h"/* for IQK,LCK,Power-tracking */
@@ -26,7 +25,6 @@
 #include "rtl8188e_hal.h"
 
 #include "odm_interface.h"
-#include "odm_reg.h"
 
 #include "HalHWImg8188E_MAC.h"
 #include "HalHWImg8188E_RF.h"

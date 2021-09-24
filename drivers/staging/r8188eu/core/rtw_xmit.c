@@ -9,6 +9,7 @@
 #include "../include/osdep_intf.h"
 #include "../include/usb_ops.h"
 #include "../include/usb_osintf.h"
+#include "../include/rtl8188e_xmit.h"
 
 static u8 P802_1H_OUI[P80211_OUI_LEN] = { 0x00, 0x00, 0xf8 };
 static u8 RFC1042_OUI[P80211_OUI_LEN] = { 0x00, 0x00, 0x00 };
@@ -17,7 +18,7 @@ static void _init_txservq(struct tx_servq *ptxservq)
 {
 
 	INIT_LIST_HEAD(&ptxservq->tx_pending);
-	_rtw_init_queue(&ptxservq->sta_pending);
+	rtw_init_queue(&ptxservq->sta_pending);
 	ptxservq->qcnt = 0;
 
 }
@@ -52,18 +53,18 @@ s32	_rtw_init_xmit_priv(struct xmit_priv *pxmitpriv, struct adapter *padapter)
 	sema_init(&pxmitpriv->terminate_xmitthread_sema, 0);
 
 	/*
-	Please insert all the queue initializaiton using _rtw_init_queue below
+	Please insert all the queue initializaiton using rtw_init_queue below
 	*/
 
 	pxmitpriv->adapter = padapter;
 
-	_rtw_init_queue(&pxmitpriv->be_pending);
-	_rtw_init_queue(&pxmitpriv->bk_pending);
-	_rtw_init_queue(&pxmitpriv->vi_pending);
-	_rtw_init_queue(&pxmitpriv->vo_pending);
-	_rtw_init_queue(&pxmitpriv->bm_pending);
+	rtw_init_queue(&pxmitpriv->be_pending);
+	rtw_init_queue(&pxmitpriv->bk_pending);
+	rtw_init_queue(&pxmitpriv->vi_pending);
+	rtw_init_queue(&pxmitpriv->vo_pending);
+	rtw_init_queue(&pxmitpriv->bm_pending);
 
-	_rtw_init_queue(&pxmitpriv->free_xmit_queue);
+	rtw_init_queue(&pxmitpriv->free_xmit_queue);
 
 	/*
 	Please allocate memory with the sz = (struct xmit_frame) * NR_XMITFRAME,
@@ -105,8 +106,8 @@ s32	_rtw_init_xmit_priv(struct xmit_priv *pxmitpriv, struct adapter *padapter)
 	pxmitpriv->frag_len = MAX_FRAG_THRESHOLD;
 
 	/* init xmit_buf */
-	_rtw_init_queue(&pxmitpriv->free_xmitbuf_queue);
-	_rtw_init_queue(&pxmitpriv->pending_xmitbuf_queue);
+	rtw_init_queue(&pxmitpriv->free_xmitbuf_queue);
+	rtw_init_queue(&pxmitpriv->pending_xmitbuf_queue);
 
 	pxmitpriv->pallocated_xmitbuf = vzalloc(NR_XMITBUFF * sizeof(struct xmit_buf) + 4);
 
@@ -147,7 +148,7 @@ s32	_rtw_init_xmit_priv(struct xmit_priv *pxmitpriv, struct adapter *padapter)
 	pxmitpriv->free_xmitbuf_cnt = NR_XMITBUFF;
 
 	/*  Init xmit extension buff */
-	_rtw_init_queue(&pxmitpriv->free_xmit_extbuf_queue);
+	rtw_init_queue(&pxmitpriv->free_xmit_extbuf_queue);
 
 	pxmitpriv->pallocated_xmit_extbuf = vzalloc(num_xmit_extbuf * sizeof(struct xmit_buf) + 4);
 
@@ -196,7 +197,7 @@ s32	_rtw_init_xmit_priv(struct xmit_priv *pxmitpriv, struct adapter *padapter)
 	pxmitpriv->voq_cnt = 0;
 
 	pxmitpriv->ack_tx = false;
-	_rtw_mutex_init(&pxmitpriv->ack_tx_mutex);
+	mutex_init(&pxmitpriv->ack_tx_mutex);
 	rtw_sctx_init(&pxmitpriv->ack_tx_ops, 0);
 
 	rtw_hal_init_xmit_priv(padapter);
@@ -243,7 +244,7 @@ void _rtw_free_xmit_priv(struct xmit_priv *pxmitpriv)
 
 	rtw_free_hwxmits(padapter);
 
-	_rtw_mutex_free(&pxmitpriv->ack_tx_mutex);
+	mutex_destroy(&pxmitpriv->ack_tx_mutex);
 }
 
 static void update_attrib_vcs_info(struct adapter *padapter, struct xmit_frame *pxmitframe)
@@ -576,8 +577,6 @@ static s32 update_attrib(struct adapter *padapter, struct sk_buff *pkt, struct p
 	else
 		pattrib->bswenc = false;
 
-	rtw_set_tx_chksum_offload(pkt, pattrib);
-
 	update_attrib_phy_info(pattrib, psta);
 
 exit:
@@ -683,13 +682,13 @@ static s32 xmitframe_swencrypt(struct adapter *padapter, struct xmit_frame *pxmi
 		switch (pattrib->encrypt) {
 		case _WEP40_:
 		case _WEP104_:
-			rtw_wep_encrypt(padapter, (u8 *)pxmitframe);
+			rtw_wep_encrypt(padapter, pxmitframe);
 			break;
 		case _TKIP_:
-			rtw_tkip_encrypt(padapter, (u8 *)pxmitframe);
+			rtw_tkip_encrypt(padapter, pxmitframe);
 			break;
 		case _AES_:
-			rtw_aes_encrypt(padapter, (u8 *)pxmitframe);
+			rtw_aes_encrypt(padapter, pxmitframe);
 			break;
 		default:
 			break;
@@ -1773,22 +1772,18 @@ s32 rtw_xmit(struct adapter *padapter, struct sk_buff **ppkt)
 
 	do_queue_select(padapter, &pxmitframe->attrib);
 
-#ifdef CONFIG_88EU_AP_MODE
 	spin_lock_bh(&pxmitpriv->lock);
 	if (xmitframe_enqueue_for_sleeping_sta(padapter, pxmitframe)) {
 		spin_unlock_bh(&pxmitpriv->lock);
 		return 1;
 	}
 	spin_unlock_bh(&pxmitpriv->lock);
-#endif
 
-	if (!rtw_hal_xmit(padapter, pxmitframe))
+	if (!rtl8188eu_hal_xmit(padapter, pxmitframe))
 		return 1;
 
 	return 0;
 }
-
-#if defined(CONFIG_88EU_AP_MODE)
 
 int xmitframe_enqueue_for_sleeping_sta(struct adapter *padapter, struct xmit_frame *pxmitframe)
 {
@@ -2018,7 +2013,7 @@ void wakeup_sta_to_xmit(struct adapter *padapter, struct sta_info *psta)
 		pxmitframe->attrib.triggered = 1;
 
 		spin_unlock_bh(&psta->sleep_q.lock);
-		if (rtw_hal_xmit(padapter, pxmitframe))
+		if (rtl8188eu_hal_xmit(padapter, pxmitframe))
 			rtw_os_xmit_complete(padapter, pxmitframe);
 		spin_lock_bh(&psta->sleep_q.lock);
 	}
@@ -2068,7 +2063,7 @@ void wakeup_sta_to_xmit(struct adapter *padapter, struct sta_info *psta)
 			pxmitframe->attrib.triggered = 1;
 
 			spin_unlock_bh(&psta_bmc->sleep_q.lock);
-			if (rtw_hal_xmit(padapter, pxmitframe))
+			if (rtl8188eu_hal_xmit(padapter, pxmitframe))
 				rtw_os_xmit_complete(padapter, pxmitframe);
 			spin_lock_bh(&psta_bmc->sleep_q.lock);
 		}
@@ -2142,7 +2137,7 @@ void xmit_delivery_enabled_frames(struct adapter *padapter, struct sta_info *pst
 
 		pxmitframe->attrib.triggered = 1;
 
-		if (rtw_hal_xmit(padapter, pxmitframe))
+		if (rtl8188eu_hal_xmit(padapter, pxmitframe))
 			rtw_os_xmit_complete(padapter, pxmitframe);
 
 		if ((psta->sleepq_ac_len == 0) && (!psta->has_legacy_ac) && (wmmps_ac)) {
@@ -2155,8 +2150,6 @@ void xmit_delivery_enabled_frames(struct adapter *padapter, struct sta_info *pst
 
 	spin_unlock_bh(&psta->sleep_q.lock);
 }
-
-#endif
 
 void rtw_sctx_init(struct submit_ctx *sctx, int timeout_ms)
 {
