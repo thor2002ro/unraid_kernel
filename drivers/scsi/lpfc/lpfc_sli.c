@@ -1404,7 +1404,8 @@ __lpfc_sli_release_iocbq_s4(struct lpfc_hba *phba, struct lpfc_iocbq *iocbq)
 		}
 
 		if ((iocbq->iocb_flag & LPFC_EXCHANGE_BUSY) &&
-			(sglq->state != SGL_XRI_ABORTED)) {
+		    (!(unlikely(pci_channel_offline(phba->pcidev)))) &&
+		    sglq->state != SGL_XRI_ABORTED) {
 			spin_lock_irqsave(&phba->sli4_hba.sgl_list_lock,
 					  iflag);
 
@@ -4583,10 +4584,12 @@ lpfc_sli_flush_io_rings(struct lpfc_hba *phba)
 			lpfc_sli_cancel_iocbs(phba, &txq,
 					      IOSTAT_LOCAL_REJECT,
 					      IOERR_SLI_DOWN);
-			/* Flush the txcmpq */
+			/* Flush the txcmplq */
 			lpfc_sli_cancel_iocbs(phba, &txcmplq,
 					      IOSTAT_LOCAL_REJECT,
 					      IOERR_SLI_DOWN);
+			if (unlikely(pci_channel_offline(phba->pcidev)))
+				lpfc_sli4_io_xri_aborted(phba, NULL, 0);
 		}
 	} else {
 		pring = &psli->sli3_ring[LPFC_FCP_RING];
@@ -7761,8 +7764,6 @@ lpfc_mbx_cmpl_cgn_set_ftrs(struct lpfc_hba *phba, LPFC_MBOXQ_t *pmb)
 
 	/* Zero out Congestion Signal ACQE counter */
 	phba->cgn_acqe_cnt = 0;
-	atomic64_set(&phba->cgn_acqe_stat.warn, 0);
-	atomic64_set(&phba->cgn_acqe_stat.alarm, 0);
 
 	acqe = bf_get(lpfc_mbx_set_feature_CGN_acqe_freq,
 		      &pmb->u.mqe.un.set_feature);
@@ -8014,6 +8015,10 @@ lpfc_cmf_setup(struct lpfc_hba *phba)
 			/* initialize congestion buffer info */
 			lpfc_init_congestion_buf(phba);
 			lpfc_init_congestion_stat(phba);
+
+			/* Zero out Congestion Signal counters */
+			atomic64_set(&phba->cgn_acqe_stat.alarm, 0);
+			atomic64_set(&phba->cgn_acqe_stat.warn, 0);
 		}
 
 		rc = lpfc_sli4_cgn_params_read(phba);
@@ -12485,15 +12490,54 @@ lpfc_sli_hba_iocb_abort(struct lpfc_hba *phba)
 }
 
 /**
- * lpfc_sli_validate_fcp_iocb - find commands associated with a vport or LUN
+ * lpfc_sli_validate_fcp_iocb_for_abort - filter iocbs appropriate for FCP aborts
+ * @iocbq: Pointer to iocb object.
+ * @vport: Pointer to driver virtual port object.
+ *
+ * This function acts as an iocb filter for functions which abort FCP iocbs.
+ *
+ * Return values
+ * -ENODEV, if a null iocb or vport ptr is encountered
+ * -EINVAL, if the iocb is not an FCP I/O, not on the TX cmpl queue, premarked as
+ *          driver already started the abort process, or is an abort iocb itself
+ * 0, passes criteria for aborting the FCP I/O iocb
+ **/
+static int
+lpfc_sli_validate_fcp_iocb_for_abort(struct lpfc_iocbq *iocbq,
+				     struct lpfc_vport *vport)
+{
+	IOCB_t *icmd = NULL;
+
+	/* No null ptr vports */
+	if (!iocbq || iocbq->vport != vport)
+		return -ENODEV;
+
+	/* iocb must be for FCP IO, already exists on the TX cmpl queue,
+	 * can't be premarked as driver aborted, nor be an ABORT iocb itself
+	 */
+	icmd = &iocbq->iocb;
+	if (!(iocbq->iocb_flag & LPFC_IO_FCP) ||
+	    !(iocbq->iocb_flag & LPFC_IO_ON_TXCMPLQ) ||
+	    (iocbq->iocb_flag & LPFC_DRIVER_ABORTED) ||
+	    (icmd->ulpCommand == CMD_ABORT_XRI_CN ||
+	     icmd->ulpCommand == CMD_CLOSE_XRI_CN))
+		return -EINVAL;
+
+	return 0;
+}
+
+/**
+ * lpfc_sli_validate_fcp_iocb - validate commands associated with a SCSI target
  * @iocbq: Pointer to driver iocb object.
  * @vport: Pointer to driver virtual port object.
  * @tgt_id: SCSI ID of the target.
  * @lun_id: LUN ID of the scsi device.
  * @ctx_cmd: LPFC_CTX_LUN/LPFC_CTX_TGT/LPFC_CTX_HOST
  *
- * This function acts as an iocb filter for functions which abort or count
- * all FCP iocbs pending on a lun/SCSI target/SCSI host. It will return
+ * This function acts as an iocb filter for validating a lun/SCSI target/SCSI
+ * host.
+ *
+ * It will return
  * 0 if the filtering criteria is met for the given iocb and will return
  * 1 if the filtering criteria is not met.
  * If ctx_cmd == LPFC_CTX_LUN, the function returns 0 only if the
@@ -12512,21 +12556,7 @@ lpfc_sli_validate_fcp_iocb(struct lpfc_iocbq *iocbq, struct lpfc_vport *vport,
 			   lpfc_ctx_cmd ctx_cmd)
 {
 	struct lpfc_io_buf *lpfc_cmd;
-	IOCB_t *icmd = NULL;
 	int rc = 1;
-
-	if (!iocbq || iocbq->vport != vport)
-		return rc;
-
-	if (!(iocbq->iocb_flag & LPFC_IO_FCP) ||
-	    !(iocbq->iocb_flag & LPFC_IO_ON_TXCMPLQ) ||
-	      iocbq->iocb_flag & LPFC_DRIVER_ABORTED)
-		return rc;
-
-	icmd = &iocbq->iocb;
-	if (icmd->ulpCommand == CMD_ABORT_XRI_CN ||
-	    icmd->ulpCommand == CMD_CLOSE_XRI_CN)
-		return rc;
 
 	lpfc_cmd = container_of(iocbq, struct lpfc_io_buf, cur_iocbq);
 
@@ -12582,17 +12612,33 @@ lpfc_sli_sum_iocb(struct lpfc_vport *vport, uint16_t tgt_id, uint64_t lun_id,
 {
 	struct lpfc_hba *phba = vport->phba;
 	struct lpfc_iocbq *iocbq;
+	IOCB_t *icmd = NULL;
 	int sum, i;
+	unsigned long iflags;
 
-	spin_lock_irq(&phba->hbalock);
+	spin_lock_irqsave(&phba->hbalock, iflags);
 	for (i = 1, sum = 0; i <= phba->sli.last_iotag; i++) {
 		iocbq = phba->sli.iocbq_lookup[i];
 
-		if (lpfc_sli_validate_fcp_iocb (iocbq, vport, tgt_id, lun_id,
-						ctx_cmd) == 0)
+		if (!iocbq || iocbq->vport != vport)
+			continue;
+		if (!(iocbq->iocb_flag & LPFC_IO_FCP) ||
+		    !(iocbq->iocb_flag & LPFC_IO_ON_TXCMPLQ))
+			continue;
+
+		/* Include counting outstanding aborts */
+		icmd = &iocbq->iocb;
+		if (icmd->ulpCommand == CMD_ABORT_XRI_CN ||
+		    icmd->ulpCommand == CMD_CLOSE_XRI_CN) {
+			sum++;
+			continue;
+		}
+
+		if (lpfc_sli_validate_fcp_iocb(iocbq, vport, tgt_id, lun_id,
+					       ctx_cmd) == 0)
 			sum++;
 	}
-	spin_unlock_irq(&phba->hbalock);
+	spin_unlock_irqrestore(&phba->hbalock, iflags);
 
 	return sum;
 }
@@ -12659,7 +12705,11 @@ lpfc_sli_abort_fcp_cmpl(struct lpfc_hba *phba, struct lpfc_iocbq *cmdiocb,
  *
  * This function sends an abort command for every SCSI command
  * associated with the given virtual port pending on the ring
- * filtered by lpfc_sli_validate_fcp_iocb function.
+ * filtered by lpfc_sli_validate_fcp_iocb_for_abort and then
+ * lpfc_sli_validate_fcp_iocb function.  The ordering for validation before
+ * submitting abort iocbs must be lpfc_sli_validate_fcp_iocb_for_abort
+ * followed by lpfc_sli_validate_fcp_iocb.
+ *
  * When abort_cmd == LPFC_CTX_LUN, the function sends abort only to the
  * FCP iocbs associated with lun specified by tgt_id and lun_id
  * parameters
@@ -12690,6 +12740,9 @@ lpfc_sli_abort_iocb(struct lpfc_vport *vport, u16 tgt_id, u64 lun_id,
 
 	for (i = 1; i <= phba->sli.last_iotag; i++) {
 		iocbq = phba->sli.iocbq_lookup[i];
+
+		if (lpfc_sli_validate_fcp_iocb_for_abort(iocbq, vport))
+			continue;
 
 		if (lpfc_sli_validate_fcp_iocb(iocbq, vport, tgt_id, lun_id,
 					       abort_cmd) != 0)
@@ -12723,7 +12776,11 @@ lpfc_sli_abort_iocb(struct lpfc_vport *vport, u16 tgt_id, u64 lun_id,
  *
  * This function sends an abort command for every SCSI command
  * associated with the given virtual port pending on the ring
- * filtered by lpfc_sli_validate_fcp_iocb function.
+ * filtered by lpfc_sli_validate_fcp_iocb_for_abort and then
+ * lpfc_sli_validate_fcp_iocb function.  The ordering for validation before
+ * submitting abort iocbs must be lpfc_sli_validate_fcp_iocb_for_abort
+ * followed by lpfc_sli_validate_fcp_iocb.
+ *
  * When taskmgmt_cmd == LPFC_CTX_LUN, the function sends abort only to the
  * FCP iocbs associated with lun specified by tgt_id and lun_id
  * parameters
@@ -12760,6 +12817,9 @@ lpfc_sli_abort_taskmgmt(struct lpfc_vport *vport, struct lpfc_sli_ring *pring,
 
 	for (i = 1; i <= phba->sli.last_iotag; i++) {
 		iocbq = phba->sli.iocbq_lookup[i];
+
+		if (lpfc_sli_validate_fcp_iocb_for_abort(iocbq, vport))
+			continue;
 
 		if (lpfc_sli_validate_fcp_iocb(iocbq, vport, tgt_id, lun_id,
 					       cmd) != 0)
@@ -21104,6 +21164,7 @@ lpfc_drain_txq(struct lpfc_hba *phba)
 					fail_msg,
 					piocbq->iotag, piocbq->sli4_xritag);
 			list_add_tail(&piocbq->list, &completions);
+			fail_msg = NULL;
 		}
 		spin_unlock_irqrestore(&pring->ring_lock, iflags);
 	}
@@ -21963,8 +22024,26 @@ lpfc_get_io_buf_from_multixri_pools(struct lpfc_hba *phba,
 
 	qp = &phba->sli4_hba.hdwq[hwqid];
 	lpfc_ncmd = NULL;
+	if (!qp) {
+		lpfc_printf_log(phba, KERN_INFO,
+				LOG_SLI | LOG_NVME_ABTS | LOG_FCP,
+				"5556 NULL qp for hwqid  x%x\n", hwqid);
+		return lpfc_ncmd;
+	}
 	multixri_pool = qp->p_multixri_pool;
+	if (!multixri_pool) {
+		lpfc_printf_log(phba, KERN_INFO,
+				LOG_SLI | LOG_NVME_ABTS | LOG_FCP,
+				"5557 NULL multixri for hwqid  x%x\n", hwqid);
+		return lpfc_ncmd;
+	}
 	pvt_pool = &multixri_pool->pvt_pool;
+	if (!pvt_pool) {
+		lpfc_printf_log(phba, KERN_INFO,
+				LOG_SLI | LOG_NVME_ABTS | LOG_FCP,
+				"5558 NULL pvt_pool for hwqid  x%x\n", hwqid);
+		return lpfc_ncmd;
+	}
 	multixri_pool->io_req_count++;
 
 	/* If pvt_pool is empty, move some XRIs from public to private pool */
@@ -22040,6 +22119,12 @@ struct lpfc_io_buf *lpfc_get_io_buf(struct lpfc_hba *phba,
 
 	qp = &phba->sli4_hba.hdwq[hwqid];
 	lpfc_cmd = NULL;
+	if (!qp) {
+		lpfc_printf_log(phba, KERN_WARNING,
+				LOG_SLI | LOG_NVME_ABTS | LOG_FCP,
+				"5555 NULL qp for hwqid  x%x\n", hwqid);
+		return lpfc_cmd;
+	}
 
 	if (phba->cfg_xri_rebalancing)
 		lpfc_cmd = lpfc_get_io_buf_from_multixri_pools(
