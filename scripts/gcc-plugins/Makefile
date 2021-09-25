@@ -19,7 +19,7 @@ targets += randomize_layout_seed.h randomize_layout_hash.h
 
 always-y += $(GCC_PLUGIN)
 
-GCC_PLUGINS_DIR = $(shell $(CC) -print-file-name=plugin)
+GCC_PLUGINS_DIR = $(shell $(HOSTCXX) -print-file-name=plugin)
 
 plugin_cxxflags	= -Wp,-MMD,$(depfile) $(KBUILD_HOSTCXXFLAGS) -fPIC \
 		  -include $(srctree)/include/linux/compiler-version.h \
