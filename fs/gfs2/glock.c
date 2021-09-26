@@ -394,6 +394,7 @@ __acquires(&gl->gl_lockref.lock)
 {
 	const struct gfs2_glock_operations *glops = gl->gl_ops;
 	struct gfs2_holder *gh, *tmp;
+	int first;
 	int ret;
 
 restart:
@@ -401,8 +402,10 @@ restart:
 		if (test_bit(HIF_HOLDER, &gh->gh_iflags))
 			continue;
 		if (may_grant(gl, gh)) {
-			if (gh->gh_list.prev == &gl->gl_holders &&
-			    glops->go_lock) {
+			first = gfs2_first_holder(gh);
+			if (!(gh->gh_flags & GL_SKIP) &&
+			    glops->go_lock_needed &&
+			    glops->go_lock_needed(gh)) {
 				spin_unlock(&gl->gl_lockref.lock);
 				/* FIXME: eliminate this eventually */
 				ret = glops->go_lock(gh);
@@ -416,14 +419,18 @@ restart:
 					gfs2_holder_wake(gh);
 					goto restart;
 				}
-				set_bit(HIF_HOLDER, &gh->gh_iflags);
-				trace_gfs2_promote(gh, 1);
-				gfs2_holder_wake(gh);
-				goto restart;
 			}
 			set_bit(HIF_HOLDER, &gh->gh_iflags);
-			trace_gfs2_promote(gh, 0);
+			trace_gfs2_promote(gh, first);
 			gfs2_holder_wake(gh);
+			/*
+			 * If this was the first holder, we may have released
+			 * the gl_lockref.lock, so the holders list may have
+			 * changed. For that reason, we start again at the
+			 * start of the holders queue.
+			 */
+			if (first)
+				goto restart;
 			continue;
 		}
 		if (gh->gh_list.prev == &gl->gl_holders)
@@ -2076,6 +2083,8 @@ static const char *hflags2str(char *buf, u16 flags, unsigned long iflags)
 		*p++ = 'H';
 	if (test_bit(HIF_WAIT, &iflags))
 		*p++ = 'W';
+	if (flags & GL_SKIP)
+		*p++ = 's';
 	*p = 0;
 	return buf;
 }

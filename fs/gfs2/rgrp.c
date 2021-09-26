@@ -1230,7 +1230,7 @@ static int gfs2_rgrp_bh_get(struct gfs2_rgrpd *rgd)
 		rgrp_set_bitmap_flags(rgd);
 		rgd->rd_flags |= (GFS2_RDF_UPTODATE | GFS2_RDF_CHECK);
 		rgd->rd_free_clone = rgd->rd_free;
-		BUG_ON(rgd->rd_reserved);
+		GLOCK_BUG_ON(rgd->rd_gl, rgd->rd_reserved);
 		/* max out the rgrp allocation failure point */
 		rgd->rd_extfail_pt = rgd->rd_free;
 	}
@@ -1280,7 +1280,7 @@ static int update_rgrp_lvb(struct gfs2_rgrpd *rgd)
 	rgd->rd_free = be32_to_cpu(rgd->rd_rgl->rl_free);
 	rgrp_set_bitmap_flags(rgd);
 	rgd->rd_free_clone = rgd->rd_free;
-	BUG_ON(rgd->rd_reserved);
+	GLOCK_BUG_ON(rgd->rd_gl, rgd->rd_reserved);
 	/* max out the rgrp allocation failure point */
 	rgd->rd_extfail_pt = rgd->rd_free;
 	rgd->rd_dinodes = be32_to_cpu(rgd->rd_rgl->rl_dinodes);
@@ -1288,14 +1288,31 @@ static int update_rgrp_lvb(struct gfs2_rgrpd *rgd)
 	return 0;
 }
 
-int gfs2_rgrp_go_lock(struct gfs2_holder *gh)
+bool gfs2_rgrp_go_lock_needed(struct gfs2_holder *gh)
 {
 	struct gfs2_rgrpd *rgd = gh->gh_gl->gl_object;
-	struct gfs2_sbd *sdp = rgd->rd_sbd;
 
-	if (gh->gh_flags & GL_SKIP && sdp->sd_args.ar_rgrplvb)
-		return 0;
-	return gfs2_rgrp_bh_get(rgd);
+	if (gh->gh_flags & GL_SKIP)
+		return false;
+
+	if (rgd->rd_bits[0].bi_bh)
+		return false;
+	return true;
+}
+
+int gfs2_rgrp_go_lock(struct gfs2_holder *gh)
+{
+	int ret;
+
+	struct gfs2_rgrpd *rgd = gh->gh_gl->gl_object;
+
+	if (gfs2_glock_is_held_excl(rgd->rd_gl))
+		rgrp_lock_local(rgd);
+	ret = gfs2_rgrp_bh_get(rgd);
+	if (gfs2_glock_is_held_excl(rgd->rd_gl))
+		rgrp_unlock_local(rgd);
+
+	return ret;
 }
 
 /**
@@ -2215,7 +2232,7 @@ void gfs2_inplace_release(struct gfs2_inode *ip)
 		struct gfs2_rgrpd *rgd = rs->rs_rgd;
 
 		spin_lock(&rgd->rd_rsspin);
-		BUG_ON(rgd->rd_reserved < rs->rs_reserved);
+		GLOCK_BUG_ON(rgd->rd_gl, rgd->rd_reserved < rs->rs_reserved);
 		rgd->rd_reserved -= rs->rs_reserved;
 		spin_unlock(&rgd->rd_rsspin);
 		rs->rs_reserved = 0;
@@ -2476,9 +2493,9 @@ int gfs2_alloc_blocks(struct gfs2_inode *ip, u64 *bn, unsigned int *nblocks,
 		spin_unlock(&rbm.rgd->rd_rsspin);
 		goto rgrp_error;
 	}
-	BUG_ON(rbm.rgd->rd_reserved < *nblocks);
-	BUG_ON(rbm.rgd->rd_free_clone < *nblocks);
-	BUG_ON(rbm.rgd->rd_free < *nblocks);
+	GLOCK_BUG_ON(rbm.rgd->rd_gl, rbm.rgd->rd_reserved < *nblocks);
+	GLOCK_BUG_ON(rbm.rgd->rd_gl, rbm.rgd->rd_free_clone < *nblocks);
+	GLOCK_BUG_ON(rbm.rgd->rd_gl, rbm.rgd->rd_free < *nblocks);
 	rbm.rgd->rd_reserved -= *nblocks;
 	rbm.rgd->rd_free_clone -= *nblocks;
 	rbm.rgd->rd_free -= *nblocks;
@@ -2765,8 +2782,8 @@ void gfs2_rlist_free(struct gfs2_rgrp_list *rlist)
 
 void rgrp_lock_local(struct gfs2_rgrpd *rgd)
 {
-	BUG_ON(!gfs2_glock_is_held_excl(rgd->rd_gl) &&
-	       !test_bit(SDF_NORECOVERY, &rgd->rd_sbd->sd_flags));
+	GLOCK_BUG_ON(rgd->rd_gl, !gfs2_glock_is_held_excl(rgd->rd_gl) &&
+		     !test_bit(SDF_NORECOVERY, &rgd->rd_sbd->sd_flags));
 	mutex_lock(&rgd->rd_mutex);
 }
 

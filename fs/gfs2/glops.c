@@ -481,6 +481,17 @@ int gfs2_inode_refresh(struct gfs2_inode *ip)
 	return error;
 }
 
+static bool inode_go_lock_needed(struct gfs2_holder *gh)
+{
+	struct gfs2_glock *gl = gh->gh_gl;
+
+	if (!gl->gl_object)
+		return false;
+	if (!gfs2_first_holder(gh))
+		return false;
+	return !(gh->gh_flags & GL_SKIP);
+}
+
 /**
  * inode_go_lock - operation done after an inode lock is locked by a process
  * @gh: The glock holder
@@ -494,9 +505,6 @@ static int inode_go_lock(struct gfs2_holder *gh)
 	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
 	struct gfs2_inode *ip = gl->gl_object;
 	int error = 0;
-
-	if (!ip || (gh->gh_flags & GL_SKIP))
-		return 0;
 
 	if (test_bit(GIF_INVALID, &ip->i_flags)) {
 		error = gfs2_inode_refresh(ip);
@@ -740,6 +748,7 @@ const struct gfs2_glock_operations gfs2_inode_glops = {
 	.go_sync = inode_go_sync,
 	.go_inval = inode_go_inval,
 	.go_demote_ok = inode_go_demote_ok,
+	.go_lock_needed = inode_go_lock_needed,
 	.go_lock = inode_go_lock,
 	.go_dump = inode_go_dump,
 	.go_type = LM_TYPE_INODE,
@@ -750,6 +759,7 @@ const struct gfs2_glock_operations gfs2_inode_glops = {
 const struct gfs2_glock_operations gfs2_rgrp_glops = {
 	.go_sync = rgrp_go_sync,
 	.go_inval = rgrp_go_inval,
+	.go_lock_needed = gfs2_rgrp_go_lock_needed,
 	.go_lock = gfs2_rgrp_go_lock,
 	.go_dump = gfs2_rgrp_go_dump,
 	.go_type = LM_TYPE_RGRP,
