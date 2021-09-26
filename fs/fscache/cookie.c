@@ -179,12 +179,7 @@ struct fscache_cookie *fscache_alloc_cookie(
 	cookie->flags		= (1 << FSCACHE_COOKIE_NO_DATA_YET);
 	cookie->type		= def->type;
 	spin_lock_init(&cookie->lock);
-	spin_lock_init(&cookie->stores_lock);
 	INIT_HLIST_HEAD(&cookie->backing_objects);
-
-	/* radix tree insertion won't use the preallocation pool unless it's
-	 * told it may not wait */
-	INIT_RADIX_TREE(&cookie->stores, GFP_NOFS & ~__GFP_DIRECT_RECLAIM);
 
 	write_lock(&fscache_cookies_lock);
 	list_add_tail(&cookie->proc_link, &fscache_cookies);
@@ -771,10 +766,6 @@ void __fscache_disable_cookie(struct fscache_cookie *cookie,
 			       !atomic_read(&cookie->n_active));
 	}
 
-	/* Make sure any pending writes are cancelled. */
-	if (cookie->type != FSCACHE_COOKIE_TYPE_INDEX)
-		fscache_invalidate_writes(cookie);
-
 	/* Reset the cookie state if it wasn't relinquished */
 	if (!test_bit(FSCACHE_COOKIE_RELINQUISHED, &cookie->flags)) {
 		atomic_inc(&cookie->n_active);
@@ -823,7 +814,6 @@ void __fscache_relinquish_cookie(struct fscache_cookie *cookie,
 	/* Clear pointers back to the netfs */
 	cookie->netfs_data	= NULL;
 	cookie->def		= NULL;
-	BUG_ON(!radix_tree_empty(&cookie->stores));
 
 	if (cookie->parent) {
 		ASSERTCMP(refcount_read(&cookie->parent->ref), >, 0);

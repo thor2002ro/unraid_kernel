@@ -138,87 +138,6 @@ extern void fscache_operation_init(struct fscache_cookie *,
 				   fscache_operation_release_t);
 
 /*
- * data read operation
- */
-struct fscache_retrieval {
-	struct fscache_operation op;
-	struct fscache_cookie	*cookie;	/* The netfs cookie */
-	struct address_space	*mapping;	/* netfs pages */
-	fscache_rw_complete_t	end_io_func;	/* function to call on I/O completion */
-	void			*context;	/* netfs read context (pinned) */
-	struct list_head	to_do;		/* list of things to be done by the backend */
-	atomic_t		n_pages;	/* number of pages to be retrieved */
-};
-
-typedef int (*fscache_page_retrieval_func_t)(struct fscache_retrieval *op,
-					     struct page *page,
-					     gfp_t gfp);
-
-typedef int (*fscache_pages_retrieval_func_t)(struct fscache_retrieval *op,
-					      struct list_head *pages,
-					      unsigned *nr_pages,
-					      gfp_t gfp);
-
-/**
- * fscache_get_retrieval - Get an extra reference on a retrieval operation
- * @op: The retrieval operation to get a reference on
- *
- * Get an extra reference on a retrieval operation.
- */
-static inline
-struct fscache_retrieval *fscache_get_retrieval(struct fscache_retrieval *op)
-{
-	atomic_inc(&op->op.usage);
-	return op;
-}
-
-/**
- * fscache_enqueue_retrieval - Enqueue a retrieval operation for processing
- * @op: The retrieval operation affected
- *
- * Enqueue a retrieval operation for processing by the FS-Cache thread pool.
- */
-static inline void fscache_enqueue_retrieval(struct fscache_retrieval *op)
-{
-	fscache_enqueue_operation(&op->op);
-}
-
-/**
- * fscache_retrieval_complete - Record (partial) completion of a retrieval
- * @op: The retrieval operation affected
- * @n_pages: The number of pages to account for
- */
-static inline void fscache_retrieval_complete(struct fscache_retrieval *op,
-					      int n_pages)
-{
-	if (atomic_sub_return_relaxed(n_pages, &op->n_pages) <= 0)
-		fscache_op_complete(&op->op, false);
-}
-
-/**
- * fscache_put_retrieval - Drop a reference to a retrieval operation
- * @op: The retrieval operation affected
- *
- * Drop a reference to a retrieval operation.
- */
-static inline void fscache_put_retrieval(struct fscache_retrieval *op)
-{
-	fscache_put_operation(&op->op);
-}
-
-/*
- * cached page storage work item
- * - used to do three things:
- *   - batch writes to the cache
- *   - do cache writes asynchronously
- *   - defer writes until cache object lookup completion
- */
-struct fscache_storage {
-	struct fscache_operation op;
-	pgoff_t			store_limit;	/* don't write more than this */
-};
-
-/*
  * cache operations
  */
 struct fscache_cache_ops {
@@ -275,38 +194,9 @@ struct fscache_cache_ops {
 	/* reserve space for an object's data and associated metadata */
 	int (*reserve_space)(struct fscache_object *object, loff_t i_size);
 
-	/* request a backing block for a page be read or allocated in the
-	 * cache */
-	fscache_page_retrieval_func_t read_or_alloc_page;
-
-	/* request backing blocks for a list of pages be read or allocated in
-	 * the cache */
-	fscache_pages_retrieval_func_t read_or_alloc_pages;
-
-	/* request a backing block for a page be allocated in the cache so that
-	 * it can be written directly */
-	fscache_page_retrieval_func_t allocate_page;
-
-	/* request backing blocks for pages be allocated in the cache so that
-	 * they can be written directly */
-	fscache_pages_retrieval_func_t allocate_pages;
-
-	/* write a page to its backing block in the cache */
-	int (*write_page)(struct fscache_storage *op, struct page *page);
-
-	/* detach backing block from a page (optional)
-	 * - must release the cookie lock before returning
-	 * - may sleep
-	 */
-	void (*uncache_page)(struct fscache_object *object,
-			     struct page *page);
-
-	/* dissociate a cache from all the pages it was backing */
-	void (*dissociate_pages)(struct fscache_cache *cache);
-
-	/* Begin a read operation for the netfs lib */
-	int (*begin_read_operation)(struct netfs_read_request *rreq,
-				    struct fscache_retrieval *op);
+	/* Begin an operation for the netfs lib */
+	int (*begin_operation)(struct netfs_cache_resources *cres,
+			       struct fscache_operation *op);
 };
 
 extern struct fscache_cookie fscache_fsdef_index;
@@ -466,21 +356,6 @@ void fscache_set_store_limit(struct fscache_object *object, loff_t i_size)
 		object->store_limit++;
 }
 
-/**
- * fscache_end_io - End a retrieval operation on a page
- * @op: The FS-Cache operation covering the retrieval
- * @page: The page that was to be fetched
- * @error: The error code (0 if successful)
- *
- * Note the end of an operation to retrieve a page, as covered by a particular
- * operation record.
- */
-static inline void fscache_end_io(struct fscache_retrieval *op,
-				  struct page *page, int error)
-{
-	op->end_io_func(page, op->context, error);
-}
-
 static inline void __fscache_use_cookie(struct fscache_cookie *cookie)
 {
 	atomic_inc(&cookie->n_active);
@@ -537,12 +412,6 @@ extern int fscache_add_cache(struct fscache_cache *cache,
 extern void fscache_withdraw_cache(struct fscache_cache *cache);
 
 extern void fscache_io_error(struct fscache_cache *cache);
-
-extern void fscache_mark_page_cached(struct fscache_retrieval *op,
-				     struct page *page);
-
-extern void fscache_mark_pages_cached(struct fscache_retrieval *op,
-				      struct pagevec *pagevec);
 
 extern bool fscache_object_sleep_till_congested(signed long *timeoutp);
 
