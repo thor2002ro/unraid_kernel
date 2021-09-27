@@ -1112,10 +1112,6 @@ _ieee802_11_parse_elems_crc(const u8 *start, size_t len, bool action,
 			} else
 				elem_parse_failed = true;
 			break;
-		case WLAN_EID_CHALLENGE:
-			elems->challenge = pos;
-			elems->challenge_len = elen;
-			break;
 		case WLAN_EID_VENDOR_SPECIFIC:
 			if (elen >= 4 && pos[0] == 0x00 && pos[1] == 0x50 &&
 			    pos[2] == 0xf2) {
@@ -1395,8 +1391,8 @@ _ieee802_11_parse_elems_crc(const u8 *start, size_t len, bool action,
 
 static size_t ieee802_11_find_bssid_profile(const u8 *start, size_t len,
 					    struct ieee802_11_elems *elems,
-					    u8 *transmitter_bssid,
-					    u8 *bss_bssid,
+					    const u8 *transmitter_bssid,
+					    const u8 *bss_bssid,
 					    u8 *nontransmitted_profile)
 {
 	const struct element *elem, *sub;
@@ -1461,16 +1457,20 @@ static size_t ieee802_11_find_bssid_profile(const u8 *start, size_t len,
 	return found ? profile_len : 0;
 }
 
-u32 ieee802_11_parse_elems_crc(const u8 *start, size_t len, bool action,
-			       struct ieee802_11_elems *elems,
-			       u64 filter, u32 crc, u8 *transmitter_bssid,
-			       u8 *bss_bssid)
+struct ieee802_11_elems *ieee802_11_parse_elems_crc(const u8 *start, size_t len,
+						    bool action, u64 filter,
+						    u32 crc,
+						    const u8 *transmitter_bssid,
+						    const u8 *bss_bssid)
 {
+	struct ieee802_11_elems *elems;
 	const struct element *non_inherit = NULL;
 	u8 *nontransmitted_profile;
 	int nontransmitted_profile_len = 0;
 
-	memset(elems, 0, sizeof(*elems));
+	elems = kzalloc(sizeof(*elems), GFP_ATOMIC);
+	if (!elems)
+		return NULL;
 	elems->ie_start = start;
 	elems->total_len = len;
 
@@ -1516,7 +1516,9 @@ u32 ieee802_11_parse_elems_crc(const u8 *start, size_t len, bool action,
 
 	kfree(nontransmitted_profile);
 
-	return crc;
+	elems->crc = crc;
+
+	return elems;
 }
 
 void ieee80211_regulatory_limit_wmm_params(struct ieee80211_sub_if_data *sdata,
