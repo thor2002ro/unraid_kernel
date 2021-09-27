@@ -57,7 +57,7 @@ enum {
 	ONLINE_POLICY_AUTO_MOVABLE,
 };
 
-const char *online_policy_to_str[] = {
+static const char * const online_policy_to_str[] = {
 	[ONLINE_POLICY_CONTIG_ZONES] = "contig-zones",
 	[ONLINE_POLICY_AUTO_MOVABLE] = "auto-movable",
 };
@@ -1663,6 +1663,12 @@ static int scan_movable_pages(unsigned long start, unsigned long end,
 		 * they could at least be skipped when offlining memory.
 		 */
 		if (PageOffline(page) && page_count(page))
+			return -EBUSY;
+		/*
+		 * HWPoisoned dirty swapcache pages are definitely unmovable
+		 * because they are kept for killing owner processes.
+		 */
+		if (PageHWPoison(page) && PageSwapCache(page))
 			return -EBUSY;
 
 		if (!PageHuge(page))
