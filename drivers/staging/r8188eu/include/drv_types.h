@@ -11,8 +11,6 @@
 #define __DRV_TYPES_H__
 
 #define DRV_NAME "r8188eu"
-#define CONFIG_88EU_AP_MODE 1
-#define CONFIG_88EU_P2P 1
 
 #include "osdep_service.h"
 #include "wlan_bssdef.h"
@@ -35,7 +33,6 @@
 #include "rtw_mlme_ext.h"
 #include "rtw_p2p.h"
 #include "rtw_ap.h"
-#include "rtw_mp.h"
 #include "rtw_br_ext.h"
 
 #define DRIVERVERSION	"v4.1.4_6773.20130222"
@@ -78,7 +75,6 @@ struct registry_priv {
 	u8	short_retry_lmt;
 	u16	busy_thresh;
 	u8	ack_policy;
-	u8	mp_mode;
 	u8	software_encrypt;
 	u8	software_decrypt;
 	u8	acm_method;
@@ -230,12 +226,7 @@ struct adapter {
 	struct	pwrctrl_priv	pwrctrlpriv;
 	struct	eeprom_priv eeprompriv;
 	struct	led_priv	ledpriv;
-	struct	mp_priv	mppriv;
-
-#ifdef CONFIG_88EU_AP_MODE
 	struct	hostapd_priv	*phostapdpriv;
-#endif
-
 	struct wifidirect_info	wdinfo;
 
 	void *HalData;
@@ -286,11 +277,9 @@ struct adapter {
 	/* The driver will show up the desired channel number
 	 * when this flag is 1. */
 	u8 bNotifyChannelChange;
-#ifdef CONFIG_88EU_P2P
 	/* The driver will show the current P2P status when the
 	 * upper application reads it. */
 	u8 bShowGetP2PState;
-#endif
 	struct adapter *pbuddy_adapter;
 
 	struct mutex *hw_init_mutex;

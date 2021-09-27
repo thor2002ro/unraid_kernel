@@ -1021,35 +1021,24 @@ u8 key_2char2num(u8 hch, u8 lch)
 void rtw_macaddr_cfg(u8 *mac_addr)
 {
 	u8 mac[ETH_ALEN];
+
 	if (!mac_addr)
 		return;
 
-	if (rtw_initmac) {	/* Users specify the mac address */
-		int jj, kk;
-
-		for (jj = 0, kk = 0; jj < ETH_ALEN; jj++, kk += 3)
-			mac[jj] = key_2char2num(rtw_initmac[kk], rtw_initmac[kk + 1]);
-		memcpy(mac_addr, mac, ETH_ALEN);
-	} else {	/* Use the mac address stored in the Efuse */
-		memcpy(mac, mac_addr, ETH_ALEN);
+	if (rtw_initmac && mac_pton(rtw_initmac, mac)) {
+		/* Users specify the mac address */
+		ether_addr_copy(mac_addr, mac);
+	} else {
+		/* Use the mac address stored in the Efuse */
+		ether_addr_copy(mac, mac_addr);
 	}
 
-	if (((mac[0] == 0xff) && (mac[1] == 0xff) && (mac[2] == 0xff) &&
-	     (mac[3] == 0xff) && (mac[4] == 0xff) && (mac[5] == 0xff)) ||
-	    ((mac[0] == 0x0) && (mac[1] == 0x0) && (mac[2] == 0x0) &&
-	     (mac[3] == 0x0) && (mac[4] == 0x0) && (mac[5] == 0x0))) {
-		mac[0] = 0x00;
-		mac[1] = 0xe0;
-		mac[2] = 0x4c;
-		mac[3] = 0x87;
-		mac[4] = 0x00;
-		mac[5] = 0x00;
-		/*  use default mac addresss */
-		memcpy(mac_addr, mac, ETH_ALEN);
-		DBG_88E("MAC Address from efuse error, assign default one !!!\n");
+	if (is_broadcast_ether_addr(mac) || is_zero_ether_addr(mac)) {
+		eth_random_addr(mac_addr);
+		DBG_88E("MAC Address from efuse error, assign random one !!!\n");
 	}
 
-	DBG_88E("rtw_macaddr_cfg MAC Address  = %pM\n", (mac_addr));
+	DBG_88E("rtw_macaddr_cfg MAC Address  = %pM\n", mac_addr);
 }
 
 void dump_ies(u8 *buf, u32 buf_len)
@@ -1062,9 +1051,7 @@ void dump_ies(u8 *buf, u32 buf_len)
 		len = *(pos + 1);
 
 		DBG_88E("%s ID:%u, LEN:%u\n", __func__, id, len);
-		#ifdef CONFIG_88EU_P2P
 		dump_p2p_ie(pos, len);
-		#endif
 		dump_wps_ie(pos, len);
 
 		pos += (2 + len);
@@ -1092,7 +1079,6 @@ void dump_wps_ie(u8 *ie, u32 ie_len)
 	}
 }
 
-#ifdef CONFIG_88EU_P2P
 void dump_p2p_ie(u8 *ie, u32 ie_len)
 {
 	u8 *pos = (u8 *)ie;
@@ -1293,8 +1279,6 @@ void rtw_wlan_bssid_ex_remove_p2p_attr(struct wlan_bssid_ex *bss_ex, u8 attr_id)
 		}
 	}
 }
-
-#endif /* CONFIG_88EU_P2P */
 
 /* Baron adds to avoid FreeBSD warning */
 int ieee80211_is_empty_essid(const char *essid, int essid_len)

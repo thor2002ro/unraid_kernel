@@ -9,9 +9,11 @@
 #include "../include/recv_osdep.h"
 #include "../include/hal_intf.h"
 #include "../include/rtw_ioctl.h"
-
 #include "../include/usb_osintf.h"
 #include "../include/rtw_br_ext.h"
+#include "../include/rtl8188e_led.h"
+#include "../include/rtl8188e_dm.h"
+#include "../include/rtw_sreset.h"
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Realtek Wireless Lan Driver");
@@ -51,8 +53,6 @@ static int rtw_short_retry_lmt = 7;
 static int rtw_busy_thresh = 40;
 static int rtw_ack_policy = NORMAL_ACK;
 
-static int rtw_mp_mode;
-
 static int rtw_software_encrypt;
 static int rtw_software_decrypt;
 
@@ -85,7 +85,6 @@ static int rtw_AcceptAddbaReq = true;/*  0:Reject AP's Add BA req, 1:Accept AP's
 static int rtw_antdiv_cfg = 2; /*  0:OFF , 1:ON, 2:decide by Efuse config */
 static int rtw_antdiv_type; /* 0:decide by efuse  1: for 88EE, 1Tx and 1RxCG are diversity.(2 Ant with SPDT), 2:  for 88EE, 1Tx and 2Rx are diversity.(2 Ant, Tx and RxCG are both on aux port, RxCS is on main port), 3: for 88EE, 1Tx and 1RxCG are fixed.(1Ant, Tx and RxCG are both on aux port) */
 
-static int rtw_enusbss;/* 0:disable, 1:enable */
 
 static int rtw_hwpdn_mode = 2;/* 0:disable, 1:enable, 2: by EFUSE config */
 
@@ -114,7 +113,6 @@ module_param(rtw_rfintfs, int, 0644);
 module_param(rtw_lbkmode, int, 0644);
 module_param(rtw_network_mode, int, 0644);
 module_param(rtw_channel, int, 0644);
-module_param(rtw_mp_mode, int, 0644);
 module_param(rtw_wmm_enable, int, 0644);
 module_param(rtw_vrtl_carrier_sense, int, 0644);
 module_param(rtw_vcs_type, int, 0644);
@@ -133,7 +131,6 @@ module_param(rtw_low_power, int, 0644);
 module_param(rtw_wifi_spec, int, 0644);
 module_param(rtw_antdiv_cfg, int, 0644);
 module_param(rtw_antdiv_type, int, 0644);
-module_param(rtw_enusbss, int, 0644);
 module_param(rtw_hwpdn_mode, int, 0644);
 module_param(rtw_hwpwrp_detect, int, 0644);
 module_param(rtw_hw_wps_pbc, int, 0644);
@@ -364,15 +361,12 @@ void rtw_proc_init_one(struct net_device *dev)
 		}
 	}
 
-#ifdef CONFIG_88EU_AP_MODE
-
 	entry = create_proc_read_entry("all_sta_info", S_IFREG | S_IRUGO,
 				   dir_dev, proc_get_all_sta_info, dev);
 	if (!entry) {
 		pr_info("Unable to create_proc_read_entry!\n");
 		return;
 	}
-#endif
 
 	entry = create_proc_read_entry("best_channel", S_IFREG | S_IRUGO,
 				   dir_dev, proc_get_best_channel, dev);
@@ -469,9 +463,7 @@ void rtw_proc_remove_one(struct net_device *dev)
 			remove_proc_entry("rf_reg_dump3", dir_dev);
 			remove_proc_entry("rf_reg_dump4", dir_dev);
 		}
-#ifdef CONFIG_88EU_AP_MODE
 		remove_proc_entry("all_sta_info", dir_dev);
-#endif
 
 		remove_proc_entry("best_channel", dir_dev);
 		remove_proc_entry("rx_signal", dir_dev);
@@ -530,7 +522,6 @@ static uint loadparam(struct adapter *padapter,  struct  net_device *pnetdev)
 	registry_par->short_retry_lmt = (u8)rtw_short_retry_lmt;
 	registry_par->busy_thresh = (u16)rtw_busy_thresh;
 	registry_par->ack_policy = (u8)rtw_ack_policy;
-	registry_par->mp_mode = (u8)rtw_mp_mode;
 	registry_par->software_encrypt = (u8)rtw_software_encrypt;
 	registry_par->software_decrypt = (u8)rtw_software_decrypt;
 	registry_par->acm_method = (u8)rtw_acm_method;
@@ -733,7 +724,6 @@ u32 rtw_start_drv_threads(struct adapter *padapter)
 	else
 		_rtw_down_sema(&padapter->cmdpriv.terminate_cmdthread_sema); /* wait for cmd_thread to run */
 
-	rtw_hal_start_thread(padapter);
 	return _status;
 }
 
@@ -743,8 +733,6 @@ void rtw_stop_drv_threads(struct adapter *padapter)
 	up(&padapter->cmdpriv.cmd_queue_sema);
 	if (padapter->cmdThread)
 		_rtw_down_sema(&padapter->cmdpriv.terminate_cmdthread_sema);
-
-	rtw_hal_stop_thread(padapter);
 }
 
 static u8 rtw_init_default_value(struct adapter *padapter)
@@ -784,16 +772,14 @@ static u8 rtw_init_default_value(struct adapter *padapter)
 	rtw_update_registrypriv_dev_network(padapter);
 
 	/* hal_priv */
-	rtw_hal_def_value_init(padapter);
+	rtl8188eu_init_default_value(padapter);
 
 	/* misc. */
 	padapter->bReadPortCancel = false;
 	padapter->bWritePortCancel = false;
 	padapter->bRxRSSIDisplay = 0;
 	padapter->bNotifyChannelChange = 0;
-#ifdef CONFIG_88EU_P2P
 	padapter->bShowGetP2PState = 1;
-#endif
 	return _SUCCESS;
 }
 
@@ -803,7 +789,7 @@ u8 rtw_reset_drv_sw(struct adapter *padapter)
 	struct pwrctrl_priv *pwrctrlpriv = &padapter->pwrctrlpriv;
 
 	/* hal_priv */
-	rtw_hal_def_value_init(padapter);
+	rtl8188eu_init_default_value(padapter);
 	padapter->bReadPortCancel = false;
 	padapter->bWritePortCancel = false;
 	padapter->bRxRSSIDisplay = 0;
@@ -816,7 +802,7 @@ u8 rtw_reset_drv_sw(struct adapter *padapter)
 
 	_clr_fwstate_(pmlmepriv, _FW_UNDER_SURVEY | _FW_UNDER_LINKING);
 
-	rtw_hal_sreset_reset_value(padapter);
+	sreset_reset_value(padapter);
 	pwrctrlpriv->pwr_state_check_cnts = 0;
 
 	/* mlmeextpriv */
@@ -848,11 +834,9 @@ u8 rtw_init_drv_sw(struct adapter *padapter)
 		goto exit;
 	}
 
-#ifdef CONFIG_88EU_P2P
 	rtw_init_wifidirect_timers(padapter);
 	init_wifidirect_info(padapter, P2P_ROLE_DISABLE);
 	reset_global_wifidirect_info(padapter);
-#endif /* CONFIG_88EU_P2P */
 
 	if (init_mlme_ext_priv(padapter) == _FAIL) {
 		ret8 = _FAIL;
@@ -883,15 +867,12 @@ u8 rtw_init_drv_sw(struct adapter *padapter)
 
 	rtw_init_pwrctrl_priv(padapter);
 
-	if (init_mp_priv(padapter) == _FAIL)
-		DBG_88E("%s: initialize MP private data Fail!\n", __func__);
-
 	ret8 = rtw_init_default_value(padapter);
 
-	rtw_hal_dm_init(padapter);
-	rtw_hal_sw_led_init(padapter);
+	rtl8188e_init_dm_priv(padapter);
+	rtl8188eu_InitSwLeds(padapter);
 
-	rtw_hal_sreset_init(padapter);
+	sreset_init_value(padapter);
 
 	spin_lock_init(&padapter->br_ext_lock);
 
@@ -908,13 +889,13 @@ void rtw_cancel_all_timer(struct adapter *padapter)
 	_cancel_timer_ex(&padapter->mlmepriv.dynamic_chk_timer);
 
 	/*  cancel sw led timer */
-	rtw_hal_sw_led_deinit(padapter);
+	rtl8188eu_DeInitSwLeds(padapter);
 
 	_cancel_timer_ex(&padapter->pwrctrlpriv.pwr_state_check_timer);
 
 	_cancel_timer_ex(&padapter->recvpriv.signal_stat_timer);
 	/* cancel dm timer */
-	rtw_hal_dm_deinit(padapter);
+	rtl8188e_deinit_dm_priv(padapter);
 }
 
 u8 rtw_free_drv_sw(struct adapter *padapter)
@@ -922,7 +903,6 @@ u8 rtw_free_drv_sw(struct adapter *padapter)
 	/* we can call rtw_p2p_enable here, but: */
 	/*  1. rtw_p2p_enable may have IO operation */
 	/*  2. rtw_p2p_enable is bundled with wext interface */
-	#ifdef CONFIG_88EU_P2P
 	{
 		struct wifidirect_info *pwdinfo = &padapter->wdinfo;
 		if (!rtw_p2p_chk_state(pwdinfo, P2P_STATE_NONE)) {
@@ -932,7 +912,6 @@ u8 rtw_free_drv_sw(struct adapter *padapter)
 			rtw_p2p_set_state(pwdinfo, P2P_STATE_NONE);
 		}
 	}
-	#endif
 
 	free_mlme_ext_priv(&padapter->mlmeextpriv);
 
@@ -947,9 +926,7 @@ u8 rtw_free_drv_sw(struct adapter *padapter)
 
 	_rtw_free_recv_priv(&padapter->recvpriv);
 
-	rtw_free_pwrctrl_priv(padapter);
-
-	rtw_hal_free_data(padapter);
+	rtl8188e_free_hal_data(padapter);
 
 	/* free the old_pnetdev */
 	if (padapter->rereg_nd_name_priv.old_pnetdev) {
@@ -1062,9 +1039,9 @@ int netdev_open(struct net_device *pnetdev)
 	int ret;
 	struct adapter *padapter = (struct adapter *)rtw_netdev_priv(pnetdev);
 
-	_enter_critical_mutex(padapter->hw_init_mutex, NULL);
+	mutex_lock(padapter->hw_init_mutex);
 	ret = _netdev_open(pnetdev);
-	_exit_critical_mutex(padapter->hw_init_mutex, NULL);
+	mutex_unlock(padapter->hw_init_mutex);
 	return ret;
 }
 
@@ -1187,9 +1164,7 @@ int netdev_close(struct net_device *pnetdev)
 
 	nat25_db_cleanup(padapter);
 
-#ifdef CONFIG_88EU_P2P
 	rtw_p2p_enable(padapter, P2P_ROLE_DISABLE);
-#endif /* CONFIG_88EU_P2P */
 
 	kfree(dvobj->firmware.szFwBuffer);
 	dvobj->firmware.szFwBuffer = NULL;
