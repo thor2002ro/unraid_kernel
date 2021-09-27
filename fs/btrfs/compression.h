@@ -29,7 +29,10 @@ struct btrfs_inode;
 
 struct compressed_bio {
 	/* number of bios pending for this compressed extent */
-	refcount_t pending_bios;
+	atomic_t pending_bios;
+
+	/* Number of sectors with unfinished IO (unsubmitted or unfinished) */
+	refcount_t pending_sectors;
 
 	/* Number of compressed pages in the array */
 	unsigned int nr_pages;
