@@ -871,7 +871,8 @@ struct symbol *sym_find(const char *name)
 	return symbol;
 }
 
-const char *sym_escape_string_value(const char *in)
+/* The returned pointer must be freed on the caller side */
+char *sym_escape_string_value(const char *in)
 {
 	const char *p;
 	size_t reslen;
@@ -912,6 +913,11 @@ const char *sym_escape_string_value(const char *in)
 
 	strcat(res, "\"");
 	return res;
+}
+
+char *sym_escape_string(struct symbol *sym)
+{
+	return sym_escape_string_value(sym_get_string_value(sym));
 }
 
 struct sym_match {
