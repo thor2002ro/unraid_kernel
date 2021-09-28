@@ -22,6 +22,7 @@
 #include <dt-bindings/firmware/imx/rsrc.h>
 #include "../ops.h"
 #include "imx-common.h"
+#include "imx-ops.h"
 
 /* DSP memories */
 #define IRAM_OFFSET		0x10000
@@ -375,11 +376,12 @@ static int imx8_get_bar_index(struct snd_sof_dev *sdev, u32 type)
 	}
 }
 
-static void imx8_ipc_msg_data(struct snd_sof_dev *sdev,
-			      struct snd_pcm_substream *substream,
-			      void *p, size_t sz)
+static int imx8_ipc_msg_data(struct snd_sof_dev *sdev,
+			     struct snd_pcm_substream *substream,
+			     void *p, size_t sz)
 {
 	sof_mailbox_read(sdev, sdev->dsp_box.offset, p, sz);
+	return 0;
 }
 
 static int imx8_ipc_pcm_params(struct snd_sof_dev *sdev,
@@ -426,9 +428,6 @@ struct snd_sof_dsp_ops sof_imx8_ops = {
 	.block_read	= sof_block_read,
 	.block_write	= sof_block_write,
 
-	/* Module IO */
-	.read64	= sof_io_read64,
-
 	/* ipc */
 	.send_msg	= imx8_send_msg,
 	.fw_ready	= sof_fw_ready,
@@ -446,9 +445,10 @@ struct snd_sof_dsp_ops sof_imx8_ops = {
 
 	/* Debug information */
 	.dbg_dump = imx8_dump,
+	.debugfs_add_region_item = snd_sof_debugfs_add_region_item_iomem,
 
 	/* Firmware ops */
-	.arch_ops = &sof_xtensa_arch_ops,
+	.dsp_arch_ops = &sof_xtensa_arch_ops,
 
 	/* DAI drivers */
 	.drv = imx8_dai,
@@ -475,9 +475,6 @@ struct snd_sof_dsp_ops sof_imx8x_ops = {
 	.block_read	= sof_block_read,
 	.block_write	= sof_block_write,
 
-	/* Module IO */
-	.read64	= sof_io_read64,
-
 	/* ipc */
 	.send_msg	= imx8_send_msg,
 	.fw_ready	= sof_fw_ready,
@@ -495,9 +492,10 @@ struct snd_sof_dsp_ops sof_imx8x_ops = {
 
 	/* Debug information */
 	.dbg_dump = imx8_dump,
+	.debugfs_add_region_item = snd_sof_debugfs_add_region_item_iomem,
 
 	/* Firmware ops */
-	.arch_ops = &sof_xtensa_arch_ops,
+	.dsp_arch_ops = &sof_xtensa_arch_ops,
 
 	/* DAI drivers */
 	.drv = imx8_dai,
