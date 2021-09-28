@@ -158,10 +158,6 @@ properties:
     description:
       The MIO bank number in which the command and data lines are configured.
 
-dependencies:
-  clock-output-names: [ '#clock-cells' ]
-  '#clock-cells': [ clock-output-names ]
-
 required:
   - compatible
   - reg
