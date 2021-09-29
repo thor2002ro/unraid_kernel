@@ -87,11 +87,6 @@ struct xilly_channel {
 };
 
 struct xilly_endpoint {
-	/*
-	 * One of pdev and dev is always NULL, and the other is a valid
-	 * pointer, depending on the type of device
-	 */
-	struct pci_dev *pdev;
 	struct device *dev;
 	struct xilly_endpoint_hardware *ephw;
 
@@ -131,7 +126,7 @@ struct xilly_endpoint_hardware {
 };
 
 struct xilly_mapping {
-	void *device;
+	struct device *device;
 	dma_addr_t dma_addr;
 	size_t size;
 	int direction;
@@ -139,8 +134,7 @@ struct xilly_mapping {
 
 irqreturn_t xillybus_isr(int irq, void *data);
 
-struct xilly_endpoint *xillybus_init_endpoint(struct pci_dev *pdev,
-					      struct device *dev,
+struct xilly_endpoint *xillybus_init_endpoint(struct device *dev,
 					      struct xilly_endpoint_hardware
 					      *ephw);
 

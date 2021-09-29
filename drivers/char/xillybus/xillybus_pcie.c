@@ -36,11 +36,10 @@ static int xilly_pci_direction(int direction)
 {
 	switch (direction) {
 	case DMA_TO_DEVICE:
-		return PCI_DMA_TODEVICE;
 	case DMA_FROM_DEVICE:
-		return PCI_DMA_FROMDEVICE;
+		return direction;
 	default:
-		return PCI_DMA_BIDIRECTIONAL;
+		return DMA_BIDIRECTIONAL;
 	}
 }
 
@@ -49,10 +48,8 @@ static void xilly_dma_sync_single_for_cpu_pci(struct xilly_endpoint *ep,
 					      size_t size,
 					      int direction)
 {
-	pci_dma_sync_single_for_cpu(ep->pdev,
-				    dma_handle,
-				    size,
-				    xilly_pci_direction(direction));
+	dma_sync_single_for_cpu(ep->dev, dma_handle, size,
+				xilly_pci_direction(direction));
 }
 
 static void xilly_dma_sync_single_for_device_pci(struct xilly_endpoint *ep,
@@ -60,18 +57,16 @@ static void xilly_dma_sync_single_for_device_pci(struct xilly_endpoint *ep,
 						 size_t size,
 						 int direction)
 {
-	pci_dma_sync_single_for_device(ep->pdev,
-				       dma_handle,
-				       size,
-				       xilly_pci_direction(direction));
+	dma_sync_single_for_device(ep->dev, dma_handle, size,
+				   xilly_pci_direction(direction));
 }
 
 static void xilly_pci_unmap(void *ptr)
 {
 	struct xilly_mapping *data = ptr;
 
-	pci_unmap_single(data->device, data->dma_addr,
-			 data->size, data->direction);
+	dma_unmap_single(data->device, data->dma_addr, data->size,
+			 data->direction);
 
 	kfree(ptr);
 }
@@ -99,14 +94,14 @@ static int xilly_map_single_pci(struct xilly_endpoint *ep,
 
 	pci_direction = xilly_pci_direction(direction);
 
-	addr = pci_map_single(ep->pdev, ptr, size, pci_direction);
+	addr = dma_map_single(ep->dev, ptr, size, pci_direction);
 
-	if (pci_dma_mapping_error(ep->pdev, addr)) {
+	if (dma_mapping_error(ep->dev, addr)) {
 		kfree(this);
 		return -ENODEV;
 	}
 
-	this->device = ep->pdev;
+	this->device = ep->dev;
 	this->dma_addr = addr;
 	this->size = size;
 	this->direction = pci_direction;
@@ -129,7 +124,7 @@ static int xilly_probe(struct pci_dev *pdev,
 	struct xilly_endpoint *endpoint;
 	int rc;
 
-	endpoint = xillybus_init_endpoint(pdev, &pdev->dev, &pci_hw);
+	endpoint = xillybus_init_endpoint(&pdev->dev, &pci_hw);
 
 	if (!endpoint)
 		return -ENOMEM;
@@ -185,9 +180,9 @@ static int xilly_probe(struct pci_dev *pdev,
 	 * So go for the 64-bit mask only when failing is the other option.
 	 */
 
-	if (!pci_set_dma_mask(pdev, DMA_BIT_MASK(32))) {
+	if (!dma_set_mask(&pdev->dev, DMA_BIT_MASK(32))) {
 		endpoint->dma_using_dac = 0;
-	} else if (!pci_set_dma_mask(pdev, DMA_BIT_MASK(64))) {
+	} else if (!dma_set_mask(&pdev->dev, DMA_BIT_MASK(64))) {
 		endpoint->dma_using_dac = 1;
 	} else {
 		dev_err(endpoint->dev, "Failed to set DMA mask. Aborting.\n");
