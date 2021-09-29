@@ -57,6 +57,7 @@ struct hci_pinfo {
 	unsigned long     flags;
 	__u32             cookie;
 	char              comm[TASK_COMM_LEN];
+	__u16             mtu;
 };
 
 static struct hci_dev *hci_hdev_from_sock(struct sock *sk)
@@ -1374,6 +1375,10 @@ static int hci_sock_bind(struct socket *sock, struct sockaddr *addr,
 		break;
 	}
 
+	/* Default MTU to HCI_MAX_FRAME_SIZE if not set */
+	if (!hci_pi(sk)->mtu)
+		hci_pi(sk)->mtu = HCI_MAX_FRAME_SIZE;
+
 	sk->sk_state = BT_BOUND;
 
 done:
@@ -1505,10 +1510,8 @@ static int hci_sock_recvmsg(struct socket *sock, struct msghdr *msg,
 	return err ? : copied;
 }
 
-static int hci_mgmt_cmd(struct hci_mgmt_chan *chan, struct sock *sk,
-			struct msghdr *msg, size_t msglen)
+static int hci_mgmt_cmd(struct hci_mgmt_chan *chan, struct sock *sk, void *buf, size_t msglen)
 {
-	void *buf;
 	u8 *cp;
 	struct mgmt_hdr *hdr;
 	u16 opcode, index, len;
@@ -1521,15 +1524,6 @@ static int hci_mgmt_cmd(struct hci_mgmt_chan *chan, struct sock *sk,
 
 	if (msglen < sizeof(*hdr))
 		return -EINVAL;
-
-	buf = kmalloc(msglen, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
-
-	if (memcpy_from_msg(buf, msg, msglen)) {
-		err = -EFAULT;
-		goto done;
-	}
 
 	hdr = buf;
 	opcode = __le16_to_cpu(hdr->opcode);
@@ -1627,11 +1621,10 @@ done:
 	if (hdev)
 		hci_dev_put(hdev);
 
-	kfree(buf);
 	return err;
 }
 
-static int hci_logging_frame(struct sock *sk, struct msghdr *msg, int len)
+static int hci_logging_frame(struct sock *sk, void *buf, int len, unsigned int flags)
 {
 	struct hci_mon_hdr *hdr;
 	struct sk_buff *skb;
@@ -1646,14 +1639,11 @@ static int hci_logging_frame(struct sock *sk, struct msghdr *msg, int len)
 	if (len < sizeof(*hdr) + 3)
 		return -EINVAL;
 
-	skb = bt_skb_send_alloc(sk, len, msg->msg_flags & MSG_DONTWAIT, &err);
+	skb = bt_skb_send_alloc(sk, len, flags & MSG_DONTWAIT, &err);
 	if (!skb)
 		return err;
 
-	if (memcpy_from_msg(skb_put(skb, len), msg, len)) {
-		err = -EFAULT;
-		goto drop;
-	}
+	memcpy(skb_put(skb, len), buf, len);
 
 	hdr = (void *)skb->data;
 
@@ -1723,18 +1713,27 @@ static int hci_sock_sendmsg(struct socket *sock, struct msghdr *msg,
 	struct hci_dev *hdev;
 	struct sk_buff *skb;
 	int err;
+	void *buf;
+	const unsigned int flags = msg->msg_flags;
 
 	BT_DBG("sock %p sk %p", sock, sk);
 
-	if (msg->msg_flags & MSG_OOB)
+	if (flags & MSG_OOB)
 		return -EOPNOTSUPP;
 
-	if (msg->msg_flags & ~(MSG_DONTWAIT|MSG_NOSIGNAL|MSG_ERRQUEUE|
-			       MSG_CMSG_COMPAT))
+	if (flags & ~(MSG_DONTWAIT | MSG_NOSIGNAL | MSG_ERRQUEUE | MSG_CMSG_COMPAT))
 		return -EINVAL;
 
-	if (len < 4 || len > HCI_MAX_FRAME_SIZE)
+	if (len < 4 || len > hci_pi(sk)->mtu)
 		return -EINVAL;
+
+	buf = kmalloc(len, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+	if (memcpy_from_msg(buf, msg, len)) {
+		kfree(buf);
+		return -EFAULT;
+	}
 
 	lock_sock(sk);
 
@@ -1746,13 +1745,13 @@ static int hci_sock_sendmsg(struct socket *sock, struct msghdr *msg,
 		err = -EOPNOTSUPP;
 		goto done;
 	case HCI_CHANNEL_LOGGING:
-		err = hci_logging_frame(sk, msg, len);
+		err = hci_logging_frame(sk, buf, len, flags);
 		goto done;
 	default:
 		mutex_lock(&mgmt_chan_list_lock);
 		chan = __hci_mgmt_chan_find(hci_pi(sk)->channel);
 		if (chan)
-			err = hci_mgmt_cmd(chan, sk, msg, len);
+			err = hci_mgmt_cmd(chan, sk, buf, len);
 		else
 			err = -EINVAL;
 
@@ -1771,14 +1770,11 @@ static int hci_sock_sendmsg(struct socket *sock, struct msghdr *msg,
 		goto done;
 	}
 
-	skb = bt_skb_send_alloc(sk, len, msg->msg_flags & MSG_DONTWAIT, &err);
+	skb = bt_skb_send_alloc(sk, len, flags & MSG_DONTWAIT, &err);
 	if (!skb)
 		goto done;
 
-	if (memcpy_from_msg(skb_put(skb, len), msg, len)) {
-		err = -EFAULT;
-		goto drop;
-	}
+	memcpy(skb_put(skb, len), buf, len);
 
 	hci_skb_pkt_type(skb) = skb->data[0];
 	skb_pull(skb, 1);
@@ -1850,6 +1846,7 @@ static int hci_sock_sendmsg(struct socket *sock, struct msghdr *msg,
 
 done:
 	release_sock(sk);
+	kfree(buf);
 	return err;
 
 drop:
@@ -1857,17 +1854,14 @@ drop:
 	goto done;
 }
 
-static int hci_sock_setsockopt(struct socket *sock, int level, int optname,
-			       sockptr_t optval, unsigned int len)
+static int hci_sock_setsockopt_old(struct socket *sock, int level, int optname,
+				   sockptr_t optval, unsigned int len)
 {
 	struct hci_ufilter uf = { .opcode = 0 };
 	struct sock *sk = sock->sk;
 	int err = 0, opt = 0;
 
 	BT_DBG("sk %p, opt %d", sk, optname);
-
-	if (level != SOL_HCI)
-		return -ENOPROTOOPT;
 
 	lock_sock(sk);
 
@@ -1943,17 +1937,62 @@ done:
 	return err;
 }
 
-static int hci_sock_getsockopt(struct socket *sock, int level, int optname,
-			       char __user *optval, int __user *optlen)
+static int hci_sock_setsockopt(struct socket *sock, int level, int optname,
+			       sockptr_t optval, unsigned int len)
+{
+	struct sock *sk = sock->sk;
+	int err = 0, opt = 0;
+
+	BT_DBG("sk %p, opt %d", sk, optname);
+
+	if (level == SOL_HCI)
+		return hci_sock_setsockopt_old(sock, level, optname, optval,
+					       len);
+
+	if (level != SOL_BLUETOOTH)
+		return -ENOPROTOOPT;
+
+	lock_sock(sk);
+
+	switch (optname) {
+	case BT_SNDMTU:
+	case BT_RCVMTU:
+		switch (hci_pi(sk)->channel) {
+		/* Don't allow changing MTU for channels that are meant for HCI
+		 * traffic only.
+		 */
+		case HCI_CHANNEL_RAW:
+		case HCI_CHANNEL_USER:
+			err = -ENOPROTOOPT;
+			goto done;
+		}
+
+		if (copy_from_sockptr(&opt, optval, sizeof(u16))) {
+			err = -EFAULT;
+			break;
+		}
+
+		hci_pi(sk)->mtu = opt;
+		break;
+
+	default:
+		err = -ENOPROTOOPT;
+		break;
+	}
+
+done:
+	release_sock(sk);
+	return err;
+}
+
+static int hci_sock_getsockopt_old(struct socket *sock, int level, int optname,
+				   char __user *optval, int __user *optlen)
 {
 	struct hci_ufilter uf;
 	struct sock *sk = sock->sk;
 	int len, opt, err = 0;
 
 	BT_DBG("sk %p, opt %d", sk, optname);
-
-	if (level != SOL_HCI)
-		return -ENOPROTOOPT;
 
 	if (get_user(len, optlen))
 		return -EFAULT;
@@ -2008,6 +2047,39 @@ static int hci_sock_getsockopt(struct socket *sock, int level, int optname,
 	}
 
 done:
+	release_sock(sk);
+	return err;
+}
+
+static int hci_sock_getsockopt(struct socket *sock, int level, int optname,
+			       char __user *optval, int __user *optlen)
+{
+	struct sock *sk = sock->sk;
+	int err = 0;
+
+	BT_DBG("sk %p, opt %d", sk, optname);
+
+	if (level == SOL_HCI)
+		return hci_sock_getsockopt_old(sock, level, optname, optval,
+					       optlen);
+
+	if (level != SOL_BLUETOOTH)
+		return -ENOPROTOOPT;
+
+	lock_sock(sk);
+
+	switch (optname) {
+	case BT_SNDMTU:
+	case BT_RCVMTU:
+		if (put_user(hci_pi(sk)->mtu, (u16 __user *)optval))
+			err = -EFAULT;
+		break;
+
+	default:
+		err = -ENOPROTOOPT;
+		break;
+	}
+
 	release_sock(sk);
 	return err;
 }
