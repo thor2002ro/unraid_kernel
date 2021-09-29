@@ -21,6 +21,8 @@
 
 #include "sdhci-pltfm.h"
 
+#define SDHCI_OMAP_SYSCONFIG	0x110
+
 #define SDHCI_OMAP_CON		0x12c
 #define CON_DW8			BIT(5)
 #define CON_DMA_MASTER		BIT(20)
@@ -61,6 +63,8 @@
 
 #define SDHCI_OMAP_IE		0x234
 #define INT_CC_EN		BIT(0)
+
+#define SDHCI_OMAP_ISE		0x238
 
 #define SDHCI_OMAP_AC12		0x23c
 #define AC12_V1V8_SIGEN		BIT(19)
@@ -113,6 +117,8 @@ struct sdhci_omap_host {
 	u32			hctl;
 	u32			sysctl;
 	u32			capa;
+	u32			ie;
+	u32			ise;
 };
 
 static void sdhci_omap_start_clock(struct sdhci_omap_host *omap_host);
@@ -682,7 +688,24 @@ static void sdhci_omap_set_power(struct sdhci_host *host, unsigned char mode,
 {
 	struct mmc_host *mmc = host->mmc;
 
-	mmc_regulator_set_ocr(mmc, mmc->supply.vmmc, vdd);
+	if (!IS_ERR(mmc->supply.vmmc))
+		mmc_regulator_set_ocr(mmc, mmc->supply.vmmc, vdd);
+}
+
+/*
+ * MMCHS_HL_HWINFO has the MADMA_EN bit set if the controller instance
+ * is connected to L3 interconnect and is bus master capable. Note that
+ * the MMCHS_HL_HWINFO register is in the module registers before the
+ * omap registers and sdhci registers. The offset can vary for omap
+ * registers depending on the SoC. Do not use sdhci_omap_readl() here.
+ */
+static bool sdhci_omap_has_adma(struct sdhci_omap_host *omap_host, int offset)
+{
+	/* MMCHS_HL_HWINFO register is only available on omap4 and later */
+	if (offset < 0x200)
+		return false;
+
+	return readl(omap_host->base + 4) & 1;
 }
 
 static int sdhci_omap_enable_dma(struct sdhci_host *host)
@@ -792,6 +815,11 @@ static void sdhci_omap_reset(struct sdhci_host *host, u8 mask)
 	struct sdhci_omap_host *omap_host = sdhci_pltfm_priv(pltfm_host);
 	unsigned long limit = MMC_TIMEOUT_US;
 	unsigned long i = 0;
+	u32 sysc;
+
+	/* Save target module sysconfig configured by SoC PM layer */
+	if (mask & SDHCI_RESET_ALL)
+		sysc = sdhci_omap_readl(omap_host, SDHCI_OMAP_SYSCONFIG);
 
 	/* Don't reset data lines during tuning operation */
 	if (omap_host->is_tuning)
@@ -811,10 +839,15 @@ static void sdhci_omap_reset(struct sdhci_host *host, u8 mask)
 			dev_err(mmc_dev(host->mmc),
 				"Timeout waiting on controller reset in %s\n",
 				__func__);
-		return;
+
+		goto restore_sysc;
 	}
 
 	sdhci_reset(host, mask);
+
+restore_sysc:
+	if (mask & SDHCI_RESET_ALL)
+		sdhci_omap_writel(omap_host, SDHCI_OMAP_SYSCONFIG, sysc);
 }
 
 #define CMD_ERR_MASK (SDHCI_INT_CRC | SDHCI_INT_END_BIT | SDHCI_INT_INDEX |\
@@ -1192,9 +1225,18 @@ static int sdhci_omap_probe(struct platform_device *pdev)
 	host->mmc_host_ops.execute_tuning = sdhci_omap_execute_tuning;
 	host->mmc_host_ops.enable_sdio_irq = sdhci_omap_enable_sdio_irq;
 
-	/* Switch to external DMA only if there is the "dmas" property */
-	if (of_find_property(dev->of_node, "dmas", NULL))
+	/*
+	 * Switch to external DMA only if there is the "dmas" property and
+	 * ADMA is not available on the controller instance.
+	 */
+	if (device_property_present(dev, "dmas") &&
+	    !sdhci_omap_has_adma(omap_host, offset))
 		sdhci_switch_external_dma(host, true);
+
+	if (device_property_read_bool(dev, "ti,non-removable")) {
+		dev_warn_once(dev, "using old ti,non-removable property\n");
+		mmc->caps |= MMC_CAP_NONREMOVABLE;
+	}
 
 	/* R1B responses is required to properly manage HW busy detection. */
 	mmc->caps |= MMC_CAP_NEED_RSP_BUSY;
@@ -1244,14 +1286,23 @@ static void sdhci_omap_context_save(struct sdhci_omap_host *omap_host)
 {
 	omap_host->con = sdhci_omap_readl(omap_host, SDHCI_OMAP_CON);
 	omap_host->hctl = sdhci_omap_readl(omap_host, SDHCI_OMAP_HCTL);
+	omap_host->sysctl = sdhci_omap_readl(omap_host, SDHCI_OMAP_SYSCTL);
 	omap_host->capa = sdhci_omap_readl(omap_host, SDHCI_OMAP_CAPA);
+	omap_host->ie = sdhci_omap_readl(omap_host, SDHCI_OMAP_IE);
+	omap_host->ise = sdhci_omap_readl(omap_host, SDHCI_OMAP_ISE);
 }
 
+/* Order matters here, HCTL must be restored in two phases */
 static void sdhci_omap_context_restore(struct sdhci_omap_host *omap_host)
 {
-	sdhci_omap_writel(omap_host, SDHCI_OMAP_CON, omap_host->con);
 	sdhci_omap_writel(omap_host, SDHCI_OMAP_HCTL, omap_host->hctl);
 	sdhci_omap_writel(omap_host, SDHCI_OMAP_CAPA, omap_host->capa);
+	sdhci_omap_writel(omap_host, SDHCI_OMAP_HCTL, omap_host->hctl);
+
+	sdhci_omap_writel(omap_host, SDHCI_OMAP_SYSCTL, omap_host->sysctl);
+	sdhci_omap_writel(omap_host, SDHCI_OMAP_CON, omap_host->con);
+	sdhci_omap_writel(omap_host, SDHCI_OMAP_IE, omap_host->ie);
+	sdhci_omap_writel(omap_host, SDHCI_OMAP_ISE, omap_host->ise);
 }
 
 static int __maybe_unused sdhci_omap_suspend(struct device *dev)
