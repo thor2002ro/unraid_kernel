@@ -172,7 +172,7 @@ static inline bool should_skip_covered(void)
 	return atomic_long_read(&counters[KFENCE_COUNTER_ALLOCATED]) > thresh;
 }
 
-static u32 get_alloc_stack_hash(unsigned long *stack_entries, size_t num_entries)
+static u32 get_alloc_stack_hash(unsigned long *stack_entries, unsigned long num_entries)
 {
 	num_entries = min(num_entries, UNIQUE_ALLOC_STACK_DEPTH);
 	num_entries = filter_irq_stacks(stack_entries, num_entries);
@@ -839,7 +839,7 @@ void kfence_shutdown_cache(struct kmem_cache *s)
 void *__kfence_alloc(struct kmem_cache *s, size_t size, gfp_t flags)
 {
 	unsigned long stack_entries[KFENCE_STACK_DEPTH];
-	size_t num_stack_entries;
+	unsigned long num_stack_entries;
 	u32 alloc_stack_hash;
 
 	/*
