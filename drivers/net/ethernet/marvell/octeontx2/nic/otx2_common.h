@@ -223,6 +223,7 @@ struct otx2_hw {
 #define HW_TSO			0
 #define CN10K_MBOX		1
 #define CN10K_LMTST		2
+#define CN10K_RPM		3
 	unsigned long		cap_flag;
 
 #define LMT_LINE_SIZE		128
@@ -263,6 +264,12 @@ struct otx2_ptp {
 
 	struct cyclecounter cycle_counter;
 	struct timecounter time_counter;
+
+	struct delayed_work extts_work;
+	u64 last_extts;
+	u64 thresh;
+
+	struct ptp_pin_desc extts_config;
 };
 
 #define OTX2_HW_TIMESTAMP_LEN	8
@@ -336,6 +343,7 @@ struct otx2_nic {
 #define OTX2_FLAG_TC_MATCHALL_INGRESS_ENABLED	BIT_ULL(13)
 #define OTX2_FLAG_DMACFLTR_SUPPORT		BIT_ULL(14)
 	u64			flags;
+	u64			*cq_op_addr;
 
 	struct otx2_qset	qset;
 	struct otx2_hw		hw;
@@ -452,6 +460,7 @@ static inline void otx2_setup_dev_hw_settings(struct otx2_nic *pfvf)
 	if (!is_dev_otx2(pfvf->pdev)) {
 		__set_bit(CN10K_MBOX, &hw->cap_flag);
 		__set_bit(CN10K_LMTST, &hw->cap_flag);
+		__set_bit(CN10K_RPM, &hw->cap_flag);
 	}
 }
 

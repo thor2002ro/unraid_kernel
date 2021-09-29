@@ -1847,7 +1847,7 @@ static int atl1c_alloc_rx_buffer(struct atl1c_adapter *adapter, u32 queue,
 			buffer_info->skb = NULL;
 			buffer_info->length = 0;
 			ATL1C_SET_BUFFER_STATE(buffer_info, ATL1C_BUFFER_FREE);
-			netif_warn(adapter, rx_err, adapter->netdev, "RX pci_map_single failed");
+			netif_warn(adapter, rx_err, adapter->netdev, "RX dma_map_single failed");
 			break;
 		}
 		buffer_info->dma = mapping;
@@ -2662,10 +2662,8 @@ static int atl1c_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	/* enable device (incl. PCI PM wakeup and hotplug setup) */
 	err = pci_enable_device_mem(pdev);
-	if (err) {
-		dev_err(&pdev->dev, "cannot enable PCI device\n");
-		return err;
-	}
+	if (err)
+		return dev_err_probe(&pdev->dev, err, "cannot enable PCI device\n");
 
 	/*
 	 * The atl1c chip can DMA to 64-bit addresses, but it uses a single
