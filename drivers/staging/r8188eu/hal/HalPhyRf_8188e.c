@@ -110,7 +110,6 @@ odm_TXPowerTrackingCallback_ThermalMeter_8188E(
 	bool is2t = false;
 
 	u8 OFDM_min_index = 6, rf; /* OFDM BB Swing should be less than +3.0dB, which is required by Arthur */
-	u8 Indexforchannel = 0/*GetRightChnlPlaceforIQK(pHalData->CurrentChannel)*/;
 	s8 OFDM_index_mapping[2][index_mapping_NUM_88E] = {
 		{0, 0, 2, 3, 4, 4, 		/* 2.4G, decrease power */
 		5, 6, 7, 7, 8, 9,
@@ -280,8 +279,8 @@ odm_TXPowerTrackingCallback_ThermalMeter_8188E(
 
 				/* Adujst OFDM Ant_A according to IQK result */
 				ele_D = (OFDMSwingTable[(u8)OFDM_index[0]] & 0xFFC00000) >> 22;
-				X = dm_odm->RFCalibrateInfo.IQKMatrixRegSetting[Indexforchannel].Value[0][0];
-				Y = dm_odm->RFCalibrateInfo.IQKMatrixRegSetting[Indexforchannel].Value[0][1];
+				X = dm_odm->RFCalibrateInfo.IQKMatrixRegSetting.Value[0][0];
+				Y = dm_odm->RFCalibrateInfo.IQKMatrixRegSetting.Value[0][1];
 
 				/*  Revse TX power table. */
 				dm_odm->BbSwingIdxOfdm		= (u8)OFDM_index[0];
@@ -315,8 +314,8 @@ odm_TXPowerTrackingCallback_ThermalMeter_8188E(
 					ele_D = (OFDMSwingTable[(u8)OFDM_index[1]] & 0xFFC00000) >> 22;
 
 					/* new element A = element D x X */
-					X = dm_odm->RFCalibrateInfo.IQKMatrixRegSetting[Indexforchannel].Value[0][4];
-					Y = dm_odm->RFCalibrateInfo.IQKMatrixRegSetting[Indexforchannel].Value[0][5];
+					X = dm_odm->RFCalibrateInfo.IQKMatrixRegSetting.Value[0][4];
+					Y = dm_odm->RFCalibrateInfo.IQKMatrixRegSetting.Value[0][5];
 
 					if ((X != 0) && (*dm_odm->pBandType == ODM_BAND_2_4G)) {
 						if ((X & 0x00000200) != 0)	/* consider minus */
@@ -628,23 +627,11 @@ static void pathb_fill_iqk(struct adapter *adapt, bool iqkok, s32 result[][8], u
 	}
 }
 
-/*  */
-/*  2011/07/26 MH Add an API for testing IQK fail case. */
-/*  */
-/*  MP Already declare in odm.c */
-static bool ODM_CheckPowerStatus(struct adapter *Adapter)
-{
-	return	true;
-}
-
 void _PHY_SaveADDARegisters(struct adapter *adapt, u32 *ADDAReg, u32 *ADDABackup, u32 RegisterNum)
 {
 	u32 i;
 	struct hal_data_8188e	*pHalData = GET_HAL_DATA(adapt);
 	struct odm_dm_struct *dm_odm = &pHalData->odmpriv;
-
-	if (!ODM_CheckPowerStatus(adapt))
-		return;
 
 	for (i = 0; i < RegisterNum; i++) {
 		ADDABackup[i] = ODM_GetBBReg(dm_odm, ADDAReg[i], bMaskDWord);
@@ -881,12 +868,7 @@ static void phy_IQCalibrate_8188E(struct adapter *adapt, s32 result[][8], u8 t, 
 							rFPGA0_XAB_RFInterfaceSW, rFPGA0_XA_RFInterfaceOE,
 							rFPGA0_XB_RFInterfaceOE, rFPGA0_RFMOD
 							};
-
-	u32 retryCount = 9;
-	if (*dm_odm->mp_mode == 1)
-		retryCount = 9;
-	else
-		retryCount = 2;
+	u32 retryCount = 2;
 	/*  Note: IQ calibration must be performed after loading */
 	/* 		PHY_REG.txt , and radio_a, radio_b.txt */
 
@@ -1065,7 +1047,6 @@ void PHY_IQCalibrate_8188E(struct adapter *adapt, bool recovery)
 {
 	struct hal_data_8188e	*pHalData = GET_HAL_DATA(adapt);
 	struct odm_dm_struct *dm_odm = &pHalData->odmpriv;
-	struct mpt_context *pMptCtx = &adapt->mppriv.MptCtx;
 	s32 result[4][8];	/* last is final result */
 	u8 i, final_candidate;
 	bool pathaok, pathbok;
@@ -1081,16 +1062,9 @@ void PHY_IQCalibrate_8188E(struct adapter *adapt, bool recovery)
 	bool is2t;
 
 	is2t = (dm_odm->RFType == ODM_2T2R) ? true : false;
-	if (!ODM_CheckPowerStatus(adapt))
-		return;
 
 	if (!(dm_odm->SupportAbility & ODM_RF_CALIBRATION))
 		return;
-
-	if (*dm_odm->mp_mode == 1) {
-		singletone = pMptCtx->bSingleTone;
-		carrier_sup = pMptCtx->bCarrierSuppression;
-	}
 
 	/*  20120213<Kordan> Turn on when continuous Tx to pass lab testing. (required by Edlu) */
 	if (singletone || carrier_sup)
@@ -1183,8 +1157,8 @@ void PHY_IQCalibrate_8188E(struct adapter *adapt, bool recovery)
 /* by sherry 20120321 */
 	if (final_candidate < 4) {
 		for (i = 0; i < IQK_Matrix_REG_NUM; i++)
-			dm_odm->RFCalibrateInfo.IQKMatrixRegSetting[0].Value[0][i] = result[final_candidate][i];
-		dm_odm->RFCalibrateInfo.IQKMatrixRegSetting[0].bIQKDone = true;
+			dm_odm->RFCalibrateInfo.IQKMatrixRegSetting.Value[0][i] = result[final_candidate][i];
+		dm_odm->RFCalibrateInfo.IQKMatrixRegSetting.bIQKDone = true;
 	}
 
 	_PHY_SaveADDARegisters(adapt, IQK_BB_REG_92C, dm_odm->RFCalibrateInfo.IQK_BB_backup_recover, 9);
@@ -1196,12 +1170,7 @@ void PHY_LCCalibrate_8188E(struct adapter *adapt)
 	u32 timeout = 2000, timecount = 0;
 	struct hal_data_8188e *pHalData = GET_HAL_DATA(adapt);
 	struct odm_dm_struct *dm_odm = &pHalData->odmpriv;
-	struct mpt_context *pMptCtx = &adapt->mppriv.MptCtx;
 
-	if (*dm_odm->mp_mode == 1) {
-		singletone = pMptCtx->bSingleTone;
-		carrier_sup = pMptCtx->bCarrierSuppression;
-	}
 	if (!(dm_odm->SupportAbility & ODM_RF_CALIBRATION))
 		return;
 	/*  20120213<Kordan> Turn on when continuous Tx to pass lab testing. (required by Edlu) */
@@ -1213,16 +1182,12 @@ void PHY_LCCalibrate_8188E(struct adapter *adapt)
 		timecount += 50;
 	}
 
-	dm_odm->RFCalibrateInfo.bLCKInProgress = true;
-
 	if (dm_odm->RFType == ODM_2T2R) {
 		phy_LCCalibrate_8188E(adapt, true);
 	} else {
 		/*  For 88C 1T1R */
 		phy_LCCalibrate_8188E(adapt, false);
 	}
-
-	dm_odm->RFCalibrateInfo.bLCKInProgress = false;
 }
 
 static void phy_setrfpathswitch_8188e(struct adapter *adapt, bool main, bool is2t)
