@@ -428,7 +428,9 @@ static __always_inline void
 __el1_interrupt(struct pt_regs *regs, void (*handler)(struct pt_regs *))
 {
 	enter_from_kernel_mode(regs);
+	irq_enter_rcu();
 	do_interrupt_handler(regs, handler);
+	irq_exit_rcu();
 	/*
 	 * Note: thread_info::preempt_count includes both thread_info::count
 	 * and thread_info::need_resched, and is not equivalent to
@@ -666,7 +668,9 @@ static void noinstr el0_interrupt(struct pt_regs *regs,
 	if (regs->pc & BIT(55))
 		arm64_apply_bp_hardening();
 
+	irq_enter_rcu();
 	do_interrupt_handler(regs, handler);
+	irq_exit_rcu();
 
 	exit_to_user_mode(regs);
 }
