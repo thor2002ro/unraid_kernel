@@ -693,7 +693,9 @@ int handle_domain_irq(struct irq_domain *domain,
 	struct irq_desc *desc;
 	int ret = 0;
 
+#ifndef CONFIG_HAVE_ARCH_IRQENTRY
 	irq_enter();
+#endif
 
 	/* The irqdomain code provides boundary checks */
 	desc = irq_resolve_mapping(domain, hwirq);
@@ -702,7 +704,9 @@ int handle_domain_irq(struct irq_domain *domain,
 	else
 		ret = -EINVAL;
 
+#ifndef CONFIG_HAVE_ARCH_IRQENTRY
 	irq_exit();
+#endif
 	set_irq_regs(old_regs);
 	return ret;
 }

@@ -100,6 +100,9 @@ config IRQ_MSI_IOMMU
 config HANDLE_DOMAIN_IRQ
 	bool
 
+config HAVE_ARCH_IRQENTRY
+	bool
+
 config IRQ_TIMINGS
 	bool
 
