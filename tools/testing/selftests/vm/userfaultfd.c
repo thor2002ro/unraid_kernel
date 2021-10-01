@@ -79,10 +79,6 @@ static int test_type;
 #define ALARM_INTERVAL_SECS 10
 static volatile bool test_uffdio_copy_eexist = true;
 static volatile bool test_uffdio_zeropage_eexist = true;
-/* Whether to test uffd write-protection */
-static bool test_uffdio_wp = false;
-/* Whether to test uffd minor faults */
-static bool test_uffdio_minor = false;
 
 static bool map_shared;
 static int shm_fd;
@@ -90,6 +86,7 @@ static int huge_fd;
 static char *huge_fd_off0;
 static unsigned long long *count_verify;
 static int uffd = -1;
+static uint64_t uffd_features;
 static int uffd_flags, finished, *pipefd;
 static char *area_src, *area_src_alias, *area_dst, *area_dst_alias;
 static char *zeropage;
@@ -345,7 +342,7 @@ static struct uffd_test_ops hugetlb_uffd_test_ops = {
 
 static struct uffd_test_ops *uffd_test_ops;
 
-static void userfaultfd_open(uint64_t *features)
+static void userfaultfd_open(uint64_t features)
 {
 	struct uffdio_api uffdio_api;
 
@@ -355,14 +352,20 @@ static void userfaultfd_open(uint64_t *features)
 	uffd_flags = fcntl(uffd, F_GETFD, NULL);
 
 	uffdio_api.api = UFFD_API;
-	uffdio_api.features = *features;
+	uffdio_api.features = features;
 	if (ioctl(uffd, UFFDIO_API, &uffdio_api))
 		err("UFFDIO_API failed.\nPlease make sure to "
 		    "run with either root or ptrace capability.");
 	if (uffdio_api.api != UFFD_API)
 		err("UFFDIO_API error: %" PRIu64, (uint64_t)uffdio_api.api);
 
-	*features = uffdio_api.features;
+	uffd_features = uffdio_api.features;
+}
+
+static inline bool uffd_wp_supported(void)
+{
+	return test_type == TEST_ANON &&
+		(uffd_features & UFFD_FEATURE_PAGEFAULT_FLAG_WP);
 }
 
 static inline void munmap_area(void **area)
@@ -397,6 +400,7 @@ static void uffd_test_ctx_clear(void)
 			err("close uffd");
 		uffd = -1;
 	}
+	uffd_features = 0;
 
 	huge_fd_off0 = NULL;
 	munmap_area((void **)&area_src);
@@ -405,7 +409,7 @@ static void uffd_test_ctx_clear(void)
 	munmap_area((void **)&area_dst_alias);
 }
 
-static void uffd_test_ctx_init_ext(uint64_t *features)
+static void uffd_test_ctx_init(uint64_t features)
 {
 	unsigned long nr, cpu;
 
@@ -460,11 +464,6 @@ static void uffd_test_ctx_init_ext(uint64_t *features)
 	for (cpu = 0; cpu < nr_cpus; cpu++)
 		if (pipe2(&pipefd[cpu * 2], O_CLOEXEC | O_NONBLOCK))
 			err("pipe");
-}
-
-static inline void uffd_test_ctx_init(uint64_t features)
-{
-	uffd_test_ctx_init_ext(&features);
 }
 
 static int my_bcmp(char *str1, char *str2, size_t n)
@@ -604,7 +603,7 @@ static int __copy_page(int ufd, unsigned long offset, bool retry)
 	uffdio_copy.dst = (unsigned long) area_dst + offset;
 	uffdio_copy.src = (unsigned long) area_src + offset;
 	uffdio_copy.len = page_size;
-	if (test_uffdio_wp)
+	if (uffd_wp_supported())
 		uffdio_copy.mode = UFFDIO_COPY_MODE_WP;
 	else
 		uffdio_copy.mode = 0;
@@ -795,7 +794,7 @@ static void *background_thread(void *arg)
 	 * at least the first half of the pages mapped already which
 	 * can be write-protected for testing
 	 */
-	if (test_uffdio_wp)
+	if (uffd_wp_supported())
 		wp_range(uffd, (unsigned long)area_dst + start_nr * page_size,
 			nr_pages_per_cpu * page_size, true);
 
@@ -1079,12 +1078,12 @@ static int userfaultfd_zeropage_test(void)
 	printf("testing UFFDIO_ZEROPAGE: ");
 	fflush(stdout);
 
-	uffd_test_ctx_init(0);
+	uffd_test_ctx_init(UFFD_FEATURE_PAGEFAULT_FLAG_WP);
 
 	uffdio_register.range.start = (unsigned long) area_dst;
 	uffdio_register.range.len = nr_pages * page_size;
 	uffdio_register.mode = UFFDIO_REGISTER_MODE_MISSING;
-	if (test_uffdio_wp)
+	if (uffd_wp_supported())
 		uffdio_register.mode |= UFFDIO_REGISTER_MODE_WP;
 	if (ioctl(uffd, UFFDIO_REGISTER, &uffdio_register))
 		err("register failure");
@@ -1106,7 +1105,7 @@ static int userfaultfd_events_test(void)
 	struct uffdio_register uffdio_register;
 	unsigned long expected_ioctls;
 	pthread_t uffd_mon;
-	int err, features;
+	int err;
 	pid_t pid;
 	char c;
 	struct uffd_stats stats = { 0 };
@@ -1114,16 +1113,15 @@ static int userfaultfd_events_test(void)
 	printf("testing events (fork, remap, remove): ");
 	fflush(stdout);
 
-	features = UFFD_FEATURE_EVENT_FORK | UFFD_FEATURE_EVENT_REMAP |
-		UFFD_FEATURE_EVENT_REMOVE;
-	uffd_test_ctx_init(features);
+	uffd_test_ctx_init(UFFD_FEATURE_EVENT_FORK | UFFD_FEATURE_EVENT_REMAP |
+			   UFFD_FEATURE_EVENT_REMOVE | UFFD_FEATURE_PAGEFAULT_FLAG_WP);
 
 	fcntl(uffd, F_SETFL, uffd_flags | O_NONBLOCK);
 
 	uffdio_register.range.start = (unsigned long) area_dst;
 	uffdio_register.range.len = nr_pages * page_size;
 	uffdio_register.mode = UFFDIO_REGISTER_MODE_MISSING;
-	if (test_uffdio_wp)
+	if (uffd_wp_supported())
 		uffdio_register.mode |= UFFDIO_REGISTER_MODE_WP;
 	if (ioctl(uffd, UFFDIO_REGISTER, &uffdio_register))
 		err("register failure");
@@ -1161,7 +1159,7 @@ static int userfaultfd_sig_test(void)
 	unsigned long expected_ioctls;
 	unsigned long userfaults;
 	pthread_t uffd_mon;
-	int err, features;
+	int err;
 	pid_t pid;
 	char c;
 	struct uffd_stats stats = { 0 };
@@ -1169,15 +1167,15 @@ static int userfaultfd_sig_test(void)
 	printf("testing signal delivery: ");
 	fflush(stdout);
 
-	features = UFFD_FEATURE_EVENT_FORK|UFFD_FEATURE_SIGBUS;
-	uffd_test_ctx_init(features);
+	uffd_test_ctx_init(UFFD_FEATURE_EVENT_FORK | UFFD_FEATURE_SIGBUS |
+			   UFFD_FEATURE_PAGEFAULT_FLAG_WP);
 
 	fcntl(uffd, F_SETFL, uffd_flags | O_NONBLOCK);
 
 	uffdio_register.range.start = (unsigned long) area_dst;
 	uffdio_register.range.len = nr_pages * page_size;
 	uffdio_register.mode = UFFDIO_REGISTER_MODE_MISSING;
-	if (test_uffdio_wp)
+	if (uffd_wp_supported())
 		uffdio_register.mode |= UFFDIO_REGISTER_MODE_WP;
 	if (ioctl(uffd, UFFDIO_REGISTER, &uffdio_register))
 		err("register failure");
@@ -1226,25 +1224,23 @@ static int userfaultfd_minor_test(void)
 	void *expected_page;
 	char c;
 	struct uffd_stats stats = { 0 };
-	uint64_t req_features, features_out;
-
-	if (!test_uffdio_minor)
-		return 0;
+	uint64_t features;
 
 	printf("testing minor faults: ");
 	fflush(stdout);
 
-	if (test_type == TEST_HUGETLB)
-		req_features = UFFD_FEATURE_MINOR_HUGETLBFS;
+	if (test_type == TEST_HUGETLB && map_shared)
+		features = UFFD_FEATURE_MINOR_HUGETLBFS;
 	else if (test_type == TEST_SHMEM)
-		req_features = UFFD_FEATURE_MINOR_SHMEM;
-	else
-		return 1;
+		features = UFFD_FEATURE_MINOR_SHMEM;
+	else {
+		printf("skipping test due to unsupported memory type\n");
+		return 0;
+	}
 
-	features_out = req_features;
-	uffd_test_ctx_init_ext(&features_out);
+	uffd_test_ctx_init(features);
 	/* If kernel reports required features aren't supported, skip test. */
-	if ((features_out & req_features) != req_features) {
+	if ((uffd_features & features) != features) {
 		printf("skipping test due to lack of feature support\n");
 		fflush(stdout);
 		return 0;
@@ -1366,10 +1362,6 @@ static void userfaultfd_pagemap_test(unsigned int test_pgsize)
 	int pagemap_fd;
 	uint64_t value;
 
-	/* Pagemap tests uffd-wp only */
-	if (!test_uffdio_wp)
-		return;
-
 	/* Not enough memory to test this page size */
 	if (test_pgsize > nr_pages * page_size)
 		return;
@@ -1378,7 +1370,12 @@ static void userfaultfd_pagemap_test(unsigned int test_pgsize)
 	/* Flush so it doesn't flush twice in parent/child later */
 	fflush(stdout);
 
-	uffd_test_ctx_init(0);
+	uffd_test_ctx_init(UFFD_FEATURE_PAGEFAULT_FLAG_WP);
+	/* Pagemap tests uffd-wp only */
+	if (!uffd_wp_supported()) {
+		printf("skipping test due to lack of feature support\n");
+		return;
+	}
 
 	if (test_pgsize > page_size) {
 		/* This is a thp test */
@@ -1443,7 +1440,7 @@ static int userfaultfd_stress(void)
 	struct uffdio_register uffdio_register;
 	struct uffd_stats uffd_stats[nr_cpus];
 
-	uffd_test_ctx_init(0);
+	uffd_test_ctx_init(UFFD_FEATURE_PAGEFAULT_FLAG_WP);
 
 	if (posix_memalign(&area, page_size, page_size))
 		err("out of memory");
@@ -1481,7 +1478,7 @@ static int userfaultfd_stress(void)
 		uffdio_register.range.start = (unsigned long) area_dst;
 		uffdio_register.range.len = nr_pages * page_size;
 		uffdio_register.mode = UFFDIO_REGISTER_MODE_MISSING;
-		if (test_uffdio_wp)
+		if (uffd_wp_supported())
 			uffdio_register.mode |= UFFDIO_REGISTER_MODE_WP;
 		if (ioctl(uffd, UFFDIO_REGISTER, &uffdio_register))
 			err("register failure");
@@ -1530,7 +1527,7 @@ static int userfaultfd_stress(void)
 			return 1;
 
 		/* Clear all the write protections if there is any */
-		if (test_uffdio_wp)
+		if (uffd_wp_supported())
 			wp_range(uffd, (unsigned long)area_dst,
 				 nr_pages * page_size, false);
 
@@ -1612,8 +1609,6 @@ static void set_test_type(const char *type)
 	if (!strcmp(type, "anon")) {
 		test_type = TEST_ANON;
 		uffd_test_ops = &anon_uffd_test_ops;
-		/* Only enable write-protect test for anonymous test */
-		test_uffdio_wp = true;
 	} else if (!strcmp(type, "hugetlb")) {
 		test_type = TEST_HUGETLB;
 		uffd_test_ops = &hugetlb_uffd_test_ops;
@@ -1621,13 +1616,10 @@ static void set_test_type(const char *type)
 		map_shared = true;
 		test_type = TEST_HUGETLB;
 		uffd_test_ops = &hugetlb_uffd_test_ops;
-		/* Minor faults require shared hugetlb; only enable here. */
-		test_uffdio_minor = true;
 	} else if (!strcmp(type, "shmem")) {
 		map_shared = true;
 		test_type = TEST_SHMEM;
 		uffd_test_ops = &shmem_uffd_test_ops;
-		test_uffdio_minor = true;
 	} else {
 		err("Unknown test type: %s", type);
 	}
