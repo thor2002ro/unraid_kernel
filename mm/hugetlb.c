@@ -2939,7 +2939,7 @@ int alloc_bootmem_huge_page(struct hstate *h, int nid)
 	__attribute__ ((weak, alias("__alloc_bootmem_huge_page")));
 int __alloc_bootmem_huge_page(struct hstate *h, int nid)
 {
-	struct huge_bootmem_page *m;
+	struct huge_bootmem_page *m = NULL;	/* initialize for clang */
 	int nr_nodes, node;
 
 	if (nid >= nr_online_nodes)
