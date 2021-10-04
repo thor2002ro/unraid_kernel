@@ -78,7 +78,7 @@ struct soc_tplg {
 };
 
 static int soc_tplg_process_headers(struct soc_tplg *tplg);
-static void soc_tplg_complete(struct soc_tplg *tplg);
+static int soc_tplg_complete(struct soc_tplg *tplg);
 
 /* check we dont overflow the data for this control chunk */
 static int soc_tplg_check_elem_count(struct soc_tplg *tplg, size_t elem_size,
@@ -312,10 +312,12 @@ static int soc_tplg_dai_link_load(struct soc_tplg *tplg,
 }
 
 /* tell the component driver that all firmware has been loaded in this request */
-static void soc_tplg_complete(struct soc_tplg *tplg)
+static int soc_tplg_complete(struct soc_tplg *tplg)
 {
 	if (tplg->ops && tplg->ops->complete)
-		tplg->ops->complete(tplg->comp);
+		return tplg->ops->complete(tplg->comp);
+
+	return 0;
 }
 
 /* add a dynamic kcontrol */
@@ -1473,10 +1475,6 @@ static int soc_tplg_dapm_widget_create(struct soc_tplg *tplg,
 		goto widget;
 	}
 
-	control_hdr = (struct snd_soc_tplg_ctl_hdr *)tplg->pos;
-	dev_dbg(tplg->dev, "ASoC: template %s has %d controls of type %x\n",
-		w->name, w->num_kcontrols, control_hdr->type);
-
 	template.num_kcontrols = le32_to_cpu(w->num_kcontrols);
 	kc = devm_kcalloc(tplg->dev, le32_to_cpu(w->num_kcontrols), sizeof(*kc), GFP_KERNEL);
 	if (!kc)
@@ -1536,6 +1534,8 @@ static int soc_tplg_dapm_widget_create(struct soc_tplg *tplg,
 	}
 
 	template.kcontrol_news = kc;
+	dev_dbg(tplg->dev, "ASoC: template %s with %d/%d/%d (mixer/enum/bytes) control\n",
+		w->name, mixer_count, enum_count, bytes_count);
 
 widget:
 	ret = soc_tplg_widget_load(tplg, &template, w);
@@ -2627,7 +2627,7 @@ static int soc_tplg_load(struct soc_tplg *tplg)
 
 	ret = soc_tplg_process_headers(tplg);
 	if (ret == 0)
-		soc_tplg_complete(tplg);
+		return soc_tplg_complete(tplg);
 
 	return ret;
 }
