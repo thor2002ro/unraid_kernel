@@ -225,6 +225,7 @@ struct gfs2_glock_operations {
 			const char *fs_id_buf);
 	void (*go_callback)(struct gfs2_glock *gl, bool remote);
 	void (*go_free)(struct gfs2_glock *gl);
+	bool (*go_lock_needed)(struct gfs2_holder *gh);
 	const int go_subclass;
 	const int go_type;
 	const unsigned long go_flags;
