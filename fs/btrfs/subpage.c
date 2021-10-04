@@ -88,6 +88,9 @@ void btrfs_init_subpage_info(struct btrfs_subpage_info *subpage_info, u32 sector
 	subpage_info->ordered_offset = cur;
 	cur += nr_bits;
 
+	subpage_info->checked_offset = cur;
+	cur += nr_bits;
+
 	subpage_info->total_nr_bits = cur;
 }
 
@@ -255,8 +258,16 @@ static void btrfs_subpage_clamp_range(struct page *page, u64 *start, u32 *len)
 	u32 orig_len = *len;
 
 	*start = max_t(u64, page_offset(page), orig_start);
-	*len = min_t(u64, page_offset(page) + PAGE_SIZE,
-		     orig_start + orig_len) - *start;
+	/*
+	 * For certain call sites like btrfs_drop_pages(), we may have pages
+	 * beyond the target range. In that case, just set @len to 0, subpage
+	 * helpers can handle @len == 0 without any problem.
+	 */
+	if (page_offset(page) >= orig_start + orig_len)
+		*len = 0;
+	else
+		*len = min_t(u64, page_offset(page) + PAGE_SIZE,
+			     orig_start + orig_len) - *start;
 }
 
 void btrfs_subpage_start_writer(const struct btrfs_fs_info *fs_info,
@@ -280,6 +291,17 @@ bool btrfs_subpage_end_and_test_writer(const struct btrfs_fs_info *fs_info,
 	const int nbits = (len >> fs_info->sectorsize_bits);
 
 	btrfs_subpage_assert(fs_info, page, start, len);
+
+	/*
+	 * We have call sites passing @lock_page into
+	 * extent_clear_unlock_delalloc() for compression path.
+	 *
+	 * Those @locked_page is locked by plain lock_page(), thus its
+	 * subpage::writers is 0.
+	 * Handle them specially.
+	 */
+	if (atomic_read(&subpage->writers) == 0)
+		return true;
 
 	ASSERT(atomic_read(&subpage->writers) >= nbits);
 	return atomic_sub_and_test(nbits, &subpage->writers);
@@ -532,6 +554,36 @@ void btrfs_subpage_clear_ordered(const struct btrfs_fs_info *fs_info,
 		ClearPageOrdered(page);
 	spin_unlock_irqrestore(&subpage->lock, flags);
 }
+
+void btrfs_subpage_set_checked(const struct btrfs_fs_info *fs_info,
+		struct page *page, u64 start, u32 len)
+{
+	struct btrfs_subpage *subpage = (struct btrfs_subpage *)page->private;
+	unsigned int start_bit = subpage_calc_start_bit(fs_info, page,
+							checked, start, len);
+	unsigned long flags;
+
+	spin_lock_irqsave(&subpage->lock, flags);
+	bitmap_set(subpage->bitmaps, start_bit, len >> fs_info->sectorsize_bits);
+	if (subpage_test_bitmap_all_set(fs_info, subpage, checked))
+		SetPageChecked(page);
+	spin_unlock_irqrestore(&subpage->lock, flags);
+}
+
+void btrfs_subpage_clear_checked(const struct btrfs_fs_info *fs_info,
+		struct page *page, u64 start, u32 len)
+{
+	struct btrfs_subpage *subpage = (struct btrfs_subpage *)page->private;
+	unsigned int start_bit = subpage_calc_start_bit(fs_info, page,
+							checked, start, len);
+	unsigned long flags;
+
+	spin_lock_irqsave(&subpage->lock, flags);
+	bitmap_clear(subpage->bitmaps, start_bit, len >> fs_info->sectorsize_bits);
+	ClearPageChecked(page);
+	spin_unlock_irqrestore(&subpage->lock, flags);
+}
+
 /*
  * Unlike set/clear which is dependent on each page status, for test all bits
  * are tested in the same way.
@@ -557,6 +609,7 @@ IMPLEMENT_BTRFS_SUBPAGE_TEST_OP(error);
 IMPLEMENT_BTRFS_SUBPAGE_TEST_OP(dirty);
 IMPLEMENT_BTRFS_SUBPAGE_TEST_OP(writeback);
 IMPLEMENT_BTRFS_SUBPAGE_TEST_OP(ordered);
+IMPLEMENT_BTRFS_SUBPAGE_TEST_OP(checked);
 
 /*
  * Note that, in selftests (extent-io-tests), we can have empty fs_info passed
@@ -627,6 +680,8 @@ IMPLEMENT_BTRFS_PAGE_OPS(writeback, set_page_writeback, end_page_writeback,
 			 PageWriteback);
 IMPLEMENT_BTRFS_PAGE_OPS(ordered, SetPageOrdered, ClearPageOrdered,
 			 PageOrdered);
+IMPLEMENT_BTRFS_PAGE_OPS(checked, SetPageChecked, ClearPageChecked,
+			 PageChecked);
 
 /*
  * Make sure not only the page dirty bit is cleared, but also subpage dirty bit
@@ -646,4 +701,47 @@ void btrfs_page_assert_not_dirty(const struct btrfs_fs_info *fs_info,
 
 	ASSERT(PagePrivate(page) && page->private);
 	ASSERT(subpage_test_bitmap_all_zero(fs_info, subpage, dirty));
+}
+
+/*
+ * Helper to handle different locked page with different page size
+ * - Page locked by plain lock_page()
+ *   It should not have any subpage::writers count.
+ *   Can be unlocked by unlock_page().
+ *   This is the most common locked page for __extent_writepage() called
+ *   inside extent_write_cache_pages() or extent_write_full_page().
+ *   Rarer cases includes the @locked_page from extent_write_locked_range().
+ *
+ * - Page locked by lock_delalloc_pages()
+ *   There is only one caller, all pages except @locked_page for
+ *   extent_write_locked_range().
+ *   In this case, we have to call subpage helper to handle the case.
+ */
+void btrfs_page_unlock_writer(struct btrfs_fs_info *fs_info, struct page *page,
+			      u64 start, u32 len)
+{
+	struct btrfs_subpage *subpage;
+
+	ASSERT(PageLocked(page));
+	/* For regular page size case, we just unlock the page */
+	if (fs_info->sectorsize == PAGE_SIZE)
+		return unlock_page(page);
+
+	ASSERT(PagePrivate(page) && page->private);
+	subpage = (struct btrfs_subpage *)page->private;
+
+	/*
+	 * For subpage case, there are two types of locked page.
+	 * With or without writers number.
+	 *
+	 * Since we own the page lock, no one else could touch
+	 * subpage::writers and are we safe to do several atomic operations
+	 * without spinlock.
+	 */
+	if (atomic_read(&subpage->writers))
+		/* No writers, locked by plain lock_page() */
+		return unlock_page(page);
+
+	/* Have writers, use proper subpage helper to end it */
+	btrfs_page_end_writer_lock(fs_info, page, start, len);
 }
