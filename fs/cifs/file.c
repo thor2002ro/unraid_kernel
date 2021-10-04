@@ -4175,11 +4175,8 @@ static vm_fault_t
 cifs_page_mkwrite(struct vm_fault *vmf)
 {
 	struct page *page = vmf->page;
-	struct file *file = vmf->vma->vm_file;
-	struct inode *inode = file_inode(file);
 
-	cifs_fscache_wait_on_page_write(inode, page);
-
+	wait_on_page_fscache(page);
 	lock_page(page);
 	return VM_FAULT_LOCKED;
 }
@@ -4252,8 +4249,6 @@ cifs_readv_complete(struct work_struct *work)
 		if (rdata->result == 0 ||
 		    (rdata->result == -EAGAIN && got_bytes))
 			cifs_readpage_to_fscache(rdata->mapping->host, page);
-		else
-			cifs_fscache_uncache_page(rdata->mapping->host, page);
 
 		got_bytes -= min_t(unsigned int, PAGE_SIZE, got_bytes);
 
@@ -4376,6 +4371,7 @@ readpages_get_pages(struct address_space *mapping, struct list_head *page_list,
 
 	INIT_LIST_HEAD(tmplist);
 
+again:
 	page = lru_to_page(page_list);
 
 	/*
@@ -4391,6 +4387,18 @@ readpages_get_pages(struct address_space *mapping, struct list_head *page_list,
 	if (rc) {
 		__ClearPageLocked(page);
 		return rc;
+	}
+
+	rc = cifs_readpage_from_fscache(mapping->host, page);
+	if (rc == 0) {
+		list_del_init(&page->lru);
+		SetPageUptodate(page);
+		lru_cache_add(page);
+		unlock_page(page);
+		put_page(page);
+		if (list_empty(page_list))
+			return 0;
+		goto again;
 	}
 
 	/* move first page to the tmplist */
@@ -4416,10 +4424,20 @@ readpages_get_pages(struct address_space *mapping, struct list_head *page_list,
 			__ClearPageLocked(page);
 			break;
 		}
-		list_move_tail(&page->lru, tmplist);
-		(*bytes) += PAGE_SIZE;
+
+		rc = cifs_readpage_from_fscache(mapping->host, page);
+		if (rc == 0) {
+			list_del_init(&page->lru);
+			SetPageUptodate(page);
+			lru_cache_add(page);
+			unlock_page(page);
+			put_page(page);
+		} else {
+			list_move_tail(&page->lru, tmplist);
+			(*bytes) += PAGE_SIZE;
+			(*nr_pages)++;
+		}
 		expected_index++;
-		(*nr_pages)++;
 	}
 	return rc;
 }
@@ -4437,19 +4455,6 @@ static int cifs_readpages(struct file *file, struct address_space *mapping,
 	unsigned int xid;
 
 	xid = get_xid();
-	/*
-	 * Reads as many pages as possible from fscache. Returns -ENOBUFS
-	 * immediately if the cookie is negative
-	 *
-	 * After this point, every page in the list might have PG_fscache set,
-	 * so we will need to clean that up off of every page we don't use.
-	 */
-	rc = cifs_readpages_from_fscache(mapping->host, mapping, page_list,
-					 &num_pages);
-	if (rc == 0) {
-		free_xid(xid);
-		return rc;
-	}
 
 	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_RWPIDFORWARD)
 		pid = open_file->pid;
@@ -4574,7 +4579,6 @@ static int cifs_readpages(struct file *file, struct address_space *mapping,
 	 * the pagecache must be uncached before they get returned to the
 	 * allocator.
 	 */
-	cifs_fscache_readpages_cancel(mapping->host, page_list);
 	free_xid(xid);
 	return rc;
 }
@@ -4778,17 +4782,19 @@ static int cifs_release_page(struct page *page, gfp_t gfp)
 {
 	if (PagePrivate(page))
 		return 0;
-
-	return cifs_fscache_release_page(page, gfp);
+	if (PageFsCache(page)) {
+		if (!(gfp & __GFP_DIRECT_RECLAIM) || !(gfp & __GFP_FS))
+			return false;
+		wait_on_page_fscache(page);
+	}
+	return true;
 }
 
 static void cifs_invalidate_page(struct page *page, unsigned int offset,
 				 unsigned int length)
 {
-	struct cifsInodeInfo *cifsi = CIFS_I(page->mapping->host);
-
 	if (offset == 0 && length == PAGE_SIZE)
-		cifs_fscache_invalidate_page(page, &cifsi->vfs_inode);
+		wait_on_page_fscache(page);
 }
 
 static int cifs_launder_page(struct page *page)
@@ -4808,7 +4814,7 @@ static int cifs_launder_page(struct page *page)
 	if (clear_page_dirty_for_io(page))
 		rc = cifs_writepage_locked(page, &wbc);
 
-	cifs_fscache_invalidate_page(page, page->mapping->host);
+	wait_on_page_fscache(page);
 	return rc;
 }
 
