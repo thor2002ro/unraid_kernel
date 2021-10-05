@@ -24,24 +24,18 @@
 #if defined(CONFIG_FSCACHE) || defined(CONFIG_FSCACHE_MODULE)
 #define fscache_available() (1)
 #define fscache_cookie_valid(cookie) (cookie)
+#define fscache_resources_valid(cres) ((cres)->cache_priv)
 #else
 #define fscache_available() (0)
 #define fscache_cookie_valid(cookie) (0)
+#define fscache_resources_valid(cres) (false)
 #endif
-
-
-/* pattern used to fill dead space in an index entry */
-#define FSCACHE_INDEX_DEADFILL_PATTERN 0x79
 
 struct pagevec;
 struct fscache_cache_tag;
 struct fscache_cookie;
 struct fscache_netfs;
 struct netfs_read_request;
-
-typedef void (*fscache_rw_complete_t)(struct page *page,
-				      void *context,
-				      int error);
 
 /* result of index entry consultation */
 enum fscache_checkaux {
@@ -81,27 +75,6 @@ struct fscache_cookie_def {
 					   const void *data,
 					   uint16_t datalen,
 					   loff_t object_size);
-
-	/* get an extra reference on a read context
-	 * - this function can be absent if the completion function doesn't
-	 *   require a context
-	 */
-	void (*get_context)(void *cookie_netfs_data, void *context);
-
-	/* release an extra reference on a read context
-	 * - this function can be absent if the completion function doesn't
-	 *   require a context
-	 */
-	void (*put_context)(void *cookie_netfs_data, void *context);
-
-	/* indicate page that now have cache metadata retained
-	 * - this function should mark the specified page as now being cached
-	 * - the page will have been marked with PG_fscache before this is
-	 *   called, so this is optional
-	 */
-	void (*mark_page_cached)(void *cookie_netfs_data,
-				 struct address_space *mapping,
-				 struct page *page);
 };
 
 /*
@@ -128,16 +101,12 @@ struct fscache_cookie {
 	atomic_t			n_active;	/* number of active users of netfs ptrs */
 	unsigned int			debug_id;
 	spinlock_t			lock;
-	spinlock_t			stores_lock;	/* lock on page store tree */
 	struct hlist_head		backing_objects; /* object(s) backing this file/index */
 	const struct fscache_cookie_def	*def;		/* definition */
 	struct fscache_cookie		*parent;	/* parent of this entry */
 	struct hlist_bl_node		hash_link;	/* Link in hash table */
 	struct list_head		proc_link;	/* Link in proc list */
 	void				*netfs_data;	/* back pointer to netfs */
-	struct radix_tree_root		stores;		/* pages to be stored on this cookie */
-#define FSCACHE_COOKIE_PENDING_TAG	0		/* pages tag: pending write to cache */
-#define FSCACHE_COOKIE_STORING_TAG	1		/* pages tag: writing to cache */
 
 	unsigned long			flags;
 #define FSCACHE_COOKIE_LOOKING_UP	0	/* T if non-index cookie being looked up still */
@@ -167,7 +136,8 @@ struct fscache_cookie {
 
 static inline bool fscache_cookie_enabled(struct fscache_cookie *cookie)
 {
-	return test_bit(FSCACHE_COOKIE_ENABLED, &cookie->flags);
+	return (fscache_cookie_valid(cookie) &&
+		test_bit(FSCACHE_COOKIE_ENABLED, &cookie->flags));
 }
 
 /*
@@ -194,35 +164,14 @@ extern void __fscache_update_cookie(struct fscache_cookie *, const void *);
 extern int __fscache_attr_changed(struct fscache_cookie *);
 extern void __fscache_invalidate(struct fscache_cookie *);
 extern void __fscache_wait_on_invalidate(struct fscache_cookie *);
-
 #ifdef FSCACHE_USE_NEW_IO_API
-extern int __fscache_begin_read_operation(struct netfs_read_request *, struct fscache_cookie *);
-#else
-extern int __fscache_read_or_alloc_page(struct fscache_cookie *,
-					struct page *,
-					fscache_rw_complete_t,
-					void *,
-					gfp_t);
-extern int __fscache_read_or_alloc_pages(struct fscache_cookie *,
-					 struct address_space *,
-					 struct list_head *,
-					 unsigned *,
-					 fscache_rw_complete_t,
-					 void *,
-					 gfp_t);
-extern int __fscache_alloc_page(struct fscache_cookie *, struct page *, gfp_t);
-extern int __fscache_write_page(struct fscache_cookie *, struct page *, loff_t, gfp_t);
-extern void __fscache_uncache_page(struct fscache_cookie *, struct page *);
-extern bool __fscache_check_page_write(struct fscache_cookie *, struct page *);
-extern void __fscache_wait_on_page_write(struct fscache_cookie *, struct page *);
-extern bool __fscache_maybe_release_page(struct fscache_cookie *, struct page *,
-					 gfp_t);
-extern void __fscache_uncache_all_inode_pages(struct fscache_cookie *,
-					      struct inode *);
-extern void __fscache_readpages_cancel(struct fscache_cookie *cookie,
-				       struct list_head *pages);
-#endif /* FSCACHE_USE_NEW_IO_API */
-
+extern int __fscache_begin_operation(struct netfs_cache_resources *, struct fscache_cookie *,
+				     bool);
+#endif
+#ifdef FSCACHE_USE_FALLBACK_IO_API
+extern int __fscache_fallback_read_page(struct fscache_cookie *, struct page *);
+extern int __fscache_fallback_write_page(struct fscache_cookie *, struct page *);
+#endif
 extern void __fscache_disable_cookie(struct fscache_cookie *, const void *, bool);
 extern void __fscache_enable_cookie(struct fscache_cookie *, const void *, loff_t,
 				    bool (*)(void *), void *);
@@ -489,34 +438,16 @@ void fscache_wait_on_invalidate(struct fscache_cookie *cookie)
 		__fscache_wait_on_invalidate(cookie);
 }
 
-/**
- * fscache_reserve_space - Reserve data space for a cached object
- * @cookie: The cookie representing the cache object
- * @i_size: The amount of space to be reserved
- *
- * Reserve an amount of space in the cache for the cache object attached to a
- * cookie so that a write to that object within the space can always be
- * honoured.
- *
- * See Documentation/filesystems/caching/netfs-api.rst for a complete
- * description.
- */
-static inline
-int fscache_reserve_space(struct fscache_cookie *cookie, loff_t size)
-{
-	return -ENOBUFS;
-}
-
 #ifdef FSCACHE_USE_NEW_IO_API
 
 /**
  * fscache_begin_read_operation - Begin a read operation for the netfs lib
- * @rreq: The read request being undertaken
+ * @cres: The cache resources for the read being performed
  * @cookie: The cookie representing the cache object
  *
- * Begin a read operation on behalf of the netfs helper library.  @rreq
- * indicates the read request to which the operation state should be attached;
- * @cookie indicates the cache object that will be accessed.
+ * Begin a read operation on behalf of the netfs helper library.  @cres
+ * indicates the cache resources to which the operation state should be
+ * attached; @cookie indicates the cache object that will be accessed.
  *
  * This is intended to be called from the ->begin_cache_operation() netfs lib
  * operation as implemented by the network filesystem.
@@ -527,293 +458,88 @@ int fscache_reserve_space(struct fscache_cookie *cookie, loff_t size)
  * * Other error code from the cache, such as -ENOMEM.
  */
 static inline
-int fscache_begin_read_operation(struct netfs_read_request *rreq,
+int fscache_begin_read_operation(struct netfs_cache_resources *cres,
 				 struct fscache_cookie *cookie)
 {
 	if (fscache_cookie_valid(cookie) && fscache_cookie_enabled(cookie))
-		return __fscache_begin_read_operation(rreq, cookie);
+		return __fscache_begin_operation(cres, cookie, false);
 	return -ENOBUFS;
 }
 
-#else /* FSCACHE_USE_NEW_IO_API */
-
 /**
- * fscache_read_or_alloc_page - Read a page from the cache or allocate a block
- * in which to store it
- * @cookie: The cookie representing the cache object
- * @page: The netfs page to fill if possible
- * @end_io_func: The callback to invoke when and if the page is filled
- * @context: An arbitrary piece of data to pass on to end_io_func()
- * @gfp: The conditions under which memory allocation should be made
+ * fscache_operation_valid - Return true if operations resources are usable
+ * @cres: The resources to check.
  *
- * Read a page from the cache, or if that's not possible make a potential
- * one-block reservation in the cache into which the page may be stored once
- * fetched from the server.
- *
- * If the page is not backed by the cache object, or if it there's some reason
- * it can't be, -ENOBUFS will be returned and nothing more will be done for
- * that page.
- *
- * Else, if that page is backed by the cache, a read will be initiated directly
- * to the netfs's page and 0 will be returned by this function.  The
- * end_io_func() callback will be invoked when the operation terminates on a
- * completion or failure.  Note that the callback may be invoked before the
- * return.
- *
- * Else, if the page is unbacked, -ENODATA is returned and a block may have
- * been allocated in the cache.
- *
- * See Documentation/filesystems/caching/netfs-api.rst for a complete
- * description.
+ * Returns a pointer to the operations table if usable or NULL if not.
  */
 static inline
-int fscache_read_or_alloc_page(struct fscache_cookie *cookie,
-			       struct page *page,
-			       fscache_rw_complete_t end_io_func,
-			       void *context,
-			       gfp_t gfp)
+const struct netfs_cache_ops *fscache_operation_valid(const struct netfs_cache_resources *cres)
 {
-	if (fscache_cookie_valid(cookie) && fscache_cookie_enabled(cookie))
-		return __fscache_read_or_alloc_page(cookie, page, end_io_func,
-						    context, gfp);
-	else
-		return -ENOBUFS;
+	return fscache_resources_valid(cres) ? cres->ops : NULL;
 }
 
 /**
- * fscache_read_or_alloc_pages - Read pages from the cache and/or allocate
- * blocks in which to store them
- * @cookie: The cookie representing the cache object
- * @mapping: The netfs inode mapping to which the pages will be attached
- * @pages: A list of potential netfs pages to be filled
- * @nr_pages: Number of pages to be read and/or allocated
- * @end_io_func: The callback to invoke when and if each page is filled
- * @context: An arbitrary piece of data to pass on to end_io_func()
- * @gfp: The conditions under which memory allocation should be made
+ * fscache_read - Start a read from the cache.
+ * @cres: The cache resources to use
+ * @start_pos: The beginning file offset in the cache file
+ * @iter: The buffer to fill - and also the length
+ * @read_hole: How to handle a hole in the data.
+ * @term_func: The function to call upon completion
+ * @term_func_priv: The private data for @term_func
  *
- * Read a set of pages from the cache, or if that's not possible, attempt to
- * make a potential one-block reservation for each page in the cache into which
- * that page may be stored once fetched from the server.
+ * Start a read from the cache.  @cres indicates the cache object to read from
+ * and must be obtained by a call to fscache_begin_operation() beforehand.
  *
- * If some pages are not backed by the cache object, or if it there's some
- * reason they can't be, -ENOBUFS will be returned and nothing more will be
- * done for that pages.
+ * The data is read into the iterator, @iter, and that also indicates the size
+ * of the operation.  @start_pos is the start position in the file, though if
+ * @seek_data is set appropriately, the cache can use SEEK_DATA to find the
+ * next piece of data, writing zeros for the hole into the iterator.
  *
- * Else, if some of the pages are backed by the cache, a read will be initiated
- * directly to the netfs's page and 0 will be returned by this function.  The
- * end_io_func() callback will be invoked when the operation terminates on a
- * completion or failure.  Note that the callback may be invoked before the
- * return.
- *
- * Else, if a page is unbacked, -ENODATA is returned and a block may have
- * been allocated in the cache.
- *
- * Because the function may want to return all of -ENOBUFS, -ENODATA and 0 in
- * regard to different pages, the return values are prioritised in that order.
- * Any pages submitted for reading are removed from the pages list.
- *
- * See Documentation/filesystems/caching/netfs-api.rst for a complete
- * description.
+ * Upon termination of the operation, @term_func will be called and supplied
+ * with @term_func_priv plus the amount of data written, if successful, or the
+ * error code otherwise.
  */
 static inline
-int fscache_read_or_alloc_pages(struct fscache_cookie *cookie,
-				struct address_space *mapping,
-				struct list_head *pages,
-				unsigned *nr_pages,
-				fscache_rw_complete_t end_io_func,
-				void *context,
-				gfp_t gfp)
+int fscache_read(struct netfs_cache_resources *cres,
+		 loff_t start_pos,
+		 struct iov_iter *iter,
+		 enum netfs_read_from_hole read_hole,
+		 netfs_io_terminated_t term_func,
+		 void *term_func_priv)
 {
-	if (fscache_cookie_valid(cookie) && fscache_cookie_enabled(cookie))
-		return __fscache_read_or_alloc_pages(cookie, mapping, pages,
-						     nr_pages, end_io_func,
-						     context, gfp);
-	else
-		return -ENOBUFS;
+	const struct netfs_cache_ops *ops = fscache_operation_valid(cres);
+	return ops->read(cres, start_pos, iter, read_hole,
+			 term_func, term_func_priv);
 }
 
 /**
- * fscache_alloc_page - Allocate a block in which to store a page
- * @cookie: The cookie representing the cache object
- * @page: The netfs page to allocate a page for
- * @gfp: The conditions under which memory allocation should be made
+ * fscache_write - Start a write to the cache.
+ * @cres: The cache resources to use
+ * @start_pos: The beginning file offset in the cache file
+ * @iter: The data to write - and also the length
+ * @term_func: The function to call upon completion
+ * @term_func_priv: The private data for @term_func
  *
- * Request Allocation a block in the cache in which to store a netfs page
- * without retrieving any contents from the cache.
+ * Start a write to the cache.  @cres indicates the cache object to write to and
+ * must be obtained by a call to fscache_begin_operation() beforehand.
  *
- * If the page is not backed by a file then -ENOBUFS will be returned and
- * nothing more will be done, and no reservation will be made.
+ * The data to be written is obtained from the iterator, @iter, and that also
+ * indicates the size of the operation.  @start_pos is the start position in
+ * the file.
  *
- * Else, a block will be allocated if one wasn't already, and 0 will be
- * returned
- *
- * See Documentation/filesystems/caching/netfs-api.rst for a complete
- * description.
+ * Upon termination of the operation, @term_func will be called and supplied
+ * with @term_func_priv plus the amount of data written, if successful, or the
+ * error code otherwise.
  */
 static inline
-int fscache_alloc_page(struct fscache_cookie *cookie,
-		       struct page *page,
-		       gfp_t gfp)
+int fscache_write(struct netfs_cache_resources *cres,
+		  loff_t start_pos,
+		  struct iov_iter *iter,
+		  netfs_io_terminated_t term_func,
+		  void *term_func_priv)
 {
-	if (fscache_cookie_valid(cookie) && fscache_cookie_enabled(cookie))
-		return __fscache_alloc_page(cookie, page, gfp);
-	else
-		return -ENOBUFS;
-}
-
-/**
- * fscache_readpages_cancel - Cancel read/alloc on pages
- * @cookie: The cookie representing the inode's cache object.
- * @pages: The netfs pages that we canceled write on in readpages()
- *
- * Uncache/unreserve the pages reserved earlier in readpages() via
- * fscache_readpages_or_alloc() and similar.  In most successful caches in
- * readpages() this doesn't do anything.  In cases when the underlying netfs's
- * readahead failed we need to clean up the pagelist (unmark and uncache).
- *
- * This function may sleep as it may have to clean up disk state.
- */
-static inline
-void fscache_readpages_cancel(struct fscache_cookie *cookie,
-			      struct list_head *pages)
-{
-	if (fscache_cookie_valid(cookie))
-		__fscache_readpages_cancel(cookie, pages);
-}
-
-/**
- * fscache_write_page - Request storage of a page in the cache
- * @cookie: The cookie representing the cache object
- * @page: The netfs page to store
- * @object_size: Updated size of object
- * @gfp: The conditions under which memory allocation should be made
- *
- * Request the contents of the netfs page be written into the cache.  This
- * request may be ignored if no cache block is currently allocated, in which
- * case it will return -ENOBUFS.
- *
- * If a cache block was already allocated, a write will be initiated and 0 will
- * be returned.  The PG_fscache_write page bit is set immediately and will then
- * be cleared at the completion of the write to indicate the success or failure
- * of the operation.  Note that the completion may happen before the return.
- *
- * See Documentation/filesystems/caching/netfs-api.rst for a complete
- * description.
- */
-static inline
-int fscache_write_page(struct fscache_cookie *cookie,
-		       struct page *page,
-		       loff_t object_size,
-		       gfp_t gfp)
-{
-	if (fscache_cookie_valid(cookie) && fscache_cookie_enabled(cookie))
-		return __fscache_write_page(cookie, page, object_size, gfp);
-	else
-		return -ENOBUFS;
-}
-
-/**
- * fscache_uncache_page - Indicate that caching is no longer required on a page
- * @cookie: The cookie representing the cache object
- * @page: The netfs page that was being cached.
- *
- * Tell the cache that we no longer want a page to be cached and that it should
- * remove any knowledge of the netfs page it may have.
- *
- * Note that this cannot cancel any outstanding I/O operations between this
- * page and the cache.
- *
- * See Documentation/filesystems/caching/netfs-api.rst for a complete
- * description.
- */
-static inline
-void fscache_uncache_page(struct fscache_cookie *cookie,
-			  struct page *page)
-{
-	if (fscache_cookie_valid(cookie))
-		__fscache_uncache_page(cookie, page);
-}
-
-/**
- * fscache_check_page_write - Ask if a page is being writing to the cache
- * @cookie: The cookie representing the cache object
- * @page: The netfs page that is being cached.
- *
- * Ask the cache if a page is being written to the cache.
- *
- * See Documentation/filesystems/caching/netfs-api.rst for a complete
- * description.
- */
-static inline
-bool fscache_check_page_write(struct fscache_cookie *cookie,
-			      struct page *page)
-{
-	if (fscache_cookie_valid(cookie))
-		return __fscache_check_page_write(cookie, page);
-	return false;
-}
-
-/**
- * fscache_wait_on_page_write - Wait for a page to complete writing to the cache
- * @cookie: The cookie representing the cache object
- * @page: The netfs page that is being cached.
- *
- * Ask the cache to wake us up when a page is no longer being written to the
- * cache.
- *
- * See Documentation/filesystems/caching/netfs-api.rst for a complete
- * description.
- */
-static inline
-void fscache_wait_on_page_write(struct fscache_cookie *cookie,
-				struct page *page)
-{
-	if (fscache_cookie_valid(cookie))
-		__fscache_wait_on_page_write(cookie, page);
-}
-
-/**
- * fscache_maybe_release_page - Consider releasing a page, cancelling a store
- * @cookie: The cookie representing the cache object
- * @page: The netfs page that is being cached.
- * @gfp: The gfp flags passed to releasepage()
- *
- * Consider releasing a page for the vmscan algorithm, on behalf of the netfs's
- * releasepage() call.  A storage request on the page may cancelled if it is
- * not currently being processed.
- *
- * The function returns true if the page no longer has a storage request on it,
- * and false if a storage request is left in place.  If true is returned, the
- * page will have been passed to fscache_uncache_page().  If false is returned
- * the page cannot be freed yet.
- */
-static inline
-bool fscache_maybe_release_page(struct fscache_cookie *cookie,
-				struct page *page,
-				gfp_t gfp)
-{
-	if (fscache_cookie_valid(cookie) && PageFsCache(page))
-		return __fscache_maybe_release_page(cookie, page, gfp);
-	return true;
-}
-
-/**
- * fscache_uncache_all_inode_pages - Uncache all an inode's pages
- * @cookie: The cookie representing the inode's cache object.
- * @inode: The inode to uncache pages from.
- *
- * Uncache all the pages in an inode that are marked PG_fscache, assuming them
- * to be associated with the given cookie.
- *
- * This function may sleep.  It will wait for pages that are being written out
- * and will wait whilst the PG_fscache mark is removed by the cache.
- */
-static inline
-void fscache_uncache_all_inode_pages(struct fscache_cookie *cookie,
-				     struct inode *inode)
-{
-	if (fscache_cookie_valid(cookie))
-		__fscache_uncache_all_inode_pages(cookie, inode);
+	const struct netfs_cache_ops *ops = fscache_operation_valid(cres);
+	return ops->write(cres, start_pos, iter, term_func, term_func_priv);
 }
 
 #endif /* FSCACHE_USE_NEW_IO_API */
@@ -871,5 +597,49 @@ void fscache_enable_cookie(struct fscache_cookie *cookie,
 		__fscache_enable_cookie(cookie, aux_data, object_size,
 					can_enable, data);
 }
+
+#ifdef FSCACHE_USE_FALLBACK_IO_API
+
+/**
+ * fscache_fallback_read_page - Read a page from a cache object (DANGEROUS)
+ * @cookie: The cookie representing the cache object
+ * @page: The page to be read to
+ *
+ * Synchronously read a page from the cache.  The page's offset is used to
+ * indicate where to read.
+ *
+ * This is dangerous and should be moved away from as it relies on the
+ * assumption that the backing filesystem will exactly record the blocks we
+ * have stored there.
+ */
+static inline
+int fscache_fallback_read_page(struct fscache_cookie *cookie, struct page *page)
+{
+	if (fscache_cookie_enabled(cookie))
+		return __fscache_fallback_read_page(cookie, page);
+	return -ENOBUFS;
+}
+
+/**
+ * fscache_fallback_write_page - Write a page to a cache object (DANGEROUS)
+ * @cookie: The cookie representing the cache object
+ * @page: The page to be written from
+ *
+ * Synchronously write a page to the cache.  The page's offset is used to
+ * indicate where to write.
+ *
+ * This is dangerous and should be moved away from as it relies on the
+ * assumption that the backing filesystem will exactly record the blocks we
+ * have stored there.
+ */
+static inline
+int fscache_fallback_write_page(struct fscache_cookie *cookie, struct page *page)
+{
+	if (fscache_cookie_enabled(cookie))
+		return __fscache_fallback_write_page(cookie, page);
+	return -ENOBUFS;
+}
+
+#endif /* FSCACHE_USE_FALLBACK_IO_API */
 
 #endif /* _LINUX_FSCACHE_H */
