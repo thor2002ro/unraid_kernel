@@ -10,12 +10,14 @@
 #include <linux/backing-dev.h>
 #include <linux/bio.h>
 #include <linux/blkdev.h>
+#include <linux/blk-integrity.h>
 #include <linux/kmemleak.h>
 #include <linux/mm.h>
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/workqueue.h>
 #include <linux/smp.h>
+#include <linux/interrupt.h>
 #include <linux/llist.h>
 #include <linux/list_sort.h>
 #include <linux/cpu.h>
