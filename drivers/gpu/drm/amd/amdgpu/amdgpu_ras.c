@@ -710,10 +710,10 @@ int amdgpu_ras_feature_enable(struct amdgpu_device *adev,
 	if (!amdgpu_ras_intr_triggered()) {
 		ret = psp_ras_enable_features(&adev->psp, info, enable);
 		if (ret) {
-			dev_err(adev->dev, "ras %s %s failed %d\n",
+			dev_err(adev->dev, "ras %s %s failed poison:%d ret:%d\n",
 				enable ? "enable":"disable",
 				get_ras_block_str(head),
-				ret);
+				amdgpu_ras_is_poison_mode_supported(adev), ret);
 			goto out;
 		}
 	}
@@ -994,6 +994,9 @@ int amdgpu_ras_query_error_status(struct amdgpu_device *adev,
 					get_ras_block_str(&info->head));
 		}
 	}
+
+	if (!amdgpu_persistent_edc_harvesting_supported(adev))
+		amdgpu_ras_reset_error_status(adev, info->head.block);
 
 	return 0;
 }
@@ -1544,22 +1547,28 @@ static void amdgpu_ras_interrupt_handler(struct ras_manager *obj)
 		data->rptr = (data->aligned_element_size +
 				data->rptr) % data->ring_size;
 
-		/* Let IP handle its data, maybe we need get the output
-		 * from the callback to udpate the error type/count, etc
-		 */
 		if (data->cb) {
-			ret = data->cb(obj->adev, &err_data, &entry);
-			/* ue will trigger an interrupt, and in that case
-			 * we need do a reset to recovery the whole system.
-			 * But leave IP do that recovery, here we just dispatch
-			 * the error.
-			 */
-			if (ret == AMDGPU_RAS_SUCCESS) {
-				/* these counts could be left as 0 if
-				 * some blocks do not count error number
+			if (amdgpu_ras_is_poison_mode_supported(obj->adev) &&
+			    obj->head.block == AMDGPU_RAS_BLOCK__UMC)
+				dev_info(obj->adev->dev,
+						"Poison is created, no user action is needed.\n");
+			else {
+				/* Let IP handle its data, maybe we need get the output
+				 * from the callback to udpate the error type/count, etc
 				 */
-				obj->err_data.ue_count += err_data.ue_count;
-				obj->err_data.ce_count += err_data.ce_count;
+				ret = data->cb(obj->adev, &err_data, &entry);
+				/* ue will trigger an interrupt, and in that case
+				 * we need do a reset to recovery the whole system.
+				 * But leave IP do that recovery, here we just dispatch
+				 * the error.
+				 */
+				if (ret == AMDGPU_RAS_SUCCESS) {
+					/* these counts could be left as 0 if
+					 * some blocks do not count error number
+					 */
+					obj->err_data.ue_count += err_data.ue_count;
+					obj->err_data.ce_count += err_data.ce_count;
+				}
 			}
 		}
 	}
@@ -2238,6 +2247,7 @@ int amdgpu_ras_init(struct amdgpu_device *adev)
 {
 	struct amdgpu_ras *con = amdgpu_ras_get_context(adev);
 	int r;
+	bool df_poison, umc_poison;
 
 	if (con)
 		return 0;
@@ -2308,6 +2318,23 @@ int amdgpu_ras_init(struct amdgpu_device *adev)
 			goto release_con;
 	}
 
+	/* Init poison supported flag, the default value is false */
+	if (adev->df.funcs &&
+	    adev->df.funcs->query_ras_poison_mode &&
+	    adev->umc.ras_funcs &&
+	    adev->umc.ras_funcs->query_ras_poison_mode) {
+		df_poison =
+			adev->df.funcs->query_ras_poison_mode(adev);
+		umc_poison =
+			adev->umc.ras_funcs->query_ras_poison_mode(adev);
+		/* Only poison is set in both DF and UMC, we can support it */
+		if (df_poison && umc_poison)
+			con->poison_supported = true;
+		else if (df_poison != umc_poison)
+			dev_warn(adev->dev, "Poison setting is inconsistent in DF/UMC(%d:%d)!\n",
+					df_poison, umc_poison);
+	}
+
 	if (amdgpu_ras_fs_init(adev)) {
 		r = -EINVAL;
 		goto release_con;
@@ -2349,6 +2376,16 @@ static int amdgpu_persistent_edc_harvesting(struct amdgpu_device *adev,
 		DRM_WARN("RAS init harvest reset failure");
 
 	return 0;
+}
+
+bool amdgpu_ras_is_poison_mode_supported(struct amdgpu_device *adev)
+{
+       struct amdgpu_ras *con = amdgpu_ras_get_context(adev);
+
+       if (!con)
+               return false;
+
+       return con->poison_supported;
 }
 
 /* helper function to handle common stuff in ip late init phase */

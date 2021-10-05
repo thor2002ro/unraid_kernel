@@ -3197,6 +3197,29 @@ static void update_mst_stream_alloc_table(
 				work_table[i];
 }
 #if defined(CONFIG_DRM_AMD_DC_DCN)
+static void dc_log_vcp_x_y(const struct dc_link *link, struct fixed31_32 avg_time_slots_per_mtp)
+{
+	const uint32_t VCP_Y_PRECISION = 1000;
+	uint64_t vcp_x, vcp_y;
+
+	// Add 0.5*(1/VCP_Y_PRECISION) to round up to decimal precision
+	avg_time_slots_per_mtp = dc_fixpt_add(
+			avg_time_slots_per_mtp, dc_fixpt_from_fraction(1, 2 * VCP_Y_PRECISION));
+
+	vcp_x = dc_fixpt_floor(avg_time_slots_per_mtp);
+	vcp_y = dc_fixpt_floor(
+			dc_fixpt_mul_int(
+				dc_fixpt_sub_int(avg_time_slots_per_mtp, dc_fixpt_floor(avg_time_slots_per_mtp)),
+				VCP_Y_PRECISION));
+
+	if (link->type == dc_connection_mst_branch)
+		DC_LOG_DP2("MST Update Payload: set_throttled_vcp_size slot X.Y for MST stream "
+				"X: %lld Y: %lld/%d", vcp_x, vcp_y, VCP_Y_PRECISION);
+	else
+		DC_LOG_DP2("SST Update Payload: set_throttled_vcp_size slot X.Y for SST stream "
+				"X: %lld Y: %lld/%d", vcp_x, vcp_y, VCP_Y_PRECISION);
+}
+
 /*
  * Payload allocation/deallocation for SST introduced in DP2.0
  */
@@ -3214,18 +3237,7 @@ enum dc_status dc_link_update_sst_payload(struct pipe_ctx *pipe_ctx, bool alloca
 	if (!allocate) {
 		avg_time_slots_per_mtp = dc_fixpt_from_int(0);
 
-		DC_LOG_DP2("SST Update Payload: set_throttled_vcp_size slot X.Y for SST stream"
-				"X: %d "
-				"Y: %d",
-				dc_fixpt_floor(
-					avg_time_slots_per_mtp),
-				dc_fixpt_ceil(
-					dc_fixpt_shl(
-						dc_fixpt_sub_int(
-							avg_time_slots_per_mtp,
-							dc_fixpt_floor(
-									avg_time_slots_per_mtp)),
-						26)));
+		dc_log_vcp_x_y(link, avg_time_slots_per_mtp);
 
 		hpo_dp_link_encoder->funcs->set_throttled_vcp_size(
 				hpo_dp_link_encoder,
@@ -3272,18 +3284,7 @@ enum dc_status dc_link_update_sst_payload(struct pipe_ctx *pipe_ctx, bool alloca
 	if (allocate) {
 		avg_time_slots_per_mtp = calculate_sst_avg_time_slots_per_mtp(stream, link);
 
-		DC_LOG_DP2("SST Update Payload: "
-				"slot.X: %d      "
-				"slot.Y: %d",
-				dc_fixpt_floor(
-					avg_time_slots_per_mtp),
-				dc_fixpt_ceil(
-					dc_fixpt_shl(
-						dc_fixpt_sub_int(
-							avg_time_slots_per_mtp,
-							dc_fixpt_floor(
-									avg_time_slots_per_mtp)),
-						26)));
+		dc_log_vcp_x_y(link, avg_time_slots_per_mtp);
 
 		hpo_dp_link_encoder->funcs->set_throttled_vcp_size(
 				hpo_dp_link_encoder,
@@ -3305,7 +3306,7 @@ enum dc_status dc_link_allocate_mst_payload(struct pipe_ctx *pipe_ctx)
 {
 	struct dc_stream_state *stream = pipe_ctx->stream;
 	struct dc_link *link = stream->link;
-	struct link_encoder *link_encoder = link->link_enc;
+	struct link_encoder *link_encoder = NULL;
 	struct stream_encoder *stream_encoder = pipe_ctx->stream_res.stream_enc;
 	struct dp_mst_stream_allocation_table proposed_table = {0};
 	struct fixed31_32 avg_time_slots_per_mtp;
@@ -3314,6 +3315,13 @@ enum dc_status dc_link_allocate_mst_payload(struct pipe_ctx *pipe_ctx)
 	uint8_t i;
 	enum act_return_status ret;
 	DC_LOGGER_INIT(link->ctx->logger);
+
+	/* Link encoder may have been dynamically assigned to non-physical display endpoint. */
+	if (link->ep_type == DISPLAY_ENDPOINT_PHY)
+		link_encoder = link->link_enc;
+	else if (link->dc->res_pool->funcs->link_encs_assign)
+		link_encoder = link_enc_cfg_get_link_enc_used_by_stream(pipe_ctx->stream->ctx->dc, stream);
+	ASSERT(link_encoder);
 
 	/* enable_link_dp_mst already check link->enabled_stream_count
 	 * and stream is in link->stream[]. This is called during set mode,
@@ -3392,13 +3400,20 @@ static enum dc_status deallocate_mst_payload(struct pipe_ctx *pipe_ctx)
 {
 	struct dc_stream_state *stream = pipe_ctx->stream;
 	struct dc_link *link = stream->link;
-	struct link_encoder *link_encoder = link->link_enc;
+	struct link_encoder *link_encoder = NULL;
 	struct stream_encoder *stream_encoder = pipe_ctx->stream_res.stream_enc;
 	struct dp_mst_stream_allocation_table proposed_table = {0};
 	struct fixed31_32 avg_time_slots_per_mtp = dc_fixpt_from_int(0);
 	uint8_t i;
 	bool mst_mode = (link->type == dc_connection_mst_branch);
 	DC_LOGGER_INIT(link->ctx->logger);
+
+	/* Link encoder may have been dynamically assigned to non-physical display endpoint. */
+	if (link->ep_type == DISPLAY_ENDPOINT_PHY)
+		link_encoder = link->link_enc;
+	else if (link->dc->res_pool->funcs->link_encs_assign)
+		link_encoder = link_enc_cfg_get_link_enc_used_by_stream(pipe_ctx->stream->ctx->dc, stream);
+	ASSERT(link_encoder);
 
 	/* deallocate_mst_payload is called before disable link. When mode or
 	 * disable/enable monitor, new stream is created which is not in link
@@ -3608,6 +3623,9 @@ void core_link_enable_stream(
 #if defined(CONFIG_DRM_AMD_DC_DCN)
 	enum otg_out_mux_dest otg_out_dest = OUT_MUX_DIO;
 	struct vpg *vpg = pipe_ctx->stream_res.stream_enc->vpg;
+
+	if (is_dp_128b_132b_signal(pipe_ctx))
+		vpg = pipe_ctx->stream_res.hpo_dp_stream_enc->vpg;
 #endif
 	DC_LOGGER_INIT(pipe_ctx->stream->ctx->logger);
 
@@ -3853,6 +3871,9 @@ void core_link_disable_stream(struct pipe_ctx *pipe_ctx)
 	struct dc_link *link = stream->sink->link;
 #if defined(CONFIG_DRM_AMD_DC_DCN)
 	struct vpg *vpg = pipe_ctx->stream_res.stream_enc->vpg;
+
+	if (is_dp_128b_132b_signal(pipe_ctx))
+		vpg = pipe_ctx->stream_res.hpo_dp_stream_enc->vpg;
 #endif
 
 	if (!IS_DIAG_DC(dc->ctx->dce_environment) &&

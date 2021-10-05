@@ -30,6 +30,7 @@ DC_LIBS += dcn20
 DC_LIBS += dsc
 DC_LIBS += dcn10 dml
 DC_LIBS += dcn21
+DC_LIBS += dcn201
 DC_LIBS += dcn30
 DC_LIBS += dcn301
 DC_LIBS += dcn302
