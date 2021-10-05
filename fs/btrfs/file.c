@@ -437,9 +437,16 @@ static noinline int btrfs_copy_from_user(loff_t pos, size_t write_bytes,
 /*
  * unlocks pages after btrfs_file_write is done with them
  */
-static void btrfs_drop_pages(struct page **pages, size_t num_pages)
+static void btrfs_drop_pages(struct btrfs_fs_info *fs_info,
+			     struct page **pages, size_t num_pages,
+			     u64 pos, u64 copied)
 {
 	size_t i;
+	u64 block_start = round_down(pos, fs_info->sectorsize);
+	u64 block_len = round_up(pos + copied, fs_info->sectorsize) -
+			block_start;
+
+	ASSERT(block_len <= U32_MAX);
 	for (i = 0; i < num_pages; i++) {
 		/* page checked is some magic around finding pages that
 		 * have been modified without going through btrfs_set_page_dirty
@@ -447,7 +454,8 @@ static void btrfs_drop_pages(struct page **pages, size_t num_pages)
 		 * accessed as prepare_pages should have marked them accessed
 		 * in prepare_pages via find_or_create_page()
 		 */
-		ClearPageChecked(pages[i]);
+		btrfs_page_clamp_clear_checked(fs_info, pages[i], block_start,
+					       block_len);
 		unlock_page(pages[i]);
 		put_page(pages[i]);
 	}
@@ -504,7 +512,8 @@ int btrfs_dirty_pages(struct btrfs_inode *inode, struct page **pages,
 		struct page *p = pages[i];
 
 		btrfs_page_clamp_set_uptodate(fs_info, p, start_pos, num_bytes);
-		ClearPageChecked(p);
+		btrfs_page_clamp_clear_checked(fs_info, p, start_pos,
+					       num_bytes);
 		btrfs_page_clamp_set_dirty(fs_info, p, start_pos, num_bytes);
 	}
 
@@ -1021,8 +1030,7 @@ delete_extent_item:
 			if (btrfs_comp_cpu_keys(&key, &slot_key) > 0)
 				path->slots[0]++;
 		}
-		setup_items_for_insert(root, path, &key,
-				       &args->extent_item_size, 1);
+		btrfs_setup_item_for_insert(root, path, &key, args->extent_item_size);
 		args->extent_inserted = true;
 	}
 
@@ -1845,7 +1853,8 @@ again:
 
 		btrfs_delalloc_release_extents(BTRFS_I(inode), reserve_bytes);
 		if (ret) {
-			btrfs_drop_pages(pages, num_pages);
+			btrfs_drop_pages(fs_info, pages, num_pages, pos,
+					 copied);
 			break;
 		}
 
@@ -1853,7 +1862,7 @@ again:
 		if (only_release_metadata)
 			btrfs_check_nocow_unlock(BTRFS_I(inode));
 
-		btrfs_drop_pages(pages, num_pages);
+		btrfs_drop_pages(fs_info, pages, num_pages, pos, copied);
 
 		cond_resched();
 
