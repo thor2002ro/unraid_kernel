@@ -236,10 +236,9 @@ struct request_queue {
 	struct timer_list	timeout;
 	struct work_struct	timeout_work;
 
-	atomic_t		nr_active_requests_shared_sbitmap;
+	atomic_t		nr_active_requests_shared_tags;
 
-	struct sbitmap_queue	sched_bitmap_tags;
-	struct sbitmap_queue	sched_breserved_tags;
+	struct blk_mq_tags	*sched_shared_tags;
 
 	struct list_head	icq_list;
 #ifdef CONFIG_BLK_CGROUP

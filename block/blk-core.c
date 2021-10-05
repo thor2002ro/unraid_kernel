@@ -407,7 +407,7 @@ void blk_cleanup_queue(struct request_queue *q)
 	 */
 	mutex_lock(&q->sysfs_lock);
 	if (q->elevator)
-		blk_mq_sched_free_requests(q);
+		blk_mq_sched_free_rqs(q);
 	mutex_unlock(&q->sysfs_lock);
 
 	percpu_ref_exit(&q->q_usage_counter);
@@ -536,7 +536,7 @@ struct request_queue *blk_alloc_queue(int node_id)
 
 	q->node = node_id;
 
-	atomic_set(&q->nr_active_requests_shared_sbitmap, 0);
+	atomic_set(&q->nr_active_requests_shared_tags, 0);
 
 	timer_setup(&q->timeout, blk_rq_timed_out_timer, 0);
 	INIT_WORK(&q->timeout_work, blk_timeout_work);
@@ -569,7 +569,7 @@ struct request_queue *blk_alloc_queue(int node_id)
 
 	blk_queue_dma_alignment(q, 511);
 	blk_set_default_limits(&q->limits);
-	q->nr_requests = BLKDEV_MAX_RQ;
+	q->nr_requests = BLKDEV_DEFAULT_RQ;
 
 	return q;
 
