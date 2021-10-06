@@ -45,7 +45,7 @@
 /* forward declaration */
 struct aux_payload;
 
-#define DC_VER "3.2.154"
+#define DC_VER "3.2.155"
 
 #define MAX_SURFACES 3
 #define MAX_PLANES 6
@@ -565,6 +565,7 @@ struct dc_debug_options {
 	enum wm_report_mode pplib_wm_report_mode;
 	unsigned int min_disp_clk_khz;
 	unsigned int min_dpp_clk_khz;
+	unsigned int min_dram_clk_khz;
 	int sr_exit_time_dpm0_ns;
 	int sr_enter_plus_exit_time_dpm0_ns;
 	int sr_exit_time_ns;
@@ -1312,6 +1313,8 @@ bool dc_interrupt_set(struct dc *dc, enum dc_irq_source src, bool enable);
 void dc_interrupt_ack(struct dc *dc, enum dc_irq_source src);
 enum dc_irq_source dc_get_hpd_irq_source_at_index(
 		struct dc *dc, uint32_t link_index);
+
+void dc_notify_vsync_int_state(struct dc *dc, struct dc_stream_state *stream, bool enable);
 
 /*******************************************************************************
  * Power Interfaces
