@@ -381,6 +381,33 @@ static void do_error(struct gfs2_glock *gl, const int ret)
 }
 
 /**
+ * gfs2_instantiate - Call the glops instantiate function
+ * @gl: The glock
+ *
+ * Returns: 0 if instantiate was successful, 2 if type specific operation is
+ * underway, or error.
+ */
+static int gfs2_instantiate(struct gfs2_holder *gh)
+{
+	struct gfs2_glock *gl = gh->gh_gl;
+	const struct gfs2_glock_operations *glops = gl->gl_ops;
+	int ret;
+
+	ret = glops->go_instantiate(gh);
+	switch(ret) {
+	case 0:
+		break;
+	case 1:
+		ret = 2;
+		break;
+	default:
+		gh->gh_error = ret;
+		break;
+	}
+	return ret;
+}
+
+/**
  * do_promote - promote as many requests as possible on the current queue
  * @gl: The glock
  * 
@@ -392,7 +419,6 @@ static int do_promote(struct gfs2_glock *gl)
 __releases(&gl->gl_lockref.lock)
 __acquires(&gl->gl_lockref.lock)
 {
-	const struct gfs2_glock_operations *glops = gl->gl_ops;
 	struct gfs2_holder *gh, *tmp;
 	bool lock_released;
 	int ret;
@@ -409,19 +435,20 @@ restart:
 			break;
 		}
 		if (gh->gh_list.prev == &gl->gl_holders &&
-		    !(gh->gh_flags & GL_SKIP) && glops->go_instantiate) {
+		    !(gh->gh_flags & GL_SKIP) && gl->gl_ops->go_instantiate) {
 			lock_released = true;
 			spin_unlock(&gl->gl_lockref.lock);
-			ret = glops->go_instantiate(gh);
+			ret = gfs2_instantiate(gh);
 			spin_lock(&gl->gl_lockref.lock);
 			if (ret) {
-				if (ret == 1)
-					return 2;
-				gh->gh_error = ret;
-				list_del_init(&gh->gh_list);
-				trace_gfs2_glock_queue(gh, 0);
-				gfs2_holder_wake(gh);
-				goto restart;
+				if (ret == 2)
+					return ret;
+				else {
+					list_del_init(&gh->gh_list);
+					trace_gfs2_glock_queue(gh, 0);
+					gfs2_holder_wake(gh);
+					goto restart;
+				}
 			}
 		}
 		set_bit(HIF_HOLDER, &gh->gh_iflags);
