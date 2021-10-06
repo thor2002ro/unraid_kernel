@@ -308,19 +308,15 @@ struct io_submit_link {
 };
 
 struct io_submit_state {
-	struct blk_plug		plug;
+	/* inline/task_work completion list, under ->uring_lock */
+	struct io_wq_work_node	free_list;
+	/* batch completion logic */
+	struct io_wq_work_list	compl_reqs;
 	struct io_submit_link	link;
 
 	bool			plug_started;
 	bool			need_plug;
-
-	/*
-	 * Batch completion logic
-	 */
-	struct io_wq_work_list	compl_reqs;
-
-	/* inline/task_work completion list, under ->uring_lock */
-	struct io_wq_work_node	free_list;
+	struct blk_plug		plug;
 };
 
 struct io_ring_ctx {
@@ -894,12 +890,12 @@ struct io_defer_entry {
 struct io_op_def {
 	/* needs req->file assigned */
 	unsigned		needs_file : 1;
+	/* should block plug */
+	unsigned		plug : 1;
 	/* hash wq insertion if file is a regular file */
 	unsigned		hash_reg_file : 1;
 	/* unbound wq insertion if file is a non-regular file */
 	unsigned		unbound_nonreg_file : 1;
-	/* opcode is not supported by this kernel */
-	unsigned		not_supported : 1;
 	/* set if opcode supports polled "wait" */
 	unsigned		pollin : 1;
 	unsigned		pollout : 1;
@@ -907,8 +903,8 @@ struct io_op_def {
 	unsigned		buffer_select : 1;
 	/* do prep async if is going to be punted */
 	unsigned		needs_async_setup : 1;
-	/* should block plug */
-	unsigned		plug : 1;
+	/* opcode is not supported by this kernel */
+	unsigned		not_supported : 1;
 	/* size of async data needed, if any */
 	unsigned short		async_size;
 };
@@ -1262,7 +1258,6 @@ static __cold void io_fallback_req_func(struct work_struct *work)
 		mutex_unlock(&ctx->uring_lock);
 	}
 	percpu_ref_put(&ctx->refs);
-
 }
 
 static __cold struct io_ring_ctx *io_ring_ctx_alloc(struct io_uring_params *p)
@@ -6981,12 +6976,12 @@ static int io_init_req(struct io_ring_ctx *ctx, struct io_kiocb *req,
 		       const struct io_uring_sqe *sqe)
 	__must_hold(&ctx->uring_lock)
 {
-	struct io_submit_state *state;
 	unsigned int sqe_flags;
 	int personality;
+	u8 opcode;
 
 	/* req is partially pre-initialised, see io_preinit_req() */
-	req->opcode = READ_ONCE(sqe->opcode);
+	req->opcode = opcode = READ_ONCE(sqe->opcode);
 	/* same numerical values with corresponding REQ_F_*, safe to copy */
 	req->flags = sqe_flags = READ_ONCE(sqe->flags);
 	req->user_data = READ_ONCE(sqe->user_data);
@@ -6994,14 +6989,16 @@ static int io_init_req(struct io_ring_ctx *ctx, struct io_kiocb *req,
 	req->fixed_rsrc_refs = NULL;
 	req->task = current;
 
-	if (unlikely(req->opcode >= IORING_OP_LAST))
+	if (unlikely(opcode >= IORING_OP_LAST)) {
+		req->opcode = 0;
 		return -EINVAL;
+	}
 	if (unlikely(sqe_flags & ~SQE_COMMON_FLAGS)) {
 		/* enforce forwards compatibility on users */
 		if (sqe_flags & ~SQE_VALID_FLAGS)
 			return -EINVAL;
 		if ((sqe_flags & IOSQE_BUFFER_SELECT) &&
-		    !io_op_defs[req->opcode].buffer_select)
+		    !io_op_defs[opcode].buffer_select)
 			return -EOPNOTSUPP;
 		if (sqe_flags & IOSQE_IO_DRAIN)
 			io_init_req_drain(req);
@@ -7020,6 +7017,25 @@ static int io_init_req(struct io_ring_ctx *ctx, struct io_kiocb *req,
 		}
 	}
 
+	if (io_op_defs[opcode].needs_file) {
+		struct io_submit_state *state = &ctx->submit_state;
+
+		/*
+		 * Plug now if we have more than 2 IO left after this, and the
+		 * target is potentially a read/write to block based storage.
+		 */
+		if (state->need_plug && io_op_defs[opcode].plug) {
+			state->plug_started = true;
+			state->need_plug = false;
+			blk_start_plug(&state->plug);
+		}
+
+		req->file = io_file_get(ctx, req, READ_ONCE(sqe->fd),
+					(sqe_flags & IOSQE_FIXED_FILE));
+		if (unlikely(!req->file))
+			return -EBADF;
+	}
+
 	personality = READ_ONCE(sqe->personality);
 	if (personality) {
 		req->creds = xa_load(&ctx->personalities, personality);
@@ -7027,24 +7043,6 @@ static int io_init_req(struct io_ring_ctx *ctx, struct io_kiocb *req,
 			return -EINVAL;
 		get_cred(req->creds);
 		req->flags |= REQ_F_CREDS;
-	}
-	state = &ctx->submit_state;
-
-	/*
-	 * Plug now if we have more than 1 IO left after this, and the target
-	 * is potentially a read/write to block based storage.
-	 */
-	if (state->need_plug && io_op_defs[req->opcode].plug) {
-		blk_start_plug(&state->plug);
-		state->plug_started = true;
-		state->need_plug = false;
-	}
-
-	if (io_op_defs[req->opcode].needs_file) {
-		req->file = io_file_get(ctx, req, READ_ONCE(sqe->fd),
-					(sqe_flags & IOSQE_FIXED_FILE));
-		if (unlikely(!req->file))
-			return -EBADF;
 	}
 
 	return io_req_prep(req, sqe);
@@ -9215,6 +9213,7 @@ static __cold void io_ring_ctx_free(struct io_ring_ctx *ctx)
 	if (ctx->rsrc_backup_node)
 		io_rsrc_node_destroy(ctx->rsrc_backup_node);
 	flush_delayed_work(&ctx->rsrc_put_work);
+	flush_delayed_work(&ctx->fallback_work);
 
 	WARN_ON_ONCE(!list_empty(&ctx->rsrc_ref_list));
 	WARN_ON_ONCE(!llist_empty(&ctx->rsrc_put_llist));
@@ -9371,7 +9370,6 @@ static __cold void io_ring_exit_work(struct work_struct *work)
 		ret = task_work_add(node->task, &exit.task_work, TWA_SIGNAL);
 		if (WARN_ON_ONCE(ret))
 			continue;
-		wake_up_process(node->task);
 
 		mutex_unlock(&ctx->uring_lock);
 		wait_for_completion(&exit.completion);
