@@ -236,6 +236,7 @@ int stack_depot_snprint(depot_stack_handle_t handle, char *buf, size_t size,
 	return nr_entries ? stack_trace_snprint(buf, size, entries, nr_entries,
 						spaces) : 0;
 }
+EXPORT_SYMBOL_GPL(stack_depot_snprint);
 
 /**
  * stack_depot_print - print stack entries from a depot
