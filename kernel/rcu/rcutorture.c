@@ -53,15 +53,18 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Paul E. McKenney <paulmck@linux.ibm.com> and Josh Triplett <josh@joshtriplett.org>");
 
 /* Bits for ->extendables field, extendables param, and related definitions. */
-#define RCUTORTURE_RDR_SHIFT	 8	/* Put SRCU index in upper bits. */
-#define RCUTORTURE_RDR_MASK	 ((1 << RCUTORTURE_RDR_SHIFT) - 1)
+#define RCUTORTURE_RDR_SHIFT_1	 8	/* Put SRCU index in upper bits. */
+#define RCUTORTURE_RDR_MASK_1	 (1 << RCUTORTURE_RDR_SHIFT_1)
+#define RCUTORTURE_RDR_SHIFT_2	 9	/* Put SRCU index in upper bits. */
+#define RCUTORTURE_RDR_MASK_2	 (1 << RCUTORTURE_RDR_SHIFT_2)
 #define RCUTORTURE_RDR_BH	 0x01	/* Extend readers by disabling bh. */
 #define RCUTORTURE_RDR_IRQ	 0x02	/*  ... disabling interrupts. */
 #define RCUTORTURE_RDR_PREEMPT	 0x04	/*  ... disabling preemption. */
 #define RCUTORTURE_RDR_RBH	 0x08	/*  ... rcu_read_lock_bh(). */
 #define RCUTORTURE_RDR_SCHED	 0x10	/*  ... rcu_read_lock_sched(). */
-#define RCUTORTURE_RDR_RCU	 0x20	/*  ... entering another RCU reader. */
-#define RCUTORTURE_RDR_NBITS	 6	/* Number of bits defined above. */
+#define RCUTORTURE_RDR_RCU_1	 0x20	/*  ... entering another RCU reader. */
+#define RCUTORTURE_RDR_RCU_2	 0x40	/*  ... entering another RCU reader. */
+#define RCUTORTURE_RDR_NBITS	 7	/* Number of bits defined above. */
 #define RCUTORTURE_MAX_EXTEND	 \
 	(RCUTORTURE_RDR_BH | RCUTORTURE_RDR_IRQ | RCUTORTURE_RDR_PREEMPT | \
 	 RCUTORTURE_RDR_RBH | RCUTORTURE_RDR_SCHED)
@@ -346,6 +349,7 @@ struct rcu_torture_ops {
 	int can_boost;
 	int extendables;
 	int slow_gps;
+	int no_pi_lock;
 	const char *name;
 };
 
@@ -667,6 +671,7 @@ static struct rcu_torture_ops srcu_ops = {
 	.cb_barrier	= srcu_torture_barrier,
 	.stats		= srcu_torture_stats,
 	.irq_capable	= 1,
+	.no_pi_lock	= IS_ENABLED(CONFIG_TINY_SRCU),
 	.name		= "srcu"
 };
 
@@ -700,6 +705,7 @@ static struct rcu_torture_ops srcud_ops = {
 	.cb_barrier	= srcu_torture_barrier,
 	.stats		= srcu_torture_stats,
 	.irq_capable	= 1,
+	.no_pi_lock	= IS_ENABLED(CONFIG_TINY_SRCU),
 	.name		= "srcud"
 };
 
@@ -720,6 +726,7 @@ static struct rcu_torture_ops busted_srcud_ops = {
 	.cb_barrier	= srcu_torture_barrier,
 	.stats		= srcu_torture_stats,
 	.irq_capable	= 1,
+	.no_pi_lock	= IS_ENABLED(CONFIG_TINY_SRCU),
 	.extendables	= RCUTORTURE_MAX_EXTEND,
 	.name		= "busted_srcud"
 };
@@ -1420,46 +1427,64 @@ static void rcutorture_one_extend(int *readstate, int newstate,
 				  struct rt_read_seg *rtrsp)
 {
 	unsigned long flags;
-	int idxnew = -1;
-	int idxold = *readstate;
+	int idxnew1 = -1;
+	int idxnew2 = -1;
+	int idxold1 = *readstate;
+	int idxold2 = idxold1;
 	int statesnew = ~*readstate & newstate;
 	int statesold = *readstate & ~newstate;
 
-	WARN_ON_ONCE(idxold < 0);
-	WARN_ON_ONCE((idxold >> RCUTORTURE_RDR_SHIFT) > 1);
+	WARN_ON_ONCE(idxold2 < 0);
+	WARN_ON_ONCE((idxold2 >> RCUTORTURE_RDR_SHIFT_2) > 1);
 	rtrsp->rt_readstate = newstate;
 
 	/* First, put new protection in place to avoid critical-section gap. */
 	if (statesnew & RCUTORTURE_RDR_BH)
 		local_bh_disable();
+	if (statesnew & RCUTORTURE_RDR_RBH)
+		rcu_read_lock_bh();
 	if (statesnew & RCUTORTURE_RDR_IRQ)
 		local_irq_disable();
 	if (statesnew & RCUTORTURE_RDR_PREEMPT)
 		preempt_disable();
-	if (statesnew & RCUTORTURE_RDR_RBH)
-		rcu_read_lock_bh();
 	if (statesnew & RCUTORTURE_RDR_SCHED)
 		rcu_read_lock_sched();
-	if (statesnew & RCUTORTURE_RDR_RCU)
-		idxnew = cur_ops->readlock() << RCUTORTURE_RDR_SHIFT;
+	if (statesnew & RCUTORTURE_RDR_RCU_1)
+		idxnew1 = (cur_ops->readlock() & 0x1) << RCUTORTURE_RDR_SHIFT_1;
+	if (statesnew & RCUTORTURE_RDR_RCU_2)
+		idxnew2 = (cur_ops->readlock() & 0x1) << RCUTORTURE_RDR_SHIFT_2;
 
-	/* Next, remove old protection, irq first due to bh conflict. */
+	/*
+	 * Next, remove old protection, in decreasing order of strength
+	 * to avoid unlock paths that aren't safe in the stronger
+	 * context. Namely: BH can not be enabled with disabled interrupts.
+	 * Additionally PREEMPT_RT requires that BH is enabled in preemptible
+	 * context.
+	 */
 	if (statesold & RCUTORTURE_RDR_IRQ)
 		local_irq_enable();
-	if (statesold & RCUTORTURE_RDR_BH)
-		local_bh_enable();
 	if (statesold & RCUTORTURE_RDR_PREEMPT)
 		preempt_enable();
-	if (statesold & RCUTORTURE_RDR_RBH)
-		rcu_read_unlock_bh();
 	if (statesold & RCUTORTURE_RDR_SCHED)
 		rcu_read_unlock_sched();
-	if (statesold & RCUTORTURE_RDR_RCU) {
-		bool lockit = !statesnew && !(torture_random(trsp) & 0xffff);
+	if (statesold & RCUTORTURE_RDR_BH)
+		local_bh_enable();
+	if (statesold & RCUTORTURE_RDR_RBH)
+		rcu_read_unlock_bh();
+	if (statesold & RCUTORTURE_RDR_RCU_2) {
+		cur_ops->readunlock((idxold2 >> RCUTORTURE_RDR_SHIFT_2) & 0x1);
+		WARN_ON_ONCE(idxnew2 != -1);
+		idxold2 = 0;
+	}
+	if (statesold & RCUTORTURE_RDR_RCU_1) {
+		bool lockit;
 
+		lockit = !cur_ops->no_pi_lock && !statesnew && !(torture_random(trsp) & 0xffff);
 		if (lockit)
 			raw_spin_lock_irqsave(&current->pi_lock, flags);
-		cur_ops->readunlock(idxold >> RCUTORTURE_RDR_SHIFT);
+		cur_ops->readunlock((idxold1 >> RCUTORTURE_RDR_SHIFT_1) & 0x1);
+		WARN_ON_ONCE(idxnew1 != -1);
+		idxold1 = 0;
 		if (lockit)
 			raw_spin_unlock_irqrestore(&current->pi_lock, flags);
 	}
@@ -1469,13 +1494,19 @@ static void rcutorture_one_extend(int *readstate, int newstate,
 		cur_ops->read_delay(trsp, rtrsp);
 
 	/* Update the reader state. */
-	if (idxnew == -1)
-		idxnew = idxold & ~RCUTORTURE_RDR_MASK;
-	WARN_ON_ONCE(idxnew < 0);
-	WARN_ON_ONCE((idxnew >> RCUTORTURE_RDR_SHIFT) > 1);
-	*readstate = idxnew | newstate;
-	WARN_ON_ONCE((*readstate >> RCUTORTURE_RDR_SHIFT) < 0);
-	WARN_ON_ONCE((*readstate >> RCUTORTURE_RDR_SHIFT) > 1);
+	if (idxnew1 == -1)
+		idxnew1 = idxold1 & RCUTORTURE_RDR_MASK_1;
+	WARN_ON_ONCE(idxnew1 < 0);
+	if (WARN_ON_ONCE((idxnew1 >> RCUTORTURE_RDR_SHIFT_1) > 1))
+		pr_info("Unexpected idxnew1 value of %#x\n", idxnew1);
+	if (idxnew2 == -1)
+		idxnew2 = idxold2 & RCUTORTURE_RDR_MASK_2;
+	WARN_ON_ONCE(idxnew2 < 0);
+	WARN_ON_ONCE((idxnew2 >> RCUTORTURE_RDR_SHIFT_2) > 1);
+	*readstate = idxnew1 | idxnew2 | newstate;
+	WARN_ON_ONCE(*readstate < 0);
+	if (WARN_ON_ONCE((*readstate >> RCUTORTURE_RDR_SHIFT_2) > 1))
+		pr_info("Unexpected idxnew2 value of %#x\n", idxnew2);
 }
 
 /* Return the biggest extendables mask given current RCU and boot parameters. */
@@ -1485,7 +1516,7 @@ static int rcutorture_extend_mask_max(void)
 
 	WARN_ON_ONCE(extendables & ~RCUTORTURE_MAX_EXTEND);
 	mask = extendables & RCUTORTURE_MAX_EXTEND & cur_ops->extendables;
-	mask = mask | RCUTORTURE_RDR_RCU;
+	mask = mask | RCUTORTURE_RDR_RCU_1 | RCUTORTURE_RDR_RCU_2;
 	return mask;
 }
 
@@ -1496,19 +1527,45 @@ rcutorture_extend_mask(int oldmask, struct torture_random_state *trsp)
 	int mask = rcutorture_extend_mask_max();
 	unsigned long randmask1 = torture_random(trsp) >> 8;
 	unsigned long randmask2 = randmask1 >> 3;
+	unsigned long preempts = RCUTORTURE_RDR_PREEMPT | RCUTORTURE_RDR_SCHED;
+	unsigned long preempts_irq = preempts | RCUTORTURE_RDR_IRQ;
+	unsigned long bhs = RCUTORTURE_RDR_BH | RCUTORTURE_RDR_RBH;
 
-	WARN_ON_ONCE(mask >> RCUTORTURE_RDR_SHIFT);
+	WARN_ON_ONCE(mask >> RCUTORTURE_RDR_SHIFT_1);
 	/* Mostly only one bit (need preemption!), sometimes lots of bits. */
 	if (!(randmask1 & 0x7))
 		mask = mask & randmask2;
 	else
 		mask = mask & (1 << (randmask2 % RCUTORTURE_RDR_NBITS));
-	/* Can't enable bh w/irq disabled. */
-	if ((mask & RCUTORTURE_RDR_IRQ) &&
-	    ((!(mask & RCUTORTURE_RDR_BH) && (oldmask & RCUTORTURE_RDR_BH)) ||
-	     (!(mask & RCUTORTURE_RDR_RBH) && (oldmask & RCUTORTURE_RDR_RBH))))
-		mask |= RCUTORTURE_RDR_BH | RCUTORTURE_RDR_RBH;
-	return mask ?: RCUTORTURE_RDR_RCU;
+
+	// Can't have nested RCU reader without outer RCU reader.
+	if (!(mask & RCUTORTURE_RDR_RCU_1) && (mask & RCUTORTURE_RDR_RCU_2)) {
+		if (oldmask & RCUTORTURE_RDR_RCU_1)
+			mask &= ~RCUTORTURE_RDR_RCU_2;
+		else
+			mask |= RCUTORTURE_RDR_RCU_1;
+	}
+
+	/*
+	 * Can't enable bh w/irq disabled.
+	 */
+	if (mask & RCUTORTURE_RDR_IRQ)
+		mask |= oldmask & bhs;
+
+	/*
+	 * Ideally these sequences would be detected in debug builds
+	 * (regardless of RT), but until then don't stop testing
+	 * them on non-RT.
+	 */
+	if (IS_ENABLED(CONFIG_PREEMPT_RT)) {
+		/* Can't modify BH in atomic context */
+		if (oldmask & preempts_irq)
+			mask &= ~bhs;
+		if ((oldmask | mask) & preempts_irq)
+			mask |= oldmask & bhs;
+	}
+
+	return mask ?: RCUTORTURE_RDR_RCU_1;
 }
 
 /*
@@ -1602,7 +1659,7 @@ static bool rcu_torture_one_read(struct torture_random_state *trsp, long myid)
 			  rcu_torture_writer_state,
 			  cookie, cur_ops->get_gp_state());
 	rcutorture_one_extend(&readstate, 0, trsp, rtrsp);
-	WARN_ON_ONCE(readstate & RCUTORTURE_RDR_MASK);
+	WARN_ON_ONCE(readstate);
 	// This next splat is expected behavior if leakpointer, especially
 	// for CONFIG_RCU_STRICT_GRACE_PERIOD=y kernels.
 	WARN_ON_ONCE(leakpointer && READ_ONCE(p->rtort_pipe_count) > 1);
@@ -2449,7 +2506,7 @@ static int __init rcu_torture_fwd_prog_init(void)
 	}
 	if (stall_cpu > 0) {
 		VERBOSE_TOROUT_STRING("rcu_torture_fwd_prog_init: Disabled, conflicts with CPU-stall testing");
-		if (IS_MODULE(CONFIG_RCU_TORTURE_TESTS))
+		if (IS_MODULE(CONFIG_RCU_TORTURE_TEST))
 			return -EINVAL; /* In module, can fail back to user. */
 		WARN_ON(1); /* Make sure rcutorture notices conflict. */
 		return 0;
@@ -2741,7 +2798,7 @@ static int rcu_torture_read_exit(void *unused)
 static int rcu_torture_read_exit_init(void)
 {
 	if (read_exit_burst <= 0)
-		return -EINVAL;
+		return 0;
 	init_waitqueue_head(&read_exit_wq);
 	read_exit_child_stop = false;
 	read_exit_child_stopped = false;
@@ -2819,7 +2876,7 @@ rcu_torture_cleanup(void)
 		 rcutorture_seq_diff(gp_seq, start_gp_seq));
 	torture_stop_kthread(rcu_torture_stats, stats_task);
 	torture_stop_kthread(rcu_torture_fqs, fqs_task);
-	if (rcu_torture_can_boost())
+	if (rcu_torture_can_boost() && rcutor_hp >= 0)
 		cpuhp_remove_state(rcutor_hp);
 
 	/*
@@ -3037,7 +3094,7 @@ rcu_torture_init(void)
 	rcu_torture_write_types();
 	firsterr = torture_create_kthread(rcu_torture_writer, NULL,
 					  writer_task);
-	if (firsterr)
+	if (torture_init_error(firsterr))
 		goto unwind;
 	if (nfakewriters > 0) {
 		fakewriter_tasks = kcalloc(nfakewriters,
@@ -3052,7 +3109,7 @@ rcu_torture_init(void)
 	for (i = 0; i < nfakewriters; i++) {
 		firsterr = torture_create_kthread(rcu_torture_fakewriter,
 						  NULL, fakewriter_tasks[i]);
-		if (firsterr)
+		if (torture_init_error(firsterr))
 			goto unwind;
 	}
 	reader_tasks = kcalloc(nrealreaders, sizeof(reader_tasks[0]),
@@ -3068,7 +3125,7 @@ rcu_torture_init(void)
 		rcu_torture_reader_mbchk[i].rtc_chkrdr = -1;
 		firsterr = torture_create_kthread(rcu_torture_reader, (void *)i,
 						  reader_tasks[i]);
-		if (firsterr)
+		if (torture_init_error(firsterr))
 			goto unwind;
 	}
 	nrealnocbers = nocbs_nthreads;
@@ -3088,18 +3145,18 @@ rcu_torture_init(void)
 	}
 	for (i = 0; i < nrealnocbers; i++) {
 		firsterr = torture_create_kthread(rcu_nocb_toggle, NULL, nocb_tasks[i]);
-		if (firsterr)
+		if (torture_init_error(firsterr))
 			goto unwind;
 	}
 	if (stat_interval > 0) {
 		firsterr = torture_create_kthread(rcu_torture_stats, NULL,
 						  stats_task);
-		if (firsterr)
+		if (torture_init_error(firsterr))
 			goto unwind;
 	}
 	if (test_no_idle_hz && shuffle_interval > 0) {
 		firsterr = torture_shuffle_init(shuffle_interval * HZ);
-		if (firsterr)
+		if (torture_init_error(firsterr))
 			goto unwind;
 	}
 	if (stutter < 0)
@@ -3109,7 +3166,7 @@ rcu_torture_init(void)
 
 		t = cur_ops->stall_dur ? cur_ops->stall_dur() : stutter * HZ;
 		firsterr = torture_stutter_init(stutter * HZ, t);
-		if (firsterr)
+		if (torture_init_error(firsterr))
 			goto unwind;
 	}
 	if (fqs_duration < 0)
@@ -3118,7 +3175,7 @@ rcu_torture_init(void)
 		/* Create the fqs thread */
 		firsterr = torture_create_kthread(rcu_torture_fqs, NULL,
 						  fqs_task);
-		if (firsterr)
+		if (torture_init_error(firsterr))
 			goto unwind;
 	}
 	if (test_boost_interval < 1)
@@ -3132,9 +3189,9 @@ rcu_torture_init(void)
 		firsterr = cpuhp_setup_state(CPUHP_AP_ONLINE_DYN, "RCU_TORTURE",
 					     rcutorture_booster_init,
 					     rcutorture_booster_cleanup);
-		if (firsterr < 0)
-			goto unwind;
 		rcutor_hp = firsterr;
+		if (torture_init_error(firsterr))
+			goto unwind;
 
 		// Testing RCU priority boosting requires rcutorture do
 		// some serious abuse.  Counter this by running ksoftirqd
@@ -3153,23 +3210,23 @@ rcu_torture_init(void)
 	}
 	shutdown_jiffies = jiffies + shutdown_secs * HZ;
 	firsterr = torture_shutdown_init(shutdown_secs, rcu_torture_cleanup);
-	if (firsterr)
+	if (torture_init_error(firsterr))
 		goto unwind;
 	firsterr = torture_onoff_init(onoff_holdoff * HZ, onoff_interval,
 				      rcutorture_sync);
-	if (firsterr)
+	if (torture_init_error(firsterr))
 		goto unwind;
 	firsterr = rcu_torture_stall_init();
-	if (firsterr)
+	if (torture_init_error(firsterr))
 		goto unwind;
 	firsterr = rcu_torture_fwd_prog_init();
-	if (firsterr)
+	if (torture_init_error(firsterr))
 		goto unwind;
 	firsterr = rcu_torture_barrier_init();
-	if (firsterr)
+	if (torture_init_error(firsterr))
 		goto unwind;
 	firsterr = rcu_torture_read_exit_init();
-	if (firsterr)
+	if (torture_init_error(firsterr))
 		goto unwind;
 	if (object_debug)
 		rcu_test_debug_objects();
