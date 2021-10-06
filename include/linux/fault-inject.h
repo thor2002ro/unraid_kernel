@@ -64,8 +64,8 @@ static inline struct dentry *fault_create_debugfs_attr(const char *name,
 
 struct kmem_cache;
 
-int should_failslab(struct kmem_cache *s, gfp_t gfpflags);
 #ifdef CONFIG_FAILSLAB
+int should_failslab(struct kmem_cache *s, gfp_t gfpflags);
 extern bool __should_failslab(struct kmem_cache *s, gfp_t gfpflags);
 #else
 static inline bool __should_failslab(struct kmem_cache *s, gfp_t gfpflags)
