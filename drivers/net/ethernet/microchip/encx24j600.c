@@ -761,7 +761,7 @@ static int encx24j600_set_mac_address(struct net_device *dev, void *addr)
 	if (!is_valid_ether_addr(address->sa_data))
 		return -EADDRNOTAVAIL;
 
-	memcpy(dev->dev_addr, address->sa_data, dev->addr_len);
+	eth_hw_addr_set(dev, address->sa_data);
 	return encx24j600_set_hw_macaddr(dev);
 }
 
@@ -1122,4 +1122,3 @@ module_spi_driver(encx24j600_spi_net_driver);
 MODULE_DESCRIPTION(DRV_NAME " ethernet driver");
 MODULE_AUTHOR("Jon Ringle <jringle@gridpoint.com>");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS("spi:" DRV_NAME);

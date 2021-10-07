@@ -707,20 +707,16 @@ static int ethoc_mdio_probe(struct net_device *dev)
 	else
 		phy = phy_find_first(priv->mdio);
 
-	if (!phy) {
-		dev_err(&dev->dev, "no PHY found\n");
-		return -ENXIO;
-	}
+	if (!phy)
+		return dev_err_probe(&dev->dev, -ENXIO, "no PHY found\n");
 
 	priv->old_duplex = -1;
 	priv->old_link = -1;
 
 	err = phy_connect_direct(dev, phy, ethoc_mdio_poll,
 				 PHY_INTERFACE_MODE_GMII);
-	if (err) {
-		dev_err(&dev->dev, "could not attach to PHY\n");
-		return err;
-	}
+	if (err)
+		return dev_err_probe(&dev->dev, err, "could not attach to PHY\n");
 
 	phy_set_max_speed(phy, SPEED_100);
 
@@ -820,7 +816,7 @@ static int ethoc_set_mac_address(struct net_device *dev, void *p)
 
 	if (!is_valid_ether_addr(addr->sa_data))
 		return -EADDRNOTAVAIL;
-	memcpy(dev->dev_addr, addr->sa_data, ETH_ALEN);
+	eth_hw_addr_set(dev, addr->sa_data);
 	ethoc_do_set_mac_address(dev);
 	return 0;
 }
@@ -1148,10 +1144,10 @@ static int ethoc_probe(struct platform_device *pdev)
 
 	/* Allow the platform setup code to pass in a MAC address. */
 	if (pdata) {
-		ether_addr_copy(netdev->dev_addr, pdata->hwaddr);
+		eth_hw_addr_set(netdev, pdata->hwaddr);
 		priv->phy_id = pdata->phy_id;
 	} else {
-		of_get_mac_address(pdev->dev.of_node, netdev->dev_addr);
+		of_get_ethdev_address(pdev->dev.of_node, netdev);
 		priv->phy_id = -1;
 	}
 
