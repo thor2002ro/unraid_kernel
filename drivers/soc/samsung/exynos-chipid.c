@@ -15,6 +15,7 @@
 #include <linux/device.h>
 #include <linux/errno.h>
 #include <linux/mfd/syscon.h>
+#include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
@@ -104,8 +105,7 @@ static int exynos_chipid_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, soc_dev);
 
-	dev_info(soc_device_to_device(soc_dev),
-		 "Exynos: CPU[%s] PRO_ID[0x%x] REV[0x%x] Detected\n",
+	dev_info(&pdev->dev, "Exynos: CPU[%s] PRO_ID[0x%x] REV[0x%x] Detected\n",
 		 soc_dev_attr->soc_id, product_id, revision);
 
 	return 0;
@@ -129,6 +129,7 @@ static const struct of_device_id exynos_chipid_of_device_ids[] = {
 	{ .compatible = "samsung,exynos4210-chipid" },
 	{}
 };
+MODULE_DEVICE_TABLE(of, exynos_chipid_of_device_ids);
 
 static struct platform_driver exynos_chipid_driver = {
 	.driver = {
@@ -138,4 +139,11 @@ static struct platform_driver exynos_chipid_driver = {
 	.probe	= exynos_chipid_probe,
 	.remove	= exynos_chipid_remove,
 };
-builtin_platform_driver(exynos_chipid_driver);
+module_platform_driver(exynos_chipid_driver);
+
+MODULE_DESCRIPTION("Samsung Exynos ChipID controller and ASV driver");
+MODULE_AUTHOR("Bartlomiej Zolnierkiewicz <b.zolnierkie@samsung.com>");
+MODULE_AUTHOR("Krzysztof Kozlowski <krzysztof.kozlowski@canonical.com>");
+MODULE_AUTHOR("Pankaj Dubey <pankaj.dubey@samsung.com>");
+MODULE_AUTHOR("Sylwester Nawrocki <s.nawrocki@samsung.com>");
+MODULE_LICENSE("GPL");
