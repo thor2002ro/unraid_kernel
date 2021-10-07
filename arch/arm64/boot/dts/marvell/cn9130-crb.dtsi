@@ -214,8 +214,8 @@
 };
 
 &cp0_eth2 {
-	/* This port uses "2500base-t" phy-mode */
-	status = "disabled";
+	status = "okay";
+	phy-mode = "2500base-x";
 	phy = <&nbaset_phy0>;
 	phys = <&cp0_comphy5 2>;
 };
