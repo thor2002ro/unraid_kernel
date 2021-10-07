@@ -384,9 +384,8 @@ static bool __fpu_restore_sig(void __user *buf, void __user *buf_fx,
 				     sizeof(fpu->state.fxsave)))
 			return false;
 
-		/* Reject invalid MXCSR values. */
-		if (fpu->state.fxsave.mxcsr & ~mxcsr_feature_mask)
-			return false;
+		/* Mask out reserved MXCSR bits. */
+		fpu->state.fxsave.mxcsr &= mxcsr_feature_mask;
 
 		/* Enforce XFEATURE_MASK_FPSSE when XSAVE is enabled */
 		if (use_xsave())
