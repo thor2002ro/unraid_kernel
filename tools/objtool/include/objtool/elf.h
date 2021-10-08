@@ -38,7 +38,6 @@ struct section {
 	Elf_Data *data;
 	char *name;
 	int idx;
-	unsigned int len;
 	bool changed, text, rodata, noinstr;
 };
 
@@ -57,6 +56,7 @@ struct symbol {
 	struct symbol *pfunc, *cfunc, *alias;
 	bool uaccess_safe;
 	bool static_call_tramp;
+	struct list_head pv_target;
 };
 
 struct reloc {
