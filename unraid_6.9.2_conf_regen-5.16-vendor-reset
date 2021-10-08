@@ -635,53 +635,6 @@ CONFIG_COMPAT_FOR_U64_ALIGNMENT=y
 CONFIG_SYSVIPC_COMPAT=y
 # end of Binary Emulations
 
-#
-# Firmware Drivers
-#
-
-#
-# ARM System Control and Management Interface Protocol
-#
-# end of ARM System Control and Management Interface Protocol
-
-# CONFIG_EDD is not set
-CONFIG_FIRMWARE_MEMMAP=y
-CONFIG_DMIID=y
-# CONFIG_DMI_SYSFS is not set
-CONFIG_DMI_SCAN_MACHINE_NON_EFI_FALLBACK=y
-# CONFIG_ISCSI_IBFT is not set
-# CONFIG_FW_CFG_SYSFS is not set
-CONFIG_SYSFB=y
-# CONFIG_SYSFB_SIMPLEFB is not set
-# CONFIG_GOOGLE_FIRMWARE is not set
-
-#
-# EFI (Extensible Firmware Interface) Support
-#
-# CONFIG_EFI_VARS is not set
-CONFIG_EFI_ESRT=y
-# CONFIG_EFI_FAKE_MEMMAP is not set
-CONFIG_EFI_RUNTIME_WRAPPERS=y
-CONFIG_EFI_GENERIC_STUB_INITRD_CMDLINE_LOADER=y
-# CONFIG_EFI_BOOTLOADER_CONTROL is not set
-# CONFIG_EFI_CAPSULE_LOADER is not set
-# CONFIG_EFI_TEST is not set
-CONFIG_APPLE_PROPERTIES=y
-# CONFIG_RESET_ATTACK_MITIGATION is not set
-# CONFIG_EFI_RCI2_TABLE is not set
-# CONFIG_EFI_DISABLE_PCI_DMA is not set
-# end of EFI (Extensible Firmware Interface) Support
-
-CONFIG_EFI_DEV_PATH_PARSER=y
-CONFIG_EFI_EARLYCON=y
-CONFIG_EFI_CUSTOM_SSDT_OVERLAYS=y
-
-#
-# Tegra firmware driver
-#
-# end of Tegra firmware driver
-# end of Firmware Drivers
-
 CONFIG_HAVE_KVM=y
 CONFIG_HAVE_KVM_IRQCHIP=y
 CONFIG_HAVE_KVM_IRQFD=y
@@ -824,6 +777,7 @@ CONFIG_HAVE_ARCH_PREL32_RELOCATIONS=y
 CONFIG_ARCH_USE_MEMREMAP_PROT=y
 # CONFIG_LOCK_EVENT_COUNTS is not set
 CONFIG_ARCH_HAS_MEM_ENCRYPT=y
+CONFIG_ARCH_HAS_CC_PLATFORM=y
 CONFIG_HAVE_STATIC_CALL=y
 CONFIG_HAVE_STATIC_CALL_INLINE=y
 CONFIG_HAVE_PREEMPT_DYNAMIC=y
@@ -1806,6 +1760,54 @@ CONFIG_DMA_SHARED_BUFFER=y
 
 CONFIG_CONNECTOR=y
 CONFIG_PROC_EVENTS=y
+
+#
+# Firmware Drivers
+#
+
+#
+# ARM System Control and Management Interface Protocol
+#
+# end of ARM System Control and Management Interface Protocol
+
+# CONFIG_EDD is not set
+CONFIG_FIRMWARE_MEMMAP=y
+CONFIG_DMIID=y
+# CONFIG_DMI_SYSFS is not set
+CONFIG_DMI_SCAN_MACHINE_NON_EFI_FALLBACK=y
+# CONFIG_ISCSI_IBFT is not set
+# CONFIG_FW_CFG_SYSFS is not set
+CONFIG_SYSFB=y
+# CONFIG_SYSFB_SIMPLEFB is not set
+# CONFIG_GOOGLE_FIRMWARE is not set
+
+#
+# EFI (Extensible Firmware Interface) Support
+#
+# CONFIG_EFI_VARS is not set
+CONFIG_EFI_ESRT=y
+# CONFIG_EFI_FAKE_MEMMAP is not set
+CONFIG_EFI_RUNTIME_WRAPPERS=y
+CONFIG_EFI_GENERIC_STUB_INITRD_CMDLINE_LOADER=y
+# CONFIG_EFI_BOOTLOADER_CONTROL is not set
+# CONFIG_EFI_CAPSULE_LOADER is not set
+# CONFIG_EFI_TEST is not set
+CONFIG_APPLE_PROPERTIES=y
+# CONFIG_RESET_ATTACK_MITIGATION is not set
+# CONFIG_EFI_RCI2_TABLE is not set
+# CONFIG_EFI_DISABLE_PCI_DMA is not set
+# end of EFI (Extensible Firmware Interface) Support
+
+CONFIG_EFI_DEV_PATH_PARSER=y
+CONFIG_EFI_EARLYCON=y
+CONFIG_EFI_CUSTOM_SSDT_OVERLAYS=y
+
+#
+# Tegra firmware driver
+#
+# end of Tegra firmware driver
+# end of Firmware Drivers
+
 # CONFIG_GNSS is not set
 # CONFIG_MTD is not set
 # CONFIG_OF is not set
