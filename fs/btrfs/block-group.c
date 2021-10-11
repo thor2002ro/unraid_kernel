@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 
+#include <linux/list_sort.h>
+
 #include "misc.h"
 #include "ctree.h"
 #include "block-group.h"
@@ -1486,6 +1488,21 @@ void btrfs_mark_bg_unused(struct btrfs_block_group *bg)
 	spin_unlock(&fs_info->unused_bgs_lock);
 }
 
+/*
+ * We want block groups with a low number of used bytes to be in the beginning
+ * of the list, so they will get reclaimed first.
+ */
+static int reclaim_bgs_cmp(void *unused, const struct list_head *a,
+			   const struct list_head *b)
+{
+	const struct btrfs_block_group *bg1, *bg2;
+
+	bg1 = list_entry(a, struct btrfs_block_group, bg_list);
+	bg2 = list_entry(b, struct btrfs_block_group, bg_list);
+
+	return bg1->used - bg2->used;
+}
+
 void btrfs_reclaim_bgs_work(struct work_struct *work)
 {
 	struct btrfs_fs_info *fs_info =
@@ -1493,6 +1510,7 @@ void btrfs_reclaim_bgs_work(struct work_struct *work)
 	struct btrfs_block_group *bg;
 	struct btrfs_space_info *space_info;
 	LIST_HEAD(again_list);
+	LIST_HEAD(reclaim_list);
 
 	if (!test_bit(BTRFS_FS_OPEN, &fs_info->flags))
 		return;
@@ -1510,17 +1528,20 @@ void btrfs_reclaim_bgs_work(struct work_struct *work)
 	}
 
 	spin_lock(&fs_info->unused_bgs_lock);
-	while (!list_empty(&fs_info->reclaim_bgs)) {
+	list_splice_init(&fs_info->reclaim_bgs, &reclaim_list);
+	spin_unlock(&fs_info->unused_bgs_lock);
+
+	list_sort(NULL, &reclaim_list, reclaim_bgs_cmp);
+	while (!list_empty(&reclaim_list)) {
 		u64 zone_unusable;
 		int ret = 0;
 
-		bg = list_first_entry(&fs_info->reclaim_bgs,
+		bg = list_first_entry(&reclaim_list,
 				      struct btrfs_block_group,
 				      bg_list);
 		list_del_init(&bg->bg_list);
 
 		space_info = bg->space_info;
-		spin_unlock(&fs_info->unused_bgs_lock);
 
 		/* Don't race with allocators so take the groups_sem */
 		down_write(&space_info->groups_sem);
@@ -1568,12 +1589,12 @@ void btrfs_reclaim_bgs_work(struct work_struct *work)
 				  bg->start);
 
 next:
-		spin_lock(&fs_info->unused_bgs_lock);
 		if (ret == -EAGAIN && list_empty(&bg->bg_list))
 			list_add_tail(&bg->bg_list, &again_list);
 		else
 			btrfs_put_block_group(bg);
 	}
+	spin_lock(&fs_info->unused_bgs_lock);
 	list_splice_tail(&again_list, &fs_info->reclaim_bgs);
 	spin_unlock(&fs_info->unused_bgs_lock);
 	mutex_unlock(&fs_info->reclaim_bgs_lock);
