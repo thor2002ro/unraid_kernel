@@ -19,6 +19,8 @@
  */
 #define CREATE_TRACE_POINTS
 #include "ice_trace.h"
+#include "ice_eswitch.h"
+#include "ice_tc_lib.h"
 
 #define DRV_SUMMARY	"Intel(R) Ethernet Connection E800 Series Linux Driver"
 static const char ice_driver_string[] = DRV_SUMMARY;
@@ -46,7 +48,6 @@ static DEFINE_IDA(ice_aux_ida);
 static struct workqueue_struct *ice_wq;
 static const struct net_device_ops ice_netdev_safe_mode_ops;
 static const struct net_device_ops ice_netdev_ops;
-static int ice_vsi_open(struct ice_vsi *vsi);
 
 static void ice_rebuild(struct ice_pf *pf, enum ice_reset_req reset_type);
 
@@ -624,7 +625,10 @@ static void ice_print_topo_conflict(struct ice_vsi *vsi)
 		netdev_info(vsi->netdev, "Potential misconfiguration of the Ethernet port detected. If it was not intended, please use the Intel (R) Ethernet Port Configuration Tool to address the issue.\n");
 		break;
 	case ICE_AQ_LINK_TOPO_UNSUPP_MEDIA:
-		netdev_info(vsi->netdev, "Rx/Tx is disabled on this device because an unsupported module type was detected. Refer to the Intel(R) Ethernet Adapters and Devices User Guide for a list of supported modules.\n");
+		if (test_bit(ICE_FLAG_LINK_LENIENT_MODE_ENA, vsi->back->flags))
+			netdev_warn(vsi->netdev, "An unsupported module type was detected. Refer to the Intel(R) Ethernet Adapters and Devices User Guide for a list of supported modules\n");
+		else
+			netdev_err(vsi->netdev, "Rx/Tx is disabled on this device because an unsupported module type was detected. Refer to the Intel(R) Ethernet Adapters and Devices User Guide for a list of supported modules.\n");
 		break;
 	default:
 		break;
@@ -1965,7 +1969,8 @@ static int ice_configure_phy(struct ice_vsi *vsi)
 
 	ice_print_topo_conflict(vsi);
 
-	if (phy->link_info.topo_media_conflict == ICE_AQ_LINK_TOPO_UNSUPP_MEDIA)
+	if (!test_bit(ICE_FLAG_LINK_LENIENT_MODE_ENA, pf->flags) &&
+	    phy->link_info.topo_media_conflict == ICE_AQ_LINK_TOPO_UNSUPP_MEDIA)
 		return -EPERM;
 
 	if (test_bit(ICE_FLAG_LINK_DOWN_ON_CLOSE_ENA, pf->flags))
@@ -3103,6 +3108,9 @@ static void ice_set_netdev_features(struct net_device *netdev)
 
 	/* enable features */
 	netdev->features |= netdev->hw_features;
+
+	netdev->hw_features |= NETIF_F_HW_TC;
+
 	/* encap and VLAN devices inherit default, csumo and tso features */
 	netdev->hw_enc_features |= dflt_features | csumo_features |
 				   tso_features;
@@ -3139,7 +3147,7 @@ static int ice_cfg_netdev(struct ice_vsi *vsi)
 	if (vsi->type == ICE_VSI_PF) {
 		SET_NETDEV_DEV(netdev, ice_pf_to_dev(vsi->back));
 		ether_addr_copy(mac_addr, vsi->port_info->mac.perm_addr);
-		ether_addr_copy(netdev->dev_addr, mac_addr);
+		eth_hw_addr_set(netdev, mac_addr);
 		ether_addr_copy(netdev->perm_addr, mac_addr);
 	}
 
@@ -3537,6 +3545,13 @@ static int ice_ena_msix_range(struct ice_pf *pf)
 		v_budget += needed;
 		v_left -= needed;
 	}
+
+	/* reserve for switchdev */
+	needed = ICE_ESWITCH_MSIX;
+	if (v_left < needed)
+		goto no_hw_vecs_left_err;
+	v_budget += needed;
+	v_left -= needed;
 
 	/* total used for non-traffic vectors */
 	v_other = v_budget;
@@ -4170,11 +4185,11 @@ static int ice_register_netdev(struct ice_pf *pf)
 	set_bit(ICE_VSI_NETDEV_REGISTERED, vsi->state);
 	netif_carrier_off(vsi->netdev);
 	netif_tx_stop_all_queues(vsi->netdev);
-	err = ice_devlink_create_port(vsi);
+	err = ice_devlink_create_pf_port(pf);
 	if (err)
 		goto err_devlink_create;
 
-	devlink_port_type_eth_set(&vsi->devlink_port, vsi->netdev);
+	devlink_port_type_eth_set(&pf->devlink_port, vsi->netdev);
 
 	return 0;
 err_devlink_create:
@@ -4258,12 +4273,6 @@ ice_probe(struct pci_dev *pdev, const struct pci_device_id __always_unused *ent)
 
 	pf->msg_enable = netif_msg_init(debug, ICE_DFLT_NETIF_M);
 
-	err = ice_devlink_register(pf);
-	if (err) {
-		dev_err(dev, "ice_devlink_register failed: %d\n", err);
-		goto err_exit_unroll;
-	}
-
 #ifndef CONFIG_DYNAMIC_DEBUG
 	if (debug < -1)
 		hw->debug_mask = debug;
@@ -4275,6 +4284,8 @@ ice_probe(struct pci_dev *pdev, const struct pci_device_id __always_unused *ent)
 		err = -EIO;
 		goto err_exit_unroll;
 	}
+
+	ice_init_feature_support(pf);
 
 	ice_request_fw(pf);
 
@@ -4497,6 +4508,7 @@ probe_done:
 		dev_warn(dev, "RDMA is not supported on this device\n");
 	}
 
+	ice_devlink_register(pf);
 	return 0;
 
 err_init_aux_unroll:
@@ -4520,7 +4532,6 @@ err_init_pf_unroll:
 	ice_devlink_destroy_regions(pf);
 	ice_deinit_hw(hw);
 err_exit_unroll:
-	ice_devlink_unregister(pf);
 	pci_disable_pcie_error_reporting(pdev);
 	pci_disable_device(pdev);
 	return err;
@@ -4597,9 +4608,7 @@ static void ice_remove(struct pci_dev *pdev)
 	struct ice_pf *pf = pci_get_drvdata(pdev);
 	int i;
 
-	if (!pf)
-		return;
-
+	ice_devlink_unregister(pf);
 	for (i = 0; i < ICE_MAX_RESET_WAIT; i++) {
 		if (!ice_is_reset_in_progress(pf->state))
 			break;
@@ -4636,7 +4645,6 @@ static void ice_remove(struct pci_dev *pdev)
 	ice_deinit_pf(pf);
 	ice_devlink_destroy_regions(pf);
 	ice_deinit_hw(&pf->hw);
-	ice_devlink_unregister(pf);
 
 	/* Issue a PFR as part of the prescribed driver unload flow.  Do not
 	 * do it via ice_schedule_reset() since there is no need to rebuild
@@ -5147,7 +5155,7 @@ static int ice_set_mac_address(struct net_device *netdev, void *pi)
 	netif_addr_lock_bh(netdev);
 	ether_addr_copy(old_mac, netdev->dev_addr);
 	/* change the netdev's MAC address */
-	memcpy(netdev->dev_addr, mac, netdev->addr_len);
+	eth_hw_addr_set(netdev, mac);
 	netif_addr_unlock_bh(netdev);
 
 	/* Clean up old MAC filter. Not an error if old filter doesn't exist */
@@ -5175,7 +5183,7 @@ err_update_filters:
 		netdev_err(netdev, "can't set MAC %pM. filter update failed\n",
 			   mac);
 		netif_addr_lock_bh(netdev);
-		ether_addr_copy(netdev->dev_addr, old_mac);
+		eth_hw_addr_set(netdev, old_mac);
 		netif_addr_unlock_bh(netdev);
 		return err;
 	}
@@ -5989,9 +5997,11 @@ int ice_down(struct ice_vsi *vsi)
 	/* Caller of this function is expected to set the
 	 * vsi->state ICE_DOWN bit
 	 */
-	if (vsi->netdev) {
+	if (vsi->netdev && vsi->type == ICE_VSI_PF) {
 		netif_carrier_off(vsi->netdev);
 		netif_tx_disable(vsi->netdev);
+	} else if (vsi->type == ICE_VSI_SWITCHDEV_CTRL) {
+		ice_eswitch_stop_all_tx_queues(vsi->back);
 	}
 
 	ice_vsi_dis_irq(vsi);
@@ -6058,7 +6068,8 @@ int ice_vsi_setup_tx_rings(struct ice_vsi *vsi)
 		if (!ring)
 			return -EINVAL;
 
-		ring->netdev = vsi->netdev;
+		if (vsi->netdev)
+			ring->netdev = vsi->netdev;
 		err = ice_setup_tx_ring(ring);
 		if (err)
 			break;
@@ -6089,7 +6100,8 @@ int ice_vsi_setup_rx_rings(struct ice_vsi *vsi)
 		if (!ring)
 			return -EINVAL;
 
-		ring->netdev = vsi->netdev;
+		if (vsi->netdev)
+			ring->netdev = vsi->netdev;
 		err = ice_setup_rx_ring(ring);
 		if (err)
 			break;
@@ -6162,7 +6174,7 @@ err_setup_tx:
  *
  * Returns 0 on success, negative value on error
  */
-static int ice_vsi_open(struct ice_vsi *vsi)
+int ice_vsi_open(struct ice_vsi *vsi)
 {
 	char int_name[ICE_INT_NAME_STR_LEN];
 	struct ice_pf *pf = vsi->back;
@@ -6187,14 +6199,16 @@ static int ice_vsi_open(struct ice_vsi *vsi)
 	if (err)
 		goto err_setup_rx;
 
-	/* Notify the stack of the actual queue counts. */
-	err = netif_set_real_num_tx_queues(vsi->netdev, vsi->num_txq);
-	if (err)
-		goto err_set_qs;
+	if (vsi->type == ICE_VSI_PF) {
+		/* Notify the stack of the actual queue counts. */
+		err = netif_set_real_num_tx_queues(vsi->netdev, vsi->num_txq);
+		if (err)
+			goto err_set_qs;
 
-	err = netif_set_real_num_rx_queues(vsi->netdev, vsi->num_rxq);
-	if (err)
-		goto err_set_qs;
+		err = netif_set_real_num_rx_queues(vsi->netdev, vsi->num_rxq);
+		if (err)
+			goto err_set_qs;
+	}
 
 	err = ice_up_complete(vsi);
 	if (err)
@@ -6430,6 +6444,12 @@ static void ice_rebuild(struct ice_pf *pf, enum ice_reset_req reset_type)
 	err = ice_vsi_rebuild_by_type(pf, ICE_VSI_PF);
 	if (err) {
 		dev_err(dev, "PF VSI rebuild failed: %d\n", err);
+		goto err_vsi_rebuild;
+	}
+
+	err = ice_vsi_rebuild_by_type(pf, ICE_VSI_SWITCHDEV_CTRL);
+	if (err) {
+		dev_err(dev, "Switchdev CTRL VSI rebuild failed: %d\n", err);
 		goto err_vsi_rebuild;
 	}
 
@@ -7054,6 +7074,72 @@ static void ice_tx_timeout(struct net_device *netdev, unsigned int txqueue)
 }
 
 /**
+ * ice_setup_tc_cls_flower - flower classifier offloads
+ * @np: net device to configure
+ * @filter_dev: device on which filter is added
+ * @cls_flower: offload data
+ */
+static int
+ice_setup_tc_cls_flower(struct ice_netdev_priv *np,
+			struct net_device *filter_dev,
+			struct flow_cls_offload *cls_flower)
+{
+	struct ice_vsi *vsi = np->vsi;
+
+	if (cls_flower->common.chain_index)
+		return -EOPNOTSUPP;
+
+	switch (cls_flower->command) {
+	case FLOW_CLS_REPLACE:
+		return ice_add_cls_flower(filter_dev, vsi, cls_flower);
+	case FLOW_CLS_DESTROY:
+		return ice_del_cls_flower(vsi, cls_flower);
+	default:
+		return -EINVAL;
+	}
+}
+
+/**
+ * ice_setup_tc_block_cb - callback handler registered for TC block
+ * @type: TC SETUP type
+ * @type_data: TC flower offload data that contains user input
+ * @cb_priv: netdev private data
+ */
+static int
+ice_setup_tc_block_cb(enum tc_setup_type type, void *type_data, void *cb_priv)
+{
+	struct ice_netdev_priv *np = cb_priv;
+
+	switch (type) {
+	case TC_SETUP_CLSFLOWER:
+		return ice_setup_tc_cls_flower(np, np->vsi->netdev,
+					       type_data);
+	default:
+		return -EOPNOTSUPP;
+	}
+}
+
+static LIST_HEAD(ice_block_cb_list);
+
+static int
+ice_setup_tc(struct net_device *netdev, enum tc_setup_type type,
+	     void *type_data)
+{
+	struct ice_netdev_priv *np = netdev_priv(netdev);
+
+	switch (type) {
+	case TC_SETUP_BLOCK:
+		return flow_block_cb_setup_simple(type_data,
+						  &ice_block_cb_list,
+						  ice_setup_tc_block_cb,
+						  np, np, true);
+	default:
+		return -EOPNOTSUPP;
+	}
+	return -EOPNOTSUPP;
+}
+
+/**
  * ice_open - Called when a network interface becomes active
  * @netdev: network interface device structure
  *
@@ -7239,6 +7325,7 @@ static const struct net_device_ops ice_netdev_ops = {
 	.ndo_open = ice_open,
 	.ndo_stop = ice_stop,
 	.ndo_start_xmit = ice_start_xmit,
+	.ndo_select_queue = ice_select_queue,
 	.ndo_features_check = ice_features_check,
 	.ndo_set_rx_mode = ice_set_rx_mode,
 	.ndo_set_mac_address = ice_set_mac_address,
@@ -7256,6 +7343,7 @@ static const struct net_device_ops ice_netdev_ops = {
 	.ndo_get_vf_stats = ice_get_vf_stats,
 	.ndo_vlan_rx_add_vid = ice_vlan_rx_add_vid,
 	.ndo_vlan_rx_kill_vid = ice_vlan_rx_kill_vid,
+	.ndo_setup_tc = ice_setup_tc,
 	.ndo_set_features = ice_set_features,
 	.ndo_bridge_getlink = ice_bridge_getlink,
 	.ndo_bridge_setlink = ice_bridge_setlink,

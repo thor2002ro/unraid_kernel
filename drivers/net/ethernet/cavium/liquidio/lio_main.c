@@ -1279,6 +1279,14 @@ static int liquidio_stop_nic_module(struct octeon_device *oct)
 	struct lio *lio;
 
 	dev_dbg(&oct->pci_dev->dev, "Stopping network interfaces\n");
+	device_lock(&oct->pci_dev->dev);
+	if (oct->devlink) {
+		devlink_unregister(oct->devlink);
+		devlink_free(oct->devlink);
+		oct->devlink = NULL;
+	}
+	device_unlock(&oct->pci_dev->dev);
+
 	if (!oct->ifcount) {
 		dev_err(&oct->pci_dev->dev, "Init for Octeon was not completed\n");
 		return 1;
@@ -1299,12 +1307,6 @@ static int liquidio_stop_nic_module(struct octeon_device *oct)
 
 	for (i = 0; i < oct->ifcount; i++)
 		liquidio_destroy_nic_device(oct, i);
-
-	if (oct->devlink) {
-		devlink_unregister(oct->devlink);
-		devlink_free(oct->devlink);
-		oct->devlink = NULL;
-	}
 
 	dev_dbg(&oct->pci_dev->dev, "Network interfaces stopped\n");
 	return 0;
@@ -2022,7 +2024,7 @@ static int liquidio_set_mac(struct net_device *netdev, void *p)
 		return -EIO;
 	}
 
-	memcpy(netdev->dev_addr, addr->sa_data, netdev->addr_len);
+	eth_hw_addr_set(netdev, addr->sa_data);
 	memcpy(((u8 *)&lio->linfo.hw_addr) + 2, addr->sa_data, ETH_ALEN);
 
 	return 0;
@@ -3632,7 +3634,7 @@ static int setup_nic_devices(struct octeon_device *octeon_dev)
 
 		/* Copy MAC Address to OS network device structure */
 
-		ether_addr_copy(netdev->dev_addr, mac);
+		eth_hw_addr_set(netdev, mac);
 
 		/* By default all interfaces on a single Octeon uses the same
 		 * tx and rx queues
@@ -3749,10 +3751,12 @@ static int setup_nic_devices(struct octeon_device *octeon_dev)
 		}
 	}
 
+	device_lock(&octeon_dev->pci_dev->dev);
 	devlink = devlink_alloc(&liquidio_devlink_ops,
 				sizeof(struct lio_devlink_priv),
 				&octeon_dev->pci_dev->dev);
 	if (!devlink) {
+		device_unlock(&octeon_dev->pci_dev->dev);
 		dev_err(&octeon_dev->pci_dev->dev, "devlink alloc failed\n");
 		goto setup_nic_dev_free;
 	}
@@ -3760,15 +3764,10 @@ static int setup_nic_devices(struct octeon_device *octeon_dev)
 	lio_devlink = devlink_priv(devlink);
 	lio_devlink->oct = octeon_dev;
 
-	if (devlink_register(devlink)) {
-		devlink_free(devlink);
-		dev_err(&octeon_dev->pci_dev->dev,
-			"devlink registration failed\n");
-		goto setup_nic_dev_free;
-	}
-
 	octeon_dev->devlink = devlink;
 	octeon_dev->eswitch_mode = DEVLINK_ESWITCH_MODE_LEGACY;
+	devlink_register(devlink);
+	device_unlock(&octeon_dev->pci_dev->dev);
 
 	return 0;
 

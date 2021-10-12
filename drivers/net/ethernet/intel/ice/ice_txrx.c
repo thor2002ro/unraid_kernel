@@ -6,6 +6,7 @@
 #include <linux/prefetch.h>
 #include <linux/mm.h>
 #include <linux/bpf_trace.h>
+#include <net/dsfield.h>
 #include <net/xdp.h>
 #include "ice_txrx_lib.h"
 #include "ice_lib.h"
@@ -13,6 +14,7 @@
 #include "ice_trace.h"
 #include "ice_dcb_lib.h"
 #include "ice_xsk.h"
+#include "ice_eswitch.h"
 
 #define ICE_RX_HDR_SIZE		256
 
@@ -2245,6 +2247,8 @@ ice_xmit_frame_ring(struct sk_buff *skb, struct ice_ring *tx_ring)
 					ICE_TXD_CTX_QW1_CMD_S);
 
 	ice_tstamp(tx_ring, skb, first, &offload);
+	if (ice_is_switchdev_running(vsi->back))
+		ice_eswitch_set_target_vsi(skb, &offload);
 
 	if (offload.cd_qw1 & ICE_TX_DESC_DTYPE_CTX) {
 		struct ice_tx_ctx_desc *cdesc;
@@ -2293,6 +2297,39 @@ netdev_tx_t ice_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 		return NETDEV_TX_OK;
 
 	return ice_xmit_frame_ring(skb, tx_ring);
+}
+
+/**
+ * ice_get_dscp_up - return the UP/TC value for a SKB
+ * @dcbcfg: DCB config that contains DSCP to UP/TC mapping
+ * @skb: SKB to query for info to determine UP/TC
+ *
+ * This function is to only be called when the PF is in L3 DSCP PFC mode
+ */
+static u8 ice_get_dscp_up(struct ice_dcbx_cfg *dcbcfg, struct sk_buff *skb)
+{
+	u8 dscp = 0;
+
+	if (skb->protocol == htons(ETH_P_IP))
+		dscp = ipv4_get_dsfield(ip_hdr(skb)) >> 2;
+	else if (skb->protocol == htons(ETH_P_IPV6))
+		dscp = ipv6_get_dsfield(ipv6_hdr(skb)) >> 2;
+
+	return dcbcfg->dscp_map[dscp];
+}
+
+u16
+ice_select_queue(struct net_device *netdev, struct sk_buff *skb,
+		 struct net_device *sb_dev)
+{
+	struct ice_pf *pf = ice_netdev_to_pf(netdev);
+	struct ice_dcbx_cfg *dcbcfg;
+
+	dcbcfg = &pf->hw.port_info->qos_cfg.local_dcbx_cfg;
+	if (dcbcfg->pfc_mode == ICE_QOS_MODE_DSCP)
+		skb->priority = ice_get_dscp_up(dcbcfg, skb);
+
+	return netdev_pick_tx(netdev, skb, sb_dev);
 }
 
 /**

@@ -5242,14 +5242,14 @@ static int mvneta_probe(struct platform_device *pdev)
 		goto err_free_ports;
 	}
 
-	err = of_get_mac_address(dn, dev->dev_addr);
+	err = of_get_ethdev_address(dn, dev);
 	if (!err) {
 		mac_from = "device tree";
 	} else {
 		mvneta_get_mac_addr(pp, hw_mac_addr);
 		if (is_valid_ether_addr(hw_mac_addr)) {
 			mac_from = "hardware";
-			memcpy(dev->dev_addr, hw_mac_addr, ETH_ALEN);
+			eth_hw_addr_set(dev, hw_mac_addr);
 		} else {
 			mac_from = "random";
 			eth_hw_addr_random(dev);
