@@ -1065,7 +1065,15 @@ void fuse_wait_aborted(struct fuse_conn *fc);
 /**
  * Invalidate inode attributes
  */
+
+/* Attributes possibly changed on data modification */
+#define FUSE_STATX_MODIFY	(STATX_MTIME | STATX_CTIME | STATX_BLOCKS)
+
+/* Attributes possibly changed on data and/or size modification */
+#define FUSE_STATX_MODSIZE	(FUSE_STATX_MODIFY | STATX_SIZE)
+
 void fuse_invalidate_attr(struct inode *inode);
+void fuse_invalidate_attr_mask(struct inode *inode, u32 mask);
 
 void fuse_invalidate_entry_cache(struct dentry *entry);
 
@@ -1145,6 +1153,7 @@ int fuse_allow_current_process(struct fuse_conn *fc);
 
 u64 fuse_lock_owner_id(struct fuse_conn *fc, fl_owner_t id);
 
+void fuse_flush_time_update(struct inode *inode);
 void fuse_update_ctime(struct inode *inode);
 
 int fuse_update_attributes(struct inode *inode, struct file *file);

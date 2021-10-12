@@ -211,7 +211,7 @@ void fuse_finish_open(struct inode *inode, struct file *file)
 		i_size_write(inode, 0);
 		spin_unlock(&fi->lock);
 		truncate_pagecache(inode, 0);
-		fuse_invalidate_attr(inode);
+		fuse_invalidate_attr_mask(inode, FUSE_STATX_MODSIZE);
 		if (fc->writeback_cache)
 			file_update_time(file);
 	} else if (!(ff->open_flags & FOPEN_KEEP_CACHE)) {
@@ -339,12 +339,6 @@ static int fuse_open(struct inode *inode, struct file *file)
 
 static int fuse_release(struct inode *inode, struct file *file)
 {
-	struct fuse_conn *fc = get_fuse_conn(inode);
-
-	/* see fuse_vma_close() for !writeback_cache case */
-	if (fc->writeback_cache)
-		write_inode_now(inode, 1);
-
 	fuse_release_common(file, false);
 
 	/* return value is ignored by VFS */
@@ -521,7 +515,7 @@ inval_attr_out:
 	 * enabled, i_blocks from cached attr may not be accurate.
 	 */
 	if (!err && fm->fc->writeback_cache)
-		fuse_invalidate_attr(inode);
+		fuse_invalidate_attr_mask(inode, STATX_BLOCKS);
 	return err;
 }
 
@@ -1272,7 +1266,7 @@ static ssize_t fuse_perform_write(struct kiocb *iocb,
 		fuse_write_update_size(inode, pos);
 
 	clear_bit(FUSE_I_SIZE_UNSTABLE, &fi->state);
-	fuse_invalidate_attr(inode);
+	fuse_invalidate_attr_mask(inode, FUSE_STATX_MODSIZE);
 
 	return res > 0 ? res : err;
 }
@@ -1451,7 +1445,6 @@ ssize_t fuse_direct_io(struct fuse_io_priv *io, struct iov_iter *iter,
 	if (!ia)
 		return -ENOMEM;
 
-	ia->io = io;
 	if (!cuse && fuse_range_is_writeback(inode, idx_from, idx_to)) {
 		if (!write)
 			inode_lock(inode);
@@ -1563,7 +1556,7 @@ static ssize_t fuse_direct_write_iter(struct kiocb *iocb, struct iov_iter *from)
 					     FUSE_DIO_WRITE);
 		}
 	}
-	fuse_invalidate_attr(inode);
+	fuse_invalidate_attr_mask(inode, FUSE_STATX_MODSIZE);
 	if (res > 0)
 		fuse_write_update_size(inode, iocb->ki_pos);
 	inode_unlock(inode);
@@ -1776,7 +1769,7 @@ static void fuse_writepage_end(struct fuse_mount *fm, struct fuse_args *args,
 	 * is enabled, we trust local ctime/mtime.
 	 */
 	if (!fc->writeback_cache)
-		fuse_invalidate_attr(inode);
+		fuse_invalidate_attr_mask(inode, FUSE_STATX_MODIFY);
 	spin_lock(&fi->lock);
 	rb_erase(&wpa->writepages_entry, &fi->writepages);
 	while (wpa->next) {
@@ -1847,6 +1840,17 @@ int fuse_write_inode(struct inode *inode, struct writeback_control *wbc)
 	struct fuse_inode *fi = get_fuse_inode(inode);
 	struct fuse_file *ff;
 	int err;
+
+	/*
+	 * Inode is always written before the last reference is dropped and
+	 * hence this should not be reached from reclaim.
+	 *
+	 * Writing back the inode from reclaim can deadlock if the request
+	 * processing itself needs an allocation.  Allocations triggering
+	 * reclaim while serving a request can't be prevented, because it can
+	 * involve any number of unrelated userspace processes.
+	 */
+	WARN_ON(wbc->for_reclaim);
 
 	ff = __fuse_write_file_get(fi);
 	err = fuse_flush_times(inode, ff);
@@ -2340,12 +2344,15 @@ static int fuse_launder_page(struct page *page)
 }
 
 /*
- * Write back dirty pages now, because there may not be any suitable
- * open files later
+ * Write back dirty data/metadata now (there may not be any suitable
+ * open files later for data)
  */
 static void fuse_vma_close(struct vm_area_struct *vma)
 {
-	filemap_write_and_wait(vma->vm_file->f_mapping);
+	int err;
+
+	err = write_inode_now(vma->vm_file->f_mapping->host, 1);
+	mapping_set_error(vma->vm_file->f_mapping, err);
 }
 
 /*
@@ -2869,7 +2876,7 @@ fuse_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
 
 	if (iov_iter_rw(iter) == WRITE) {
 		ret = fuse_direct_io(io, iter, &pos, FUSE_DIO_WRITE);
-		fuse_invalidate_attr(inode);
+		fuse_invalidate_attr_mask(inode, FUSE_STATX_MODSIZE);
 	} else {
 		ret = __fuse_direct_read(io, iter, &pos);
 	}
@@ -2990,7 +2997,7 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 	if (mode & (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_ZERO_RANGE))
 		truncate_pagecache_range(inode, offset, offset + length - 1);
 
-	fuse_invalidate_attr(inode);
+	fuse_invalidate_attr_mask(inode, FUSE_STATX_MODSIZE);
 
 out:
 	if (!(mode & FALLOC_FL_KEEP_SIZE))
@@ -3001,6 +3008,8 @@ out:
 
 	if (lock_inode)
 		inode_unlock(inode);
+
+	fuse_flush_time_update(inode);
 
 	return err;
 }
@@ -3101,7 +3110,7 @@ static ssize_t __fuse_copy_file_range(struct file *file_in, loff_t pos_in,
 		file_update_time(file_out);
 	}
 
-	fuse_invalidate_attr(inode_out);
+	fuse_invalidate_attr_mask(inode_out, FUSE_STATX_MODSIZE);
 
 	err = outarg.size;
 out:
@@ -3110,6 +3119,8 @@ out:
 
 	inode_unlock(inode_out);
 	file_accessed(file_in);
+
+	fuse_flush_time_update(inode_out);
 
 	return err;
 }
