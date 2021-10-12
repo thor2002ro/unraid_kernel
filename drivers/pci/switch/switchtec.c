@@ -206,7 +206,8 @@ static void mrpc_complete_cmd(struct switchtec_dev *stdev)
 	stuser_set_state(stuser, MRPC_DONE);
 	stuser->return_code = 0;
 
-	if (stuser->status != SWITCHTEC_MRPC_STATUS_DONE)
+	if (stuser->status != SWITCHTEC_MRPC_STATUS_DONE &&
+	    stuser->status != SWITCHTEC_MRPC_STATUS_ERROR)
 		goto out;
 
 	if (stdev->dma_mrpc)
@@ -327,7 +328,7 @@ static ssize_t field ## _show(struct device *dev, \
 		return io_string_show(buf, &si->gen4.field, \
 				      sizeof(si->gen4.field)); \
 	else \
-		return -ENOTSUPP; \
+		return -EOPNOTSUPP; \
 } \
 \
 static DEVICE_ATTR_RO(field)
@@ -569,7 +570,8 @@ static ssize_t switchtec_dev_read(struct file *filp, char __user *data,
 out:
 	mutex_unlock(&stdev->mrpc_mutex);
 
-	if (stuser->status == SWITCHTEC_MRPC_STATUS_DONE)
+	if (stuser->status == SWITCHTEC_MRPC_STATUS_DONE ||
+	    stuser->status == SWITCHTEC_MRPC_STATUS_ERROR)
 		return size;
 	else if (stuser->status == SWITCHTEC_MRPC_STATUS_INTERRUPTED)
 		return -ENXIO;
@@ -613,7 +615,7 @@ static int ioctl_flash_info(struct switchtec_dev *stdev,
 		info.flash_length = ioread32(&fi->gen4.flash_length);
 		info.num_partitions = SWITCHTEC_NUM_PARTITIONS_GEN4;
 	} else {
-		return -ENOTSUPP;
+		return -EOPNOTSUPP;
 	}
 
 	if (copy_to_user(uinfo, &info, sizeof(info)))
@@ -821,7 +823,7 @@ static int ioctl_flash_part_info(struct switchtec_dev *stdev,
 		if (ret)
 			return ret;
 	} else {
-		return -ENOTSUPP;
+		return -EOPNOTSUPP;
 	}
 
 	if (copy_to_user(uinfo, &info, sizeof(info)))
@@ -969,6 +971,9 @@ static int event_ctl(struct switchtec_dev *stdev,
 		return PTR_ERR(reg);
 
 	hdr = ioread32(reg);
+	if (hdr & SWITCHTEC_EVENT_NOT_SUPP)
+		return -EOPNOTSUPP;
+
 	for (i = 0; i < ARRAY_SIZE(ctl->data); i++)
 		ctl->data[i] = ioread32(&reg[i + 1]);
 
@@ -1041,7 +1046,7 @@ static int ioctl_event_ctl(struct switchtec_dev *stdev,
 		for (ctl.index = 0; ctl.index < nr_idxs; ctl.index++) {
 			ctl.flags = event_flags;
 			ret = event_ctl(stdev, &ctl);
-			if (ret < 0)
+			if (ret < 0 && ret != -EOPNOTSUPP)
 				return ret;
 		}
 	} else {
@@ -1078,7 +1083,7 @@ static int ioctl_pff_to_port(struct switchtec_dev *stdev,
 			break;
 		}
 
-		reg = ioread32(&pcfg->vep_pff_inst_id);
+		reg = ioread32(&pcfg->vep_pff_inst_id) & 0xFF;
 		if (reg == p.pff) {
 			p.port = SWITCHTEC_IOCTL_PFF_VEP;
 			break;
@@ -1124,7 +1129,7 @@ static int ioctl_port_to_pff(struct switchtec_dev *stdev,
 		p.pff = ioread32(&pcfg->usp_pff_inst_id);
 		break;
 	case SWITCHTEC_IOCTL_PFF_VEP:
-		p.pff = ioread32(&pcfg->vep_pff_inst_id);
+		p.pff = ioread32(&pcfg->vep_pff_inst_id) & 0xFF;
 		break;
 	default:
 		if (p.port > ARRAY_SIZE(pcfg->dsp_pff_inst_id))
@@ -1348,6 +1353,9 @@ static int mask_event(struct switchtec_dev *stdev, int eid, int idx)
 	hdr_reg = event_regs[eid].map_reg(stdev, off, idx);
 	hdr = ioread32(hdr_reg);
 
+	if (hdr & SWITCHTEC_EVENT_NOT_SUPP)
+		return 0;
+
 	if (!(hdr & SWITCHTEC_EVENT_OCCURRED && hdr & SWITCHTEC_EVENT_EN_IRQ))
 		return 0;
 
@@ -1498,7 +1506,7 @@ static void init_pff(struct switchtec_dev *stdev)
 	if (reg < stdev->pff_csr_count)
 		stdev->pff_local[reg] = 1;
 
-	reg = ioread32(&pcfg->vep_pff_inst_id);
+	reg = ioread32(&pcfg->vep_pff_inst_id) & 0xFF;
 	if (reg < stdev->pff_csr_count)
 		stdev->pff_local[reg] = 1;
 
@@ -1556,7 +1564,7 @@ static int switchtec_init_pci(struct switchtec_dev *stdev,
 	else if (stdev->gen == SWITCHTEC_GEN4)
 		part_id = &stdev->mmio_sys_info->gen4.partition_id;
 	else
-		return -ENOTSUPP;
+		return -EOPNOTSUPP;
 
 	stdev->partition = ioread8(part_id);
 	stdev->partition_count = ioread8(&stdev->mmio_ntb->partition_count);
