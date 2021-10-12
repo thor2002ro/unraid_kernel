@@ -540,14 +540,6 @@ static void cachefiles_invalidate_object(struct fscache_operation *op)
 	_leave("");
 }
 
-/*
- * dissociate a cache from all the pages it was backing
- */
-static void cachefiles_dissociate_pages(struct fscache_cache *cache)
-{
-	_enter("");
-}
-
 const struct fscache_cache_ops cachefiles_cache_ops = {
 	.name			= "cachefiles",
 	.alloc_object		= cachefiles_alloc_object,
@@ -560,13 +552,6 @@ const struct fscache_cache_ops cachefiles_cache_ops = {
 	.put_object		= cachefiles_put_object,
 	.sync_cache		= cachefiles_sync_cache,
 	.attr_changed		= cachefiles_attr_changed,
-	.read_or_alloc_page	= cachefiles_read_or_alloc_page,
-	.read_or_alloc_pages	= cachefiles_read_or_alloc_pages,
-	.allocate_page		= cachefiles_allocate_page,
-	.allocate_pages		= cachefiles_allocate_pages,
-	.write_page		= cachefiles_write_page,
-	.uncache_page		= cachefiles_uncache_page,
-	.dissociate_pages	= cachefiles_dissociate_pages,
 	.check_consistency	= cachefiles_check_consistency,
-	.begin_read_operation	= cachefiles_begin_read_operation,
+	.begin_operation	= cachefiles_begin_operation,
 };
