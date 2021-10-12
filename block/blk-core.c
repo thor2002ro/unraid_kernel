@@ -18,6 +18,7 @@
 #include <linux/blkdev.h>
 #include <linux/blk-mq.h>
 #include <linux/blk-pm.h>
+#include <linux/blk-integrity.h>
 #include <linux/highmem.h>
 #include <linux/mm.h>
 #include <linux/pagemap.h>
@@ -50,6 +51,7 @@
 #include "blk-mq-sched.h"
 #include "blk-pm.h"
 #include "blk-rq-qos.h"
+#include "blk-throttle.h"
 
 struct dentry *blk_debugfs_root;
 
@@ -406,7 +408,7 @@ void blk_cleanup_queue(struct request_queue *q)
 	 */
 	mutex_lock(&q->sysfs_lock);
 	if (q->elevator)
-		blk_mq_sched_free_requests(q);
+		blk_mq_sched_free_rqs(q);
 	mutex_unlock(&q->sysfs_lock);
 
 	percpu_ref_exit(&q->q_usage_counter);
@@ -535,7 +537,7 @@ struct request_queue *blk_alloc_queue(int node_id)
 
 	q->node = node_id;
 
-	atomic_set(&q->nr_active_requests_shared_sbitmap, 0);
+	atomic_set(&q->nr_active_requests_shared_tags, 0);
 
 	timer_setup(&q->timeout, blk_rq_timed_out_timer, 0);
 	INIT_WORK(&q->timeout_work, blk_timeout_work);
@@ -568,7 +570,7 @@ struct request_queue *blk_alloc_queue(int node_id)
 
 	blk_queue_dma_alignment(q, 511);
 	blk_set_default_limits(&q->limits);
-	q->nr_requests = BLKDEV_MAX_RQ;
+	q->nr_requests = BLKDEV_DEFAULT_RQ;
 
 	return q;
 
@@ -636,8 +638,9 @@ static void handle_bad_sector(struct bio *bio, sector_t maxsector)
 {
 	char b[BDEVNAME_SIZE];
 
-	pr_info_ratelimited("attempt to access beyond end of device\n"
+	pr_info_ratelimited("%s: attempt to access beyond end of device\n"
 			    "%s: rw=%d, want=%llu, limit=%llu\n",
+			    current->comm,
 			    bio_devname(bio, b), bio->bi_opf,
 			    bio_end_sector(bio), maxsector);
 }
@@ -1621,6 +1624,31 @@ int kblockd_mod_delayed_work_on(int cpu, struct delayed_work *dwork,
 }
 EXPORT_SYMBOL(kblockd_mod_delayed_work_on);
 
+void blk_start_plug_nr_ios(struct blk_plug *plug, unsigned short nr_ios)
+{
+	struct task_struct *tsk = current;
+
+	/*
+	 * If this is a nested plug, don't actually assign it.
+	 */
+	if (tsk->plug)
+		return;
+
+	INIT_LIST_HEAD(&plug->mq_list);
+	plug->cached_rq = NULL;
+	plug->nr_ios = min_t(unsigned short, nr_ios, BLK_MAX_REQUEST_COUNT);
+	plug->rq_count = 0;
+	plug->multiple_queues = false;
+	plug->nowait = false;
+	INIT_LIST_HEAD(&plug->cb_list);
+
+	/*
+	 * Store ordering should not be needed here, since a potential
+	 * preempt will imply a full memory barrier
+	 */
+	tsk->plug = plug;
+}
+
 /**
  * blk_start_plug - initialize blk_plug and track it inside the task_struct
  * @plug:	The &struct blk_plug that needs to be initialized
@@ -1646,25 +1674,7 @@ EXPORT_SYMBOL(kblockd_mod_delayed_work_on);
  */
 void blk_start_plug(struct blk_plug *plug)
 {
-	struct task_struct *tsk = current;
-
-	/*
-	 * If this is a nested plug, don't actually assign it.
-	 */
-	if (tsk->plug)
-		return;
-
-	INIT_LIST_HEAD(&plug->mq_list);
-	INIT_LIST_HEAD(&plug->cb_list);
-	plug->rq_count = 0;
-	plug->multiple_queues = false;
-	plug->nowait = false;
-
-	/*
-	 * Store ordering should not be needed here, since a potential
-	 * preempt will imply a full memory barrier
-	 */
-	tsk->plug = plug;
+	blk_start_plug_nr_ios(plug, 1);
 }
 EXPORT_SYMBOL(blk_start_plug);
 
@@ -1716,6 +1726,8 @@ void blk_flush_plug_list(struct blk_plug *plug, bool from_schedule)
 
 	if (!list_empty(&plug->mq_list))
 		blk_mq_flush_plug_list(plug, from_schedule);
+	if (unlikely(!from_schedule && plug->cached_rq))
+		blk_mq_free_plug_rqs(plug);
 }
 
 /**
