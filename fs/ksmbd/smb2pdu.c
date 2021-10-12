@@ -292,22 +292,6 @@ int init_smb2_neg_rsp(struct ksmbd_work *work)
 	return 0;
 }
 
-static int smb2_consume_credit_charge(struct ksmbd_work *work,
-				      unsigned short credit_charge)
-{
-	struct ksmbd_conn *conn = work->conn;
-	unsigned int rsp_credits = 1;
-
-	if (!conn->total_credits)
-		return 0;
-
-	if (credit_charge > 0)
-		rsp_credits = credit_charge;
-
-	conn->total_credits -= rsp_credits;
-	return rsp_credits;
-}
-
 /**
  * smb2_set_rsp_credits() - set number of credits in response buffer
  * @work:	smb work containing smb response buffer
@@ -317,49 +301,43 @@ int smb2_set_rsp_credits(struct ksmbd_work *work)
 	struct smb2_hdr *req_hdr = ksmbd_req_buf_next(work);
 	struct smb2_hdr *hdr = ksmbd_resp_buf_next(work);
 	struct ksmbd_conn *conn = work->conn;
-	unsigned short credits_requested = le16_to_cpu(req_hdr->CreditRequest);
-	unsigned short credit_charge = 1, credits_granted = 0;
-	unsigned short aux_max, aux_credits, min_credits;
-	int rsp_credit_charge;
+	unsigned short credits_requested;
+	unsigned short credit_charge, credits_granted = 0;
+	unsigned short aux_max, aux_credits;
 
-	if (hdr->Command == SMB2_CANCEL)
-		goto out;
+	if (work->send_no_response)
+		return 0;
 
-	/* get default minimum credits by shifting maximum credits by 4 */
-	min_credits = conn->max_credits >> 4;
+	hdr->CreditCharge = req_hdr->CreditCharge;
 
-	if (conn->total_credits >= conn->max_credits) {
+	if (conn->total_credits > conn->max_credits) {
+		hdr->CreditRequest = 0;
 		pr_err("Total credits overflow: %d\n", conn->total_credits);
-		conn->total_credits = min_credits;
-	}
-
-	rsp_credit_charge =
-		smb2_consume_credit_charge(work, le16_to_cpu(req_hdr->CreditCharge));
-	if (rsp_credit_charge < 0)
 		return -EINVAL;
-
-	hdr->CreditCharge = cpu_to_le16(rsp_credit_charge);
-
-	if (credits_requested > 0) {
-		aux_credits = credits_requested - 1;
-		aux_max = 32;
-		if (hdr->Command == SMB2_NEGOTIATE)
-			aux_max = 0;
-		aux_credits = (aux_credits < aux_max) ? aux_credits : aux_max;
-		credits_granted = aux_credits + credit_charge;
-
-		/* if credits granted per client is getting bigger than default
-		 * minimum credits then we should wrap it up within the limits.
-		 */
-		if ((conn->total_credits + credits_granted) > min_credits)
-			credits_granted = min_credits -	conn->total_credits;
-		/*
-		 * TODO: Need to adjuct CreditRequest value according to
-		 * current cpu load
-		 */
-	} else if (conn->total_credits == 0) {
-		credits_granted = 1;
 	}
+
+	credit_charge = max_t(unsigned short,
+			      le16_to_cpu(req_hdr->CreditCharge), 1);
+	credits_requested = max_t(unsigned short,
+				  le16_to_cpu(req_hdr->CreditRequest), 1);
+
+	/* according to smb2.credits smbtorture, Windows server
+	 * 2016 or later grant up to 8192 credits at once.
+	 *
+	 * TODO: Need to adjuct CreditRequest value according to
+	 * current cpu load
+	 */
+	aux_credits = credits_requested - 1;
+	if (hdr->Command == SMB2_NEGOTIATE)
+		aux_max = 0;
+	else
+		aux_max = conn->max_credits - credit_charge;
+	aux_credits = min_t(unsigned short, aux_credits, aux_max);
+	credits_granted = credit_charge + aux_credits;
+
+	if (conn->max_credits - conn->total_credits < credits_granted)
+		credits_granted = conn->max_credits -
+			conn->total_credits;
 
 	conn->total_credits += credits_granted;
 	work->credits_granted += credits_granted;
@@ -368,7 +346,6 @@ int smb2_set_rsp_credits(struct ksmbd_work *work)
 		/* Update CreditRequest in last request */
 		hdr->CreditRequest = cpu_to_le16(work->credits_granted);
 	}
-out:
 	ksmbd_debug(SMB,
 		    "credits: requested[%d] granted[%d] total_granted[%d]\n",
 		    credits_requested, credits_granted,
@@ -7023,24 +7000,26 @@ out2:
 	return err;
 }
 
-static int fsctl_copychunk(struct ksmbd_work *work, struct smb2_ioctl_req *req,
+static int fsctl_copychunk(struct ksmbd_work *work,
+			   struct copychunk_ioctl_req *ci_req,
+			   unsigned int cnt_code,
+			   unsigned int input_count,
+			   unsigned long long volatile_id,
+			   unsigned long long persistent_id,
 			   struct smb2_ioctl_rsp *rsp)
 {
-	struct copychunk_ioctl_req *ci_req;
 	struct copychunk_ioctl_rsp *ci_rsp;
 	struct ksmbd_file *src_fp = NULL, *dst_fp = NULL;
 	struct srv_copychunk *chunks;
 	unsigned int i, chunk_count, chunk_count_written = 0;
 	unsigned int chunk_size_written = 0;
 	loff_t total_size_written = 0;
-	int ret, cnt_code;
+	int ret = 0;
 
-	cnt_code = le32_to_cpu(req->CntCode);
-	ci_req = (struct copychunk_ioctl_req *)&req->Buffer[0];
 	ci_rsp = (struct copychunk_ioctl_rsp *)&rsp->Buffer[0];
 
-	rsp->VolatileFileId = req->VolatileFileId;
-	rsp->PersistentFileId = req->PersistentFileId;
+	rsp->VolatileFileId = cpu_to_le64(volatile_id);
+	rsp->PersistentFileId = cpu_to_le64(persistent_id);
 	ci_rsp->ChunksWritten =
 		cpu_to_le32(ksmbd_server_side_copy_max_chunk_count());
 	ci_rsp->ChunkBytesWritten =
@@ -7050,12 +7029,13 @@ static int fsctl_copychunk(struct ksmbd_work *work, struct smb2_ioctl_req *req,
 
 	chunks = (struct srv_copychunk *)&ci_req->Chunks[0];
 	chunk_count = le32_to_cpu(ci_req->ChunkCount);
+	if (chunk_count == 0)
+		goto out;
 	total_size_written = 0;
 
 	/* verify the SRV_COPYCHUNK_COPY packet */
 	if (chunk_count > ksmbd_server_side_copy_max_chunk_count() ||
-	    le32_to_cpu(req->InputCount) <
-	     offsetof(struct copychunk_ioctl_req, Chunks) +
+	    input_count < offsetof(struct copychunk_ioctl_req, Chunks) +
 	     chunk_count * sizeof(struct srv_copychunk)) {
 		rsp->hdr.Status = STATUS_INVALID_PARAMETER;
 		return -EINVAL;
@@ -7076,9 +7056,7 @@ static int fsctl_copychunk(struct ksmbd_work *work, struct smb2_ioctl_req *req,
 
 	src_fp = ksmbd_lookup_foreign_fd(work,
 					 le64_to_cpu(ci_req->ResumeKey[0]));
-	dst_fp = ksmbd_lookup_fd_slow(work,
-				      le64_to_cpu(req->VolatileFileId),
-				      le64_to_cpu(req->PersistentFileId));
+	dst_fp = ksmbd_lookup_fd_slow(work, volatile_id, persistent_id);
 	ret = -EINVAL;
 	if (!src_fp ||
 	    src_fp->persistent_id != le64_to_cpu(ci_req->ResumeKey[1])) {
@@ -7153,8 +7131,8 @@ static __be32 idev_ipv4_address(struct in_device *idev)
 }
 
 static int fsctl_query_iface_info_ioctl(struct ksmbd_conn *conn,
-					struct smb2_ioctl_req *req,
-					struct smb2_ioctl_rsp *rsp)
+					struct smb2_ioctl_rsp *rsp,
+					unsigned int out_buf_len)
 {
 	struct network_interface_info_ioctl_rsp *nii_rsp = NULL;
 	int nbytes = 0;
@@ -7166,6 +7144,12 @@ static int fsctl_query_iface_info_ioctl(struct ksmbd_conn *conn,
 
 	rtnl_lock();
 	for_each_netdev(&init_net, netdev) {
+		if (out_buf_len <
+		    nbytes + sizeof(struct network_interface_info_ioctl_rsp)) {
+			rtnl_unlock();
+			return -ENOSPC;
+		}
+
 		if (netdev->type == ARPHRD_LOOPBACK)
 			continue;
 
@@ -7245,11 +7229,6 @@ static int fsctl_query_iface_info_ioctl(struct ksmbd_conn *conn,
 	if (nii_rsp)
 		nii_rsp->Next = 0;
 
-	if (!nbytes) {
-		rsp->hdr.Status = STATUS_BUFFER_TOO_SMALL;
-		return -EINVAL;
-	}
-
 	rsp->PersistentFileId = cpu_to_le64(SMB2_NO_FID);
 	rsp->VolatileFileId = cpu_to_le64(SMB2_NO_FID);
 	return nbytes;
@@ -7257,10 +7236,15 @@ static int fsctl_query_iface_info_ioctl(struct ksmbd_conn *conn,
 
 static int fsctl_validate_negotiate_info(struct ksmbd_conn *conn,
 					 struct validate_negotiate_info_req *neg_req,
-					 struct validate_negotiate_info_rsp *neg_rsp)
+					 struct validate_negotiate_info_rsp *neg_rsp,
+					 unsigned int in_buf_len)
 {
 	int ret = 0;
 	int dialect;
+
+	if (in_buf_len < sizeof(struct validate_negotiate_info_req) +
+			le16_to_cpu(neg_req->DialectCount) * sizeof(__le16))
+		return -EINVAL;
 
 	dialect = ksmbd_lookup_dialect_by_id(neg_req->Dialects,
 					     neg_req->DialectCount);
@@ -7295,7 +7279,7 @@ err_out:
 static int fsctl_query_allocated_ranges(struct ksmbd_work *work, u64 id,
 					struct file_allocated_range_buffer *qar_req,
 					struct file_allocated_range_buffer *qar_rsp,
-					int in_count, int *out_count)
+					unsigned int in_count, unsigned int *out_count)
 {
 	struct ksmbd_file *fp;
 	loff_t start, length;
@@ -7322,7 +7306,8 @@ static int fsctl_query_allocated_ranges(struct ksmbd_work *work, u64 id,
 }
 
 static int fsctl_pipe_transceive(struct ksmbd_work *work, u64 id,
-				 int out_buf_len, struct smb2_ioctl_req *req,
+				 unsigned int out_buf_len,
+				 struct smb2_ioctl_req *req,
 				 struct smb2_ioctl_rsp *rsp)
 {
 	struct ksmbd_rpc_command *rpc_resp;
@@ -7436,8 +7421,7 @@ int smb2_ioctl(struct ksmbd_work *work)
 {
 	struct smb2_ioctl_req *req;
 	struct smb2_ioctl_rsp *rsp, *rsp_org;
-	int cnt_code, nbytes = 0;
-	int out_buf_len;
+	unsigned int cnt_code, nbytes = 0, out_buf_len, in_buf_len;
 	u64 id = KSMBD_NO_FID;
 	struct ksmbd_conn *conn = work->conn;
 	int ret = 0;
@@ -7466,7 +7450,11 @@ int smb2_ioctl(struct ksmbd_work *work)
 
 	cnt_code = le32_to_cpu(req->CntCode);
 	out_buf_len = le32_to_cpu(req->MaxOutputResponse);
-	out_buf_len = min(KSMBD_IPC_MAX_PAYLOAD, out_buf_len);
+	out_buf_len =
+		min_t(u32, work->response_sz - work->next_smb2_rsp_hdr_off -
+				(offsetof(struct smb2_ioctl_rsp, Buffer) - 4),
+		      out_buf_len);
+	in_buf_len = le32_to_cpu(req->InputCount);
 
 	switch (cnt_code) {
 	case FSCTL_DFS_GET_REFERRALS:
@@ -7494,6 +7482,7 @@ int smb2_ioctl(struct ksmbd_work *work)
 		break;
 	}
 	case FSCTL_PIPE_TRANSCEIVE:
+		out_buf_len = min_t(u32, KSMBD_IPC_MAX_PAYLOAD, out_buf_len);
 		nbytes = fsctl_pipe_transceive(work, id, out_buf_len, req, rsp);
 		break;
 	case FSCTL_VALIDATE_NEGOTIATE_INFO:
@@ -7502,9 +7491,16 @@ int smb2_ioctl(struct ksmbd_work *work)
 			goto out;
 		}
 
+		if (in_buf_len < sizeof(struct validate_negotiate_info_req))
+			return -EINVAL;
+
+		if (out_buf_len < sizeof(struct validate_negotiate_info_rsp))
+			return -EINVAL;
+
 		ret = fsctl_validate_negotiate_info(conn,
 			(struct validate_negotiate_info_req *)&req->Buffer[0],
-			(struct validate_negotiate_info_rsp *)&rsp->Buffer[0]);
+			(struct validate_negotiate_info_rsp *)&rsp->Buffer[0],
+			in_buf_len);
 		if (ret < 0)
 			goto out;
 
@@ -7513,9 +7509,10 @@ int smb2_ioctl(struct ksmbd_work *work)
 		rsp->VolatileFileId = cpu_to_le64(SMB2_NO_FID);
 		break;
 	case FSCTL_QUERY_NETWORK_INTERFACE_INFO:
-		nbytes = fsctl_query_iface_info_ioctl(conn, req, rsp);
-		if (nbytes < 0)
+		ret = fsctl_query_iface_info_ioctl(conn, rsp, out_buf_len);
+		if (ret < 0)
 			goto out;
+		nbytes = ret;
 		break;
 	case FSCTL_REQUEST_RESUME_KEY:
 		if (out_buf_len < sizeof(struct resume_key_ioctl_rsp)) {
@@ -7540,15 +7537,33 @@ int smb2_ioctl(struct ksmbd_work *work)
 			goto out;
 		}
 
+		if (in_buf_len < sizeof(struct copychunk_ioctl_req)) {
+			ret = -EINVAL;
+			goto out;
+		}
+
 		if (out_buf_len < sizeof(struct copychunk_ioctl_rsp)) {
 			ret = -EINVAL;
 			goto out;
 		}
 
 		nbytes = sizeof(struct copychunk_ioctl_rsp);
-		fsctl_copychunk(work, req, rsp);
+		rsp->VolatileFileId = req->VolatileFileId;
+		rsp->PersistentFileId = req->PersistentFileId;
+		fsctl_copychunk(work,
+				(struct copychunk_ioctl_req *)&req->Buffer[0],
+				le32_to_cpu(req->CntCode),
+				le32_to_cpu(req->InputCount),
+				le64_to_cpu(req->VolatileFileId),
+				le64_to_cpu(req->PersistentFileId),
+				rsp);
 		break;
 	case FSCTL_SET_SPARSE:
+		if (in_buf_len < sizeof(struct file_sparse)) {
+			ret = -EINVAL;
+			goto out;
+		}
+
 		ret = fsctl_set_sparse(work, id,
 				       (struct file_sparse *)&req->Buffer[0]);
 		if (ret < 0)
@@ -7564,6 +7579,11 @@ int smb2_ioctl(struct ksmbd_work *work)
 			ksmbd_debug(SMB,
 				    "User does not have write permission\n");
 			ret = -EACCES;
+			goto out;
+		}
+
+		if (in_buf_len < sizeof(struct file_zero_data_information)) {
+			ret = -EINVAL;
 			goto out;
 		}
 
@@ -7586,6 +7606,11 @@ int smb2_ioctl(struct ksmbd_work *work)
 		break;
 	}
 	case FSCTL_QUERY_ALLOCATED_RANGES:
+		if (in_buf_len < sizeof(struct file_allocated_range_buffer)) {
+			ret = -EINVAL;
+			goto out;
+		}
+
 		ret = fsctl_query_allocated_ranges(work, id,
 			(struct file_allocated_range_buffer *)&req->Buffer[0],
 			(struct file_allocated_range_buffer *)&rsp->Buffer[0],
@@ -7625,6 +7650,11 @@ int smb2_ioctl(struct ksmbd_work *work)
 		struct ksmbd_file *fp_in, *fp_out = NULL;
 		struct duplicate_extents_to_file *dup_ext;
 		loff_t src_off, dst_off, length, cloned;
+
+		if (in_buf_len < sizeof(struct duplicate_extents_to_file)) {
+			ret = -EINVAL;
+			goto out;
+		}
 
 		dup_ext = (struct duplicate_extents_to_file *)&req->Buffer[0];
 
@@ -7696,6 +7726,8 @@ out:
 		rsp->hdr.Status = STATUS_OBJECT_NAME_NOT_FOUND;
 	else if (ret == -EOPNOTSUPP)
 		rsp->hdr.Status = STATUS_NOT_SUPPORTED;
+	else if (ret == -ENOSPC)
+		rsp->hdr.Status = STATUS_BUFFER_TOO_SMALL;
 	else if (ret < 0 || rsp->hdr.Status == 0)
 		rsp->hdr.Status = STATUS_INVALID_PARAMETER;
 	smb2_set_err_rsp(work);
