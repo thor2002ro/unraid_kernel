@@ -2389,7 +2389,7 @@ static inline bool io_run_task_work(void)
 static int io_do_iopoll(struct io_ring_ctx *ctx, bool force_nonspin)
 {
 	struct io_wq_work_node *pos, *start, *prev;
-	unsigned int poll_flags = 0;
+	unsigned int poll_flags = BLK_POLL_NOSLEEP;
 	int nr_events = 0;
 
 	/*
