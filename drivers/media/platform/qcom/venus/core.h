@@ -68,6 +68,7 @@ struct venus_resources {
 	const char * const resets[VIDC_RESETS_NUM_MAX];
 	unsigned int resets_num;
 	enum hfi_version hfi_version;
+	u8 num_vpp_pipes;
 	u32 max_load;
 	unsigned int vmem_id;
 	u32 vmem_size;
@@ -408,6 +409,7 @@ struct venus_inst {
 	u32 width;
 	u32 height;
 	struct v4l2_rect crop;
+	u32 fw_min_cnt;
 	u32 out_width;
 	u32 out_height;
 	u32 colorspace;

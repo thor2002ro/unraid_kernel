@@ -332,8 +332,11 @@ static int vdec_s_fmt(struct file *file, void *fh, struct v4l2_format *f)
 
 	if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
 		inst->fmt_out = fmt;
-	else if (f->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
+	else if (f->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
 		inst->fmt_cap = fmt;
+		inst->output2_buf_size =
+			venus_helper_get_framesz(pixfmt_cap, orig_pixmp.width, orig_pixmp.height);
+	}
 
 	return 0;
 }
@@ -653,6 +656,19 @@ static int vdec_set_properties(struct venus_inst *inst)
 	return 0;
 }
 
+static int vdec_set_work_route(struct venus_inst *inst)
+{
+	u32 ptype = HFI_PROPERTY_PARAM_WORK_ROUTE;
+	struct hfi_video_work_route wr;
+
+	if (!IS_V6(inst->core))
+		return 0;
+
+	wr.video_work_route = inst->core->res->num_vpp_pipes;
+
+	return hfi_session_set_property(inst, ptype, &wr);
+}
+
 #define is_ubwc_fmt(fmt) (!!((fmt) & HFI_COLOR_FORMAT_UBWC_BASE))
 
 static int vdec_output_conf(struct venus_inst *inst)
@@ -970,23 +986,23 @@ reconfigure:
 	if (ret)
 		goto err;
 
+	venus_pm_load_scale(inst);
+
+	inst->next_buf_last = false;
+
 	ret = venus_helper_alloc_dpb_bufs(inst);
 	if (ret)
 		goto err;
+
+	ret = hfi_session_continue(inst);
+	if (ret)
+		goto free_dpb_bufs;
 
 	ret = venus_helper_queue_dpb_bufs(inst);
 	if (ret)
 		goto free_dpb_bufs;
 
 	ret = venus_helper_process_initial_cap_bufs(inst);
-	if (ret)
-		goto free_dpb_bufs;
-
-	venus_pm_load_scale(inst);
-
-	inst->next_buf_last = false;
-
-	ret = hfi_session_continue(inst);
 	if (ret)
 		goto free_dpb_bufs;
 
@@ -1036,6 +1052,10 @@ static int vdec_start_output(struct venus_inst *inst)
 	inst->next_buf_last = false;
 
 	ret = vdec_set_properties(inst);
+	if (ret)
+		return ret;
+
+	ret = vdec_set_work_route(inst);
 	if (ret)
 		return ret;
 
@@ -1389,6 +1409,11 @@ static void vdec_event_change(struct venus_inst *inst,
 		inst->crop.height = ev_data->height;
 	}
 
+	inst->fw_min_cnt = ev_data->buf_count;
+	/* overwriting this to 11 for vp9 due to fw bug */
+	if (inst->hfi_codec == HFI_VIDEO_CODEC_VP9)
+		inst->fw_min_cnt = 11;
+
 	inst->out_width = ev_data->width;
 	inst->out_height = ev_data->height;
 
@@ -1492,6 +1517,7 @@ static void vdec_inst_init(struct venus_inst *inst)
 	inst->crop.top = 0;
 	inst->crop.width = inst->width;
 	inst->crop.height = inst->height;
+	inst->fw_min_cnt = 8;
 	inst->out_width = frame_width_min(inst);
 	inst->out_height = frame_height_min(inst);
 	inst->fps = 30;
