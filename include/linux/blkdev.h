@@ -25,6 +25,7 @@ struct request;
 struct sg_io_hdr;
 struct blkcg_gq;
 struct blk_flush_queue;
+struct kiocb;
 struct pr_ops;
 struct rq_qos;
 struct blk_queue_stats;
@@ -550,7 +551,7 @@ static inline unsigned int blk_queue_depth(struct request_queue *q)
 
 extern int blk_register_queue(struct gendisk *disk);
 extern void blk_unregister_queue(struct gendisk *disk);
-blk_qc_t submit_bio_noacct(struct bio *bio);
+void submit_bio_noacct(struct bio *bio);
 
 extern int blk_lld_busy(struct request_queue *q);
 extern void blk_queue_split(struct bio **);
@@ -564,7 +565,12 @@ extern const char *blk_op_str(unsigned int op);
 int blk_status_to_errno(blk_status_t status);
 blk_status_t errno_to_blk_status(int errno);
 
-int blk_poll(struct request_queue *q, blk_qc_t cookie, bool spin);
+/* only poll the hardware once, don't continue until a completion was found */
+#define BLK_POLL_ONESHOT		(1 << 0)
+/* do not sleep to wait for the expected completion time */
+#define BLK_POLL_NOSLEEP		(1 << 1)
+int bio_poll(struct bio *bio, unsigned int flags);
+int iocb_bio_iopoll(struct kiocb *kiocb, unsigned int flags);
 
 static inline struct request_queue *bdev_get_queue(struct block_device *bdev)
 {
@@ -1172,7 +1178,7 @@ static inline void blk_ksm_unregister(struct request_queue *q) { }
 
 
 struct block_device_operations {
-	blk_qc_t (*submit_bio) (struct bio *bio);
+	void (*submit_bio)(struct bio *bio);
 	int (*open) (struct block_device *, fmode_t);
 	void (*release) (struct gendisk *, fmode_t);
 	int (*rw_page)(struct block_device *, sector_t, struct page *, unsigned int);
