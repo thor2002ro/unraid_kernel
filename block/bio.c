@@ -157,7 +157,7 @@ out:
 
 void bvec_free(mempool_t *pool, struct bio_vec *bv, unsigned short nr_vecs)
 {
-	BIO_BUG_ON(nr_vecs > BIO_MAX_VECS);
+	BUG_ON(nr_vecs > BIO_MAX_VECS);
 
 	if (nr_vecs == BIO_MAX_VECS)
 		mempool_free(bv, pool);
@@ -548,7 +548,7 @@ EXPORT_SYMBOL(zero_fill_bio);
  *   REQ_OP_READ, zero the truncated part. This function should only
  *   be used for handling corner cases, such as bio eod.
  */
-void bio_truncate(struct bio *bio, unsigned new_size)
+static void bio_truncate(struct bio *bio, unsigned new_size)
 {
 	struct bio_vec bv;
 	struct bvec_iter iter;
@@ -679,7 +679,7 @@ static void bio_alloc_cache_destroy(struct bio_set *bs)
 void bio_put(struct bio *bio)
 {
 	if (unlikely(bio_flagged(bio, BIO_REFFED))) {
-		BIO_BUG_ON(!atomic_read(&bio->__bi_cnt));
+		BUG_ON(!atomic_read(&bio->__bi_cnt));
 		if (!atomic_dec_and_test(&bio->__bi_cnt))
 			return;
 	}
@@ -774,6 +774,23 @@ const char *bio_devname(struct bio *bio, char *buf)
 }
 EXPORT_SYMBOL(bio_devname);
 
+/**
+ * bio_full - check if the bio is full
+ * @bio:	bio to check
+ * @len:	length of one segment to be added
+ *
+ * Return true if @bio is full and one segment with @len bytes can't be
+ * added to the bio, otherwise return false
+ */
+static inline bool bio_full(struct bio *bio, unsigned len)
+{
+	if (bio->bi_vcnt >= bio->bi_max_vecs)
+		return true;
+	if (bio->bi_iter.bi_size > UINT_MAX - len)
+		return true;
+	return false;
+}
+
 static inline bool page_is_mergeable(const struct bio_vec *bv,
 		struct page *page, unsigned int len, unsigned int off,
 		bool *same_page)
@@ -791,6 +808,44 @@ static inline bool page_is_mergeable(const struct bio_vec *bv,
 	if (*same_page)
 		return true;
 	return (bv->bv_page + bv_end / PAGE_SIZE) == (page + off / PAGE_SIZE);
+}
+
+/**
+ * __bio_try_merge_page - try appending data to an existing bvec.
+ * @bio: destination bio
+ * @page: start page to add
+ * @len: length of the data to add
+ * @off: offset of the data relative to @page
+ * @same_page: return if the segment has been merged inside the same page
+ *
+ * Try to add the data at @page + @off to the last bvec of @bio.  This is a
+ * useful optimisation for file systems with a block size smaller than the
+ * page size.
+ *
+ * Warn if (@len, @off) crosses pages in case that @same_page is true.
+ *
+ * Return %true on success or %false on failure.
+ */
+static bool __bio_try_merge_page(struct bio *bio, struct page *page,
+		unsigned int len, unsigned int off, bool *same_page)
+{
+	if (WARN_ON_ONCE(bio_flagged(bio, BIO_CLONED)))
+		return false;
+
+	if (bio->bi_vcnt > 0) {
+		struct bio_vec *bv = &bio->bi_io_vec[bio->bi_vcnt - 1];
+
+		if (page_is_mergeable(bv, page, len, off, same_page)) {
+			if (bio->bi_iter.bi_size > UINT_MAX - len) {
+				*same_page = false;
+				return false;
+			}
+			bv->bv_len += len;
+			bio->bi_iter.bi_size += len;
+			return true;
+		}
+	}
+	return false;
 }
 
 /*
@@ -923,45 +978,6 @@ int bio_add_zone_append_page(struct bio *bio, struct page *page,
 			       queue_max_zone_append_sectors(q), &same_page);
 }
 EXPORT_SYMBOL_GPL(bio_add_zone_append_page);
-
-/**
- * __bio_try_merge_page - try appending data to an existing bvec.
- * @bio: destination bio
- * @page: start page to add
- * @len: length of the data to add
- * @off: offset of the data relative to @page
- * @same_page: return if the segment has been merged inside the same page
- *
- * Try to add the data at @page + @off to the last bvec of @bio.  This is a
- * useful optimisation for file systems with a block size smaller than the
- * page size.
- *
- * Warn if (@len, @off) crosses pages in case that @same_page is true.
- *
- * Return %true on success or %false on failure.
- */
-bool __bio_try_merge_page(struct bio *bio, struct page *page,
-		unsigned int len, unsigned int off, bool *same_page)
-{
-	if (WARN_ON_ONCE(bio_flagged(bio, BIO_CLONED)))
-		return false;
-
-	if (bio->bi_vcnt > 0) {
-		struct bio_vec *bv = &bio->bi_io_vec[bio->bi_vcnt - 1];
-
-		if (page_is_mergeable(bv, page, len, off, same_page)) {
-			if (bio->bi_iter.bi_size > UINT_MAX - len) {
-				*same_page = false;
-				return false;
-			}
-			bv->bv_len += len;
-			bio->bi_iter.bi_size += len;
-			return true;
-		}
-	}
-	return false;
-}
-EXPORT_SYMBOL_GPL(__bio_try_merge_page);
 
 /**
  * __bio_add_page - add page(s) to a bio in a new segment
