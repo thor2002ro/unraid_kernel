@@ -6,7 +6,6 @@
 #define READ_AND_CONFIG     READ_AND_CONFIG_MP
 
 #define READ_AND_CONFIG_MP(ic, txt) (ODM_ReadAndConfig##txt##ic(dm_odm))
-#define READ_AND_CONFIG_TC(ic, txt) (ODM_ReadAndConfig_TC##txt##ic(dm_odm))
 
 static u8 odm_QueryRxPwrPercentage(s8 AntPower)
 {
@@ -18,63 +17,28 @@ static u8 odm_QueryRxPwrPercentage(s8 AntPower)
 		return 100 + AntPower;
 }
 
-/*  2012/01/12 MH MOve some signal strength smooth method to MP HAL layer. */
-/*  IF other SW team do not support the feature, remove this section.?? */
-static s32 odm_sig_patch_lenove(struct odm_dm_struct *dm_odm, s32 CurrSig)
-{
-	return 0;
-}
-
-static s32 odm_sig_patch_netcore(struct odm_dm_struct *dm_odm, s32 CurrSig)
-{
-	return 0;
-}
-
-static s32 odm_SignalScaleMapping_92CSeries(struct odm_dm_struct *dm_odm, s32 CurrSig)
+static s32 odm_SignalScaleMapping(struct odm_dm_struct *dm_odm, s32 CurrSig)
 {
 	s32 RetSig = 0;
 
-	if ((dm_odm->SupportInterface  == ODM_ITRF_USB) ||
-	    (dm_odm->SupportInterface  == ODM_ITRF_SDIO)) {
-		if (CurrSig >= 51 && CurrSig <= 100)
-			RetSig = 100;
-		else if (CurrSig >= 41 && CurrSig <= 50)
-			RetSig = 80 + ((CurrSig - 40) * 2);
-		else if (CurrSig >= 31 && CurrSig <= 40)
-			RetSig = 66 + (CurrSig - 30);
-		else if (CurrSig >= 21 && CurrSig <= 30)
-			RetSig = 54 + (CurrSig - 20);
-		else if (CurrSig >= 10 && CurrSig <= 20)
-			RetSig = 42 + (((CurrSig - 10) * 2) / 3);
-		else if (CurrSig >= 5 && CurrSig <= 9)
-			RetSig = 22 + (((CurrSig - 5) * 3) / 2);
-		else if (CurrSig >= 1 && CurrSig <= 4)
-			RetSig = 6 + (((CurrSig - 1) * 3) / 2);
-		else
-			RetSig = CurrSig;
-	}
-	return RetSig;
-}
-
-static s32 odm_SignalScaleMapping(struct odm_dm_struct *dm_odm, s32 CurrSig)
-{
-	if ((dm_odm->SupportPlatform == ODM_MP) &&
-	    (dm_odm->SupportInterface != ODM_ITRF_PCIE) && /* USB & SDIO */
-	    (dm_odm->PatchID == 10))
-		return odm_sig_patch_netcore(dm_odm, CurrSig);
-	else if ((dm_odm->SupportPlatform == ODM_MP) &&
-		 (dm_odm->SupportInterface == ODM_ITRF_PCIE) &&
-		 (dm_odm->PatchID == 19))
-		return odm_sig_patch_lenove(dm_odm, CurrSig);
+	if (CurrSig >= 51 && CurrSig <= 100)
+		RetSig = 100;
+	else if (CurrSig >= 41 && CurrSig <= 50)
+		RetSig = 80 + ((CurrSig - 40) * 2);
+	else if (CurrSig >= 31 && CurrSig <= 40)
+		RetSig = 66 + (CurrSig - 30);
+	else if (CurrSig >= 21 && CurrSig <= 30)
+		RetSig = 54 + (CurrSig - 20);
+	else if (CurrSig >= 10 && CurrSig <= 20)
+		RetSig = 42 + (((CurrSig - 10) * 2) / 3);
+	else if (CurrSig >= 5 && CurrSig <= 9)
+		RetSig = 22 + (((CurrSig - 5) * 3) / 2);
+	else if (CurrSig >= 1 && CurrSig <= 4)
+		RetSig = 6 + (((CurrSig - 1) * 3) / 2);
 	else
-		return odm_SignalScaleMapping_92CSeries(dm_odm, CurrSig);
-}
+		RetSig = CurrSig;
 
-/* pMgntInfo->CustomerID == RT_CID_819x_Lenovo */
-static u8 odm_SQ_process_patch_RT_CID_819x_Lenovo(struct odm_dm_struct *dm_odm,
-	u8 isCCKrate, u8 PWDB_ALL, u8 path, u8 RSSI)
-{
-	return 0;
+	return RetSig;
 }
 
 static u8 odm_evm_db_to_percentage(s8 value)
@@ -112,7 +76,6 @@ static void odm_RxPhyStatus92CSeries_Parsing(struct odm_dm_struct *dm_odm,
 	pPhyInfo->RxMIMOSignalQuality[RF_PATH_B] = -1;
 
 	if (isCCKrate) {
-		u8 report;
 		u8 cck_agc_rpt;
 
 		dm_odm->PhyDbgInfo.NumQryPhyStatusCCK++;
@@ -126,113 +89,51 @@ static void odm_RxPhyStatus92CSeries_Parsing(struct odm_dm_struct *dm_odm,
 		/* 2011.11.28 LukeLee: 88E use different LNA & VGA gain table */
 		/* The RSSI formula should be modified according to the gain table */
 		/* In 88E, cck_highpwr is always set to 1 */
-		if (dm_odm->SupportICType & (ODM_RTL8188E | ODM_RTL8812)) {
-			LNA_idx = ((cck_agc_rpt & 0xE0) >> 5);
-			VGA_idx = (cck_agc_rpt & 0x1F);
-			switch (LNA_idx) {
-			case 7:
-				if (VGA_idx <= 27)
-					rx_pwr_all = -100 + 2 * (27 - VGA_idx); /* VGA_idx = 27~2 */
-				else
-					rx_pwr_all = -100;
-				break;
-			case 6:
-				rx_pwr_all = -48 + 2 * (2 - VGA_idx); /* VGA_idx = 2~0 */
-				break;
-			case 5:
-				rx_pwr_all = -42 + 2 * (7 - VGA_idx); /* VGA_idx = 7~5 */
-				break;
-			case 4:
-				rx_pwr_all = -36 + 2 * (7 - VGA_idx); /* VGA_idx = 7~4 */
-				break;
-			case 3:
-				rx_pwr_all = -24 + 2 * (7 - VGA_idx); /* VGA_idx = 7~0 */
-				break;
-			case 2:
-				if (cck_highpwr)
-					rx_pwr_all = -12 + 2 * (5 - VGA_idx); /* VGA_idx = 5~0 */
-				else
-					rx_pwr_all = -6 + 2 * (5 - VGA_idx);
-				break;
-			case 1:
-					rx_pwr_all = 8 - 2 * VGA_idx;
-				break;
-			case 0:
-					rx_pwr_all = 14 - 2 * VGA_idx;
-				break;
-			default:
-				break;
-			}
-			rx_pwr_all += 6;
-			PWDB_ALL = odm_QueryRxPwrPercentage(rx_pwr_all);
-			if (!cck_highpwr) {
-				if (PWDB_ALL >= 80)
-					PWDB_ALL = ((PWDB_ALL - 80) << 1) + ((PWDB_ALL - 80) >> 1) + 80;
-				else if ((PWDB_ALL <= 78) && (PWDB_ALL >= 20))
-					PWDB_ALL += 3;
-				if (PWDB_ALL > 100)
-					PWDB_ALL = 100;
-			}
-		} else {
-			if (!cck_highpwr) {
-				report = (cck_agc_rpt & 0xc0) >> 6;
-				switch (report) {
-				/*  03312009 modified by cosa */
-				/*  Modify the RF RNA gain value to -40, -20, -2, 14 by Jenyu's suggestion */
-				/*  Note: different RF with the different RNA gain. */
-				case 0x3:
-					rx_pwr_all = -46 - (cck_agc_rpt & 0x3e);
-					break;
-				case 0x2:
-					rx_pwr_all = -26 - (cck_agc_rpt & 0x3e);
-					break;
-				case 0x1:
-					rx_pwr_all = -12 - (cck_agc_rpt & 0x3e);
-					break;
-				case 0x0:
-					rx_pwr_all = 16 - (cck_agc_rpt & 0x3e);
-					break;
-				}
-			} else {
-				report = (cck_agc_rpt & 0x60) >> 5;
-				switch (report) {
-				case 0x3:
-					rx_pwr_all = -46 - ((cck_agc_rpt & 0x1f) << 1);
-					break;
-				case 0x2:
-					rx_pwr_all = -26 - ((cck_agc_rpt & 0x1f) << 1);
-					break;
-				case 0x1:
-					rx_pwr_all = -12 - ((cck_agc_rpt & 0x1f) << 1);
-					break;
-				case 0x0:
-					rx_pwr_all = 16 - ((cck_agc_rpt & 0x1f) << 1);
-					break;
-				}
-			}
-
-			PWDB_ALL = odm_QueryRxPwrPercentage(rx_pwr_all);
-
-			/* Modification for ext-LNA board */
-			if (dm_odm->BoardType == ODM_BOARD_HIGHPWR) {
-				if ((cck_agc_rpt >> 7) == 0) {
-					PWDB_ALL = (PWDB_ALL > 94) ? 100 : (PWDB_ALL + 6);
-				} else {
-					if (PWDB_ALL > 38)
-						PWDB_ALL -= 16;
-					else
-						PWDB_ALL = (PWDB_ALL <= 16) ? (PWDB_ALL >> 2) : (PWDB_ALL - 12);
-				}
-
-				/* CCK modification */
-				if (PWDB_ALL > 25 && PWDB_ALL <= 60)
-					PWDB_ALL += 6;
-			} else {/* Modification for int-LNA board */
-				if (PWDB_ALL > 99)
-					PWDB_ALL -= 8;
-				else if (PWDB_ALL > 50 && PWDB_ALL <= 68)
-					PWDB_ALL += 4;
-			}
+		LNA_idx = ((cck_agc_rpt & 0xE0) >> 5);
+		VGA_idx = (cck_agc_rpt & 0x1F);
+		switch (LNA_idx) {
+		case 7:
+			if (VGA_idx <= 27)
+				rx_pwr_all = -100 + 2 * (27 - VGA_idx); /* VGA_idx = 27~2 */
+			else
+				rx_pwr_all = -100;
+			break;
+		case 6:
+			rx_pwr_all = -48 + 2 * (2 - VGA_idx); /* VGA_idx = 2~0 */
+			break;
+		case 5:
+			rx_pwr_all = -42 + 2 * (7 - VGA_idx); /* VGA_idx = 7~5 */
+			break;
+		case 4:
+			rx_pwr_all = -36 + 2 * (7 - VGA_idx); /* VGA_idx = 7~4 */
+			break;
+		case 3:
+			rx_pwr_all = -24 + 2 * (7 - VGA_idx); /* VGA_idx = 7~0 */
+			break;
+		case 2:
+			if (cck_highpwr)
+				rx_pwr_all = -12 + 2 * (5 - VGA_idx); /* VGA_idx = 5~0 */
+			else
+				rx_pwr_all = -6 + 2 * (5 - VGA_idx);
+			break;
+		case 1:
+				rx_pwr_all = 8 - 2 * VGA_idx;
+			break;
+		case 0:
+				rx_pwr_all = 14 - 2 * VGA_idx;
+			break;
+		default:
+			break;
+		}
+		rx_pwr_all += 6;
+		PWDB_ALL = odm_QueryRxPwrPercentage(rx_pwr_all);
+		if (!cck_highpwr) {
+			if (PWDB_ALL >= 80)
+				PWDB_ALL = ((PWDB_ALL - 80) << 1) + ((PWDB_ALL - 80) >> 1) + 80;
+			else if ((PWDB_ALL <= 78) && (PWDB_ALL >= 20))
+				PWDB_ALL += 3;
+			if (PWDB_ALL > 100)
+				PWDB_ALL = 100;
 		}
 
 		pPhyInfo->RxPWDBAll = PWDB_ALL;
@@ -242,9 +143,7 @@ static void odm_RxPhyStatus92CSeries_Parsing(struct odm_dm_struct *dm_odm,
 		if (pPktinfo->bPacketMatchBSSID) {
 			u8 SQ, SQ_rpt;
 
-			if ((dm_odm->SupportPlatform == ODM_MP) && (dm_odm->PatchID == 19)) {
-				SQ = odm_SQ_process_patch_RT_CID_819x_Lenovo(dm_odm, isCCKrate, PWDB_ALL, 0, 0);
-			} else if (pPhyInfo->RxPWDBAll > 40 && !dm_odm->bInHctTest) {
+			if (pPhyInfo->RxPWDBAll > 40 && !dm_odm->bInHctTest) {
 				SQ = 100;
 			} else {
 				SQ_rpt = pPhyStaRpt->cck_sig_qual_ofdm_pwdb_all;
@@ -296,14 +195,6 @@ static void odm_RxPhyStatus92CSeries_Parsing(struct odm_dm_struct *dm_odm,
 			/* Get Rx snr value in DB */
 			pPhyInfo->RxSNR[i] = (s32)(pPhyStaRpt->path_rxsnr[i] / 2);
 			dm_odm->PhyDbgInfo.RxSNRdB[i] = (s32)(pPhyStaRpt->path_rxsnr[i] / 2);
-
-			/* Record Signal Strength for next packet */
-			if (pPktinfo->bPacketMatchBSSID) {
-				if ((dm_odm->SupportPlatform == ODM_MP) && (dm_odm->PatchID == 19)) {
-					if (i == RF_PATH_A)
-						pPhyInfo->SignalQuality = odm_SQ_process_patch_RT_CID_819x_Lenovo(dm_odm, isCCKrate, PWDB_ALL, i, RSSI);
-				}
-			}
 		}
 		/*  (2)PWDB, Average PWDB cacluated by hardware (for rate adaptive) */
 		rx_pwr_all = (((pPhyStaRpt->cck_sig_qual_ofdm_pwdb_all) >> 1) & 0x7f) - 110;
@@ -316,26 +207,22 @@ static void odm_RxPhyStatus92CSeries_Parsing(struct odm_dm_struct *dm_odm,
 		pPhyInfo->RxPower = rx_pwr_all;
 		pPhyInfo->RecvSignalPower = rx_pwr_all;
 
-		if ((dm_odm->SupportPlatform == ODM_MP) && (dm_odm->PatchID == 19)) {
-			/* do nothing */
-		} else {
-			/*  (3)EVM of HT rate */
-			if (pPktinfo->Rate >= DESC92C_RATEMCS8 && pPktinfo->Rate <= DESC92C_RATEMCS15)
-				Max_spatial_stream = 2; /* both spatial stream make sense */
-			else
-				Max_spatial_stream = 1; /* only spatial stream 1 makes sense */
+		/*  (3)EVM of HT rate */
+		if (pPktinfo->Rate >= DESC92C_RATEMCS8 && pPktinfo->Rate <= DESC92C_RATEMCS15)
+			Max_spatial_stream = 2; /* both spatial stream make sense */
+		else
+			Max_spatial_stream = 1; /* only spatial stream 1 makes sense */
 
-			for (i = 0; i < Max_spatial_stream; i++) {
-				/*  Do not use shift operation like "rx_evmX >>= 1" because the compilor of free build environment */
-				/*  fill most significant bit to "zero" when doing shifting operation which may change a negative */
-				/*  value to positive one, then the dbm value (which is supposed to be negative)  is not correct anymore. */
-				EVM = odm_evm_db_to_percentage((pPhyStaRpt->stream_rxevm[i]));	/* dbm */
+		for (i = 0; i < Max_spatial_stream; i++) {
+			/*  Do not use shift operation like "rx_evmX >>= 1" because the compilor of free build environment */
+			/*  fill most significant bit to "zero" when doing shifting operation which may change a negative */
+			/*  value to positive one, then the dbm value (which is supposed to be negative)  is not correct anymore. */
+			EVM = odm_evm_db_to_percentage((pPhyStaRpt->stream_rxevm[i]));	/* dbm */
 
-				if (pPktinfo->bPacketMatchBSSID) {
-					if (i == RF_PATH_A) /*  Fill value in RFD, Get the first spatial stream only */
-						pPhyInfo->SignalQuality = (u8)(EVM & 0xff);
-					pPhyInfo->RxMIMOSignalQuality[i] = (u8)(EVM & 0xff);
-				}
+			if (pPktinfo->bPacketMatchBSSID) {
+				if (i == RF_PATH_A) /*  Fill value in RFD, Get the first spatial stream only */
+					pPhyInfo->SignalQuality = (u8)(EVM & 0xff);
+				pPhyInfo->RxMIMOSignalQuality[i] = (u8)(EVM & 0xff);
 			}
 		}
 	}
@@ -354,10 +241,6 @@ static void odm_RxPhyStatus92CSeries_Parsing(struct odm_dm_struct *dm_odm,
 	dm_odm->DM_FatTable.antsel_rx_keep_0 = pPhyStaRpt->ant_sel;
 	dm_odm->DM_FatTable.antsel_rx_keep_1 = pPhyStaRpt->ant_sel_b;
 	dm_odm->DM_FatTable.antsel_rx_keep_2 = pPhyStaRpt->antsel_rx_keep_2;
-}
-
-void odm_Init_RSSIForDM(struct odm_dm_struct *dm_odm)
-{
 }
 
 static void odm_Process_RSSIForDM(struct odm_dm_struct *dm_odm,
@@ -521,14 +404,6 @@ void ODM_PhyStatusQuery(struct odm_dm_struct *dm_odm,
 			struct adapter *adapt)
 {
 	ODM_PhyStatusQuery_92CSeries(dm_odm, pPhyInfo, pPhyStatus, pPktinfo, adapt);
-}
-
-/*  For future use. */
-void ODM_MacStatusQuery(struct odm_dm_struct *dm_odm, u8 *mac_stat,
-			u8 macid, bool pkt_match_bssid,
-			bool pkttoself, bool pkt_beacon)
-{
-	/*  2011/10/19 Driver team will handle in the future. */
 }
 
 enum HAL_STATUS ODM_ConfigRFWithHeaderFile(struct odm_dm_struct *dm_odm,
