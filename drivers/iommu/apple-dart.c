@@ -578,7 +578,6 @@ static struct iommu_domain *apple_dart_domain_alloc(unsigned int type)
 	if (!dart_domain)
 		return NULL;
 
-	iommu_get_dma_cookie(&dart_domain->domain);
 	mutex_init(&dart_domain->init_lock);
 
 	/* no need to allocate pgtbl_ops or do any other finalization steps */
