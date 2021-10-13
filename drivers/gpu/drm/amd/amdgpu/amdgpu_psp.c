@@ -77,7 +77,9 @@ static void psp_check_pmfw_centralized_cstate_management(struct psp_context *psp
 	}
 
 	switch (adev->ip_versions[MP0_HWIP][0]) {
+	case IP_VERSION(11, 0, 0):
 	case IP_VERSION(11, 0, 4):
+	case IP_VERSION(11, 0, 5):
 	case IP_VERSION(11, 0, 7):
 	case IP_VERSION(11, 0, 9):
 	case IP_VERSION(11, 0, 11):
