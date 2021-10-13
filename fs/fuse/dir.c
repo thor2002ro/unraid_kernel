@@ -116,7 +116,7 @@ u64 entry_attr_timeout(struct fuse_entry_out *o)
 	return time_to_jiffies(o->attr_valid, o->attr_valid_nsec);
 }
 
-static void fuse_invalidate_attr_mask(struct inode *inode, u32 mask)
+void fuse_invalidate_attr_mask(struct inode *inode, u32 mask)
 {
 	set_mask_bits(&get_fuse_inode(inode)->inval_mask, 0, mask);
 }
@@ -747,7 +747,7 @@ void fuse_flush_time_update(struct inode *inode)
 
 void fuse_update_ctime(struct inode *inode)
 {
-	fuse_invalidate_attr(inode);
+	fuse_invalidate_attr_mask(inode, STATX_CTIME);
 	if (!IS_NOCMTIME(inode)) {
 		inode->i_ctime = current_time(inode);
 		mark_inode_dirty_sync(inode);
