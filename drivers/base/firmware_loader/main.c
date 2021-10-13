@@ -100,30 +100,41 @@ static struct firmware_cache fw_cache;
 extern struct builtin_fw __start_builtin_fw[];
 extern struct builtin_fw __end_builtin_fw[];
 
-static void fw_copy_to_prealloc_buf(struct firmware *fw,
+static bool fw_copy_to_prealloc_buf(struct firmware *fw,
 				    void *buf, size_t size)
 {
-	if (!buf || size < fw->size)
-		return;
+	if (!buf)
+		return true;
+	if (size < fw->size)
+		return false;
 	memcpy(buf, fw->data, fw->size);
+	return true;
 }
 
-static bool fw_get_builtin_firmware(struct firmware *fw, const char *name,
-				    void *buf, size_t size)
+static bool firmware_request_builtin(struct firmware *fw, const char *name)
 {
 	struct builtin_fw *b_fw;
+
+	if (!fw)
+		return false;
 
 	for (b_fw = __start_builtin_fw; b_fw != __end_builtin_fw; b_fw++) {
 		if (strcmp(name, b_fw->name) == 0) {
 			fw->size = b_fw->size;
 			fw->data = b_fw->data;
-			fw_copy_to_prealloc_buf(fw, buf, size);
-
 			return true;
 		}
 	}
 
 	return false;
+}
+
+static bool firmware_request_builtin_buf(struct firmware *fw, const char *name,
+					 void *buf, size_t size)
+{
+	if (!firmware_request_builtin(fw, name))
+		return false;
+	return fw_copy_to_prealloc_buf(fw, buf, size);
 }
 
 static bool fw_is_builtin_firmware(const struct firmware *fw)
@@ -139,9 +150,15 @@ static bool fw_is_builtin_firmware(const struct firmware *fw)
 
 #else /* Module case - no builtin firmware support */
 
-static inline bool fw_get_builtin_firmware(struct firmware *fw,
-					   const char *name, void *buf,
-					   size_t size)
+static inline bool firmware_request_builtin(struct firmware *fw,
+					    const char *name)
+{
+	return false;
+}
+
+static inline bool firmware_request_builtin_buf(struct firmware *fw,
+						const char *name, void *buf,
+						size_t size)
 {
 	return false;
 }
@@ -736,7 +753,7 @@ _request_firmware_prepare(struct firmware **firmware_p, const char *name,
 		return -ENOMEM;
 	}
 
-	if (fw_get_builtin_firmware(firmware, name, dbuf, size)) {
+	if (firmware_request_builtin_buf(firmware, name, dbuf, size)) {
 		dev_dbg(device, "using built-in %s\n", name);
 		return 0; /* assigned */
 	}
@@ -1215,7 +1232,7 @@ static int uncache_firmware(const char *fw_name)
 
 	pr_debug("%s: %s\n", __func__, fw_name);
 
-	if (fw_get_builtin_firmware(&fw, fw_name, NULL, 0))
+	if (firmware_request_builtin(&fw, fw_name))
 		return 0;
 
 	fw_priv = lookup_fw_priv(fw_name);
