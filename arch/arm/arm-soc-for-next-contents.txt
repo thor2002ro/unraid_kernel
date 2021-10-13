@@ -60,6 +60,10 @@ arm/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.15-next-soc
 	omap/ti-sysc
 		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.16/ti-sysc-signed
+	qcom/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-drivers-for-5.16
+	broadcom/drivers
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.16/drivers
 
 arm/defconfigs
 	defconfig/multiv7
@@ -78,3 +82,9 @@ arm/late
 arm/fixes
 	firmware/ffa
 		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/ffa-fixes-5.15
+	<no branch> (bc22b6208f416ba702c17a93c9af6474f19e8212)
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.15/devicetree
+	<no branch> (7f565d0ead264329749c0da488de9c8dfa2f18ce)
+		git://git.linaro.org/people/jens.wiklander/linux-tee tags/optee-fix2-for-v5.15
+	patch
+		iommu/arm: fix ARM_SMMU_QCOM compilation
