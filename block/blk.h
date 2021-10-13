@@ -12,6 +12,8 @@
 #include "blk-mq.h"
 #include "blk-mq-sched.h"
 
+struct elevator_type;
+
 /* Max future timer expiry for timeouts */
 #define BLK_MAX_TIMEOUT		(5 * HZ)
 
@@ -90,6 +92,44 @@ static inline bool bvec_gap_to_prev(struct request_queue *q,
 	if (!queue_virt_boundary(q))
 		return false;
 	return __bvec_gap_to_prev(q, bprv, offset);
+}
+
+static inline bool rq_mergeable(struct request *rq)
+{
+	if (blk_rq_is_passthrough(rq))
+		return false;
+
+	if (req_op(rq) == REQ_OP_FLUSH)
+		return false;
+
+	if (req_op(rq) == REQ_OP_WRITE_ZEROES)
+		return false;
+
+	if (req_op(rq) == REQ_OP_ZONE_APPEND)
+		return false;
+
+	if (rq->cmd_flags & REQ_NOMERGE_FLAGS)
+		return false;
+	if (rq->rq_flags & RQF_NOMERGE_FLAGS)
+		return false;
+
+	return true;
+}
+
+/*
+ * There are two different ways to handle DISCARD merges:
+ *  1) If max_discard_segments > 1, the driver treats every bio as a range and
+ *     send the bios to controller together. The ranges don't need to be
+ *     contiguous.
+ *  2) Otherwise, the request will be normal read/write requests.  The ranges
+ *     need to be contiguous.
+ */
+static inline bool blk_discard_mergable(struct request *req)
+{
+	if (req_op(req) == REQ_OP_DISCARD &&
+	    queue_max_discard_segments(req->q) > 1)
+		return true;
+	return false;
 }
 
 #ifdef CONFIG_BLK_DEV_INTEGRITY
@@ -179,8 +219,14 @@ bool blk_attempt_plug_merge(struct request_queue *q, struct bio *bio,
 bool blk_bio_list_merge(struct request_queue *q, struct list_head *list,
 			struct bio *bio, unsigned int nr_segs);
 
-void blk_account_io_start(struct request *req);
-void blk_account_io_done(struct request *req, u64 now);
+void __blk_account_io_start(struct request *req);
+void __blk_account_io_done(struct request *req, u64 now);
+
+/*
+ * Plug flush limits
+ */
+#define BLK_MAX_REQUEST_COUNT	32
+#define BLK_PLUG_FLUSH_SIZE	(128 * 1024)
 
 /*
  * Internal elevator interface
@@ -200,7 +246,7 @@ static inline void elevator_exit(struct request_queue *q,
 {
 	lockdep_assert_held(&q->sysfs_lock);
 
-	blk_mq_sched_free_requests(q);
+	blk_mq_sched_free_rqs(q);
 	__elevator_exit(q, e);
 }
 
@@ -238,7 +284,25 @@ int blk_dev_init(void);
  */
 static inline bool blk_do_io_stat(struct request *rq)
 {
-	return rq->rq_disk && (rq->rq_flags & RQF_IO_STAT);
+	return (rq->rq_flags & RQF_IO_STAT) && rq->rq_disk;
+}
+
+static inline void blk_account_io_done(struct request *req, u64 now)
+{
+	/*
+	 * Account IO completion.  flush_rq isn't accounted as a
+	 * normal IO on queueing nor completion.  Accounting the
+	 * containing request is enough.
+	 */
+	if (blk_do_io_stat(req) && req->part &&
+	    !(req->rq_flags & RQF_FLUSH_SEQ))
+		__blk_account_io_done(req, now);
+}
+
+static inline void blk_account_io_start(struct request *req)
+{
+	if (blk_do_io_stat(req))
+		__blk_account_io_start(req);
 }
 
 static inline void req_set_nomerge(struct request_queue *q, struct request *req)
@@ -283,22 +347,6 @@ void ioc_clear_queue(struct request_queue *q);
 
 int create_task_io_context(struct task_struct *task, gfp_t gfp_mask, int node);
 
-/*
- * Internal throttling interface
- */
-#ifdef CONFIG_BLK_DEV_THROTTLING
-extern int blk_throtl_init(struct request_queue *q);
-extern void blk_throtl_exit(struct request_queue *q);
-extern void blk_throtl_register_queue(struct request_queue *q);
-extern void blk_throtl_charge_bio_split(struct bio *bio);
-bool blk_throtl_bio(struct bio *bio);
-#else /* CONFIG_BLK_DEV_THROTTLING */
-static inline int blk_throtl_init(struct request_queue *q) { return 0; }
-static inline void blk_throtl_exit(struct request_queue *q) { }
-static inline void blk_throtl_register_queue(struct request_queue *q) { }
-static inline void blk_throtl_charge_bio_split(struct bio *bio) { }
-static inline bool blk_throtl_bio(struct bio *bio) { return false; }
-#endif /* CONFIG_BLK_DEV_THROTTLING */
 #ifdef CONFIG_BLK_DEV_THROTTLING_LOW
 extern ssize_t blk_throtl_sample_time_show(struct request_queue *q, char *page);
 extern ssize_t blk_throtl_sample_time_store(struct request_queue *q,
@@ -366,12 +414,15 @@ extern struct device_attribute dev_attr_events;
 extern struct device_attribute dev_attr_events_async;
 extern struct device_attribute dev_attr_events_poll_msecs;
 
-static inline void bio_clear_hipri(struct bio *bio)
+static inline void bio_clear_polled(struct bio *bio)
 {
 	/* can't support alloc cache if we turn off polling */
 	bio_clear_flag(bio, BIO_PERCPU_CACHE);
-	bio->bi_opf &= ~REQ_HIPRI;
+	bio->bi_opf &= ~REQ_POLLED;
 }
+
+long blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg);
+long compat_blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg);
 
 extern const struct address_space_operations def_blk_aops;
 
