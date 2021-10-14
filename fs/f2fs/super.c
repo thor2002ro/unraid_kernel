@@ -1370,6 +1370,8 @@ static int f2fs_drop_inode(struct inode *inode)
 			/* should remain fi->extent_tree for writepage */
 			f2fs_destroy_extent_node(inode);
 
+			dquot_initialize(inode);
+
 			sb_start_intwrite(inode->i_sb);
 			f2fs_i_size_write(inode, 0);
 
