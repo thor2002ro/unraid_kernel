@@ -131,7 +131,7 @@ static void show_leaks(struct drm_mm *mm)
 			continue;
 		}
 
-		stack_depot_snprint(node->stack, buf, BUFSZ);
+		stack_depot_snprint(node->stack, buf, BUFSZ, 0);
 		DRM_ERROR("node [%08llx + %08llx]: inserted at\n%s",
 			  node->start, node->size, buf);
 	}
