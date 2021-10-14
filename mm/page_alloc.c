@@ -5208,6 +5208,10 @@ unsigned long __alloc_pages_bulk(gfp_t gfp, int preferred_nid,
 	unsigned int alloc_flags = ALLOC_WMARK_LOW;
 	int nr_populated = 0, nr_account = 0;
 
+	/* Bulk allocator does not support memcg accounting. */
+	if (unlikely(gfp & __GFP_ACCOUNT))
+		goto out;
+
 	/*
 	 * Skip populated array elements to determine if any pages need
 	 * to be allocated before disabling IRQs.
