@@ -5,7 +5,6 @@
  * Author: SeongJae Park <sj@kernel.org>
  */
 
-#include <linux/highmem.h>
 #include <linux/mmu_notifier.h>
 #include <linux/page_idle.h>
 #include <linux/pagemap.h>
