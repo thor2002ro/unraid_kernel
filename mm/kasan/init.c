@@ -279,11 +279,6 @@ int __ref kasan_populate_early_shadow(const void *shadow_start,
 	return 0;
 }
 
-void __init __weak kasan_populate_early_vm_area_shadow(void *start,
-						       unsigned long size)
-{
-}
-
 static void kasan_free_pte(pte_t *pte_start, pmd_t *pmd)
 {
 	pte_t *pte;
