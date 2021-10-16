@@ -50,6 +50,8 @@ enum sgx_encls_function {
  * %SGX_NOT_TRACKED:		Previous ETRACK's shootdown sequence has not
  *				been completed yet.
  * %SGX_CHILD_PRESENT		SECS has child pages present in the EPC.
+ * %SGX_ENCLAVE_ACT		One or more logical processors are executing
+ *				inside the enclave.
  * %SGX_INVALID_EINITTOKEN:	EINITTOKEN is invalid and enclave signer's
  *				public key does not match IA32_SGXLEPUBKEYHASH.
  * %SGX_UNMASKED_EVENT:		An unmasked event, e.g. INTR, was received
@@ -57,6 +59,7 @@ enum sgx_encls_function {
 enum sgx_return_code {
 	SGX_NOT_TRACKED			= 11,
 	SGX_CHILD_PRESENT		= 13,
+	SGX_ENCLAVE_ACT			= 14,
 	SGX_INVALID_EINITTOKEN		= 16,
 	SGX_UNMASKED_EVENT		= 128,
 };
