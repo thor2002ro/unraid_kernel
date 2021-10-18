@@ -1248,13 +1248,13 @@ tda1997x_parse_infoframe(struct tda1997x_state *state, u16 addr)
 {
 	struct v4l2_subdev *sd = &state->sd;
 	union hdmi_infoframe frame;
-	u8 buffer[40];
+	u8 buffer[40] = { 0 };
 	u8 reg;
 	int len, err;
 
 	/* read data */
 	len = io_readn(sd, addr, sizeof(buffer), buffer);
-	err = hdmi_infoframe_unpack(&frame, buffer, sizeof(buffer));
+	err = hdmi_infoframe_unpack(&frame, buffer, len);
 	if (err) {
 		v4l_err(state->client,
 			"failed parsing %d byte infoframe: 0x%04x/0x%02x\n",
@@ -1928,13 +1928,13 @@ static int tda1997x_log_infoframe(struct v4l2_subdev *sd, int addr)
 {
 	struct tda1997x_state *state = to_state(sd);
 	union hdmi_infoframe frame;
-	u8 buffer[40];
+	u8 buffer[40] = { 0 };
 	int len, err;
 
 	/* read data */
 	len = io_readn(sd, addr, sizeof(buffer), buffer);
 	v4l2_dbg(1, debug, sd, "infoframe: addr=%d len=%d\n", addr, len);
-	err = hdmi_infoframe_unpack(&frame, buffer, sizeof(buffer));
+	err = hdmi_infoframe_unpack(&frame, buffer, len);
 	if (err) {
 		v4l_err(state->client,
 			"failed parsing %d byte infoframe: 0x%04x/0x%02x\n",
@@ -2450,7 +2450,8 @@ static const struct media_entity_operations tda1997x_media_ops = {
 static int tda1997x_pcm_startup(struct snd_pcm_substream *substream,
 				struct snd_soc_dai *dai)
 {
-	struct tda1997x_state *state = snd_soc_dai_get_drvdata(dai);
+	struct v4l2_subdev *sd = snd_soc_dai_get_drvdata(dai);
+	struct tda1997x_state *state = to_state(sd);
 	struct snd_soc_component *component = dai->component;
 	struct snd_pcm_runtime *rtd = substream->runtime;
 	int rate, err;
@@ -2759,7 +2760,6 @@ static int tda1997x_probe(struct i2c_client *client,
 			dev_err(&client->dev, "register audio codec failed\n");
 			goto err_free_media;
 		}
-		dev_set_drvdata(&state->client->dev, state);
 		v4l_info(state->client, "registered audio codec\n");
 	}
 
