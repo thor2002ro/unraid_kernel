@@ -269,7 +269,7 @@ static int pci_dev_str_match_path(struct pci_dev *dev, const char *path,
 				  const char **endptr)
 {
 	int ret;
-	int seg, bus, slot, func;
+	unsigned int seg, bus, slot, func;
 	char *wpath, *p;
 	char end;
 
@@ -2091,14 +2091,14 @@ void pcim_pin_device(struct pci_dev *pdev)
 EXPORT_SYMBOL(pcim_pin_device);
 
 /*
- * pcibios_add_device - provide arch specific hooks when adding device dev
+ * pcibios_device_add - provide arch specific hooks when adding device dev
  * @dev: the PCI device being added
  *
  * Permits the platform to provide architecture specific functionality when
  * devices are added. This is the default implementation. Architecture
  * implementations can override this.
  */
-int __weak pcibios_add_device(struct pci_dev *dev)
+int __weak pcibios_device_add(struct pci_dev *dev)
 {
 	return 0;
 }
@@ -2218,6 +2218,7 @@ int pci_set_pcie_reset_state(struct pci_dev *dev, enum pcie_reset_state state)
 }
 EXPORT_SYMBOL_GPL(pci_set_pcie_reset_state);
 
+#ifdef CONFIG_PCIEAER
 void pcie_clear_device_status(struct pci_dev *dev)
 {
 	u16 sta;
@@ -2225,6 +2226,7 @@ void pcie_clear_device_status(struct pci_dev *dev)
 	pcie_capability_read_word(dev, PCI_EXP_DEVSTA, &sta);
 	pcie_capability_write_word(dev, PCI_EXP_DEVSTA, sta);
 }
+#endif
 
 /**
  * pcie_clear_root_pme_status - Clear root port PME interrupt status.
@@ -3719,6 +3721,14 @@ int pci_enable_atomic_ops_to_root(struct pci_dev *dev, u32 cap_mask)
 	struct pci_dev *bridge;
 	u32 cap, ctl2;
 
+	/*
+	 * Per PCIe r5.0, sec 9.3.5.10, the AtomicOp Requester Enable bit
+	 * in Device Control 2 is reserved in VFs and the PF value applies
+	 * to all associated VFs.
+	 */
+	if (dev->is_virtfn)
+		return -EINVAL;
+
 	if (!pci_is_pcie(dev))
 		return -EINVAL;
 
@@ -5088,13 +5098,14 @@ EXPORT_SYMBOL_GPL(pci_dev_unlock);
 
 static void pci_dev_save_and_disable(struct pci_dev *dev)
 {
+	struct pci_driver *drv = to_pci_driver(dev->dev.driver);
 	const struct pci_error_handlers *err_handler =
-			dev->driver ? dev->driver->err_handler : NULL;
+			drv ? drv->err_handler : NULL;
 
 	/*
-	 * dev->driver->err_handler->reset_prepare() is protected against
-	 * races with ->remove() by the device lock, which must be held by
-	 * the caller.
+	 * drv->err_handler->reset_prepare() is protected against races
+	 * with ->remove() by the device lock, which must be held by the
+	 * caller.
 	 */
 	if (err_handler && err_handler->reset_prepare)
 		err_handler->reset_prepare(dev);
@@ -5119,15 +5130,15 @@ static void pci_dev_save_and_disable(struct pci_dev *dev)
 
 static void pci_dev_restore(struct pci_dev *dev)
 {
+	struct pci_driver *drv = to_pci_driver(dev->dev.driver);
 	const struct pci_error_handlers *err_handler =
-			dev->driver ? dev->driver->err_handler : NULL;
+			drv ? drv->err_handler : NULL;
 
 	pci_restore_state(dev);
 
 	/*
-	 * dev->driver->err_handler->reset_done() is protected against
-	 * races with ->remove() by the device lock, which must be held by
-	 * the caller.
+	 * drv->err_handler->reset_done() is protected against races with
+	 * ->remove() by the device lock, which must be held by the caller.
 	 */
 	if (err_handler && err_handler->reset_done)
 		err_handler->reset_done(dev);
