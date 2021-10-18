@@ -43,7 +43,6 @@ struct cachefiles_object {
 	atomic_t			usage;		/* object usage count */
 	uint8_t				type;		/* object type */
 	uint8_t				new;		/* T if object new */
-	spinlock_t			work_lock;
 	struct rb_node			active_node;	/* link in active tree (dentry is key) */
 };
 
@@ -87,28 +86,6 @@ struct cachefiles_cache {
 	char				*rootdirname;	/* name of cache root directory */
 	char				*secctx;	/* LSM security context */
 	char				*tag;		/* cache binding tag */
-};
-
-/*
- * backing file read tracking
- */
-struct cachefiles_one_read {
-	wait_queue_entry_t			monitor;	/* link into monitored waitqueue */
-	struct page			*back_page;	/* backing file page we're waiting for */
-	struct page			*netfs_page;	/* netfs page we're going to fill */
-	struct fscache_retrieval	*op;		/* retrieval op covering this */
-	struct list_head		op_link;	/* link in op's todo list */
-};
-
-/*
- * backing file write tracking
- */
-struct cachefiles_one_write {
-	struct page			*netfs_page;	/* netfs page to copy */
-	struct cachefiles_object	*object;
-	struct list_head		obj_link;	/* link in object's lists */
-	fscache_rw_complete_t		end_io_func;
-	void				*context;
 };
 
 /*
@@ -181,25 +158,10 @@ extern int cachefiles_check_in_use(struct cachefiles_cache *cache,
 				   struct dentry *dir, char *filename);
 
 /*
- * rdwr.c
- */
-extern int cachefiles_read_or_alloc_page(struct fscache_retrieval *,
-					 struct page *, gfp_t);
-extern int cachefiles_read_or_alloc_pages(struct fscache_retrieval *,
-					  struct list_head *, unsigned *,
-					  gfp_t);
-extern int cachefiles_allocate_page(struct fscache_retrieval *, struct page *,
-				    gfp_t);
-extern int cachefiles_allocate_pages(struct fscache_retrieval *,
-				     struct list_head *, unsigned *, gfp_t);
-extern int cachefiles_write_page(struct fscache_storage *, struct page *);
-extern void cachefiles_uncache_page(struct fscache_object *, struct page *);
-
-/*
  * rdwr2.c
  */
-extern int cachefiles_begin_read_operation(struct netfs_read_request *,
-					   struct fscache_retrieval *);
+extern int cachefiles_begin_operation(struct netfs_cache_resources *,
+				      struct fscache_operation *);
 
 /*
  * security.c
