@@ -27,8 +27,6 @@ export	TEXTADDR
 
 
 # If we have a machine-specific directory, then include it in the build.
-core-y				+= arch/nds32/kernel/ arch/nds32/mm/
-core-$(CONFIG_FPU)              += arch/nds32/math-emu/
 libs-y				+= arch/nds32/lib/
 
 ifneq '$(CONFIG_NDS32_BUILTIN_DTB)' '""'
@@ -50,7 +48,6 @@ CHECKFLAGS      += -D__NDS32_EB__
 endif
 
 boot := arch/nds32/boot
-core-y += $(boot)/dts/
 
 Image: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
