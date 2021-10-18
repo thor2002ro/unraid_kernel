@@ -220,8 +220,6 @@ struct mlx5e_umr_wqe {
 	struct mlx5_mtt                inline_mtts[0];
 };
 
-extern const char mlx5e_self_tests[][ETH_GSTRING_LEN];
-
 enum mlx5e_priv_flag {
 	MLX5E_PFLAG_RX_CQE_BASED_MODER,
 	MLX5E_PFLAG_TX_CQE_BASED_MODER,
@@ -253,6 +251,9 @@ struct mlx5e_params {
 		u16 mode;
 		u8 num_tc;
 		struct netdev_tc_txq tc_to_txq[TC_MAX_QUEUE];
+		struct {
+			struct mlx5e_mqprio_rl *rl;
+		} channel;
 	} mqprio;
 	bool rx_cqe_compress_def;
 	bool tunneled_offload_en;
@@ -879,6 +880,7 @@ struct mlx5e_priv {
 #endif
 	struct mlx5e_scratchpad    scratchpad;
 	struct mlx5e_htb           htb;
+	struct mlx5e_mqprio_rl    *mqprio_rl;
 };
 
 struct mlx5e_rx_handlers {
@@ -918,6 +920,7 @@ void mlx5e_fold_sw_stats64(struct mlx5e_priv *priv, struct rtnl_link_stats64 *s)
 
 void mlx5e_init_l2_addr(struct mlx5e_priv *priv);
 int mlx5e_self_test_num(struct mlx5e_priv *priv);
+int mlx5e_self_test_fill_strings(struct mlx5e_priv *priv, u8 *data);
 void mlx5e_self_test(struct net_device *ndev, struct ethtool_test *etest,
 		     u64 *buf);
 void mlx5e_set_rx_mode_work(struct work_struct *work);
@@ -1003,7 +1006,8 @@ int mlx5e_modify_sq(struct mlx5_core_dev *mdev, u32 sqn,
 		    struct mlx5e_modify_sq_param *p);
 int mlx5e_open_txqsq(struct mlx5e_channel *c, u32 tisn, int txq_ix,
 		     struct mlx5e_params *params, struct mlx5e_sq_param *param,
-		     struct mlx5e_txqsq *sq, int tc, u16 qos_queue_group_id, u16 qos_qid);
+		     struct mlx5e_txqsq *sq, int tc, u16 qos_queue_group_id,
+		     struct mlx5e_sq_stats *sq_stats);
 void mlx5e_activate_txqsq(struct mlx5e_txqsq *sq);
 void mlx5e_deactivate_txqsq(struct mlx5e_txqsq *sq);
 void mlx5e_free_txqsq(struct mlx5e_txqsq *sq);

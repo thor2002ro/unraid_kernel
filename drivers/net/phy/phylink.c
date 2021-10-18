@@ -132,6 +132,17 @@ void phylink_set_port_modes(unsigned long *mask)
 }
 EXPORT_SYMBOL_GPL(phylink_set_port_modes);
 
+void phylink_set_10g_modes(unsigned long *mask)
+{
+	phylink_set(mask, 10000baseT_Full);
+	phylink_set(mask, 10000baseCR_Full);
+	phylink_set(mask, 10000baseSR_Full);
+	phylink_set(mask, 10000baseLR_Full);
+	phylink_set(mask, 10000baseLRM_Full);
+	phylink_set(mask, 10000baseER_Full);
+}
+EXPORT_SYMBOL_GPL(phylink_set_10g_modes);
+
 static int phylink_is_empty_linkmode(const unsigned long *linkmode)
 {
 	__ETHTOOL_DECLARE_LINK_MODE_MASK(tmp) = { 0, };
@@ -1333,7 +1344,10 @@ void phylink_suspend(struct phylink *pl, bool mac_wol)
 		 * but one would hope all packets have been sent. This
 		 * also means phylink_resolve() will do nothing.
 		 */
-		netif_carrier_off(pl->netdev);
+		if (pl->netdev)
+			netif_carrier_off(pl->netdev);
+		else
+			pl->old_link_state = false;
 
 		/* We do not call mac_link_down() here as we want the
 		 * link to remain up to receive the WoL packets.
@@ -2582,7 +2596,6 @@ int phylink_mii_c22_pcs_set_advertisement(struct mdio_device *pcs,
 {
 	struct mii_bus *bus = pcs->bus;
 	int addr = pcs->addr;
-	int val, ret;
 	u16 adv;
 
 	switch (interface) {
@@ -2596,32 +2609,12 @@ int phylink_mii_c22_pcs_set_advertisement(struct mdio_device *pcs,
 				      advertising))
 			adv |= ADVERTISE_1000XPSE_ASYM;
 
-		val = mdiobus_read(bus, addr, MII_ADVERTISE);
-		if (val < 0)
-			return val;
-
-		if (val == adv)
-			return 0;
-
-		ret = mdiobus_write(bus, addr, MII_ADVERTISE, adv);
-		if (ret < 0)
-			return ret;
-
-		return 1;
+		return mdiobus_modify_changed(bus, addr, MII_ADVERTISE,
+					      0xffff, adv);
 
 	case PHY_INTERFACE_MODE_SGMII:
-		val = mdiobus_read(bus, addr, MII_ADVERTISE);
-		if (val < 0)
-			return val;
-
-		if (val == 0x0001)
-			return 0;
-
-		ret = mdiobus_write(bus, addr, MII_ADVERTISE, 0x0001);
-		if (ret < 0)
-			return ret;
-
-		return 1;
+		return mdiobus_modify_changed(bus, addr, MII_ADVERTISE,
+					      0xffff, 0x0001);
 
 	default:
 		/* Nothing to do for other modes */

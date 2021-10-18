@@ -1070,7 +1070,7 @@ static int sis190_open(struct net_device *dev)
 
 	/*
 	 * Rx and Tx descriptors need 256 bytes alignment.
-	 * pci_alloc_consistent() guarantees a stronger alignment.
+	 * dma_alloc_coherent() guarantees a stronger alignment.
 	 */
 	tp->TxDescRing = dma_alloc_coherent(&pdev->dev, TX_RING_BYTES,
 					    &tp->tx_dma, GFP_KERNEL);
@@ -1586,6 +1586,7 @@ static int sis190_get_mac_addr_from_eeprom(struct pci_dev *pdev,
 {
 	struct sis190_private *tp = netdev_priv(dev);
 	void __iomem *ioaddr = tp->mmio_addr;
+	__le16 addr[ETH_ALEN / 2];
 	u16 sig;
 	int i;
 
@@ -1606,8 +1607,9 @@ static int sis190_get_mac_addr_from_eeprom(struct pci_dev *pdev,
 	for (i = 0; i < ETH_ALEN / 2; i++) {
 		u16 w = sis190_read_eeprom(ioaddr, EEPROMMACAddr + i);
 
-		((__le16 *)dev->dev_addr)[i] = cpu_to_le16(w);
+		addr[i] = cpu_to_le16(w);
 	}
+	eth_hw_addr_set(dev, (u8 *)addr);
 
 	sis190_set_rgmii(tp, sis190_read_eeprom(ioaddr, EEPROMInfo));
 
