@@ -13,6 +13,7 @@
 #include <linux/atomic.h>
 #include <linux/blk-mq.h>
 #include <linux/blk-mq-rdma.h>
+#include <linux/blk-integrity.h>
 #include <linux/types.h>
 #include <linux/list.h>
 #include <linux/mutex.h>
@@ -2105,7 +2106,7 @@ unmap_qe:
 	return ret;
 }
 
-static int nvme_rdma_poll(struct blk_mq_hw_ctx *hctx)
+static int nvme_rdma_poll(struct blk_mq_hw_ctx *hctx, struct io_comp_batch *iob)
 {
 	struct nvme_rdma_queue *queue = hctx->driver_data;
 
