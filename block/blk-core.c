@@ -1550,11 +1550,12 @@ void blk_start_plug_nr_ios(struct blk_plug *plug, unsigned short nr_ios)
 	if (tsk->plug)
 		return;
 
-	INIT_LIST_HEAD(&plug->mq_list);
+	plug->mq_list = NULL;
 	plug->cached_rq = NULL;
 	plug->nr_ios = min_t(unsigned short, nr_ios, BLK_MAX_REQUEST_COUNT);
 	plug->rq_count = 0;
 	plug->multiple_queues = false;
+	plug->has_elevator = false;
 	plug->nowait = false;
 	INIT_LIST_HEAD(&plug->cb_list);
 
@@ -1640,7 +1641,7 @@ void blk_flush_plug_list(struct blk_plug *plug, bool from_schedule)
 {
 	flush_plug_callbacks(plug, from_schedule);
 
-	if (!list_empty(&plug->mq_list))
+	if (!rq_list_empty(plug->mq_list))
 		blk_mq_flush_plug_list(plug, from_schedule);
 	if (unlikely(!from_schedule && plug->cached_rq))
 		blk_mq_free_plug_rqs(plug);
