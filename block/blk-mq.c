@@ -19,7 +19,6 @@
 #include <linux/smp.h>
 #include <linux/interrupt.h>
 #include <linux/llist.h>
-#include <linux/list_sort.h>
 #include <linux/cpu.h>
 #include <linux/cache.h>
 #include <linux/sched/sysctl.h>
@@ -680,7 +679,7 @@ bool blk_update_request(struct request *req, blk_status_t error,
 {
 	int total_bytes;
 
-	trace_block_rq_complete(req, blk_status_to_errno(error), nr_bytes);
+	trace_block_rq_complete(req, error, nr_bytes);
 
 	if (!req->bio)
 		return false;
@@ -1120,17 +1119,6 @@ void blk_mq_delay_kick_requeue_list(struct request_queue *q,
 				    msecs_to_jiffies(msecs));
 }
 EXPORT_SYMBOL(blk_mq_delay_kick_requeue_list);
-
-struct request *blk_mq_tag_to_rq(struct blk_mq_tags *tags, unsigned int tag)
-{
-	if (tag < tags->nr_tags) {
-		prefetch(tags->rqs[tag]);
-		return tags->rqs[tag];
-	}
-
-	return NULL;
-}
-EXPORT_SYMBOL(blk_mq_tag_to_rq);
 
 static bool blk_mq_rq_inflight(struct blk_mq_hw_ctx *hctx, struct request *rq,
 			       void *priv, bool reserved)
@@ -2161,20 +2149,6 @@ void blk_mq_insert_requests(struct blk_mq_hw_ctx *hctx, struct blk_mq_ctx *ctx,
 	spin_unlock(&ctx->lock);
 }
 
-static int plug_rq_cmp(void *priv, const struct list_head *a,
-		       const struct list_head *b)
-{
-	struct request *rqa = container_of(a, struct request, queuelist);
-	struct request *rqb = container_of(b, struct request, queuelist);
-
-	if (rqa->mq_ctx != rqb->mq_ctx)
-		return rqa->mq_ctx > rqb->mq_ctx;
-	if (rqa->mq_hctx != rqb->mq_hctx)
-		return rqa->mq_hctx > rqb->mq_hctx;
-
-	return blk_rq_pos(rqa) > blk_rq_pos(rqb);
-}
-
 void blk_mq_flush_plug_list(struct blk_plug *plug, bool from_schedule)
 {
 	LIST_HEAD(list);
@@ -2182,10 +2156,6 @@ void blk_mq_flush_plug_list(struct blk_plug *plug, bool from_schedule)
 	if (list_empty(&plug->mq_list))
 		return;
 	list_splice_init(&plug->mq_list, &list);
-
-	if (plug->rq_count > 2 && plug->multiple_queues)
-		list_sort(NULL, &list, plug_rq_cmp);
-
 	plug->rq_count = 0;
 
 	do {
@@ -2432,7 +2402,7 @@ void blk_mq_submit_bio(struct bio *bio)
 	const int is_flush_fua = op_is_flush(bio->bi_opf);
 	struct request *rq;
 	struct blk_plug *plug;
-	struct request *same_queue_rq = NULL;
+	bool same_queue_rq = false;
 	unsigned int nr_segs = 1;
 	blk_status_t ret;
 
@@ -2525,6 +2495,8 @@ void blk_mq_submit_bio(struct bio *bio)
 		/* Insert the request at the IO scheduler queue */
 		blk_mq_sched_insert_request(rq, false, true, true);
 	} else if (plug && !blk_queue_nomerges(q)) {
+		struct request *next_rq = NULL;
+
 		/*
 		 * We do limited plugging. If the bio can be merged, do that.
 		 * Otherwise the existing request in the plug list will be
@@ -2532,19 +2504,19 @@ void blk_mq_submit_bio(struct bio *bio)
 		 * The plug list might get flushed before this. If that happens,
 		 * the plug list is empty, and same_queue_rq is invalid.
 		 */
-		if (list_empty(&plug->mq_list))
-			same_queue_rq = NULL;
 		if (same_queue_rq) {
-			list_del_init(&same_queue_rq->queuelist);
+			next_rq = list_last_entry(&plug->mq_list,
+							struct request,
+							queuelist);
+			list_del_init(&next_rq->queuelist);
 			plug->rq_count--;
 		}
 		blk_add_rq_to_plug(plug, rq);
 		trace_block_plug(q);
 
-		if (same_queue_rq) {
+		if (next_rq) {
 			trace_block_unplug(q, 1, true);
-			blk_mq_try_issue_directly(same_queue_rq->mq_hctx,
-						  same_queue_rq);
+			blk_mq_try_issue_directly(next_rq->mq_hctx, next_rq);
 		}
 	} else if ((q->nr_hw_queues > 1 && is_sync) ||
 		   !rq->mq_hctx->dispatch_busy) {
