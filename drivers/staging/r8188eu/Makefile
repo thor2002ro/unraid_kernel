@@ -26,7 +26,6 @@ OUTSRC_FILES :=				\
 		hal/rtl8188e_cmd.o	\
 		hal/rtl8188e_dm.o	\
 		hal/rtl8188e_hal_init.o	\
-		hal/rtl8188e_mp.o	\
 		hal/rtl8188e_phycfg.o	\
 		hal/rtl8188e_rf6052.o	\
 		hal/rtl8188e_rxdesc.o	\
@@ -78,14 +77,11 @@ rtk_core :=				\
 		core/rtw_debug.o	\
 		core/rtw_efuse.o	\
 		core/rtw_ieee80211.o	\
-		core/rtw_io.o		\
 		core/rtw_ioctl_set.o	\
 		core/rtw_iol.o		\
 		core/rtw_led.o		\
 		core/rtw_mlme.o		\
 		core/rtw_mlme_ext.o	\
-		core/rtw_mp.o		\
-		core/rtw_mp_ioctl.o	\
 		core/rtw_pwrctrl.o	\
 		core/rtw_p2p.o		\
 		core/rtw_recv.o		\

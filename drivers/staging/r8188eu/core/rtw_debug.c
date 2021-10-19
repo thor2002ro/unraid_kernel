@@ -264,21 +264,6 @@ int proc_get_ap_info(char *page, char **start,
 	return len;
 }
 
-int proc_get_adapter_state(char *page, char **start,
-			  off_t offset, int count,
-			  int *eof, void *data)
-{
-	struct net_device *dev = data;
-	struct adapter *padapter = (struct adapter *)rtw_netdev_priv(dev);
-	int len = 0;
-
-	len += snprintf(page + len, count - len, "bSurpriseRemoved=%d, bDriverStopped=%d\n",
-						padapter->bSurpriseRemoved, padapter->bDriverStopped);
-
-	*eof = 1;
-	return len;
-}
-
 int proc_get_trx_info(char *page, char **start,
 			  off_t offset, int count,
 			  int *eof, void *data)
@@ -443,7 +428,7 @@ int proc_get_rf_reg_dump1(char *page, char **start,
 	path = 1;
 	len += snprintf(page + len, count - len, "\nRF_Path(%x)\n", path);
 	for (i = 0; i < 0xC0; i++) {
-		value = rtw_hal_read_rfreg(padapter, path, i, 0xffffffff);
+		value = rtl8188e_PHY_QueryRFReg(padapter, path, i, 0xffffffff);
 		if (j % 4 == 1)
 			len += snprintf(page + len, count - len, "0x%02x ", i);
 		len += snprintf(page + len, count - len, " 0x%08x ", value);
@@ -468,7 +453,7 @@ int proc_get_rf_reg_dump2(char *page, char **start,
 	path = 1;
 	len += snprintf(page + len, count - len, "\nRF_Path(%x)\n", path);
 	for (i = 0xC0; i < 0x100; i++) {
-		value = rtw_hal_read_rfreg(padapter, path, i, 0xffffffff);
+		value = rtl8188e_PHY_QueryRFReg(padapter, path, i, 0xffffffff);
 		if (j % 4 == 1)
 			len += snprintf(page + len, count - len, "0x%02x ", i);
 		len += snprintf(page + len, count - len, " 0x%08x ", value);
@@ -493,7 +478,7 @@ int proc_get_rf_reg_dump3(char *page, char **start,
 	path = 2;
 	len += snprintf(page + len, count - len, "\nRF_Path(%x)\n", path);
 	for (i = 0; i < 0xC0; i++) {
-		value = rtw_hal_read_rfreg(padapter, path, i, 0xffffffff);
+		value = rtl8188e_PHY_QueryRFReg(padapter, path, i, 0xffffffff);
 		if (j % 4 == 1)
 			len += snprintf(page + len, count - len, "0x%02x ", i);
 		len += snprintf(page + len, count - len, " 0x%08x ", value);
@@ -519,7 +504,7 @@ int proc_get_rf_reg_dump4(char *page, char **start,
 	path = 2;
 	len += snprintf(page + len, count - len, "\nRF_Path(%x)\n", path);
 	for (i = 0xC0; i < 0x100; i++) {
-		value = rtw_hal_read_rfreg(padapter, path, i, 0xffffffff);
+		value = rtl8188e_PHY_QueryRFReg(padapter, path, i, 0xffffffff);
 		if (j % 4 == 1)
 			len += snprintf(page + len, count - len, "0x%02x ", i);
 		len += snprintf(page + len, count - len, " 0x%08x ", value);
@@ -810,8 +795,6 @@ int proc_set_rssi_disp(struct file *file, const char __user *buffer,
 	return count;
 }
 
-#ifdef CONFIG_88EU_AP_MODE
-
 int proc_get_all_sta_info(char *page, char **start,
 			  off_t offset, int count,
 			  int *eof, void *data)
@@ -866,7 +849,6 @@ int proc_get_all_sta_info(char *page, char **start,
 	*eof = 1;
 	return len;
 }
-#endif
 
 int proc_get_best_channel(char *page, char **start,
 			  off_t offset, int count,
