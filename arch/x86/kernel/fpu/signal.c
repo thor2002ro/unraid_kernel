@@ -7,7 +7,6 @@
 #include <linux/cpu.h>
 #include <linux/pagemap.h>
 
-#include <asm/fpu/internal.h>
 #include <asm/fpu/signal.h>
 #include <asm/fpu/regset.h>
 #include <asm/fpu/xstate.h>
@@ -15,6 +14,11 @@
 #include <asm/sigframe.h>
 #include <asm/trapnr.h>
 #include <asm/trace/fpu.h>
+
+#include "context.h"
+#include "internal.h"
+#include "legacy.h"
+#include "xstate.h"
 
 static struct _fpx_sw_bytes fx_sw_reserved __ro_after_init;
 static struct _fpx_sw_bytes fx_sw_reserved_ia32 __ro_after_init;
@@ -155,10 +159,8 @@ static inline int copy_fpregs_to_sigframe(struct xregs_state __user *buf)
  *	buf == buf_fx for 64-bit frames and 32-bit fsave frame.
  *	buf != buf_fx for 32-bit frames with fxstate.
  *
- * Try to save it directly to the user frame with disabled page fault handler.
- * If this fails then do the slow path where the FPU state is first saved to
- * task's fpu->state and then copy it to the user frame pointed to by the
- * aligned pointer 'buf_fx'.
+ * Save it directly to the user frame with disabled page fault handler. If
+ * that faults, try to clear the frame which handles the page fault.
  *
  * If this is a 32-bit frame with fxstate, put a fsave header before
  * the aligned state at 'buf_fx'.
@@ -334,12 +336,7 @@ static bool __fpu_restore_sig(void __user *buf, void __user *buf_fx,
 	}
 
 	if (likely(!ia32_fxstate)) {
-		/*
-		 * Attempt to restore the FPU registers directly from user
-		 * memory. For that to succeed, the user access cannot cause page
-		 * faults. If it does, fall back to the slow path below, going
-		 * through the kernel buffer with the enabled pagefault handler.
-		 */
+		/* Restore the FPU registers directly from user memory. */
 		return restore_fpregs_from_user(buf_fx, user_xfeatures, fx_only,
 						state_size);
 	}
@@ -521,7 +518,7 @@ unsigned long fpu__get_fpstate_size(void)
  * This will be saved when ever the FP and extended state context is
  * saved on the user stack during the signal handler delivery to the user.
  */
-void fpu__init_prepare_fx_sw_frame(void)
+void __init fpu__init_prepare_fx_sw_frame(void)
 {
 	int size = fpu_user_xstate_size + FP_XSTATE_MAGIC2_SIZE;
 

@@ -4,6 +4,7 @@
  *
  * Author: Suresh Siddha <suresh.b.siddha@intel.com>
  */
+#include <linux/bitops.h>
 #include <linux/compat.h>
 #include <linux/cpu.h>
 #include <linux/mman.h>
@@ -12,13 +13,19 @@
 #include <linux/proc_fs.h>
 
 #include <asm/fpu/api.h>
-#include <asm/fpu/internal.h>
-#include <asm/fpu/signal.h>
 #include <asm/fpu/regset.h>
-#include <asm/fpu/xstate.h>
+#include <asm/fpu/signal.h>
+#include <asm/fpu/xcr.h>
 
 #include <asm/tlbflush.h>
-#include <asm/cpufeature.h>
+
+#include "internal.h"
+#include "legacy.h"
+#include "xstate.h"
+
+#define for_each_extended_xfeature(bit, mask)				\
+	(bit) = FIRST_EXTENDED_XFEATURE;				\
+	for_each_set_bit_from(bit, (unsigned long *)&(mask), 8 * sizeof(mask))
 
 /*
  * Although we spell it out in here, the Processor Trace
@@ -60,7 +67,6 @@ static short xsave_cpuid_features[] __initdata = {
  * XSAVE buffer, both supervisor and user xstates.
  */
 u64 xfeatures_mask_all __ro_after_init;
-EXPORT_SYMBOL_GPL(xfeatures_mask_all);
 
 static unsigned int xstate_offsets[XFEATURE_MAX] __ro_after_init =
 	{ [ 0 ... XFEATURE_MAX - 1] = -1};
@@ -184,10 +190,7 @@ static void __init setup_xstate_features(void)
 	xstate_sizes[XFEATURE_SSE]	= sizeof_field(struct fxregs_state,
 						       xmm_space);
 
-	for (i = FIRST_EXTENDED_XFEATURE; i < XFEATURE_MAX; i++) {
-		if (!xfeature_enabled(i))
-			continue;
-
+	for_each_extended_xfeature(i, xfeatures_mask_all) {
 		cpuid_count(XSTATE_CPUID, i, &eax, &ebx, &ecx, &edx);
 
 		xstate_sizes[i] = eax;
@@ -291,20 +294,15 @@ static void __init setup_xstate_comp_offsets(void)
 	xstate_comp_offsets[XFEATURE_SSE] = offsetof(struct fxregs_state,
 						     xmm_space);
 
-	if (!boot_cpu_has(X86_FEATURE_XSAVES)) {
-		for (i = FIRST_EXTENDED_XFEATURE; i < XFEATURE_MAX; i++) {
-			if (xfeature_enabled(i))
-				xstate_comp_offsets[i] = xstate_offsets[i];
-		}
+	if (!cpu_feature_enabled(X86_FEATURE_XSAVES)) {
+		for_each_extended_xfeature(i, xfeatures_mask_all)
+			xstate_comp_offsets[i] = xstate_offsets[i];
 		return;
 	}
 
 	next_offset = FXSAVE_SIZE + XSAVE_HDR_SIZE;
 
-	for (i = FIRST_EXTENDED_XFEATURE; i < XFEATURE_MAX; i++) {
-		if (!xfeature_enabled(i))
-			continue;
-
+	for_each_extended_xfeature(i, xfeatures_mask_all) {
 		if (xfeature_is_aligned(i))
 			next_offset = ALIGN(next_offset, 64);
 
@@ -328,8 +326,8 @@ static void __init setup_supervisor_only_offsets(void)
 
 	next_offset = FXSAVE_SIZE + XSAVE_HDR_SIZE;
 
-	for (i = FIRST_EXTENDED_XFEATURE; i < XFEATURE_MAX; i++) {
-		if (!xfeature_enabled(i) || !xfeature_is_supervisor(i))
+	for_each_extended_xfeature(i, xfeatures_mask_all) {
+		if (!xfeature_is_supervisor(i))
 			continue;
 
 		if (xfeature_is_aligned(i))
@@ -347,12 +345,33 @@ static void __init print_xstate_offset_size(void)
 {
 	int i;
 
-	for (i = FIRST_EXTENDED_XFEATURE; i < XFEATURE_MAX; i++) {
-		if (!xfeature_enabled(i))
-			continue;
+	for_each_extended_xfeature(i, xfeatures_mask_all) {
 		pr_info("x86/fpu: xstate_offset[%d]: %4d, xstate_sizes[%d]: %4d\n",
 			 i, xstate_comp_offsets[i], i, xstate_sizes[i]);
 	}
+}
+
+/*
+ * This function is called only during boot time when x86 caps are not set
+ * up and alternative can not be used yet.
+ */
+static __init void os_xrstor_booting(struct xregs_state *xstate)
+{
+	u64 mask = xfeatures_mask_fpstate();
+	u32 lmask = mask;
+	u32 hmask = mask >> 32;
+	int err;
+
+	if (cpu_feature_enabled(X86_FEATURE_XSAVES))
+		XSTATE_OP(XRSTORS, xstate, lmask, hmask, err);
+	else
+		XSTATE_OP(XRSTOR, xstate, lmask, hmask, err);
+
+	/*
+	 * We should never fault when copying from a kernel buffer, and the FPU
+	 * state we set at boot time should be valid.
+	 */
+	WARN_ON_FPU(err);
 }
 
 /*
@@ -379,14 +398,9 @@ static void __init print_xstate_offset_size(void)
  */
 static void __init setup_init_fpu_buf(void)
 {
-	static int on_boot_cpu __initdata = 1;
-
 	BUILD_BUG_ON((XFEATURE_MASK_USER_SUPPORTED |
 		      XFEATURE_MASK_SUPERVISOR_SUPPORTED) !=
 		     XFEATURES_INIT_FPSTATE_HANDLED);
-
-	WARN_ON_FPU(!on_boot_cpu);
-	on_boot_cpu = 0;
 
 	if (!boot_cpu_has(X86_FEATURE_XSAVE))
 		return;
@@ -394,9 +408,7 @@ static void __init setup_init_fpu_buf(void)
 	setup_xstate_features();
 	print_xstate_features();
 
-	if (boot_cpu_has(X86_FEATURE_XSAVES))
-		init_fpstate.xsave.header.xcomp_bv = XCOMP_BV_COMPACTED_FORMAT |
-						     xfeatures_mask_all;
+	xstate_init_xcomp_bv(&init_fpstate.xsave, xfeatures_mask_all);
 
 	/*
 	 * Init all the features state with header.xfeatures being 0x0
@@ -474,7 +486,7 @@ static int validate_user_xstate_header(const struct xstate_header *hdr)
 	return 0;
 }
 
-static void __xstate_dump_leaves(void)
+static void __init __xstate_dump_leaves(void)
 {
 	int i;
 	u32 eax, ebx, ecx, edx;
@@ -514,7 +526,7 @@ static void __xstate_dump_leaves(void)
  * that our software representation matches what the CPU
  * tells us about the state's size.
  */
-static void check_xstate_against_struct(int nr)
+static void __init check_xstate_against_struct(int nr)
 {
 	/*
 	 * Ask the CPU for the size of the state.
@@ -556,15 +568,12 @@ static void check_xstate_against_struct(int nr)
  * covered by these checks. Only the size of the buffer for task->fpu
  * is checked here.
  */
-static void do_extra_xstate_size_checks(void)
+static void __init do_extra_xstate_size_checks(void)
 {
 	int paranoid_xstate_size = FXSAVE_SIZE + XSAVE_HDR_SIZE;
 	int i;
 
-	for (i = FIRST_EXTENDED_XFEATURE; i < XFEATURE_MAX; i++) {
-		if (!xfeature_enabled(i))
-			continue;
-
+	for_each_extended_xfeature(i, xfeatures_mask_all) {
 		check_xstate_against_struct(i);
 		/*
 		 * Supervisor state components can be managed only by
@@ -592,7 +601,6 @@ static void do_extra_xstate_size_checks(void)
 	}
 	XSTATE_WARN_ON(paranoid_xstate_size != fpu_kernel_xstate_size);
 }
-
 
 /*
  * Get total size of enabled xstates in XCR0 | IA32_XSS.
@@ -662,7 +670,7 @@ static unsigned int __init get_xsave_size(void)
  * Will the runtime-enumerated 'xstate_size' fit in the init
  * task's statically-allocated buffer?
  */
-static bool is_supported_xstate_size(unsigned int test_xstate_size)
+static bool __init is_supported_xstate_size(unsigned int test_xstate_size)
 {
 	if (test_xstate_size <= sizeof(union fpregs_state))
 		return true;
@@ -707,7 +715,7 @@ static int __init init_xstate_size(void)
  * We enabled the XSAVE hardware, but something went wrong and
  * we can not use it.  Disable it.
  */
-static void fpu__init_disable_system_xstate(void)
+static void __init fpu__init_disable_system_xstate(void)
 {
 	xfeatures_mask_all = 0;
 	cr4_clear_bits(X86_CR4_OSXSAVE);
@@ -721,13 +729,9 @@ static void fpu__init_disable_system_xstate(void)
 void __init fpu__init_system_xstate(void)
 {
 	unsigned int eax, ebx, ecx, edx;
-	static int on_boot_cpu __initdata = 1;
 	u64 xfeatures;
 	int err;
 	int i;
-
-	WARN_ON_FPU(!on_boot_cpu);
-	on_boot_cpu = 0;
 
 	if (!boot_cpu_has(X86_FEATURE_FPU)) {
 		pr_info("x86/fpu: No FPU detected\n");
@@ -961,9 +965,10 @@ static void copy_feature(bool from_xstate, struct membuf *to, void *xstate,
 }
 
 /**
- * copy_xstate_to_uabi_buf - Copy kernel saved xstate to a UABI buffer
+ * __copy_xstate_to_uabi_buf - Copy kernel saved xstate to a UABI buffer
  * @to:		membuf descriptor
- * @tsk:	The task from which to copy the saved xstate
+ * @xsave:	The xsave from which to copy
+ * @pkru_val:	The PKRU value to store in the PKRU component
  * @copy_mode:	The requested copy mode
  *
  * Converts from kernel XSAVE or XSAVES compacted format to UABI conforming
@@ -972,14 +977,14 @@ static void copy_feature(bool from_xstate, struct membuf *to, void *xstate,
  *
  * It supports partial copy but @to.pos always starts from zero.
  */
-void copy_xstate_to_uabi_buf(struct membuf to, struct task_struct *tsk,
-			     enum xstate_copy_mode copy_mode)
+void __copy_xstate_to_uabi_buf(struct membuf to, struct xregs_state *xsave,
+			       u32 pkru_val, enum xstate_copy_mode copy_mode)
 {
 	const unsigned int off_mxcsr = offsetof(struct fxregs_state, mxcsr);
-	struct xregs_state *xsave = &tsk->thread.fpu.state.xsave;
 	struct xregs_state *xinit = &init_fpstate.xsave;
 	struct xstate_header header;
 	unsigned int zerofrom;
+	u64 mask;
 	int i;
 
 	memset(&header, 0, sizeof(header));
@@ -1033,17 +1038,15 @@ void copy_xstate_to_uabi_buf(struct membuf to, struct task_struct *tsk,
 
 	zerofrom = offsetof(struct xregs_state, extended_state_area);
 
-	for (i = FIRST_EXTENDED_XFEATURE; i < XFEATURE_MAX; i++) {
-		/*
-		 * The ptrace buffer is in non-compacted XSAVE format.
-		 * In non-compacted format disabled features still occupy
-		 * state space, but there is no state to copy from in the
-		 * compacted init_fpstate. The gap tracking will zero this
-		 * later.
-		 */
-		if (!(xfeatures_mask_uabi() & BIT_ULL(i)))
-			continue;
+	/*
+	 * The ptrace buffer is in non-compacted XSAVE format.  In
+	 * non-compacted format disabled features still occupy state space,
+	 * but there is no state to copy from in the compacted
+	 * init_fpstate. The gap tracking will zero these states.
+	 */
+	mask = xfeatures_mask_uabi();
 
+	for_each_extended_xfeature(i, mask) {
 		/*
 		 * If there was a feature or alignment gap, zero the space
 		 * in the destination buffer.
@@ -1055,10 +1058,9 @@ void copy_xstate_to_uabi_buf(struct membuf to, struct task_struct *tsk,
 			struct pkru_state pkru = {0};
 			/*
 			 * PKRU is not necessarily up to date in the
-			 * thread's XSAVE buffer.  Fill this part from the
-			 * per-thread storage.
+			 * XSAVE buffer. Use the provided value.
 			 */
-			pkru.pkru = tsk->thread.pkru;
+			pkru.pkru = pkru_val;
 			membuf_write(&to, &pkru, sizeof(pkru));
 		} else {
 			copy_feature(header.xfeatures & BIT_ULL(i), &to,
@@ -1076,6 +1078,25 @@ void copy_xstate_to_uabi_buf(struct membuf to, struct task_struct *tsk,
 out:
 	if (to.left)
 		membuf_zero(&to, to.left);
+}
+
+/**
+ * copy_xstate_to_uabi_buf - Copy kernel saved xstate to a UABI buffer
+ * @to:		membuf descriptor
+ * @tsk:	The task from which to copy the saved xstate
+ * @copy_mode:	The requested copy mode
+ *
+ * Converts from kernel XSAVE or XSAVES compacted format to UABI conforming
+ * format, i.e. from the kernel internal hardware dependent storage format
+ * to the requested @mode. UABI XSTATE is always uncompacted!
+ *
+ * It supports partial copy but @to.pos always starts from zero.
+ */
+void copy_xstate_to_uabi_buf(struct membuf to, struct task_struct *tsk,
+			     enum xstate_copy_mode copy_mode)
+{
+	__copy_xstate_to_uabi_buf(to, &tsk->thread.fpu.state.xsave,
+				  tsk->thread.pkru, copy_mode);
 }
 
 static int copy_from_buffer(void *dst, unsigned int offset, unsigned int size,
@@ -1156,8 +1177,7 @@ static int copy_uabi_to_xstate(struct xregs_state *xsave, const void *kbuf,
 
 /*
  * Convert from a ptrace standard-format kernel buffer to kernel XSAVE[S]
- * format and copy to the target thread. This is called from
- * xstateregs_set().
+ * format and copy to the target thread. Used by ptrace and KVM.
  */
 int copy_uabi_from_kernel_to_xstate(struct xregs_state *xsave, const void *kbuf)
 {
@@ -1175,20 +1195,14 @@ int copy_sigframe_from_user_to_xstate(struct xregs_state *xsave,
 	return copy_uabi_to_xstate(xsave, NULL, ubuf);
 }
 
-static bool validate_xsaves_xrstors(u64 mask)
+static bool validate_independent_components(u64 mask)
 {
 	u64 xchk;
 
 	if (WARN_ON_FPU(!cpu_feature_enabled(X86_FEATURE_XSAVES)))
 		return false;
-	/*
-	 * Validate that this is either a task->fpstate related component
-	 * subset or an independent one.
-	 */
-	if (mask & xfeatures_mask_independent())
-		xchk = ~xfeatures_mask_independent();
-	else
-		xchk = ~xfeatures_mask_all;
+
+	xchk = ~xfeatures_mask_independent();
 
 	if (WARN_ON_ONCE(!mask || mask & xchk))
 		return false;
@@ -1206,14 +1220,13 @@ static bool validate_xsaves_xrstors(u64 mask)
  * buffer should be zeroed otherwise a consecutive XRSTORS from that buffer
  * can #GP.
  *
- * The feature mask must either be a subset of the independent features or
- * a subset of the task->fpstate related features.
+ * The feature mask must be a subset of the independent features.
  */
 void xsaves(struct xregs_state *xstate, u64 mask)
 {
 	int err;
 
-	if (!validate_xsaves_xrstors(mask))
+	if (!validate_independent_components(mask))
 		return;
 
 	XSTATE_OP(XSAVES, xstate, (u32)mask, (u32)(mask >> 32), err);
@@ -1231,14 +1244,13 @@ void xsaves(struct xregs_state *xstate, u64 mask)
  * Proper usage is to restore the state which was saved with
  * xsaves() into @xstate.
  *
- * The feature mask must either be a subset of the independent features or
- * a subset of the task->fpstate related features.
+ * The feature mask must be a subset of the independent features.
  */
 void xrstors(struct xregs_state *xstate, u64 mask)
 {
 	int err;
 
-	if (!validate_xsaves_xrstors(mask))
+	if (!validate_independent_components(mask))
 		return;
 
 	XSTATE_OP(XRSTORS, xstate, (u32)mask, (u32)(mask >> 32), err);

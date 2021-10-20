@@ -5,10 +5,14 @@
 #include <linux/sched/task_stack.h>
 #include <linux/vmalloc.h>
 
-#include <asm/fpu/internal.h>
+#include <asm/fpu/api.h>
 #include <asm/fpu/signal.h>
 #include <asm/fpu/regset.h>
 #include <asm/fpu/xstate.h>
+
+#include "context.h"
+#include "internal.h"
+#include "legacy.h"
 
 /*
  * The xstateregs_active() routine is the same as the regset_fpregs_active() routine,

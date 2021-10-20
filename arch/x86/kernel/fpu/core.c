@@ -6,8 +6,9 @@
  *  General FPU state handling cleanups
  *	Gareth Hughes <gareth@valinux.com>, May 2000
  */
-#include <asm/fpu/internal.h>
+#include <asm/fpu/api.h>
 #include <asm/fpu/regset.h>
+#include <asm/fpu/sched.h>
 #include <asm/fpu/signal.h>
 #include <asm/fpu/types.h>
 #include <asm/traps.h>
@@ -15,6 +16,11 @@
 
 #include <linux/hardirq.h>
 #include <linux/pkeys.h>
+
+#include "context.h"
+#include "internal.h"
+#include "legacy.h"
+#include "xstate.h"
 
 #define CREATE_TRACE_POINTS
 #include <asm/trace/fpu.h>
@@ -122,9 +128,8 @@ void save_fpregs_to_fpstate(struct fpu *fpu)
 	asm volatile("fnsave %[fp]; fwait" : [fp] "=m" (fpu->state.fsave));
 	frstor(&fpu->state.fsave);
 }
-EXPORT_SYMBOL(save_fpregs_to_fpstate);
 
-void __restore_fpregs_from_fpstate(union fpregs_state *fpstate, u64 mask)
+void restore_fpregs_from_fpstate(union fpregs_state *fpstate, u64 mask)
 {
 	/*
 	 * AMD K7/K8 and later CPUs up to Zen don't save/restore
@@ -149,7 +154,72 @@ void __restore_fpregs_from_fpstate(union fpregs_state *fpstate, u64 mask)
 			frstor(&fpstate->fsave);
 	}
 }
-EXPORT_SYMBOL_GPL(__restore_fpregs_from_fpstate);
+
+void fpu_reset_from_exception_fixup(void)
+{
+	restore_fpregs_from_fpstate(&init_fpstate, xfeatures_mask_fpstate());
+}
+
+#if IS_ENABLED(CONFIG_KVM)
+void fpu_swap_kvm_fpu(struct fpu *save, struct fpu *rstor, u64 restore_mask)
+{
+	fpregs_lock();
+
+	if (save) {
+		if (test_thread_flag(TIF_NEED_FPU_LOAD)) {
+			memcpy(&save->state, &current->thread.fpu.state,
+			       fpu_kernel_xstate_size);
+		} else {
+			save_fpregs_to_fpstate(save);
+		}
+	}
+
+	if (rstor) {
+		restore_mask &= xfeatures_mask_fpstate();
+		restore_fpregs_from_fpstate(&rstor->state, restore_mask);
+	}
+
+	fpregs_mark_activate();
+	fpregs_unlock();
+}
+EXPORT_SYMBOL_GPL(fpu_swap_kvm_fpu);
+
+int fpu_copy_kvm_uabi_to_fpstate(struct fpu *fpu, const void *buf, u64 xcr0,
+				 u32 *vpkru)
+{
+	union fpregs_state *kstate = &fpu->state;
+	const union fpregs_state *ustate = buf;
+	struct pkru_state *xpkru;
+	int ret;
+
+	if (!cpu_feature_enabled(X86_FEATURE_XSAVE)) {
+		if (ustate->xsave.header.xfeatures & ~XFEATURE_MASK_FPSSE)
+			return -EINVAL;
+		if (ustate->fxsave.mxcsr & ~mxcsr_feature_mask)
+			return -EINVAL;
+		memcpy(&kstate->fxsave, &ustate->fxsave, sizeof(ustate->fxsave));
+		return 0;
+	}
+
+	if (ustate->xsave.header.xfeatures & ~xcr0)
+		return -EINVAL;
+
+	ret = copy_uabi_from_kernel_to_xstate(&kstate->xsave, ustate);
+	if (ret)
+		return ret;
+
+	/* Retrieve PKRU if not in init state */
+	if (kstate->xsave.header.xfeatures & XFEATURE_MASK_PKRU) {
+		xpkru = get_xsave_addr(&kstate->xsave, XFEATURE_PKRU);
+		*vpkru = xpkru->pkru;
+	}
+
+	/* Ensure that XCOMP_BV is set up for XSAVES */
+	xstate_init_xcomp_bv(&kstate->xsave, xfeatures_mask_uabi());
+	return 0;
+}
+EXPORT_SYMBOL_GPL(fpu_copy_kvm_uabi_to_fpstate);
+#endif /* CONFIG_KVM */
 
 void kernel_fpu_begin_mask(unsigned int kfpu_mask)
 {
@@ -203,13 +273,13 @@ void fpu_sync_fpstate(struct fpu *fpu)
 	fpregs_unlock();
 }
 
-static inline void fpstate_init_xstate(struct xregs_state *xsave)
+static inline unsigned int init_fpstate_copy_size(void)
 {
-	/*
-	 * XRSTORS requires these bits set in xcomp_bv, or it will
-	 * trigger #GP:
-	 */
-	xsave->header.xcomp_bv = XCOMP_BV_COMPACTED_FORMAT | xfeatures_mask_all;
+	if (!use_xsave())
+		return fpu_kernel_xstate_size;
+
+	/* XSAVE(S) just needs the legacy and the xstate header part */
+	return sizeof(init_fpstate.xsave);
 }
 
 static inline void fpstate_init_fxstate(struct fxregs_state *fx)
@@ -229,23 +299,33 @@ static inline void fpstate_init_fstate(struct fregs_state *fp)
 	fp->fos = 0xffff0000u;
 }
 
-void fpstate_init(union fpregs_state *state)
+/*
+ * Used in two places:
+ * 1) Early boot to setup init_fpstate for non XSAVE systems
+ * 2) fpu_init_fpstate_user() which is invoked from KVM
+ */
+void fpstate_init_user(union fpregs_state *state)
 {
-	if (!static_cpu_has(X86_FEATURE_FPU)) {
+	if (!cpu_feature_enabled(X86_FEATURE_FPU)) {
 		fpstate_init_soft(&state->soft);
 		return;
 	}
 
-	memset(state, 0, fpu_kernel_xstate_size);
+	xstate_init_xcomp_bv(&state->xsave, xfeatures_mask_uabi());
 
-	if (static_cpu_has(X86_FEATURE_XSAVES))
-		fpstate_init_xstate(&state->xsave);
-	if (static_cpu_has(X86_FEATURE_FXSR))
+	if (cpu_feature_enabled(X86_FEATURE_FXSR))
 		fpstate_init_fxstate(&state->fxsave);
 	else
 		fpstate_init_fstate(&state->fsave);
 }
-EXPORT_SYMBOL_GPL(fpstate_init);
+
+#if IS_ENABLED(CONFIG_KVM)
+void fpu_init_fpstate_user(struct fpu *fpu)
+{
+	fpstate_init_user(&fpu->state);
+}
+EXPORT_SYMBOL_GPL(fpu_init_fpstate_user);
+#endif
 
 /* Clone current's FPU state on fork */
 int fpu_clone(struct task_struct *dst)
@@ -260,10 +340,21 @@ int fpu_clone(struct task_struct *dst)
 		return 0;
 
 	/*
-	 * Don't let 'init optimized' areas of the XSAVE area
-	 * leak into the child task:
+	 * Enforce reload for user space tasks and prevent kernel threads
+	 * from trying to save the FPU registers on context switch.
 	 */
-	memset(&dst_fpu->state.xsave, 0, fpu_kernel_xstate_size);
+	set_tsk_thread_flag(dst, TIF_NEED_FPU_LOAD);
+
+	/*
+	 * No FPU state inheritance for kernel threads and IO
+	 * worker threads.
+	 */
+	if (dst->flags & (PF_KTHREAD | PF_IO_WORKER)) {
+		/* Clear out the minimal state */
+		memcpy(&dst_fpu->state, &init_fpstate,
+		       init_fpstate_copy_size());
+		return 0;
+	}
 
 	/*
 	 * If the FPU registers are not owned by current just memcpy() the
@@ -277,8 +368,6 @@ int fpu_clone(struct task_struct *dst)
 	else
 		save_fpregs_to_fpstate(dst_fpu);
 	fpregs_unlock();
-
-	set_tsk_thread_flag(dst, TIF_NEED_FPU_LOAD);
 
 	trace_x86_fpu_copy_src(src_fpu);
 	trace_x86_fpu_copy_dst(dst_fpu);
@@ -326,15 +415,6 @@ static inline void restore_fpregs_from_init_fpstate(u64 features_mask)
 		frstor(&init_fpstate.fsave);
 
 	pkru_write_default();
-}
-
-static inline unsigned int init_fpstate_copy_size(void)
-{
-	if (!use_xsave())
-		return fpu_kernel_xstate_size;
-
-	/* XSAVE(S) just needs the legacy and the xstate header part */
-	return sizeof(init_fpstate.xsave);
 }
 
 /*
@@ -445,7 +525,6 @@ void fpregs_mark_activate(void)
 	fpu->last_cpu = smp_processor_id();
 	clear_thread_flag(TIF_NEED_FPU_LOAD);
 }
-EXPORT_SYMBOL_GPL(fpregs_mark_activate);
 
 /*
  * x87 math exception handling:

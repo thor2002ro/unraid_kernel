@@ -2,13 +2,17 @@
 /*
  * x86 FPU boot time init code:
  */
-#include <asm/fpu/internal.h>
+#include <asm/fpu/api.h>
 #include <asm/tlbflush.h>
 #include <asm/setup.h>
 
 #include <linux/sched.h>
 #include <linux/sched/task.h>
 #include <linux/init.h>
+
+#include "internal.h"
+#include "legacy.h"
+#include "xstate.h"
 
 /*
  * Initialize the registers found in all CPUs, CR0 and CR4:
@@ -121,10 +125,10 @@ static void __init fpu__init_system_mxcsr(void)
 static void __init fpu__init_system_generic(void)
 {
 	/*
-	 * Set up the legacy init FPU context. (xstate init might overwrite this
-	 * with a more modern format, if the CPU supports it.)
+	 * Set up the legacy init FPU context. Will be updated when the
+	 * CPU supports XSAVE[S].
 	 */
-	fpstate_init(&init_fpstate);
+	fpstate_init_user(&init_fpstate);
 
 	fpu__init_system_mxcsr();
 }
@@ -136,7 +140,6 @@ static void __init fpu__init_system_generic(void)
  * components into a single, continuous memory block:
  */
 unsigned int fpu_kernel_xstate_size __ro_after_init;
-EXPORT_SYMBOL_GPL(fpu_kernel_xstate_size);
 
 /* Get alignment of the TYPE. */
 #define TYPE_ALIGN(TYPE) offsetof(struct { char x; TYPE test; }, test)
@@ -192,11 +195,6 @@ static void __init fpu__init_task_struct_size(void)
  */
 static void __init fpu__init_system_xstate_size_legacy(void)
 {
-	static int on_boot_cpu __initdata = 1;
-
-	WARN_ON_FPU(!on_boot_cpu);
-	on_boot_cpu = 0;
-
 	/*
 	 * Note that xstate sizes might be overwritten later during
 	 * fpu__init_system_xstate().
@@ -214,15 +212,6 @@ static void __init fpu__init_system_xstate_size_legacy(void)
 	}
 
 	fpu_user_xstate_size = fpu_kernel_xstate_size;
-}
-
-/* Legacy code to initialize eager fpu mode. */
-static void __init fpu__init_system_ctx_switch(void)
-{
-	static bool on_boot_cpu __initdata = 1;
-
-	WARN_ON_FPU(!on_boot_cpu);
-	on_boot_cpu = 0;
 }
 
 /*
@@ -243,6 +232,4 @@ void __init fpu__init_system(struct cpuinfo_x86 *c)
 	fpu__init_system_xstate_size_legacy();
 	fpu__init_system_xstate();
 	fpu__init_task_struct_size();
-
-	fpu__init_system_ctx_switch();
 }
