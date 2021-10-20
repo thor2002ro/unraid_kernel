@@ -395,8 +395,6 @@ struct cached_dev {
 	atomic_t		io_errors;
 	unsigned int		error_limit;
 	unsigned int		offline_seconds;
-
-	char			backing_dev_name[BDEVNAME_SIZE];
 };
 
 enum alloc_reserve {
@@ -470,8 +468,6 @@ struct cache {
 	atomic_long_t		meta_sectors_written;
 	atomic_long_t		btree_sectors_written;
 	atomic_long_t		sectors_written;
-
-	char			cache_dev_name[BDEVNAME_SIZE];
 };
 
 struct gc_stat {
