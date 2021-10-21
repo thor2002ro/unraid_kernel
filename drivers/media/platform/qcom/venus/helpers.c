@@ -18,8 +18,8 @@
 #include "hfi_platform.h"
 #include "hfi_parser.h"
 
-#define NUM_MBS_720P	(((1280 + 15) >> 4) * ((720 + 15) >> 4))
-#define NUM_MBS_4K	(((4096 + 15) >> 4) * ((2304 + 15) >> 4))
+#define NUM_MBS_720P	(((ALIGN(1280, 16)) >> 4) * ((ALIGN(736, 16)) >> 4))
+#define NUM_MBS_4K	(((ALIGN(4096, 16)) >> 4) * ((ALIGN(2304, 16)) >> 4))
 
 struct intbuf {
 	struct list_head list;
@@ -583,7 +583,7 @@ static int platform_get_bufreq(struct venus_inst *inst, u32 buftype,
 		return -EINVAL;
 
 	params.version = version;
-	params.num_vpp_pipes = hfi_platform_num_vpp_pipes(version);
+	params.num_vpp_pipes = inst->core->res->num_vpp_pipes;
 
 	if (is_dec) {
 		params.width = inst->width;
@@ -623,9 +623,15 @@ int venus_helper_get_bufreq(struct venus_inst *inst, u32 type,
 	if (req)
 		memset(req, 0, sizeof(*req));
 
+	if (type == HFI_BUFFER_OUTPUT || type == HFI_BUFFER_OUTPUT2)
+		req->count_min = inst->fw_min_cnt;
+
 	ret = platform_get_bufreq(inst, type, req);
-	if (!ret)
+	if (!ret) {
+		if (type == HFI_BUFFER_OUTPUT || type == HFI_BUFFER_OUTPUT2)
+			inst->fw_min_cnt = req->count_min;
 		return 0;
+	}
 
 	ret = hfi_session_get_property(inst, ptype, &hprop);
 	if (ret)

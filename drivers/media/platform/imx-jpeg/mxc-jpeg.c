@@ -282,6 +282,20 @@ static const unsigned char jpeg_sos_maximal[] = {
 	0x11, 0x04, 0x11, 0x00, 0x3F, 0x00
 };
 
+static const unsigned char jpeg_image_red[] = {
+	0xFC, 0x5F, 0xA2, 0xBF, 0xCA, 0x73, 0xFE, 0xFE,
+	0x02, 0x8A, 0x00, 0x28, 0xA0, 0x02, 0x8A, 0x00,
+	0x28, 0xA0, 0x02, 0x8A, 0x00, 0x28, 0xA0, 0x02,
+	0x8A, 0x00, 0x28, 0xA0, 0x02, 0x8A, 0x00, 0x28,
+	0xA0, 0x02, 0x8A, 0x00, 0x28, 0xA0, 0x02, 0x8A,
+	0x00, 0x28, 0xA0, 0x02, 0x8A, 0x00, 0x28, 0xA0,
+	0x02, 0x8A, 0x00, 0x28, 0xA0, 0x02, 0x8A, 0x00,
+	0x28, 0xA0, 0x02, 0x8A, 0x00, 0x28, 0xA0, 0x02,
+	0x8A, 0x00, 0x28, 0xA0, 0x02, 0x8A, 0x00, 0x28,
+	0xA0, 0x02, 0x8A, 0x00, 0x28, 0xA0, 0x02, 0x8A,
+	0x00, 0x28, 0xA0, 0x02, 0x8A, 0x00
+};
+
 static const unsigned char jpeg_eoi[] = {
 	0xFF, 0xD9
 };
@@ -575,6 +589,10 @@ static irqreturn_t mxc_jpeg_dec_irq(int irq, void *priv)
 
 	dst_buf = v4l2_m2m_next_dst_buf(ctx->fh.m2m_ctx);
 	src_buf = v4l2_m2m_next_src_buf(ctx->fh.m2m_ctx);
+	if (!dst_buf || !src_buf) {
+		dev_err(dev, "No source or destination buffer.\n");
+		goto job_unlock;
+	}
 	jpeg_src_buf = vb2_to_mxc_buf(&src_buf->vb2_buf);
 
 	if (dec_ret & SLOT_STATUS_ENC_CONFIG_ERR) {
@@ -760,6 +778,9 @@ static unsigned int mxc_jpeg_setup_cfg_stream(void *cfg_stream_vaddr,
 	sos = (struct mxc_jpeg_sos *)(cfg + offset);
 	offset += mxc_jpeg_fixup_sos(sos, fourcc);
 
+	memcpy(cfg + offset, jpeg_image_red, sizeof(jpeg_image_red));
+	offset += sizeof(jpeg_image_red);
+
 	memcpy(cfg + offset, jpeg_eoi, sizeof(jpeg_eoi));
 	offset += sizeof(jpeg_eoi);
 
@@ -795,6 +816,7 @@ static void mxc_jpeg_config_dec_desc(struct vb2_buffer *out_buf,
 	img_fmt = mxc_jpeg_fourcc_to_imgfmt(q_data_cap->fmt->fourcc);
 	desc->stm_ctrl &= ~STM_CTRL_IMAGE_FORMAT(0xF); /* clear image format */
 	desc->stm_ctrl |= STM_CTRL_IMAGE_FORMAT(img_fmt);
+	desc->stm_ctrl |= STM_CTRL_BITBUF_PTR_CLR(1);
 	desc->line_pitch = q_data_cap->bytesperline[0];
 	mxc_jpeg_addrs(desc, dst_buf, src_buf, 0);
 	mxc_jpeg_set_bufsize(desc, ALIGN(vb2_plane_size(src_buf, 0), 1024));
@@ -821,6 +843,7 @@ static void mxc_jpeg_config_dec_desc(struct vb2_buffer *out_buf,
 	cfg_desc->imgsize |= MXC_JPEG_MIN_HEIGHT;
 	cfg_desc->line_pitch = MXC_JPEG_MIN_WIDTH * 2;
 	cfg_desc->stm_ctrl = STM_CTRL_IMAGE_FORMAT(MXC_JPEG_YUV422);
+	cfg_desc->stm_ctrl |= STM_CTRL_BITBUF_PTR_CLR(1);
 	cfg_desc->stm_bufbase = cfg_stream_handle;
 	cfg_desc->stm_bufsize = ALIGN(*cfg_size, 1024);
 	print_descriptor_info(jpeg->dev, cfg_desc);
@@ -864,6 +887,7 @@ static void mxc_jpeg_config_enc_desc(struct vb2_buffer *out_buf,
 	cfg_desc->stm_bufsize = 0x0;
 	cfg_desc->imgsize = 0;
 	cfg_desc->stm_ctrl = STM_CTRL_CONFIG_MOD(1);
+	cfg_desc->stm_ctrl |= STM_CTRL_BITBUF_PTR_CLR(1);
 
 	desc->next_descpt_ptr = 0; /* end of chain */
 
@@ -878,6 +902,7 @@ static void mxc_jpeg_config_enc_desc(struct vb2_buffer *out_buf,
 		dev_err(jpeg->dev, "No valid image format detected\n");
 	desc->stm_ctrl = STM_CTRL_CONFIG_MOD(0) |
 			 STM_CTRL_IMAGE_FORMAT(img_fmt);
+	desc->stm_ctrl |= STM_CTRL_BITBUF_PTR_CLR(1);
 	mxc_jpeg_addrs(desc, src_buf, dst_buf, 0);
 	dev_dbg(jpeg->dev, "cfg_desc:\n");
 	print_descriptor_info(jpeg->dev, cfg_desc);
@@ -933,11 +958,6 @@ static void mxc_jpeg_device_run(void *priv)
 		return;
 	}
 
-	/*
-	 * TODO: this reset should be removed, once we figure out
-	 * how to overcome hardware issues both on encoder and decoder
-	 */
-	mxc_jpeg_sw_reset(reg);
 	mxc_jpeg_enable(reg);
 	mxc_jpeg_set_l_endian(reg, 1);
 
@@ -1959,7 +1979,6 @@ static int mxc_jpeg_probe(struct platform_device *pdev)
 {
 	struct mxc_jpeg_dev *jpeg;
 	struct device *dev = &pdev->dev;
-	struct resource *res;
 	int dec_irq;
 	int ret;
 	int mode;
@@ -1982,8 +2001,7 @@ static int mxc_jpeg_probe(struct platform_device *pdev)
 		goto err_irq;
 	}
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	jpeg->base_reg = devm_ioremap_resource(&pdev->dev, res);
+	jpeg->base_reg = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(jpeg->base_reg))
 		return PTR_ERR(jpeg->base_reg);
 
@@ -2088,6 +2106,8 @@ err_m2m:
 	v4l2_device_unregister(&jpeg->v4l2_dev);
 
 err_register:
+	mxc_jpeg_detach_pm_domains(jpeg);
+
 err_irq:
 	return ret;
 }
