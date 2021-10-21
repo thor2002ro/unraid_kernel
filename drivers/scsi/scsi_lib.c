@@ -2638,6 +2638,40 @@ static int __scsi_internal_device_block_nowait(struct scsi_device *sdev)
 	return 0;
 }
 
+static DEFINE_SPINLOCK(sdev_queue_stop_lock);
+
+void scsi_start_queue(struct scsi_device *sdev)
+{
+	bool need_start;
+	unsigned long flags;
+
+	spin_lock_irqsave(&sdev_queue_stop_lock, flags);
+	need_start = sdev->queue_stopped;
+	sdev->queue_stopped = 0;
+	spin_unlock_irqrestore(&sdev_queue_stop_lock, flags);
+
+	if (need_start)
+		blk_mq_unquiesce_queue(sdev->request_queue);
+}
+
+static void scsi_stop_queue(struct scsi_device *sdev, bool nowait)
+{
+	bool need_stop;
+	unsigned long flags;
+
+	spin_lock_irqsave(&sdev_queue_stop_lock, flags);
+	need_stop = !sdev->queue_stopped;
+	sdev->queue_stopped = 1;
+	spin_unlock_irqrestore(&sdev_queue_stop_lock, flags);
+
+	if (need_stop) {
+		if (nowait)
+			blk_mq_quiesce_queue_nowait(sdev->request_queue);
+		else
+			blk_mq_quiesce_queue(sdev->request_queue);
+	}
+}
+
 /**
  * scsi_internal_device_block_nowait - try to transition to the SDEV_BLOCK state
  * @sdev: device to block
@@ -2662,7 +2696,7 @@ int scsi_internal_device_block_nowait(struct scsi_device *sdev)
 	 * request queue.
 	 */
 	if (!ret)
-		blk_mq_quiesce_queue_nowait(sdev->request_queue);
+		scsi_stop_queue(sdev, true);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(scsi_internal_device_block_nowait);
@@ -2689,17 +2723,10 @@ static int scsi_internal_device_block(struct scsi_device *sdev)
 	mutex_lock(&sdev->state_mutex);
 	err = __scsi_internal_device_block_nowait(sdev);
 	if (err == 0)
-		blk_mq_quiesce_queue(sdev->request_queue);
+		scsi_stop_queue(sdev, false);
 	mutex_unlock(&sdev->state_mutex);
 
 	return err;
-}
-
-void scsi_start_queue(struct scsi_device *sdev)
-{
-	struct request_queue *q = sdev->request_queue;
-
-	blk_mq_unquiesce_queue(q);
 }
 
 /**
