@@ -7,6 +7,7 @@
 #ifndef __VENUS_CORE_H_
 #define __VENUS_CORE_H_
 
+#include <linux/bitops.h>
 #include <linux/list.h>
 #include <media/videobuf2-v4l2.h>
 #include <media/v4l2-ctrls.h>
@@ -182,7 +183,8 @@ struct venus_core {
 	unsigned int state;
 	struct completion done;
 	unsigned int error;
-	bool sys_error;
+	unsigned long sys_error;
+	wait_queue_head_t sys_err_done;
 	const struct hfi_core_ops *core_ops;
 	const struct venus_pm_ops *pm_ops;
 	struct mutex pm_lock;
@@ -335,6 +337,7 @@ enum venus_inst_modes {
  * @registeredbufs:	a list of registered capture bufferes
  * @delayed_process:	a list of delayed buffers
  * @delayed_process_work:	a work_struct for process delayed buffers
+ * @nonblock:		nonblocking flag
  * @ctrl_handler:	v4l control handler
  * @controls:	a union of decoder and encoder control parameters
  * @fh:	 a holder of v4l file handle structure
@@ -398,6 +401,7 @@ struct venus_inst {
 	struct list_head registeredbufs;
 	struct list_head delayed_process;
 	struct work_struct delayed_process_work;
+	bool nonblock;
 
 	struct v4l2_ctrl_handler ctrl_handler;
 	union {
@@ -454,6 +458,7 @@ struct venus_inst {
 	bool next_buf_last;
 	bool drain_active;
 	enum venus_inst_modes flags;
+	struct ida dpb_ids;
 };
 
 #define IS_V1(core)	((core)->res->hfi_version == HFI_VERSION_1XX)
