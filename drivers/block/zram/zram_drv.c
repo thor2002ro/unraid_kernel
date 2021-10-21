@@ -310,7 +310,7 @@ static void mark_idle(struct zram *zram, ktime_t cutoff)
 		if (zram_allocated(zram, index) &&
 				!zram_test_flag(zram, index, ZRAM_UNDER_WB)) {
 #ifdef CONFIG_ZRAM_MEMORY_TRACKING
-				is_idle = (!cutoff || ktime_after(cutoff, zram->table[index].ac_time));
+			is_idle = !cutoff || ktime_after(cutoff, zram->table[index].ac_time);
 #endif
 			if (is_idle)
 				zram_set_flag(zram, index, ZRAM_IDLE);
@@ -332,6 +332,7 @@ static ssize_t idle_store(struct device *dev,
 		 * we have memory tracking enabled.
 		 */
 		u64 age_sec;
+
 		if (IS_ENABLED(CONFIG_ZRAM_MEMORY_TRACKING) && !kstrtoull(buf, 0, &age_sec))
 			cutoff_time = ktime_sub(ktime_get_boottime(),
 					ns_to_ktime(age_sec * NSEC_PER_SEC));
@@ -343,7 +344,7 @@ static ssize_t idle_store(struct device *dev,
 	if (!init_done(zram))
 		goto out_unlock;
 
-	/* A age_sec of 0 marks everything as idle, this is the "all" behavior */
+	/* A cutoff_time of 0 marks everything as idle, this is the "all" behavior */
 	mark_idle(zram, cutoff_time);
 	rv = len;
 
