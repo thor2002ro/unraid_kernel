@@ -433,7 +433,7 @@ enum mlx5_flow_match_level {
 };
 
 /* current maximum for flow based vport multicasting */
-#define MLX5_MAX_FLOW_FWD_VPORTS 2
+#define MLX5_MAX_FLOW_FWD_VPORTS 32
 
 enum {
 	MLX5_ESW_DEST_ENCAP         = BIT(0),
@@ -447,7 +447,15 @@ enum {
 	MLX5_ESW_ATTR_FLAG_NO_IN_PORT    = BIT(2),
 	MLX5_ESW_ATTR_FLAG_SRC_REWRITE   = BIT(3),
 	MLX5_ESW_ATTR_FLAG_SAMPLE        = BIT(4),
+	MLX5_ESW_ATTR_FLAG_ACCEPT        = BIT(5),
 };
+
+/* Returns true if any of the flags that require skipping further TC/NF processing are set. */
+static inline bool
+mlx5_esw_attr_flags_skip(u32 attr_flags)
+{
+	return attr_flags & (MLX5_ESW_ATTR_FLAG_SLOW_PATH | MLX5_ESW_ATTR_FLAG_ACCEPT);
+}
 
 struct mlx5_esw_flow_attr {
 	struct mlx5_eswitch_rep *in_rep;

@@ -935,6 +935,48 @@ static int bcmgenet_set_coalesce(struct net_device *dev,
 	return 0;
 }
 
+static void bcmgenet_get_pauseparam(struct net_device *dev,
+				    struct ethtool_pauseparam *epause)
+{
+	struct bcmgenet_priv *priv;
+	u32 umac_cmd;
+
+	priv = netdev_priv(dev);
+
+	epause->autoneg = priv->autoneg_pause;
+
+	if (netif_carrier_ok(dev)) {
+		/* report active state when link is up */
+		umac_cmd = bcmgenet_umac_readl(priv, UMAC_CMD);
+		epause->tx_pause = !(umac_cmd & CMD_TX_PAUSE_IGNORE);
+		epause->rx_pause = !(umac_cmd & CMD_RX_PAUSE_IGNORE);
+	} else {
+		/* otherwise report stored settings */
+		epause->tx_pause = priv->tx_pause;
+		epause->rx_pause = priv->rx_pause;
+	}
+}
+
+static int bcmgenet_set_pauseparam(struct net_device *dev,
+				   struct ethtool_pauseparam *epause)
+{
+	struct bcmgenet_priv *priv = netdev_priv(dev);
+
+	if (!dev->phydev)
+		return -ENODEV;
+
+	if (!phy_validate_pause(dev->phydev, epause))
+		return -EINVAL;
+
+	priv->autoneg_pause = !!epause->autoneg;
+	priv->tx_pause = !!epause->tx_pause;
+	priv->rx_pause = !!epause->rx_pause;
+
+	bcmgenet_phy_pause_set(dev, priv->rx_pause, priv->tx_pause);
+
+	return 0;
+}
+
 /* standard ethtool support functions. */
 enum bcmgenet_stat_type {
 	BCMGENET_STAT_NETDEV = -1,
@@ -1587,6 +1629,8 @@ static const struct ethtool_ops bcmgenet_ethtool_ops = {
 	.get_ts_info		= ethtool_op_get_ts_info,
 	.get_rxnfc		= bcmgenet_get_rxnfc,
 	.set_rxnfc		= bcmgenet_set_rxnfc,
+	.get_pauseparam		= bcmgenet_get_pauseparam,
+	.set_pauseparam		= bcmgenet_set_pauseparam,
 };
 
 /* Power down the unimac, based on mode. */
@@ -3222,7 +3266,7 @@ static void bcmgenet_umac_reset(struct bcmgenet_priv *priv)
 }
 
 static void bcmgenet_set_hw_addr(struct bcmgenet_priv *priv,
-				 unsigned char *addr)
+				 const unsigned char *addr)
 {
 	bcmgenet_umac_writel(priv, get_unaligned_be32(&addr[0]), UMAC_MAC0);
 	bcmgenet_umac_writel(priv, get_unaligned_be16(&addr[4]), UMAC_MAC1);
@@ -3364,6 +3408,8 @@ static int bcmgenet_open(struct net_device *dev)
 		goto err_irq1;
 	}
 
+	bcmgenet_phy_pause_set(dev, priv->rx_pause, priv->tx_pause);
+
 	bcmgenet_netif_start(dev);
 
 	netif_tx_start_all_queues(dev);
@@ -3407,11 +3453,6 @@ static void bcmgenet_netif_stop(struct net_device *dev)
 	 * disabled no new work will be scheduled.
 	 */
 	cancel_work_sync(&priv->bcmgenet_irq_work);
-
-	priv->old_link = -1;
-	priv->old_speed = -1;
-	priv->old_duplex = -1;
-	priv->old_pause = -1;
 
 	/* tx reclaim */
 	bcmgenet_tx_reclaim_all(dev);
@@ -3519,7 +3560,7 @@ static void bcmgenet_timeout(struct net_device *dev, unsigned int txqueue)
 #define MAX_MDF_FILTER	17
 
 static inline void bcmgenet_set_mdf_addr(struct bcmgenet_priv *priv,
-					 unsigned char *addr,
+					 const unsigned char *addr,
 					 int *i)
 {
 	bcmgenet_umac_writel(priv, addr[0] << 8 | addr[1],
@@ -3592,7 +3633,7 @@ static int bcmgenet_set_mac_addr(struct net_device *dev, void *p)
 	if (netif_running(dev))
 		return -EBUSY;
 
-	ether_addr_copy(dev->dev_addr, addr->sa_data);
+	eth_hw_addr_set(dev, addr->sa_data);
 
 	return 0;
 }
@@ -3950,6 +3991,11 @@ static int bcmgenet_probe(struct platform_device *pdev)
 
 	spin_lock_init(&priv->lock);
 
+	/* Set default pause parameters */
+	priv->autoneg_pause = 1;
+	priv->tx_pause = 1;
+	priv->rx_pause = 1;
+
 	SET_NETDEV_DEV(dev, &pdev->dev);
 	dev_set_drvdata(&pdev->dev, dev);
 	dev->watchdog_timeo = 2 * HZ;
@@ -4036,11 +4082,15 @@ static int bcmgenet_probe(struct platform_device *pdev)
 		bcmgenet_power_up(priv, GENET_POWER_PASSIVE);
 
 	if (pd && !IS_ERR_OR_NULL(pd->mac_address))
-		ether_addr_copy(dev->dev_addr, pd->mac_address);
+		eth_hw_addr_set(dev, pd->mac_address);
 	else
-		if (!device_get_mac_address(&pdev->dev, dev->dev_addr, ETH_ALEN))
-			if (has_acpi_companion(&pdev->dev))
-				bcmgenet_get_hw_addr(priv, dev->dev_addr);
+		if (device_get_ethdev_address(&pdev->dev, dev))
+			if (has_acpi_companion(&pdev->dev)) {
+				u8 addr[ETH_ALEN];
+
+				bcmgenet_get_hw_addr(priv, addr);
+				eth_hw_addr_set(dev, addr);
+			}
 
 	if (!is_valid_ether_addr(dev->dev_addr)) {
 		dev_warn(&pdev->dev, "using random Ethernet MAC\n");

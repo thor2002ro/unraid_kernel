@@ -40,7 +40,7 @@ static int enetc_pf_set_mac_addr(struct net_device *ndev, void *addr)
 	if (!is_valid_ether_addr(saddr->sa_data))
 		return -EADDRNOTAVAIL;
 
-	memcpy(ndev->dev_addr, saddr->sa_data, ndev->addr_len);
+	eth_hw_addr_set(ndev, saddr->sa_data);
 	enetc_pf_set_primary_mac_addr(&priv->si->hw, 0, saddr->sa_data);
 
 	return 0;
@@ -762,10 +762,14 @@ static void enetc_pf_netdev_setup(struct enetc_si *si, struct net_device *ndev,
 
 	ndev->hw_features = NETIF_F_SG | NETIF_F_RXCSUM |
 			    NETIF_F_HW_VLAN_CTAG_TX | NETIF_F_HW_VLAN_CTAG_RX |
-			    NETIF_F_HW_VLAN_CTAG_FILTER | NETIF_F_LOOPBACK;
+			    NETIF_F_HW_VLAN_CTAG_FILTER | NETIF_F_LOOPBACK |
+			    NETIF_F_HW_CSUM | NETIF_F_TSO | NETIF_F_TSO6;
 	ndev->features = NETIF_F_HIGHDMA | NETIF_F_SG | NETIF_F_RXCSUM |
 			 NETIF_F_HW_VLAN_CTAG_TX |
-			 NETIF_F_HW_VLAN_CTAG_RX;
+			 NETIF_F_HW_VLAN_CTAG_RX |
+			 NETIF_F_HW_CSUM | NETIF_F_TSO | NETIF_F_TSO6;
+	ndev->vlan_features = NETIF_F_SG | NETIF_F_HW_CSUM |
+			      NETIF_F_TSO | NETIF_F_TSO6;
 
 	if (si->num_rss)
 		ndev->hw_features |= NETIF_F_RXHASH;
@@ -782,7 +786,7 @@ static void enetc_pf_netdev_setup(struct enetc_si *si, struct net_device *ndev,
 	}
 
 	/* pick up primary MAC address from SI */
-	enetc_get_primary_mac_addr(&si->hw, ndev->dev_addr);
+	enetc_load_primary_mac_addr(&si->hw, ndev);
 }
 
 static int enetc_mdio_probe(struct enetc_pf *pf, struct device_node *np)
@@ -806,10 +810,8 @@ static int enetc_mdio_probe(struct enetc_pf *pf, struct device_node *np)
 	snprintf(bus->id, MII_BUS_ID_SIZE, "%s", dev_name(dev));
 
 	err = of_mdiobus_register(bus, np);
-	if (err) {
-		dev_err(dev, "cannot register MDIO bus\n");
-		return err;
-	}
+	if (err)
+		return dev_err_probe(dev, err, "cannot register MDIO bus\n");
 
 	pf->mdio = bus;
 
@@ -1218,10 +1220,8 @@ static int enetc_pf_probe(struct pci_dev *pdev,
 			 ERR_PTR(err));
 
 	err = enetc_pci_probe(pdev, KBUILD_MODNAME, sizeof(*pf));
-	if (err) {
-		dev_err(&pdev->dev, "PCI probing failed\n");
-		return err;
-	}
+	if (err)
+		return dev_err_probe(&pdev->dev, err, "PCI probing failed\n");
 
 	si = pci_get_drvdata(pdev);
 	if (!si->hw.port || !si->hw.global) {

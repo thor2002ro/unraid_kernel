@@ -137,7 +137,7 @@ static int prestera_port_set_mac_address(struct net_device *dev, void *p)
 	if (err)
 		return err;
 
-	ether_addr_copy(dev->dev_addr, addr->sa_data);
+	eth_hw_addr_set(dev, addr->sa_data);
 
 	return 0;
 }
@@ -338,11 +338,14 @@ static int prestera_port_create(struct prestera_switch *sw, u32 id)
 		goto err_port_init;
 	}
 
+	eth_hw_addr_gen(dev, sw->base_mac, port->fp_id);
 	/* firmware requires that port's MAC address consist of the first
 	 * 5 bytes of the base MAC address
 	 */
-	memcpy(dev->dev_addr, sw->base_mac, dev->addr_len - 1);
-	dev->dev_addr[dev->addr_len - 1] = port->fp_id;
+	if (memcmp(dev->dev_addr, sw->base_mac, ETH_ALEN - 1)) {
+		dev_warn(prestera_dev(sw), "Port MAC address wraps for port(%u)\n", id);
+		dev_addr_mod(dev, 0, sw->base_mac, ETH_ALEN - 1);
+	}
 
 	err = prestera_hw_port_mac_set(port, dev->dev_addr);
 	if (err) {
@@ -851,7 +854,7 @@ static int prestera_switch_init(struct prestera_switch *sw)
 	if (err)
 		goto err_span_init;
 
-	err = prestera_devlink_register(sw);
+	err = prestera_devlink_traps_register(sw);
 	if (err)
 		goto err_dl_register;
 
@@ -863,12 +866,13 @@ static int prestera_switch_init(struct prestera_switch *sw)
 	if (err)
 		goto err_ports_create;
 
+	prestera_devlink_register(sw);
 	return 0;
 
 err_ports_create:
 	prestera_lag_fini(sw);
 err_lag_init:
-	prestera_devlink_unregister(sw);
+	prestera_devlink_traps_unregister(sw);
 err_dl_register:
 	prestera_span_fini(sw);
 err_span_init:
@@ -888,9 +892,10 @@ err_swdev_register:
 
 static void prestera_switch_fini(struct prestera_switch *sw)
 {
+	prestera_devlink_unregister(sw);
 	prestera_destroy_ports(sw);
 	prestera_lag_fini(sw);
-	prestera_devlink_unregister(sw);
+	prestera_devlink_traps_unregister(sw);
 	prestera_span_fini(sw);
 	prestera_acl_fini(sw);
 	prestera_event_handlers_unregister(sw);
