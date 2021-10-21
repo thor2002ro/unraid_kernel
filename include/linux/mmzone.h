@@ -199,6 +199,7 @@ enum node_stat_item {
 	NR_VMSCAN_IMMEDIATE,	/* Prioritise for reclaim when writeback ends */
 	NR_DIRTIED,		/* page dirtyings since bootup */
 	NR_WRITTEN,		/* page writings since bootup */
+	NR_THROTTLED_WRITTEN,	/* NR_WRITTEN while reclaim throttled */
 	NR_KERNEL_MISC_RECLAIMABLE,	/* reclaimable non-slab kernel pages */
 	NR_FOLL_PIN_ACQUIRED,	/* via: pin_user_page(), gup flag: FOLL_PIN */
 	NR_FOLL_PIN_RELEASED,	/* pages returned via unpin_user_page() */
@@ -270,6 +271,10 @@ enum lru_list {
 	LRU_ACTIVE_FILE = LRU_BASE + LRU_FILE + LRU_ACTIVE,
 	LRU_UNEVICTABLE,
 	NR_LRU_LISTS
+};
+
+enum vmscan_throttle_state {
+	VMSCAN_THROTTLE_WRITEBACK,
 };
 
 #define for_each_lru(lru) for (lru = 0; lru < NR_LRU_LISTS; lru++)
@@ -841,6 +846,10 @@ typedef struct pglist_data {
 	int node_id;
 	wait_queue_head_t kswapd_wait;
 	wait_queue_head_t pfmemalloc_wait;
+	wait_queue_head_t reclaim_wait;	/* wq for throttling reclaim */
+	atomic_t nr_reclaim_throttled;	/* nr of throtted tasks */
+	unsigned long nr_reclaim_start;	/* nr pages written while throttled
+					 * when throttling started. */
 	struct task_struct *kswapd;	/* Protected by
 					   mem_hotplug_begin/end() */
 	int kswapd_order;
