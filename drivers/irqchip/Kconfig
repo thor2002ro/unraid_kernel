@@ -604,7 +604,7 @@ config APPLE_AIC
 
 config MCHP_EIC
 	bool "Microchip External Interrupt Controller"
-	depends on ARCH_AT91 || COMPILE_TEST
+	depends on ARCH_AT91
 	select IRQ_DOMAIN
 	select IRQ_DOMAIN_HIERARCHY
 	help
