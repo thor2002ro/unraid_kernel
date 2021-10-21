@@ -1417,7 +1417,7 @@ static void aio_remove_iocb(struct aio_kiocb *iocb)
 	spin_unlock_irqrestore(&ctx->ctx_lock, flags);
 }
 
-static void aio_complete_rw(struct kiocb *kiocb, long res, long res2)
+static void aio_complete_rw(struct kiocb *kiocb, u64 res)
 {
 	struct aio_kiocb *iocb = container_of(kiocb, struct aio_kiocb, rw);
 
@@ -1436,8 +1436,14 @@ static void aio_complete_rw(struct kiocb *kiocb, long res, long res2)
 		file_end_write(kiocb->ki_filp);
 	}
 
-	iocb->ki_res.res = res;
-	iocb->ki_res.res2 = res2;
+	/*
+	 * Historically we've only had one real user of res2, the USB
+	 * gadget code, everybody else just passes back zero. As we pass
+	 * 32-bits of value at most for either value, bundle these up and
+	 * pass them in one u64 value.
+	 */
+	iocb->ki_res.res = lower_32_bits(res);
+	iocb->ki_res.res2 = upper_32_bits(res);
 	iocb_put(iocb);
 }
 
@@ -1508,7 +1514,7 @@ static inline void aio_rw_done(struct kiocb *req, ssize_t ret)
 		ret = -EINTR;
 		fallthrough;
 	default:
-		req->ki_complete(req, ret, 0);
+		req->ki_complete(req, ret);
 	}
 }
 
