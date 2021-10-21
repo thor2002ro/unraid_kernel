@@ -90,7 +90,7 @@ arm/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.16-rockchip-dts64-2
 	rockchip/dt-2
 		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.16-rockchip-dts32-2
-	<no branch> (bc22b6208f416ba702c17a93c9af6474f19e8212)
+	broadcom/dt-fixes
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.15/devicetree
 	mstar/dt
 		https://github.com/linux-chenxing/linux mstar-dt-next
@@ -133,6 +133,10 @@ arm/drivers
 		git://git.linaro.org/people/jens.wiklander/linux-tee tags/optee-ffa-for-v5.16
 	drivers/reset
 		git://git.pengutronix.de/pza/linux tags/reset-for-v5.16
+	drivers/memory-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux-mem-ctrl tags/memory-controller-drv-5.16-2
+	patch
+		optee: smc_abi.c: add missing #include <linux/mm.h>
 
 arm/defconfigs
 	defconfig/multiv7
@@ -149,6 +153,8 @@ arm/defconfigs
 		git://git.kernel.org/pub/scm/linux/kernel/git/iwamatsu/linux-visconti tags/visconti-arm-defconfig-for-v5.16
 	imx/defconfig
 		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-defconfig-5.16
+	aspeed/defconfigs
+		git://git.kernel.org/pub/scm/linux/kernel/git/joel/bmc tags/aspeed-5.16-defconfig
 
 arm/newsoc
 
