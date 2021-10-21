@@ -309,6 +309,25 @@ union fpregs_state {
 	u8 __padding[PAGE_SIZE];
 };
 
+struct fpstate {
+	/* @kernel_size: The size of the kernel register image */
+	unsigned int		size;
+
+	/* @user_size: The size in non-compacted UABI format */
+	unsigned int		user_size;
+
+	/* @xfeatures:		xfeatures for which the storage is sized */
+	u64			xfeatures;
+
+	/* @user_xfeatures:	xfeatures valid in UABI buffers */
+	u64			user_xfeatures;
+
+	/* @regs: The register state union for all supported formats */
+	union fpregs_state		regs;
+
+	/* @regs is dynamically sized! Don't add anything after @regs! */
+} __aligned(64);
+
 /*
  * Highest level per task FPU state data structure that
  * contains the FPU register state plus various FPU
@@ -337,17 +356,24 @@ struct fpu {
 	unsigned long			avx512_timestamp;
 
 	/*
-	 * @state:
+	 * @fpstate:
 	 *
-	 * In-memory copy of all FPU registers that we save/restore
-	 * over context switches. If the task is using the FPU then
-	 * the registers in the FPU are more recent than this state
-	 * copy. If the task context-switches away then they get
-	 * saved here and represent the FPU state.
+	 * Pointer to the active struct fpstate. Initialized to
+	 * point at @__fpstate below.
 	 */
-	union fpregs_state		state;
+	struct fpstate			*fpstate;
+
 	/*
-	 * WARNING: 'state' is dynamically-sized.  Do not put
+	 * @__fpstate:
+	 *
+	 * Initial in-memory storage for FPU registers which are saved in
+	 * context switch and when the kernel uses the FPU. The registers
+	 * are restored from this storage on return to user space if they
+	 * are not longer containing the tasks FPU register state.
+	 */
+	struct fpstate			__fpstate;
+	/*
+	 * WARNING: '__fpstate' is dynamically-sized.  Do not put
 	 * anything after it here.
 	 */
 };

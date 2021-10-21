@@ -50,9 +50,9 @@ static inline void kernel_fpu_begin(void)
 }
 
 /*
- * Use fpregs_lock() while editing CPU's FPU registers or fpu->state.
+ * Use fpregs_lock() while editing CPU's FPU registers or fpu->fpstate.
  * A context switch will (and softirq might) save CPU's FPU registers to
- * fpu->state and set TIF_NEED_FPU_LOAD leaving CPU's FPU registers in
+ * fpu->fpstate.regs and set TIF_NEED_FPU_LOAD leaving CPU's FPU registers in
  * a random state.
  *
  * local_bh_disable() protects against both preemption and soft interrupts
@@ -132,10 +132,12 @@ DECLARE_PER_CPU(struct fpu *, fpu_fpregs_owner_ctx);
 
 /* fpstate-related functions which are exported to KVM */
 extern void fpu_init_fpstate_user(struct fpu *fpu);
+extern void fpstate_clear_xstate_component(struct fpstate *fps, unsigned int xfeature);
 
 /* KVM specific functions */
 extern void fpu_swap_kvm_fpu(struct fpu *save, struct fpu *rstor, u64 restore_mask);
 
 extern int fpu_copy_kvm_uabi_to_fpstate(struct fpu *fpu, const void *buf, u64 xcr0, u32 *pkru);
+extern void fpu_copy_fpstate_to_kvm_uabi(struct fpu *fpu, void *buf, unsigned int size, u32 pkru);
 
 #endif /* _ASM_X86_FPU_API_H */

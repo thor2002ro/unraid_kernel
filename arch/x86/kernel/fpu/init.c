@@ -38,7 +38,7 @@ static void fpu__init_cpu_generic(void)
 	/* Flush out any pending x87 state: */
 #ifdef CONFIG_MATH_EMULATION
 	if (!boot_cpu_has(X86_FEATURE_FPU))
-		fpstate_init_soft(&current->thread.fpu.state.soft);
+		fpstate_init_soft(&current->thread.fpu.fpstate->regs.soft);
 	else
 #endif
 		asm volatile ("fninit");
@@ -165,7 +165,7 @@ static void __init fpu__init_task_struct_size(void)
 	 * Subtract off the static size of the register state.
 	 * It potentially has a bunch of padding.
 	 */
-	task_size -= sizeof(((struct task_struct *)0)->thread.fpu.state);
+	task_size -= sizeof(current->thread.fpu.__fpstate.regs);
 
 	/*
 	 * Add back the dynamically-calculated register state
@@ -180,7 +180,7 @@ static void __init fpu__init_task_struct_size(void)
 	 * you hit a compile error here, check the structure to
 	 * see if something got added to the end.
 	 */
-	CHECK_MEMBER_AT_END_OF(struct fpu, state);
+	CHECK_MEMBER_AT_END_OF(struct fpu, __fpstate);
 	CHECK_MEMBER_AT_END_OF(struct thread_struct, fpu);
 	CHECK_MEMBER_AT_END_OF(struct task_struct, thread);
 
@@ -212,6 +212,14 @@ static void __init fpu__init_system_xstate_size_legacy(void)
 	}
 
 	fpu_user_xstate_size = fpu_kernel_xstate_size;
+	fpstate_reset(&current->thread.fpu);
+}
+
+static void __init fpu__init_init_fpstate(void)
+{
+	/* Bring init_fpstate size and features up to date */
+	init_fpstate.size		= fpu_kernel_xstate_size;
+	init_fpstate.xfeatures		= xfeatures_mask_all;
 }
 
 /*
@@ -220,6 +228,7 @@ static void __init fpu__init_system_xstate_size_legacy(void)
  */
 void __init fpu__init_system(struct cpuinfo_x86 *c)
 {
+	fpstate_reset(&current->thread.fpu);
 	fpu__init_system_early_generic(c);
 
 	/*
@@ -232,4 +241,5 @@ void __init fpu__init_system(struct cpuinfo_x86 *c)
 	fpu__init_system_xstate_size_legacy();
 	fpu__init_system_xstate();
 	fpu__init_task_struct_size();
+	fpu__init_init_fpstate();
 }

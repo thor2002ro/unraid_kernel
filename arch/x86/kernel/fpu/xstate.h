@@ -15,11 +15,25 @@ static inline void xstate_init_xcomp_bv(struct xregs_state *xsave, u64 mask)
 		xsave->header.xcomp_bv = mask | XCOMP_BV_COMPACTED_FORMAT;
 }
 
-extern void __copy_xstate_to_uabi_buf(struct membuf to, struct xregs_state *xsave,
+enum xstate_copy_mode {
+	XSTATE_COPY_FP,
+	XSTATE_COPY_FX,
+	XSTATE_COPY_XSAVE,
+};
+
+struct membuf;
+extern void __copy_xstate_to_uabi_buf(struct membuf to, struct fpstate *fpstate,
 				      u32 pkru_val, enum xstate_copy_mode copy_mode);
+extern void copy_xstate_to_uabi_buf(struct membuf to, struct task_struct *tsk,
+				    enum xstate_copy_mode mode);
+extern int copy_uabi_from_kernel_to_xstate(struct fpstate *fpstate, const void *kbuf);
+extern int copy_sigframe_from_user_to_xstate(struct fpstate *fpstate, const void __user *ubuf);
+
 
 extern void fpu__init_cpu_xstate(void);
 extern void fpu__init_system_xstate(void);
+
+extern void *get_xsave_addr(struct xregs_state *xsave, int xfeature_nr);
 
 /* XSAVE/XRSTOR wrapper functions */
 
@@ -99,16 +113,16 @@ extern void fpu__init_system_xstate(void);
  * Uses either XSAVE or XSAVEOPT or XSAVES depending on the CPU features
  * and command line options. The choice is permanent until the next reboot.
  */
-static inline void os_xsave(struct xregs_state *xstate)
+static inline void os_xsave(struct fpstate *fpstate)
 {
-	u64 mask = xfeatures_mask_all;
+	u64 mask = fpstate->xfeatures;
 	u32 lmask = mask;
 	u32 hmask = mask >> 32;
 	int err;
 
 	WARN_ON_FPU(!alternatives_patched);
 
-	XSTATE_XSAVE(xstate, lmask, hmask, err);
+	XSTATE_XSAVE(&fpstate->regs.xsave, lmask, hmask, err);
 
 	/* We should never fault when copying to a kernel buffer: */
 	WARN_ON_FPU(err);
@@ -147,7 +161,7 @@ static inline int xsave_to_user_sigframe(struct xregs_state __user *buf)
 	 * internally, e.g. PKRU. That's user space ABI and also required
 	 * to allow the signal handler to modify PKRU.
 	 */
-	u64 mask = xfeatures_mask_uabi();
+	u64 mask = current->thread.fpu.fpstate->user_xfeatures;
 	u32 lmask = mask;
 	u32 hmask = mask >> 32;
 	int err;

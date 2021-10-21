@@ -408,12 +408,12 @@ static void __init setup_init_fpu_buf(void)
 	setup_xstate_features();
 	print_xstate_features();
 
-	xstate_init_xcomp_bv(&init_fpstate.xsave, xfeatures_mask_all);
+	xstate_init_xcomp_bv(&init_fpstate.regs.xsave, xfeatures_mask_all);
 
 	/*
 	 * Init all the features state with header.xfeatures being 0x0
 	 */
-	os_xrstor_booting(&init_fpstate.xsave);
+	os_xrstor_booting(&init_fpstate.regs.xsave);
 
 	/*
 	 * All components are now in init state. Read the state back so
@@ -431,7 +431,7 @@ static void __init setup_init_fpu_buf(void)
 	 * state is all zeroes or if not to add the necessary handling
 	 * here.
 	 */
-	fxsave(&init_fpstate.fxsave);
+	fxsave(&init_fpstate.regs.fxsave);
 }
 
 static int xfeature_uncompacted_offset(int xfeature_nr)
@@ -463,10 +463,11 @@ int xfeature_size(int xfeature_nr)
 }
 
 /* Validate an xstate header supplied by userspace (ptrace or sigreturn) */
-static int validate_user_xstate_header(const struct xstate_header *hdr)
+static int validate_user_xstate_header(const struct xstate_header *hdr,
+				       struct fpstate *fpstate)
 {
 	/* No unknown or supervisor features may be set */
-	if (hdr->xfeatures & ~xfeatures_mask_uabi())
+	if (hdr->xfeatures & ~fpstate->user_xfeatures)
 		return -EINVAL;
 
 	/* Userspace must use the uncompacted format */
@@ -672,11 +673,11 @@ static unsigned int __init get_xsave_size(void)
  */
 static bool __init is_supported_xstate_size(unsigned int test_xstate_size)
 {
-	if (test_xstate_size <= sizeof(union fpregs_state))
+	if (test_xstate_size <= sizeof(init_fpstate.regs))
 		return true;
 
 	pr_warn("x86/fpu: xstate buffer too small (%zu < %d), disabling xsave\n",
-			sizeof(union fpregs_state), test_xstate_size);
+			sizeof(init_fpstate.regs), test_xstate_size);
 	return false;
 }
 
@@ -720,6 +721,7 @@ static void __init fpu__init_disable_system_xstate(void)
 	xfeatures_mask_all = 0;
 	cr4_clear_bits(X86_CR4_OSXSAVE);
 	setup_clear_cpu_cap(X86_FEATURE_XSAVE);
+	fpstate_reset(&current->thread.fpu);
 }
 
 /*
@@ -791,6 +793,8 @@ void __init fpu__init_system_xstate(void)
 	err = init_xstate_size();
 	if (err)
 		goto out_disable;
+
+	fpstate_reset(&current->thread.fpu);
 
 	/*
 	 * Update info used for ptrace frames; use standard-format size and no
@@ -908,7 +912,6 @@ void *get_xsave_addr(struct xregs_state *xsave, int xfeature_nr)
 
 	return __raw_xsave_addr(xsave, xfeature_nr);
 }
-EXPORT_SYMBOL_GPL(get_xsave_addr);
 
 #ifdef CONFIG_ARCH_HAS_PKEYS
 
@@ -967,7 +970,7 @@ static void copy_feature(bool from_xstate, struct membuf *to, void *xstate,
 /**
  * __copy_xstate_to_uabi_buf - Copy kernel saved xstate to a UABI buffer
  * @to:		membuf descriptor
- * @xsave:	The xsave from which to copy
+ * @fpstate:	The fpstate buffer from which to copy
  * @pkru_val:	The PKRU value to store in the PKRU component
  * @copy_mode:	The requested copy mode
  *
@@ -977,11 +980,12 @@ static void copy_feature(bool from_xstate, struct membuf *to, void *xstate,
  *
  * It supports partial copy but @to.pos always starts from zero.
  */
-void __copy_xstate_to_uabi_buf(struct membuf to, struct xregs_state *xsave,
+void __copy_xstate_to_uabi_buf(struct membuf to, struct fpstate *fpstate,
 			       u32 pkru_val, enum xstate_copy_mode copy_mode)
 {
 	const unsigned int off_mxcsr = offsetof(struct fxregs_state, mxcsr);
-	struct xregs_state *xinit = &init_fpstate.xsave;
+	struct xregs_state *xinit = &init_fpstate.regs.xsave;
+	struct xregs_state *xsave = &fpstate->regs.xsave;
 	struct xstate_header header;
 	unsigned int zerofrom;
 	u64 mask;
@@ -1001,7 +1005,7 @@ void __copy_xstate_to_uabi_buf(struct membuf to, struct xregs_state *xsave,
 		break;
 
 	case XSTATE_COPY_XSAVE:
-		header.xfeatures &= xfeatures_mask_uabi();
+		header.xfeatures &= fpstate->user_xfeatures;
 		break;
 	}
 
@@ -1044,7 +1048,7 @@ void __copy_xstate_to_uabi_buf(struct membuf to, struct xregs_state *xsave,
 	 * but there is no state to copy from in the compacted
 	 * init_fpstate. The gap tracking will zero these states.
 	 */
-	mask = xfeatures_mask_uabi();
+	mask = fpstate->user_xfeatures;
 
 	for_each_extended_xfeature(i, mask) {
 		/*
@@ -1095,7 +1099,7 @@ out:
 void copy_xstate_to_uabi_buf(struct membuf to, struct task_struct *tsk,
 			     enum xstate_copy_mode copy_mode)
 {
-	__copy_xstate_to_uabi_buf(to, &tsk->thread.fpu.state.xsave,
+	__copy_xstate_to_uabi_buf(to, tsk->thread.fpu.fpstate,
 				  tsk->thread.pkru, copy_mode);
 }
 
@@ -1112,9 +1116,10 @@ static int copy_from_buffer(void *dst, unsigned int offset, unsigned int size,
 }
 
 
-static int copy_uabi_to_xstate(struct xregs_state *xsave, const void *kbuf,
+static int copy_uabi_to_xstate(struct fpstate *fpstate, const void *kbuf,
 			       const void __user *ubuf)
 {
+	struct xregs_state *xsave = &fpstate->regs.xsave;
 	unsigned int offset, size;
 	struct xstate_header hdr;
 	u64 mask;
@@ -1124,7 +1129,7 @@ static int copy_uabi_to_xstate(struct xregs_state *xsave, const void *kbuf,
 	if (copy_from_buffer(&hdr, offset, sizeof(hdr), kbuf, ubuf))
 		return -EFAULT;
 
-	if (validate_user_xstate_header(&hdr))
+	if (validate_user_xstate_header(&hdr, fpstate))
 		return -EINVAL;
 
 	/* Validate MXCSR when any of the related features is in use */
@@ -1179,9 +1184,9 @@ static int copy_uabi_to_xstate(struct xregs_state *xsave, const void *kbuf,
  * Convert from a ptrace standard-format kernel buffer to kernel XSAVE[S]
  * format and copy to the target thread. Used by ptrace and KVM.
  */
-int copy_uabi_from_kernel_to_xstate(struct xregs_state *xsave, const void *kbuf)
+int copy_uabi_from_kernel_to_xstate(struct fpstate *fpstate, const void *kbuf)
 {
-	return copy_uabi_to_xstate(xsave, kbuf, NULL);
+	return copy_uabi_to_xstate(fpstate, kbuf, NULL);
 }
 
 /*
@@ -1189,10 +1194,10 @@ int copy_uabi_from_kernel_to_xstate(struct xregs_state *xsave, const void *kbuf)
  * XSAVE[S] format and copy to the target thread. This is called from the
  * sigreturn() and rt_sigreturn() system calls.
  */
-int copy_sigframe_from_user_to_xstate(struct xregs_state *xsave,
+int copy_sigframe_from_user_to_xstate(struct fpstate *fpstate,
 				      const void __user *ubuf)
 {
-	return copy_uabi_to_xstate(xsave, NULL, ubuf);
+	return copy_uabi_to_xstate(fpstate, NULL, ubuf);
 }
 
 static bool validate_independent_components(u64 mask)
@@ -1256,6 +1261,17 @@ void xrstors(struct xregs_state *xstate, u64 mask)
 	XSTATE_OP(XRSTORS, xstate, (u32)mask, (u32)(mask >> 32), err);
 	WARN_ON_ONCE(err);
 }
+
+#if IS_ENABLED(CONFIG_KVM)
+void fpstate_clear_xstate_component(struct fpstate *fps, unsigned int xfeature)
+{
+	void *addr = get_xsave_addr(&fps->regs.xsave, xfeature);
+
+	if (addr)
+		memset(addr, 0, xstate_sizes[xfeature]);
+}
+EXPORT_SYMBOL_GPL(fpstate_clear_xstate_component);
+#endif
 
 #ifdef CONFIG_PROC_PID_ARCH_STATUS
 /*
