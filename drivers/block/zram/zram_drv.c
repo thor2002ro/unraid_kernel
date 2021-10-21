@@ -294,7 +294,7 @@ static ssize_t mem_used_max_store(struct device *dev,
 /*
  * Mark all pages which are older than or equal to cutoff as IDLE.
  * Callers should hold the zram init lock in read mode
- **/
+ */
 static void mark_idle(struct zram *zram, ktime_t cutoff)
 {
 	int is_idle = 1;
@@ -310,7 +310,7 @@ static void mark_idle(struct zram *zram, ktime_t cutoff)
 		if (zram_allocated(zram, index) &&
 				!zram_test_flag(zram, index, ZRAM_UNDER_WB)) {
 #ifdef CONFIG_ZRAM_MEMORY_TRACKING
-			is_idle = (!cutoff || ktime_after(cutoff, zram->table[index].ac_time));
+				is_idle = (!cutoff || ktime_after(cutoff, zram->table[index].ac_time));
 #endif
 			if (is_idle)
 				zram_set_flag(zram, index, ZRAM_IDLE);
@@ -327,14 +327,15 @@ static ssize_t idle_store(struct device *dev,
 	ssize_t rv = -EINVAL;
 
 	if (!sysfs_streq(buf, "all")) {
-#ifdef CONFIG_ZRAM_MEMORY_TRACKING
+		/*
+		 * If it did not parse as 'all' try to treat it as an integer when
+		 * we have memory tracking enabled.
+		 */
 		u64 age_sec;
-		/* If it did not parse as 'all' try to treat it as an integer */
-		if (!kstrtoull(buf, 0, &age_sec))
+		if (IS_ENABLED(CONFIG_ZRAM_MEMORY_TRACKING) && !kstrtoull(buf, 0, &age_sec))
 			cutoff_time = ktime_sub(ktime_get_boottime(),
 					ns_to_ktime(age_sec * NSEC_PER_SEC));
 		else
-#endif
 			goto out;
 	}
 
