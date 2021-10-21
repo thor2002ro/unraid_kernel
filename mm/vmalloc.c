@@ -2856,23 +2856,14 @@ vm_area_alloc_pages(gfp_t gfp, int nid,
 			 */
 			nr_pages_request = min(100U, nr_pages - nr_allocated);
 
-			if (nid == NUMA_NO_NODE) {
-				for (i = 0; i < nr_pages_request; i++) {
-					page = alloc_page(gfp);
-					if (page)
-						pages[nr_allocated + i] = page;
-					else {
-						nr = i;
-						break;
-					}
-				}
-				if (i >= nr_pages_request)
-					nr = nr_pages_request;
-			} else {
+			if (nid == NUMA_NO_NODE)
+				nr = alloc_pages_bulk_array_mempolicy(gfp,
+							nr_pages_request,
+							pages + nr_allocated);
+			else
 				nr = alloc_pages_bulk_array_node(gfp, nid,
 							nr_pages_request,
 							pages + nr_allocated);
-			}
 			nr_allocated += nr;
 			cond_resched();
 
