@@ -400,11 +400,11 @@ static int call_undef_hook(struct pt_regs *regs)
 	unsigned long flags;
 	u32 instr;
 	int (*fn)(struct pt_regs *regs, u32 instr) = NULL;
-	void __user *pc = (void __user *)instruction_pointer(regs);
+	unsigned long pc = instruction_pointer(regs);
 
 	if (!user_mode(regs)) {
 		__le32 instr_le;
-		if (get_kernel_nofault(instr_le, (__force __le32 *)pc))
+		if (get_kernel_nofault(instr_le, (__le32 *)pc))
 			goto exit;
 		instr = le32_to_cpu(instr_le);
 	} else if (compat_thumb_mode(regs)) {
@@ -527,14 +527,9 @@ NOKPROBE_SYMBOL(do_ptrauth_fault);
 			"1:	" insn ", %1\n"			\
 			"	mov	%w0, #0\n"		\
 			"2:\n"					\
-			"	.pushsection .fixup,\"ax\"\n"	\
-			"	.align	2\n"			\
-			"3:	mov	%w0, %w2\n"		\
-			"	b	2b\n"			\
-			"	.popsection\n"			\
-			_ASM_EXTABLE(1b, 3b)			\
+			_ASM_EXTABLE_UACCESS_ERR(1b, 2b, %w0)	\
 			: "=r" (res)				\
-			: "r" (address), "i" (-EFAULT));	\
+			: "r" (address));			\
 		uaccess_ttbr0_disable();			\
 	}
 
