@@ -2856,7 +2856,7 @@ vm_area_alloc_pages(gfp_t gfp, int nid,
 			 */
 			nr_pages_request = min(100U, nr_pages - nr_allocated);
 
-			if (nid == NUMA_NO_NODE)
+			if (IS_ENABLED(CONFIG_NUMA) && nid == NUMA_NO_NODE)
 				nr = alloc_pages_bulk_array_mempolicy(gfp,
 							nr_pages_request,
 							pages + nr_allocated);
