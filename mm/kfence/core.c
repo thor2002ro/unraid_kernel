@@ -130,7 +130,7 @@ atomic_t kfence_allocation_gate = ATOMIC_INIT(1);
 static atomic_t alloc_covered[ALLOC_COVERED_SIZE];
 
 /* Stack depth used to determine uniqueness of an allocation. */
-#define UNIQUE_ALLOC_STACK_DEPTH 8UL
+#define UNIQUE_ALLOC_STACK_DEPTH ((size_t)8)
 
 /*
  * Randomness for stack hashes, making the same collisions across reboots and
