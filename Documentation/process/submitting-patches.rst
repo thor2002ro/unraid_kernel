@@ -21,6 +21,10 @@ If you're unfamiliar with ``git``, you would be well-advised to learn how to
 use it, it will make your life as a kernel developer and in general much
 easier.
 
+Some subsystems and maintainer trees have additional information about
+their workflow and expectations, see :ref:`Documentation/process/maintainer
+handbooks <maintainer_handbooks_main>`.
+
 Obtain a current source tree
 ----------------------------
 
@@ -94,7 +98,7 @@ its behaviour.
 
 If the patch fixes a logged bug entry, refer to that bug entry by
 number and URL.  If the patch follows from a mailing list discussion,
-give a URL to the mailing list archive; use the https://lkml.kernel.org/
+give a URL to the mailing list archive; use the https://lore.kernel.org/
 redirector with a ``Message-Id``, to ensure that the links cannot become
 stale.
 
@@ -326,6 +330,7 @@ politely and address the problems they have pointed out.
 See Documentation/process/email-clients.rst for recommendations on email
 clients and mailing list etiquette.
 
+.. _resend_reminders:
 
 Don't get discouraged - or impatient
 ------------------------------------
@@ -711,6 +716,8 @@ patch::
 See more details on the proper patch format in the following
 references.
 
+.. _backtraces:
+
 Backtraces in commit mesages
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -743,7 +750,7 @@ the bug report.  However, for a multi-patch series, it is generally
 best to avoid using In-Reply-To: to link to older versions of the
 series.  This way multiple versions of the patch don't become an
 unmanageable forest of references in email clients.  If a link is
-helpful, you can use the https://lkml.kernel.org/ redirector (e.g., in
+helpful, you can use the https://lore.kernel.org/ redirector (e.g., in
 the cover email text) to link to an earlier version of the patch series.
 
 
