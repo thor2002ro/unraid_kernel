@@ -351,7 +351,7 @@ static int afs_begin_cache_operation(struct netfs_read_request *rreq)
 {
 	struct afs_vnode *vnode = AFS_FS_I(rreq->inode);
 
-	return fscache_begin_read_operation(rreq, afs_vnode_cache(vnode));
+	return fscache_begin_read_operation(&rreq->cache_resources, afs_vnode_cache(vnode));
 }
 
 static int afs_check_write_begin(struct file *file, loff_t pos, unsigned len,

@@ -58,14 +58,14 @@ static void cachefiles_read_complete(struct kiocb *iocb, long ret, long ret2)
 static int cachefiles_read(struct netfs_cache_resources *cres,
 			   loff_t start_pos,
 			   struct iov_iter *iter,
-			   bool seek_data,
+			   enum netfs_read_from_hole read_hole,
 			   netfs_io_terminated_t term_func,
 			   void *term_func_priv)
 {
 	struct cachefiles_kiocb *ki;
 	struct file *file = cres->cache_priv2;
 	unsigned int old_nofs;
-	ssize_t ret = -ENOBUFS;
+	ssize_t ret = -ENODATA;
 	size_t len = iov_iter_count(iter), skipped = 0;
 
 	_enter("%pD,%li,%llx,%zx/%llx",
@@ -75,7 +75,7 @@ static int cachefiles_read(struct netfs_cache_resources *cres,
 	/* If the caller asked us to seek for data before doing the read, then
 	 * we should do that now.  If we find a gap, we fill it with zeros.
 	 */
-	if (seek_data) {
+	if (read_hole != NETFS_READ_HOLE_IGNORE) {
 		loff_t off = start_pos, off2;
 
 		off2 = vfs_llseek(file, off, SEEK_DATA);
@@ -90,6 +90,9 @@ static int cachefiles_read(struct netfs_cache_resources *cres,
 			 * in the region, so clear the rest of the buffer and
 			 * return success.
 			 */
+			if (read_hole == NETFS_READ_HOLE_FAIL)
+				goto presubmission_error;
+
 			iov_iter_zero(len, iter);
 			skipped = len;
 			ret = 0;
@@ -268,33 +271,38 @@ presubmission_error:
 static enum netfs_read_source cachefiles_prepare_read(struct netfs_read_subrequest *subreq,
 						      loff_t i_size)
 {
-	struct fscache_retrieval *op = subreq->rreq->cache_resources.cache_priv;
+	struct fscache_operation *op = subreq->rreq->cache_resources.cache_priv;
 	struct cachefiles_object *object;
 	struct cachefiles_cache *cache;
 	const struct cred *saved_cred;
 	struct file *file = subreq->rreq->cache_resources.cache_priv2;
+	enum netfs_read_source ret = NETFS_DOWNLOAD_FROM_SERVER;
 	loff_t off, to;
 
 	_enter("%zx @%llx/%llx", subreq->len, subreq->start, i_size);
 
-	object = container_of(op->op.object,
-			      struct cachefiles_object, fscache);
+	object = container_of(op->object, struct cachefiles_object, fscache);
 	cache = container_of(object->fscache.cache,
 			     struct cachefiles_cache, cache);
 
-	if (!file)
-		goto cache_fail_nosec;
-
-	if (subreq->start >= i_size)
-		return NETFS_FILL_WITH_ZEROES;
-
 	cachefiles_begin_secure(cache, &saved_cred);
+
+	if (subreq->start >= i_size) {
+		ret = NETFS_FILL_WITH_ZEROES;
+		goto out;
+	}
+
+	if (!file)
+		goto out;
+
+	if (test_bit(FSCACHE_COOKIE_NO_DATA_YET, &object->fscache.cookie->flags))
+		goto download_and_store;
 
 	off = vfs_llseek(file, subreq->start, SEEK_DATA);
 	if (off < 0 && off >= (loff_t)-MAX_ERRNO) {
 		if (off == (loff_t)-ENXIO)
 			goto download_and_store;
-		goto cache_fail;
+		goto out;
 	}
 
 	if (off >= subreq->start + subreq->len)
@@ -308,7 +316,7 @@ static enum netfs_read_source cachefiles_prepare_read(struct netfs_read_subreque
 
 	to = vfs_llseek(file, subreq->start, SEEK_HOLE);
 	if (to < 0 && to >= (loff_t)-MAX_ERRNO)
-		goto cache_fail;
+		goto out;
 
 	if (to < subreq->start + subreq->len) {
 		if (subreq->start + subreq->len >= i_size)
@@ -318,16 +326,15 @@ static enum netfs_read_source cachefiles_prepare_read(struct netfs_read_subreque
 		subreq->len = to - subreq->start;
 	}
 
-	cachefiles_end_secure(cache, saved_cred);
-	return NETFS_READ_FROM_CACHE;
+	ret = NETFS_READ_FROM_CACHE;
+	goto out;
 
 download_and_store:
 	if (cachefiles_has_space(cache, 0, (subreq->len + PAGE_SIZE - 1) / PAGE_SIZE) == 0)
 		__set_bit(NETFS_SREQ_WRITE_TO_CACHE, &subreq->flags);
-cache_fail:
+out:
 	cachefiles_end_secure(cache, saved_cred);
-cache_fail_nosec:
-	return NETFS_DOWNLOAD_FROM_SERVER;
+	return ret;
 }
 
 /*
@@ -347,11 +354,29 @@ static int cachefiles_prepare_write(struct netfs_cache_resources *cres,
 }
 
 /*
+ * Prepare for a write to occur from the fallback I/O API.
+ */
+static int cachefiles_prepare_fallback_write(struct netfs_cache_resources *cres,
+					     pgoff_t index)
+{
+	struct fscache_operation *op = cres->cache_priv;
+	struct cachefiles_object *object;
+	struct cachefiles_cache *cache;
+
+	_enter("%lx", index);
+
+	object = container_of(op->object, struct cachefiles_object, fscache);
+	cache = container_of(object->fscache.cache,
+			     struct cachefiles_cache, cache);
+	return cachefiles_has_space(cache, 0, 1);
+}
+
+/*
  * Clean up an operation.
  */
 static void cachefiles_end_operation(struct netfs_cache_resources *cres)
 {
-	struct fscache_retrieval *op = cres->cache_priv;
+	struct fscache_operation *op = cres->cache_priv;
 	struct file *file = cres->cache_priv2;
 
 	_enter("");
@@ -359,8 +384,8 @@ static void cachefiles_end_operation(struct netfs_cache_resources *cres)
 	if (file)
 		fput(file);
 	if (op) {
-		fscache_op_complete(&op->op, false);
-		fscache_put_retrieval(op);
+		fscache_op_complete(op, false);
+		fscache_put_operation(op);
 	}
 
 	_leave("");
@@ -372,13 +397,14 @@ static const struct netfs_cache_ops cachefiles_netfs_cache_ops = {
 	.write			= cachefiles_write,
 	.prepare_read		= cachefiles_prepare_read,
 	.prepare_write		= cachefiles_prepare_write,
+	.prepare_fallback_write	= cachefiles_prepare_fallback_write,
 };
 
 /*
  * Open the cache file when beginning a cache operation.
  */
-int cachefiles_begin_read_operation(struct netfs_read_request *rreq,
-				    struct fscache_retrieval *op)
+int cachefiles_begin_operation(struct netfs_cache_resources *cres,
+			       struct fscache_operation *op)
 {
 	struct cachefiles_object *object;
 	struct cachefiles_cache *cache;
@@ -387,8 +413,7 @@ int cachefiles_begin_read_operation(struct netfs_read_request *rreq,
 
 	_enter("");
 
-	object = container_of(op->op.object,
-			      struct cachefiles_object, fscache);
+	object = container_of(op->object, struct cachefiles_object, fscache);
 	cache = container_of(object->fscache.cache,
 			     struct cachefiles_cache, cache);
 
@@ -406,11 +431,11 @@ int cachefiles_begin_read_operation(struct netfs_read_request *rreq,
 		goto error_file;
 	}
 
-	fscache_get_retrieval(op);
-	rreq->cache_resources.cache_priv = op;
-	rreq->cache_resources.cache_priv2 = file;
-	rreq->cache_resources.ops = &cachefiles_netfs_cache_ops;
-	rreq->cache_resources.debug_id = object->fscache.debug_id;
+	atomic_inc(&op->usage);
+	cres->cache_priv = op;
+	cres->cache_priv2 = file;
+	cres->ops = &cachefiles_netfs_cache_ops;
+	cres->debug_id = object->fscache.debug_id;
 	_leave("");
 	return 0;
 
