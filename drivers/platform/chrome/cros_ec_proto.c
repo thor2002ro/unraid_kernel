@@ -808,9 +808,9 @@ EXPORT_SYMBOL(cros_ec_get_host_event);
  *
  * Call this function to test whether the ChromeOS EC supports a feature.
  *
- * Return: 1 if supported, 0 if not
+ * Return: true if supported, false if not (or if an error was encountered).
  */
-int cros_ec_check_features(struct cros_ec_dev *ec, int feature)
+bool cros_ec_check_features(struct cros_ec_dev *ec, int feature)
 {
 	struct cros_ec_command *msg;
 	int ret;
@@ -818,8 +818,10 @@ int cros_ec_check_features(struct cros_ec_dev *ec, int feature)
 	if (ec->features[0] == -1U && ec->features[1] == -1U) {
 		/* features bitmap not read yet */
 		msg = kzalloc(sizeof(*msg) + sizeof(ec->features), GFP_KERNEL);
-		if (!msg)
-			return -ENOMEM;
+		if (!msg) {
+			dev_err(ec->dev, "failed to allocate memory to get EC features\n");
+			return false;
+		}
 
 		msg->command = EC_CMD_GET_FEATURES + ec->cmd_offset;
 		msg->insize = sizeof(ec->features);
@@ -839,7 +841,7 @@ int cros_ec_check_features(struct cros_ec_dev *ec, int feature)
 		kfree(msg);
 	}
 
-	return ec->features[feature / 32] & EC_FEATURE_MASK_0(feature);
+	return !!(ec->features[feature / 32] & EC_FEATURE_MASK_0(feature));
 }
 EXPORT_SYMBOL_GPL(cros_ec_check_features);
 
@@ -908,3 +910,51 @@ int cros_ec_get_sensor_count(struct cros_ec_dev *ec)
 	return sensor_count;
 }
 EXPORT_SYMBOL_GPL(cros_ec_get_sensor_count);
+
+/**
+ * cros_ec_command - Send a command to the EC.
+ *
+ * @ec_dev: EC device
+ * @version: EC command version
+ * @command: EC command
+ * @outdata: EC command output data
+ * @outsize: Size of outdata
+ * @indata: EC command input data
+ * @insize: Size of indata
+ *
+ * Return: >= 0 on success, negative error number on failure.
+ */
+int cros_ec_command(struct cros_ec_device *ec_dev,
+		    unsigned int version,
+		    int command,
+		    void *outdata,
+		    int outsize,
+		    void *indata,
+		    int insize)
+{
+	struct cros_ec_command *msg;
+	int ret;
+
+	msg = kzalloc(sizeof(*msg) + max(insize, outsize), GFP_KERNEL);
+	if (!msg)
+		return -ENOMEM;
+
+	msg->version = version;
+	msg->command = command;
+	msg->outsize = outsize;
+	msg->insize = insize;
+
+	if (outsize)
+		memcpy(msg->data, outdata, outsize);
+
+	ret = cros_ec_cmd_xfer_status(ec_dev, msg);
+	if (ret < 0)
+		goto error;
+
+	if (insize)
+		memcpy(indata, msg->data, insize);
+error:
+	kfree(msg);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(cros_ec_command);
