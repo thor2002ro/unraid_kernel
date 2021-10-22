@@ -548,14 +548,6 @@ static inline uint64_t bch_crc64(const void *p, size_t len)
 	return crc ^ 0xffffffffffffffffULL;
 }
 
-static inline uint64_t bch_crc64_update(uint64_t crc,
-					const void *p,
-					size_t len)
-{
-	crc = crc64_be(crc, p, len);
-	return crc;
-}
-
 /*
  * A stepwise-linear pseudo-exponential.  This returns 1 << (x >>
  * frac_bits), with the less-significant bits filled in by linear
@@ -584,8 +576,4 @@ static inline unsigned int fract_exp_two(unsigned int x,
 void bch_bio_map(struct bio *bio, void *base);
 int bch_bio_alloc_pages(struct bio *bio, gfp_t gfp_mask);
 
-static inline sector_t bdev_sectors(struct block_device *bdev)
-{
-	return bdev->bd_inode->i_size >> 9;
-}
 #endif /* _BCACHE_UTIL_H */
