@@ -868,7 +868,7 @@ static int me_pagecache_clean(struct page_state *ps, struct page *p)
 {
 	int ret;
 	struct address_space *mapping;
-	bool extra_pins;
+	bool extra_pins = false;
 
 	delete_from_lru_cache(p);
 
