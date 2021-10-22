@@ -56,6 +56,7 @@ struct symbol {
 	struct symbol *pfunc, *cfunc, *alias;
 	bool uaccess_safe;
 	bool static_call_tramp;
+	struct list_head pv_target;
 };
 
 struct reloc {
