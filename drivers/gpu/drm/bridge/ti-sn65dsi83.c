@@ -288,20 +288,17 @@ err_dsi_attach:
 	return ret;
 }
 
-static void sn65dsi83_atomic_pre_enable(struct drm_bridge *bridge,
-					struct drm_bridge_state *old_bridge_state)
+static void sn65dsi83_detach(struct drm_bridge *bridge)
 {
 	struct sn65dsi83 *ctx = bridge_to_sn65dsi83(bridge);
 
-	/*
-	 * Reset the chip, pull EN line low for t_reset=10ms,
-	 * then high for t_en=1ms.
-	 */
-	regcache_mark_dirty(ctx->regmap);
-	gpiod_set_value(ctx->enable_gpio, 0);
-	usleep_range(10000, 11000);
-	gpiod_set_value(ctx->enable_gpio, 1);
-	usleep_range(1000, 1100);
+	if (!ctx->dsi)
+		return;
+
+	mipi_dsi_detach(ctx->dsi);
+	mipi_dsi_device_unregister(ctx->dsi);
+	drm_bridge_remove(&ctx->bridge);
+	ctx->dsi = NULL;
 }
 
 static u8 sn65dsi83_get_lvds_range(struct sn65dsi83 *ctx,
@@ -380,6 +377,10 @@ static void sn65dsi83_atomic_enable(struct drm_bridge *bridge,
 	__le16 le16val;
 	u16 val;
 	int ret;
+
+	/* Deassert reset */
+	gpiod_set_value(ctx->enable_gpio, 1);
+	usleep_range(1000, 1100);
 
 	/* Get the LVDS format from the bridge state. */
 	bridge_state = drm_atomic_get_new_bridge_state(state, bridge);
@@ -527,18 +528,11 @@ static void sn65dsi83_atomic_disable(struct drm_bridge *bridge,
 {
 	struct sn65dsi83 *ctx = bridge_to_sn65dsi83(bridge);
 
-	/* Clear reset, disable PLL */
-	regmap_write(ctx->regmap, REG_RC_RESET, 0x00);
-	regmap_write(ctx->regmap, REG_RC_PLL_EN, 0x00);
-}
-
-static void sn65dsi83_atomic_post_disable(struct drm_bridge *bridge,
-					  struct drm_bridge_state *old_bridge_state)
-{
-	struct sn65dsi83 *ctx = bridge_to_sn65dsi83(bridge);
-
-	/* Put the chip in reset, pull EN line low. */
+	/* Put the chip in reset, pull EN line low, and assure 10ms reset low timing. */
 	gpiod_set_value(ctx->enable_gpio, 0);
+	usleep_range(10000, 11000);
+
+	regcache_mark_dirty(ctx->regmap);
 }
 
 static enum drm_mode_status
@@ -583,10 +577,9 @@ sn65dsi83_atomic_get_input_bus_fmts(struct drm_bridge *bridge,
 
 static const struct drm_bridge_funcs sn65dsi83_funcs = {
 	.attach			= sn65dsi83_attach,
-	.atomic_pre_enable	= sn65dsi83_atomic_pre_enable,
+	.detach			= sn65dsi83_detach,
 	.atomic_enable		= sn65dsi83_atomic_enable,
 	.atomic_disable		= sn65dsi83_atomic_disable,
-	.atomic_post_disable	= sn65dsi83_atomic_post_disable,
 	.mode_valid		= sn65dsi83_mode_valid,
 
 	.atomic_duplicate_state = drm_atomic_helper_bridge_duplicate_state,
@@ -671,9 +664,12 @@ static int sn65dsi83_probe(struct i2c_client *client,
 		model = id->driver_data;
 	}
 
+	/* Put the chip in reset, pull EN line low, and assure 10ms reset low timing. */
 	ctx->enable_gpio = devm_gpiod_get(ctx->dev, "enable", GPIOD_OUT_LOW);
 	if (IS_ERR(ctx->enable_gpio))
 		return PTR_ERR(ctx->enable_gpio);
+
+	usleep_range(10000, 11000);
 
 	ret = sn65dsi83_parse_dt(ctx, model);
 	if (ret)
@@ -697,9 +693,6 @@ static int sn65dsi83_remove(struct i2c_client *client)
 {
 	struct sn65dsi83 *ctx = i2c_get_clientdata(client);
 
-	mipi_dsi_detach(ctx->dsi);
-	mipi_dsi_device_unregister(ctx->dsi);
-	drm_bridge_remove(&ctx->bridge);
 	of_node_put(ctx->host_node);
 
 	return 0;
