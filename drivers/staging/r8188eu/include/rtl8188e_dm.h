@@ -26,17 +26,9 @@ struct	dm_priv {
 	int	EntryMinUndecoratedSmoothedPWDB;
 	int	EntryMaxUndecoratedSmoothedPWDB;
 	int	MinUndecoratedPWDBForDM;
-	int	LastMinUndecoratedPWDBForDM;
-
-	/* for High Power */
-	u8 bDynamicTxPowerEnable;
-	u8 LastDTPLvl;
-	u8 DynamicTxHighPowerLvl;/* Tx Power Control for Near/Far Range */
-	u8	PowerIndex_backup[6];
 };
 
 void rtl8188e_init_dm_priv(struct adapter *adapt);
-void rtl8188e_deinit_dm_priv(struct adapter *adapt);
 void rtl8188e_InitHalDm(struct adapter *adapt);
 void rtl8188e_HalDmWatchDog(struct adapter *adapt);
 
