@@ -1356,8 +1356,7 @@ static int amdgpu_dm_init(struct amdgpu_device *adev)
 		switch (adev->ip_versions[DCE_HWIP][0]) {
 		case IP_VERSION(2, 1, 0):
 			init_data.flags.gpu_vm_support = true;
-			if (ASICREV_IS_GREEN_SARDINE(adev->external_rev_id))
-				init_data.flags.disable_dmcu = true;
+			init_data.flags.disable_dmcu = true;
 			break;
 		case IP_VERSION(1, 0, 0):
 		case IP_VERSION(1, 0, 1):
@@ -4031,6 +4030,7 @@ static int amdgpu_dm_initialize_drm_device(struct amdgpu_device *adev)
 	int32_t primary_planes;
 	enum dc_connection_type new_connection_type = dc_connection_none;
 	const struct dc_plane_cap *plane;
+	bool psr_feature_enabled = false;
 
 	dm->display_indexes_num = dm->dc->caps.max_streams;
 	/* Update the actual used number of crtc */
@@ -4113,6 +4113,19 @@ static int amdgpu_dm_initialize_drm_device(struct amdgpu_device *adev)
 		DRM_DEBUG_KMS("Unsupported DCN IP version for outbox: 0x%X\n",
 			      adev->ip_versions[DCE_HWIP][0]);
 	}
+
+	/* Determine whether to enable PSR support by default. */
+	if (!(amdgpu_dc_debug_mask & DC_DISABLE_PSR)) {
+		switch (adev->ip_versions[DCE_HWIP][0]) {
+		case IP_VERSION(3, 1, 2):
+		case IP_VERSION(3, 1, 3):
+			psr_feature_enabled = true;
+			break;
+		default:
+			psr_feature_enabled = amdgpu_dc_feature_mask & DC_PSR_MASK;
+			break;
+		}
+	}
 #endif
 
 	/* loops over all connectors on the board */
@@ -4156,7 +4169,8 @@ static int amdgpu_dm_initialize_drm_device(struct amdgpu_device *adev)
 		} else if (dc_link_detect(link, DETECT_REASON_BOOT)) {
 			amdgpu_dm_update_connector_after_detect(aconnector);
 			register_backlight_device(dm, link);
-			if (amdgpu_dc_feature_mask & DC_PSR_MASK)
+
+			if (psr_feature_enabled)
 				amdgpu_dm_set_psr_caps(link);
 		}
 
@@ -10535,18 +10549,18 @@ static int dm_check_crtc_cursor(struct drm_atomic_state *state,
 				struct drm_crtc *crtc,
 				struct drm_crtc_state *new_crtc_state)
 {
-	struct drm_plane_state *new_cursor_state, *new_primary_state;
-	int cursor_scale_w, cursor_scale_h, primary_scale_w, primary_scale_h;
+	struct drm_plane *cursor = crtc->cursor, *underlying;
+	struct drm_plane_state *new_cursor_state, *new_underlying_state;
+	int i;
+	int cursor_scale_w, cursor_scale_h, underlying_scale_w, underlying_scale_h;
 
 	/* On DCE and DCN there is no dedicated hardware cursor plane. We get a
 	 * cursor per pipe but it's going to inherit the scaling and
 	 * positioning from the underlying pipe. Check the cursor plane's
-	 * blending properties match the primary plane's. */
+	 * blending properties match the underlying planes'. */
 
-	new_cursor_state = drm_atomic_get_new_plane_state(state, crtc->cursor);
-	new_primary_state = drm_atomic_get_new_plane_state(state, crtc->primary);
-	if (!new_cursor_state || !new_primary_state ||
-	    !new_cursor_state->fb || !new_primary_state->fb) {
+	new_cursor_state = drm_atomic_get_new_plane_state(state, cursor);
+	if (!new_cursor_state || !new_cursor_state->fb) {
 		return 0;
 	}
 
@@ -10555,15 +10569,34 @@ static int dm_check_crtc_cursor(struct drm_atomic_state *state,
 	cursor_scale_h = new_cursor_state->crtc_h * 1000 /
 			 (new_cursor_state->src_h >> 16);
 
-	primary_scale_w = new_primary_state->crtc_w * 1000 /
-			 (new_primary_state->src_w >> 16);
-	primary_scale_h = new_primary_state->crtc_h * 1000 /
-			 (new_primary_state->src_h >> 16);
+	for_each_new_plane_in_state_reverse(state, underlying, new_underlying_state, i) {
+		/* Narrow down to non-cursor planes on the same CRTC as the cursor */
+		if (new_underlying_state->crtc != crtc || underlying == crtc->cursor)
+			continue;
 
-	if (cursor_scale_w != primary_scale_w ||
-	    cursor_scale_h != primary_scale_h) {
-		drm_dbg_atomic(crtc->dev, "Cursor plane scaling doesn't match primary plane\n");
-		return -EINVAL;
+		/* Ignore disabled planes */
+		if (!new_underlying_state->fb)
+			continue;
+
+		underlying_scale_w = new_underlying_state->crtc_w * 1000 /
+				     (new_underlying_state->src_w >> 16);
+		underlying_scale_h = new_underlying_state->crtc_h * 1000 /
+				     (new_underlying_state->src_h >> 16);
+
+		if (cursor_scale_w != underlying_scale_w ||
+		    cursor_scale_h != underlying_scale_h) {
+			drm_dbg_atomic(crtc->dev,
+				       "Cursor [PLANE:%d:%s] scaling doesn't match underlying [PLANE:%d:%s]\n",
+				       cursor->base.id, cursor->name, underlying->base.id, underlying->name);
+			return -EINVAL;
+		}
+
+		/* If this plane covers the whole CRTC, no need to check planes underneath */
+		if (new_underlying_state->crtc_x <= 0 &&
+		    new_underlying_state->crtc_y <= 0 &&
+		    new_underlying_state->crtc_x + new_underlying_state->crtc_w >= new_crtc_state->mode.hdisplay &&
+		    new_underlying_state->crtc_y + new_underlying_state->crtc_h >= new_crtc_state->mode.vdisplay)
+			break;
 	}
 
 	return 0;

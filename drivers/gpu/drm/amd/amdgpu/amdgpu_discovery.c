@@ -108,6 +108,8 @@ static const char *hw_id_names[HW_ID_MAX] = {
 	[HDP_HWID]		= "HDP",
 	[SDMA0_HWID]		= "SDMA0",
 	[SDMA1_HWID]		= "SDMA1",
+	[SDMA2_HWID]		= "SDMA2",
+	[SDMA3_HWID]		= "SDMA3",
 	[ISP_HWID]		= "ISP",
 	[DBGU_IO_HWID]		= "DBGU_IO",
 	[DF_HWID]		= "DF",
@@ -736,6 +738,7 @@ static int amdgpu_discovery_set_display_ip_blocks(struct amdgpu_device *adev)
 		case IP_VERSION(1, 0, 1):
 		case IP_VERSION(2, 0, 2):
 		case IP_VERSION(2, 0, 0):
+		case IP_VERSION(2, 0, 3):
 		case IP_VERSION(2, 1, 0):
 		case IP_VERSION(3, 0, 0):
 		case IP_VERSION(3, 0, 2):
@@ -744,8 +747,6 @@ static int amdgpu_discovery_set_display_ip_blocks(struct amdgpu_device *adev)
 		case IP_VERSION(3, 1, 2):
 		case IP_VERSION(3, 1, 3):
 			amdgpu_device_ip_block_add(adev, &dm_ip_block);
-			break;
-		case IP_VERSION(2, 0, 3):
 			break;
 		default:
 			return -EINVAL;
@@ -1134,12 +1135,15 @@ int amdgpu_discovery_set_ip_blocks(struct amdgpu_device *adev)
 	case IP_VERSION(2, 3, 0):
 	case IP_VERSION(2, 3, 1):
 	case IP_VERSION(2, 3, 2):
+		adev->nbio.funcs = &nbio_v2_3_funcs;
+		adev->nbio.hdp_flush_reg = &nbio_v2_3_hdp_flush_reg;
+		break;
 	case IP_VERSION(3, 3, 0):
 	case IP_VERSION(3, 3, 1):
 	case IP_VERSION(3, 3, 2):
 	case IP_VERSION(3, 3, 3):
 		adev->nbio.funcs = &nbio_v2_3_funcs;
-		adev->nbio.hdp_flush_reg = &nbio_v2_3_hdp_flush_reg;
+		adev->nbio.hdp_flush_reg = &nbio_v2_3_hdp_flush_reg_sc;
 		break;
 	default:
 		break;
