@@ -6,9 +6,9 @@
 #ifndef _LINUX_MEMPOLICY_H
 #define _LINUX_MEMPOLICY_H 1
 
+#include <linux/refcount.h>
 #include <linux/sched.h>
 #include <linux/mmzone.h>
-#include <linux/dax.h>
 #include <linux/slab.h>
 #include <linux/rbtree.h>
 #include <linux/spinlock.h>
@@ -43,7 +43,7 @@ struct mm_struct;
  * to 1, representing the caller of mpol_dup().
  */
 struct mempolicy {
-	atomic_t refcnt;
+	refcount_t refcnt;
 	unsigned short mode; 	/* See MPOL_* above */
 	unsigned short flags;	/* See set_mempolicy() MPOL_F_* above */
 	nodemask_t nodes;	/* interleave/bind/perfer */
@@ -94,7 +94,7 @@ static inline struct mempolicy *mpol_dup(struct mempolicy *pol)
 static inline void mpol_get(struct mempolicy *pol)
 {
 	if (pol)
-		atomic_inc(&pol->refcnt);
+		refcount_inc(&pol->refcnt);
 }
 
 extern bool __mpol_equal(struct mempolicy *a, struct mempolicy *b);
@@ -183,8 +183,6 @@ extern bool vma_migratable(struct vm_area_struct *vma);
 
 extern int mpol_misplaced(struct page *, struct vm_area_struct *, unsigned long);
 extern void mpol_put_task_policy(struct task_struct *);
-
-extern bool numa_demotion_enabled;
 
 static inline bool mpol_is_preferred_many(struct mempolicy *pol)
 {
@@ -300,8 +298,6 @@ static inline nodemask_t *policy_nodemask_current(gfp_t gfp)
 {
 	return NULL;
 }
-
-#define numa_demotion_enabled	false
 
 static inline bool mpol_is_preferred_many(struct mempolicy *pol)
 {
