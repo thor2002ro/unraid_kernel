@@ -1336,7 +1336,6 @@ struct intel_plane {
 	enum plane_id id;
 	enum pipe pipe;
 	bool has_fbc;
-	bool has_ccs;
 	bool need_async_flip_disable_wa;
 	u32 frontbuffer_bit;
 
@@ -1563,6 +1562,8 @@ struct intel_dp {
 	int num_sink_rates;
 	int sink_rates[DP_MAX_SUPPORTED_RATES];
 	bool use_rate_select;
+	/* Max sink lane count as reported by DP_MAX_LANE_COUNT */
+	int max_sink_lane_count;
 	/* intersection of source and sink rates */
 	int num_common_rates;
 	int common_rates[DP_MAX_SUPPORTED_RATES];
@@ -2039,22 +2040,6 @@ static inline struct intel_frontbuffer *
 to_intel_frontbuffer(struct drm_framebuffer *fb)
 {
 	return fb ? to_intel_framebuffer(fb)->frontbuffer : NULL;
-}
-
-static inline bool is_ccs_modifier(u64 modifier)
-{
-	return modifier == I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS ||
-	       modifier == I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS_CC ||
-	       modifier == I915_FORMAT_MOD_Y_TILED_GEN12_MC_CCS ||
-	       modifier == I915_FORMAT_MOD_Y_TILED_CCS ||
-	       modifier == I915_FORMAT_MOD_Yf_TILED_CCS;
-}
-
-static inline bool is_gen12_ccs_modifier(u64 modifier)
-{
-	return modifier == I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS ||
-	       modifier == I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS_CC ||
-	       modifier == I915_FORMAT_MOD_Y_TILED_GEN12_MC_CCS;
 }
 
 #endif /*  __INTEL_DISPLAY_TYPES_H__ */
