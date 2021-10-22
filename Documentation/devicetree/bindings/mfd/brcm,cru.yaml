@@ -32,15 +32,15 @@ properties:
   "#size-cells":
     const: 1
 
-  pinctrl:
-    $ref: ../pinctrl/brcm,ns-pinmux.yaml
-
 patternProperties:
   '^clock-controller@[a-f0-9]+$':
     $ref: ../clock/brcm,iproc-clocks.yaml
 
   '^phy@[a-f0-9]+$':
     $ref: ../phy/bcm-ns-usb2-phy.yaml
+
+  '^pin-controller@[a-f0-9]+$':
+    $ref: ../pinctrl/brcm,ns-pinmux.yaml
 
   '^syscon@[a-f0-9]+$':
     $ref: syscon.yaml
@@ -94,9 +94,10 @@ examples:
             reg = <0x180 0x4>;
         };
 
-        pinctrl {
+        pin-controller@1c0 {
             compatible = "brcm,bcm4708-pinmux";
-            offset = <0x1c0>;
+            reg = <0x1c0 0x24>;
+            reg-names = "cru_gpio_control";
         };
 
         thermal@2c0 {
