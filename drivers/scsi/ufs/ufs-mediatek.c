@@ -15,6 +15,7 @@
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
 #include <linux/reset.h>
+#include <linux/sched/clock.h>
 #include <linux/soc/mediatek/mtk_sip_svc.h>
 
 #include "ufshcd.h"
@@ -246,9 +247,9 @@ static int ufs_mtk_setup_ref_clk(struct ufs_hba *hba, bool on)
 
 	if (on) {
 		ufs_mtk_ref_clk_notify(on, res);
-		ufshcd_delay_us(host->ref_clk_ungating_wait_us, 10);
 		ufshcd_writel(hba, REFCLK_REQUEST, REG_UFS_REFCLK_CTRL);
 	} else {
+		ufshcd_delay_us(host->ref_clk_gating_wait_us, 10);
 		ufshcd_writel(hba, REFCLK_RELEASE, REG_UFS_REFCLK_CTRL);
 	}
 
@@ -273,16 +274,16 @@ static int ufs_mtk_setup_ref_clk(struct ufs_hba *hba, bool on)
 
 out:
 	host->ref_clk_enabled = on;
-	if (!on) {
-		ufshcd_delay_us(host->ref_clk_gating_wait_us, 10);
+	if (on)
+		ufshcd_delay_us(host->ref_clk_ungating_wait_us, 10);
+	else
 		ufs_mtk_ref_clk_notify(on, res);
-	}
 
 	return 0;
 }
 
 static void ufs_mtk_setup_ref_clk_wait_us(struct ufs_hba *hba,
-					  u16 gating_us, u16 ungating_us)
+					  u16 gating_us)
 {
 	struct ufs_mtk_host *host = ufshcd_get_variant(hba);
 
@@ -293,7 +294,7 @@ static void ufs_mtk_setup_ref_clk_wait_us(struct ufs_hba *hba,
 		host->ref_clk_gating_wait_us = gating_us;
 	}
 
-	host->ref_clk_ungating_wait_us = ungating_us;
+	host->ref_clk_ungating_wait_us = REFCLK_DEFAULT_WAIT_US;
 }
 
 static void ufs_mtk_dbg_sel(struct ufs_hba *hba)
@@ -1102,11 +1103,14 @@ static int ufs_mtk_apply_dev_quirks(struct ufs_hba *hba)
 	 * requirements.
 	 */
 	if (mid == UFS_VENDOR_SAMSUNG)
-		ufs_mtk_setup_ref_clk_wait_us(hba, 1, 1);
+		ufs_mtk_setup_ref_clk_wait_us(hba, 1);
 	else if (mid == UFS_VENDOR_SKHYNIX)
-		ufs_mtk_setup_ref_clk_wait_us(hba, 30, 30);
+		ufs_mtk_setup_ref_clk_wait_us(hba, 30);
 	else if (mid == UFS_VENDOR_TOSHIBA)
-		ufs_mtk_setup_ref_clk_wait_us(hba, 100, 32);
+		ufs_mtk_setup_ref_clk_wait_us(hba, 100);
+	else
+		ufs_mtk_setup_ref_clk_wait_us(hba,
+					      REFCLK_DEFAULT_WAIT_US);
 
 	return 0;
 }
