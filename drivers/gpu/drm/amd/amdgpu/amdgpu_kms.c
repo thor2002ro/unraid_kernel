@@ -1043,6 +1043,22 @@ int amdgpu_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 			}
 			ui32 /= 100;
 			break;
+		case AMDGPU_INFO_SENSOR_PROFILE_MODE_ACTIVE: {
+			const struct amd_pm_funcs *pp_funcs = adev->powerplay.pp_funcs;
+			enum amd_dpm_forced_level level;
+
+			if (pp_funcs->get_performance_level)
+				level = amdgpu_dpm_get_performance_level(adev);
+			else
+				level = adev->pm.dpm.forced_level;
+
+			if ((level == AMD_DPM_FORCED_LEVEL_PROFILE_STANDARD) ||
+			    (level == AMD_DPM_FORCED_LEVEL_PROFILE_MIN_SCLK) ||
+			    (level == AMD_DPM_FORCED_LEVEL_PROFILE_MIN_MCLK) ||
+			    (level == AMD_DPM_FORCED_LEVEL_PROFILE_PEAK))
+				ui32 = 1;
+		}
+			break;
 		default:
 			DRM_DEBUG_KMS("Invalid request %d\n",
 				      info->sensor_info.type);
