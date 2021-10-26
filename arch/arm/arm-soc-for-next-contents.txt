@@ -96,6 +96,11 @@ arm/dt
 		https://github.com/linux-chenxing/linux mstar-dt-next
 	omap/dt-gpmc
 		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.16/gpmc-signed
+	patch
+		ARM: dts: spear13xx: Drop malformed 'interrupt-map' on PCI nodes
+		dts: socfpga: Add Mercury+ AA1 devicetree
+	aspeed/dt-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/joel/bmc tags/aspeed-5.16-devicetree-2
 
 arm/drivers
 	renesas/drivers
@@ -137,6 +142,10 @@ arm/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux-mem-ctrl tags/memory-controller-drv-5.16-2
 	patch
 		optee: smc_abi.c: add missing #include <linux/mm.h>
+	<no branch> (54c8b5b6f8a868b9c21a7b0efe92ed2fbcc67080)
+		git://git.kernel.org/pub/scm/linux/kernel/git/leo/linux tags/soc-fsl-next-v5.16
+	patch
+		soc: aspeed: Add UART routing support
 
 arm/defconfigs
 	defconfig/multiv7
