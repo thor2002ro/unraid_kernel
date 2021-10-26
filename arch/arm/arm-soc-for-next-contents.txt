@@ -9,6 +9,10 @@ arm/soc
 		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-maintainers-5.16
 	sunxi/soc
 		git://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-core-for-5.16-1
+	patch
+		ARM: SPEAr: Update MAINTAINERS entries
+	samsung/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-soc-5.16
 
 arm/dt
 	zynq/dt
@@ -101,6 +105,17 @@ arm/dt
 		dts: socfpga: Add Mercury+ AA1 devicetree
 	aspeed/dt-2
 		git://git.kernel.org/pub/scm/linux/kernel/git/joel/bmc tags/aspeed-5.16-devicetree-2
+	patch
+		ARM: dts: arm: Update register-bit-led nodes 'reg' and node names
+		ARM: dts: arm: Update ICST clock nodes 'reg' and node names
+	at91/dt-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-dt-5.16-2
+	samsung/dt-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-dt-5.16-2
+	samsung/dt64-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-dt64-5.16-2
+	qcom/dt-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-dts-for-5.16-2
 
 arm/drivers
 	renesas/drivers
@@ -142,10 +157,17 @@ arm/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux-mem-ctrl tags/memory-controller-drv-5.16-2
 	patch
 		optee: smc_abi.c: add missing #include <linux/mm.h>
-	<no branch> (54c8b5b6f8a868b9c21a7b0efe92ed2fbcc67080)
+	freescale/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/leo/linux tags/soc-fsl-next-v5.16
 	patch
 		soc: aspeed: Add UART routing support
+	samsung/drivers-soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-drivers-5.16
+	qcom/drivers-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-drivers-for-5.16-2
+	firmware/ffa-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/arm-ffa-updates-5.16
+		contains firmware/ffa
 
 arm/defconfigs
 	defconfig/multiv7
@@ -164,6 +186,8 @@ arm/defconfigs
 		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-defconfig-5.16
 	aspeed/defconfigs
 		git://git.kernel.org/pub/scm/linux/kernel/git/joel/bmc tags/aspeed-5.16-defconfig
+	qcom/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-defconfig-for-5.16
 
 arm/newsoc
 
@@ -176,4 +200,8 @@ arm/fixes
 		git://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-fixes-for-5.15-1
 	drivers/reset-fixes
 		git://git.pengutronix.de/pza/linux tags/reset-fixes-for-v5.15
+	<no branch> (e091b836a3baee4c8b1423a969589196b88a9e06)
+		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-fixes-for-5.15-2
+	patch
+		MAINTAINERS: Add maintainers for DHCOM i.MX6 and DHCOM/DHCOR STM32MP1
 
