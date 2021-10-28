@@ -39,6 +39,7 @@
 #include <asm/page.h>
 #include <linux/bug.h>
 #include <linux/log2.h>
+#include <linux/math.h>
 #include <linux/types.h>
 
 struct genradix_root;
