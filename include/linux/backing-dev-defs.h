@@ -104,7 +104,7 @@ struct wb_completion {
  * is tested for blkcg after lookup and removed from index on mismatch so
  * that a new wb for the combination can be created.
  *
- * Each bdi_writeback that is no embedded into the backing_dev_info must hold
+ * Each bdi_writeback that is not embedded into the backing_dev_info must hold
  * a reference to the parent backing_dev_info.  See cgwb_create() for details.
  */
 struct bdi_writeback {
