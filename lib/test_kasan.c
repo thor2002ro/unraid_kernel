@@ -834,7 +834,7 @@ static void kmem_cache_invalid_free(struct kunit *test)
 /*
  * noinline wrappers to prevent the compiler from noticing the overflow
  * at compile time rather than having kasan catch it.
- * */
+ */
 static noinline void *__kasan_memchr(const void *s, int c, size_t n)
 {
 	return memchr(s, c, n);
