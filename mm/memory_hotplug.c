@@ -1656,6 +1656,12 @@ static int scan_movable_pages(unsigned long start, unsigned long end,
 		 */
 		if (PageOffline(page) && page_count(page))
 			return -EBUSY;
+		/*
+		 * HWPoisoned dirty swapcache pages are definitely unmovable
+		 * because they are kept for killing owner processes.
+		 */
+		if (PageHWPoison(page) && PageSwapCache(page))
+			return -EBUSY;
 
 		if (!PageHuge(page))
 			continue;
