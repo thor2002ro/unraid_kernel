@@ -186,7 +186,7 @@ __ref int stack_depot_init(void)
 			for (i = 0; i < STACK_HASH_SIZE;  i++)
 				stack_table[i] = NULL;
 		} else {
-			pr_err("Stack Depot failed hash table allocationg, disabling\n");
+			pr_err("Stack Depot hash table allocation failed, disabling\n");
 			stack_depot_disable = true;
 			mutex_unlock(&stack_depot_init_mutex);
 			return -ENOMEM;
