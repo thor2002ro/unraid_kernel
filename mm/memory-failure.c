@@ -909,11 +909,11 @@ static int me_pagecache_clean(struct page_state *ps, struct page *p)
 	 * Open: to take i_rwsem or not for this? Right now we don't.
 	 */
 	ret = truncate_error_page(p, page_to_pfn(p), mapping);
-out:
-	unlock_page(p);
-
 	if (has_extra_refcount(ps, p, extra_pins))
 		ret = MF_FAILED;
+
+out:
+	unlock_page(p);
 
 	return ret;
 }
