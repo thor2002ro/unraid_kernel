@@ -947,6 +947,11 @@ void bdi_unregister(struct backing_dev_info *bdi)
 	wb_shutdown(&bdi->wb);
 	cgwb_bdi_unregister(bdi);
 
+	/* if min ratio doesn't 0, it has to set 0 before unregister */
+	if (bdi->min_ratio) {
+		bdi_set_min_ratio(bdi, 0);
+	}
+
 	if (bdi->dev) {
 		bdi_debug_unregister(bdi);
 		device_unregister(bdi->dev);
