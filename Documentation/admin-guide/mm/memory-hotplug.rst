@@ -402,6 +402,9 @@ command line parameters are relevant:
 			 contiguous.
 ======================== =======================================================
 
+See Documentation/admin-guide/kernel-parameters.txt for a more generic
+description of these command line parameters.
+
 Module Parameters
 ------------------
 
@@ -457,7 +460,17 @@ The following module parameters are currently defined:
 				 hotplugging a lot of memory later and still
 				 wanting to be able to hotunplug as much as
 				 possible reliably, very desirable in
-				 virtualized environments. As one example, a
+				 virtualized environments. This policy ignores
+				 the ``movable_node`` kernel command line
+				 parameter and isn't really applicable in
+				 environments that require it (e.g., bare metal
+				 with hotunpluggable nodes) where hotplugged
+				 memory might be exposed via the
+				 firmware-provided memory map early during boot
+				 to the system instead of getting detected,
+				 added and onlined  later during boot (such as
+				 done by virtio-mem or by some hypervisors
+				 implementing emulated DIMMs). As one example, a
 				 hotplugged DIMM will be onlined either
 				 completely to ZONE_MOVABLE or completely to
 				 ZONE_NORMAL, not a mixture.
