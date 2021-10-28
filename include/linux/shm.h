@@ -11,7 +11,7 @@ struct file;
 
 #ifdef CONFIG_SYSVIPC
 struct sysv_shm {
-	struct list_head shm_clist;
+	struct list_head	shm_clist;
 };
 
 long do_shmat(int shmid, char __user *shmaddr, int shmflg, unsigned long *addr,
