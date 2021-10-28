@@ -3,12 +3,8 @@
  * hugepage-mremap:
  *
  * Example of remapping huge page memory in a user application using the
- * mremap system call.  Before running this application, make sure that the
- * administrator has mounted the hugetlbfs filesystem (on some directory
- * like /mnt) using the command mount -t hugetlbfs nodev /mnt. In this
- * example, the app is requesting memory of size 10MB that is backed by
- * huge pages.
- *
+ * mremap system call.  Code assumes a hugetlbfs filesystem is mounted
+ * at './huge'.  The code will use 10MB worth of huge pages.
  */
 
 #define _GNU_SOURCE
@@ -109,7 +105,7 @@ int main(void)
 {
 	int ret = 0;
 
-	int fd = open("/mnt/huge/test", O_CREAT | O_RDWR, 0755);
+	int fd = open("/huge/test", O_CREAT | O_RDWR, 0755);
 
 	if (fd < 0) {
 		perror("Open failed");
