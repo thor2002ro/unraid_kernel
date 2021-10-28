@@ -3766,7 +3766,7 @@ static ssize_t mem_cgroup_write(struct kernfs_open_file *of,
 			break;
 		case _KMEM:
 			/* kmem.limit_in_bytes is deprecated. */
-			ret = -ENOTSUPP;
+			ret = -EOPNOTSUPP;
 			break;
 		case _TCP:
 			ret = memcg_update_tcp_max(memcg, nr_pages);
