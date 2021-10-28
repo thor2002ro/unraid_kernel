@@ -3486,9 +3486,6 @@ static ssize_t demote_store(struct kobject *kobj,
 		return err;
 	h = kobj_to_hstate(kobj, &nid);
 
-	/* Synchronize with other sysfs operations modifying huge pages */
-	mutex_lock(&h->resize_lock);
-
 	if (nid != NUMA_NO_NODE) {
 		init_nodemask_of_node(&nodes_allowed, nid);
 		n_mask = &nodes_allowed;
@@ -3496,7 +3493,10 @@ static ssize_t demote_store(struct kobject *kobj,
 		n_mask = &node_states[N_MEMORY];
 	}
 
+	/* Synchronize with other sysfs operations modifying huge pages */
+	mutex_lock(&h->resize_lock);
 	spin_lock_irq(&hugetlb_lock);
+
 	while (nr_demote) {
 		/*
 		 * Check for available pages to demote each time thorough the
