@@ -292,8 +292,10 @@ static int damon_reclaim_turn(bool on)
 
 	/* Will be freed by 'damon_set_schemes()' below */
 	scheme = damon_reclaim_new_scheme();
-	if (!scheme)
+	if (!scheme) {
+		err = -ENOMEM;
 		goto free_region_out;
+	}
 	err = damon_set_schemes(ctx, &scheme, 1);
 	if (err)
 		goto free_scheme_out;
