@@ -2860,7 +2860,7 @@ vm_area_alloc_pages(gfp_t gfp, int nid,
 			 * otherwise memory may be allocated in only one node,
 			 * but mempolcy want to alloc memory by interleaving.
 			 */
-			if (nid == NUMA_NO_NODE)
+			if (IS_ENABLED(CONFIG_NUMA) && nid == NUMA_NO_NODE)
 				nr = alloc_pages_bulk_array_mempolicy(gfp,
 							nr_pages_request,
 							pages + nr_allocated);
