@@ -789,8 +789,10 @@ static int gpio_sim_config_commit_item(struct config_item *item)
 						config->num_line_names);
 
 	fwnode = fwnode_create_software_node(properties, NULL);
-	if (IS_ERR(fwnode))
+	if (IS_ERR(fwnode)) {
+		mutex_unlock(&config->lock);
 		return PTR_ERR(fwnode);
+	}
 
 	pdevinfo.name = "gpio-sim";
 	pdevinfo.fwnode = fwnode;
