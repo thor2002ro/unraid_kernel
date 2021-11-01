@@ -405,8 +405,8 @@ __blk_mq_alloc_requests_batch(struct blk_mq_alloc_data *data,
 	for (i = 0; tag_mask; i++) {
 		if (!(tag_mask & (1UL << i)))
 			continue;
-		prefetch(tags->static_rqs[tag]);
 		tag = tag_offset + i;
+		prefetch(tags->static_rqs[tag]);
 		tag_mask &= ~(1UL << i);
 		rq = blk_mq_rq_ctx_init(data, tags, tag, alloc_time_ns);
 		rq_list_add(data->cached_rq, rq);
@@ -2232,7 +2232,7 @@ void blk_mq_flush_plug_list(struct blk_plug *plug, bool from_schedule)
 	plug->rq_count = 0;
 
 	if (!plug->multiple_queues && !plug->has_elevator && !from_schedule) {
-		blk_mq_plug_issue_direct(plug, from_schedule);
+		blk_mq_plug_issue_direct(plug, false);
 		if (rq_list_empty(plug->mq_list))
 			return;
 	}
