@@ -355,14 +355,6 @@ performed on the denizens of the cache.  These are held in a structure of type:
      device.
 
 
-   * Dissociate a cache [mandatory]::
-
-	void (*dissociate_pages)(struct fscache_cache *cache)
-
-     This is called to ask a cache to perform any page dissociations as part of
-     cache withdrawal.
-
-
    * Notification that the attributes on a netfs file changed [mandatory]::
 
 	int (*attr_changed)(struct fscache_object *object);
@@ -402,123 +394,14 @@ performed on the denizens of the cache.  These are held in a structure of type:
      size if larger than that already.
 
 
-   * Request page be read from cache [mandatory]::
+   * Begin an operation [mandatory]::
 
-	int (*read_or_alloc_page)(struct fscache_retrieval *op,
-				  struct page *page,
-				  gfp_t gfp)
+	int (*begin_operation)(struct netfs_cache_resources *cres,
+			       struct fscache_operation *op);
 
-     This is called to attempt to read a netfs page from the cache, or to
-     reserve a backing block if not.  FS-Cache will have done as much checking
-     as it can before calling, but most of the work belongs to the backend.
-
-     If there's no page in the cache, then -ENODATA should be returned if the
-     backend managed to reserve a backing block; -ENOBUFS or -ENOMEM if it
-     didn't.
-
-     If there is suitable data in the cache, then a read operation should be
-     queued and 0 returned.  When the read finishes, fscache_end_io() should be
-     called.
-
-     The fscache_mark_pages_cached() should be called for the page if any cache
-     metadata is retained.  This will indicate to the netfs that the page needs
-     explicit uncaching.  This operation takes a pagevec, thus allowing several
-     pages to be marked at once.
-
-     The retrieval record pointed to by op should be retained for each page
-     queued and released when I/O on the page has been formally ended.
-     fscache_get/put_retrieval() are available for this purpose.
-
-     The retrieval record may be used to get CPU time via the FS-Cache thread
-     pool.  If this is desired, the op->op.processor should be set to point to
-     the appropriate processing routine, and fscache_enqueue_retrieval() should
-     be called at an appropriate point to request CPU time.  For instance, the
-     retrieval routine could be enqueued upon the completion of a disk read.
-     The to_do field in the retrieval record is provided to aid in this.
-
-     If an I/O error occurs, fscache_io_error() should be called and -ENOBUFS
-     returned if possible or fscache_end_io() called with a suitable error
-     code.
-
-     fscache_put_retrieval() should be called after a page or pages are dealt
-     with.  This will complete the operation when all pages are dealt with.
-
-
-   * Request pages be read from cache [mandatory]::
-
-	int (*read_or_alloc_pages)(struct fscache_retrieval *op,
-				   struct list_head *pages,
-				   unsigned *nr_pages,
-				   gfp_t gfp)
-
-     This is like the read_or_alloc_page() method, except it is handed a list
-     of pages instead of one page.  Any pages on which a read operation is
-     started must be added to the page cache for the specified mapping and also
-     to the LRU.  Such pages must also be removed from the pages list and
-     ``*nr_pages`` decremented per page.
-
-     If there was an error such as -ENOMEM, then that should be returned; else
-     if one or more pages couldn't be read or allocated, then -ENOBUFS should
-     be returned; else if one or more pages couldn't be read, then -ENODATA
-     should be returned.  If all the pages are dispatched then 0 should be
-     returned.
-
-
-   * Request page be allocated in the cache [mandatory]::
-
-	int (*allocate_page)(struct fscache_retrieval *op,
-			     struct page *page,
-			     gfp_t gfp)
-
-     This is like the read_or_alloc_page() method, except that it shouldn't
-     read from the cache, even if there's data there that could be retrieved.
-     It should, however, set up any internal metadata required such that
-     the write_page() method can write to the cache.
-
-     If there's no backing block available, then -ENOBUFS should be returned
-     (or -ENOMEM if there were other problems).  If a block is successfully
-     allocated, then the netfs page should be marked and 0 returned.
-
-
-   * Request pages be allocated in the cache [mandatory]::
-
-	int (*allocate_pages)(struct fscache_retrieval *op,
-			      struct list_head *pages,
-			      unsigned *nr_pages,
-			      gfp_t gfp)
-
-     This is an multiple page version of the allocate_page() method.  pages and
-     nr_pages should be treated as for the read_or_alloc_pages() method.
-
-
-   * Request page be written to cache [mandatory]::
-
-	int (*write_page)(struct fscache_storage *op,
-			  struct page *page);
-
-     This is called to write from a page on which there was a previously
-     successful read_or_alloc_page() call or similar.  FS-Cache filters out
-     pages that don't have mappings.
-
-     This method is called asynchronously from the FS-Cache thread pool.  It is
-     not required to actually store anything, provided -ENODATA is then
-     returned to the next read of this page.
-
-     If an error occurred, then a negative error code should be returned,
-     otherwise zero should be returned.  FS-Cache will take appropriate action
-     in response to an error, such as withdrawing this object.
-
-     If this method returns success then FS-Cache will inform the netfs
-     appropriately.
-
-
-   * Discard retained per-page metadata [mandatory]::
-
-	void (*uncache_page)(struct fscache_object *object, struct page *page)
-
-     This is called when a netfs page is being evicted from the pagecache.  The
-     cache backend should tear down any internal representation or tracking it
-     maintains for this page.
+     This is called to start an operation on behalf of the network filesystem
+     or the netfs helper library.  The cache resources attached to *cres
+     should be filled in by the cache so that the operation can be performed.
 
 
 FS-Cache Utilities
@@ -576,15 +459,6 @@ FS-Cache provides some utilities that a cache backend may make use of:
      This sets the limit FS-Cache imposes on the highest byte it's willing to
      try and store for a netfs.  Any page over this limit is automatically
      rejected by fscache_read_alloc_page() and co with -ENOBUFS.
-
-
-   * Mark pages as being cached::
-
-	void fscache_mark_pages_cached(struct fscache_retrieval *op,
-				       struct pagevec *pagevec);
-
-     This marks a set of pages as being cached.  After this has been called,
-     the netfs must call fscache_uncache_page() to unmark the pages.
 
 
    * Perform coherency check on an object::
