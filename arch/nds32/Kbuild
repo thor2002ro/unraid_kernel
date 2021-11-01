@@ -1,4 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
+obj-y			+= kernel/ mm/
+obj-$(CONFIG_FPU)	+= math-emu/
+obj-y			+= boot/dts/
 
 # for cleaning
 subdir- += boot
