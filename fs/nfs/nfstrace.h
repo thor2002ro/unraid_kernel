@@ -11,15 +11,7 @@
 #include <linux/tracepoint.h>
 #include <linux/iversion.h>
 
-TRACE_DEFINE_ENUM(DT_UNKNOWN);
-TRACE_DEFINE_ENUM(DT_FIFO);
-TRACE_DEFINE_ENUM(DT_CHR);
-TRACE_DEFINE_ENUM(DT_DIR);
-TRACE_DEFINE_ENUM(DT_BLK);
-TRACE_DEFINE_ENUM(DT_REG);
-TRACE_DEFINE_ENUM(DT_LNK);
-TRACE_DEFINE_ENUM(DT_SOCK);
-TRACE_DEFINE_ENUM(DT_WHT);
+#include <trace/events/sunrpc_base.h>
 
 #define nfs_show_file_type(ftype) \
 	__print_symbolic(ftype, \
@@ -32,24 +24,6 @@ TRACE_DEFINE_ENUM(DT_WHT);
 			{ DT_LNK, "LNK" }, \
 			{ DT_SOCK, "SOCK" }, \
 			{ DT_WHT, "WHT" })
-
-TRACE_DEFINE_ENUM(NFS_INO_INVALID_DATA);
-TRACE_DEFINE_ENUM(NFS_INO_INVALID_ATIME);
-TRACE_DEFINE_ENUM(NFS_INO_INVALID_ACCESS);
-TRACE_DEFINE_ENUM(NFS_INO_INVALID_ACL);
-TRACE_DEFINE_ENUM(NFS_INO_REVAL_PAGECACHE);
-TRACE_DEFINE_ENUM(NFS_INO_REVAL_FORCED);
-TRACE_DEFINE_ENUM(NFS_INO_INVALID_LABEL);
-TRACE_DEFINE_ENUM(NFS_INO_INVALID_CHANGE);
-TRACE_DEFINE_ENUM(NFS_INO_INVALID_CTIME);
-TRACE_DEFINE_ENUM(NFS_INO_INVALID_MTIME);
-TRACE_DEFINE_ENUM(NFS_INO_INVALID_SIZE);
-TRACE_DEFINE_ENUM(NFS_INO_INVALID_OTHER);
-TRACE_DEFINE_ENUM(NFS_INO_DATA_INVAL_DEFER);
-TRACE_DEFINE_ENUM(NFS_INO_INVALID_BLOCKS);
-TRACE_DEFINE_ENUM(NFS_INO_INVALID_XATTR);
-TRACE_DEFINE_ENUM(NFS_INO_INVALID_NLINK);
-TRACE_DEFINE_ENUM(NFS_INO_INVALID_MODE);
 
 #define nfs_show_cache_validity(v) \
 	__print_flags(v, "|", \
@@ -70,17 +44,6 @@ TRACE_DEFINE_ENUM(NFS_INO_INVALID_MODE);
 			{ NFS_INO_INVALID_XATTR, "INVALID_XATTR" }, \
 			{ NFS_INO_INVALID_NLINK, "INVALID_NLINK" }, \
 			{ NFS_INO_INVALID_MODE, "INVALID_MODE" })
-
-TRACE_DEFINE_ENUM(NFS_INO_ADVISE_RDPLUS);
-TRACE_DEFINE_ENUM(NFS_INO_STALE);
-TRACE_DEFINE_ENUM(NFS_INO_ACL_LRU_SET);
-TRACE_DEFINE_ENUM(NFS_INO_INVALIDATING);
-TRACE_DEFINE_ENUM(NFS_INO_FSCACHE);
-TRACE_DEFINE_ENUM(NFS_INO_FSCACHE_LOCK);
-TRACE_DEFINE_ENUM(NFS_INO_LAYOUTCOMMIT);
-TRACE_DEFINE_ENUM(NFS_INO_LAYOUTCOMMITTING);
-TRACE_DEFINE_ENUM(NFS_INO_LAYOUTSTATS);
-TRACE_DEFINE_ENUM(NFS_INO_ODIRECT);
 
 #define nfs_show_nfsi_flags(v) \
 	__print_flags(v, "|", \
@@ -270,18 +233,55 @@ TRACE_EVENT(nfs_access_exit,
 		)
 );
 
-TRACE_DEFINE_ENUM(LOOKUP_FOLLOW);
-TRACE_DEFINE_ENUM(LOOKUP_DIRECTORY);
-TRACE_DEFINE_ENUM(LOOKUP_AUTOMOUNT);
-TRACE_DEFINE_ENUM(LOOKUP_PARENT);
-TRACE_DEFINE_ENUM(LOOKUP_REVAL);
-TRACE_DEFINE_ENUM(LOOKUP_RCU);
-TRACE_DEFINE_ENUM(LOOKUP_OPEN);
-TRACE_DEFINE_ENUM(LOOKUP_CREATE);
-TRACE_DEFINE_ENUM(LOOKUP_EXCL);
-TRACE_DEFINE_ENUM(LOOKUP_RENAME_TARGET);
-TRACE_DEFINE_ENUM(LOOKUP_EMPTY);
-TRACE_DEFINE_ENUM(LOOKUP_DOWN);
+DECLARE_EVENT_CLASS(nfs_update_size_class,
+		TP_PROTO(
+			const struct inode *inode,
+			loff_t new_size
+		),
+
+		TP_ARGS(inode, new_size),
+
+		TP_STRUCT__entry(
+			__field(dev_t, dev)
+			__field(u32, fhandle)
+			__field(u64, fileid)
+			__field(u64, version)
+			__field(loff_t, cur_size)
+			__field(loff_t, new_size)
+		),
+
+		TP_fast_assign(
+			const struct nfs_inode *nfsi = NFS_I(inode);
+
+			__entry->dev = inode->i_sb->s_dev;
+			__entry->fhandle = nfs_fhandle_hash(&nfsi->fh);
+			__entry->fileid = nfsi->fileid;
+			__entry->version = inode_peek_iversion_raw(inode);
+			__entry->cur_size = i_size_read(inode);
+			__entry->new_size = new_size;
+		),
+
+		TP_printk(
+			"fileid=%02x:%02x:%llu fhandle=0x%08x version=%llu cursize=%lld newsize=%lld",
+			MAJOR(__entry->dev), MINOR(__entry->dev),
+			(unsigned long long)__entry->fileid,
+			__entry->fhandle, __entry->version,
+			__entry->cur_size, __entry->new_size
+		)
+);
+
+#define DEFINE_NFS_UPDATE_SIZE_EVENT(name) \
+	DEFINE_EVENT(nfs_update_size_class, nfs_size_##name, \
+			TP_PROTO( \
+				const struct inode *inode, \
+				loff_t new_size \
+			), \
+			TP_ARGS(inode, new_size))
+
+DEFINE_NFS_UPDATE_SIZE_EVENT(truncate);
+DEFINE_NFS_UPDATE_SIZE_EVENT(wcc);
+DEFINE_NFS_UPDATE_SIZE_EVENT(update);
+DEFINE_NFS_UPDATE_SIZE_EVENT(grow);
 
 #define show_lookup_flags(flags) \
 	__print_flags(flags, "|", \
@@ -391,22 +391,6 @@ DEFINE_NFS_LOOKUP_EVENT(nfs_lookup_enter);
 DEFINE_NFS_LOOKUP_EVENT_DONE(nfs_lookup_exit);
 DEFINE_NFS_LOOKUP_EVENT(nfs_lookup_revalidate_enter);
 DEFINE_NFS_LOOKUP_EVENT_DONE(nfs_lookup_revalidate_exit);
-
-TRACE_DEFINE_ENUM(O_WRONLY);
-TRACE_DEFINE_ENUM(O_RDWR);
-TRACE_DEFINE_ENUM(O_CREAT);
-TRACE_DEFINE_ENUM(O_EXCL);
-TRACE_DEFINE_ENUM(O_NOCTTY);
-TRACE_DEFINE_ENUM(O_TRUNC);
-TRACE_DEFINE_ENUM(O_APPEND);
-TRACE_DEFINE_ENUM(O_NONBLOCK);
-TRACE_DEFINE_ENUM(O_DSYNC);
-TRACE_DEFINE_ENUM(O_DIRECT);
-TRACE_DEFINE_ENUM(O_LARGEFILE);
-TRACE_DEFINE_ENUM(O_DIRECTORY);
-TRACE_DEFINE_ENUM(O_NOFOLLOW);
-TRACE_DEFINE_ENUM(O_NOATIME);
-TRACE_DEFINE_ENUM(O_CLOEXEC);
 
 #define show_open_flags(flags) \
 	__print_flags(flags, "|", \
@@ -875,6 +859,152 @@ TRACE_EVENT(nfs_sillyrename_unlink,
 			MAJOR(__entry->dev), MINOR(__entry->dev),
 			(unsigned long long)__entry->dir,
 			__get_str(name)
+		)
+);
+
+TRACE_EVENT(nfs_aop_readpage,
+		TP_PROTO(
+			const struct inode *inode,
+			struct page *page
+		),
+
+		TP_ARGS(inode, page),
+
+		TP_STRUCT__entry(
+			__field(dev_t, dev)
+			__field(u32, fhandle)
+			__field(u64, fileid)
+			__field(u64, version)
+			__field(loff_t, offset)
+		),
+
+		TP_fast_assign(
+			const struct nfs_inode *nfsi = NFS_I(inode);
+
+			__entry->dev = inode->i_sb->s_dev;
+			__entry->fileid = nfsi->fileid;
+			__entry->fhandle = nfs_fhandle_hash(&nfsi->fh);
+			__entry->version = inode_peek_iversion_raw(inode);
+			__entry->offset = page_index(page) << PAGE_SHIFT;
+		),
+
+		TP_printk(
+			"fileid=%02x:%02x:%llu fhandle=0x%08x version=%llu offset=%lld",
+			MAJOR(__entry->dev), MINOR(__entry->dev),
+			(unsigned long long)__entry->fileid,
+			__entry->fhandle, __entry->version,
+			__entry->offset
+		)
+);
+
+TRACE_EVENT(nfs_aop_readpage_done,
+		TP_PROTO(
+			const struct inode *inode,
+			struct page *page,
+			int ret
+		),
+
+		TP_ARGS(inode, page, ret),
+
+		TP_STRUCT__entry(
+			__field(dev_t, dev)
+			__field(u32, fhandle)
+			__field(int, ret)
+			__field(u64, fileid)
+			__field(u64, version)
+			__field(loff_t, offset)
+		),
+
+		TP_fast_assign(
+			const struct nfs_inode *nfsi = NFS_I(inode);
+
+			__entry->dev = inode->i_sb->s_dev;
+			__entry->fileid = nfsi->fileid;
+			__entry->fhandle = nfs_fhandle_hash(&nfsi->fh);
+			__entry->version = inode_peek_iversion_raw(inode);
+			__entry->offset = page_index(page) << PAGE_SHIFT;
+			__entry->ret = ret;
+		),
+
+		TP_printk(
+			"fileid=%02x:%02x:%llu fhandle=0x%08x version=%llu offset=%lld ret=%d",
+			MAJOR(__entry->dev), MINOR(__entry->dev),
+			(unsigned long long)__entry->fileid,
+			__entry->fhandle, __entry->version,
+			__entry->offset, __entry->ret
+		)
+);
+
+TRACE_EVENT(nfs_aop_readahead,
+		TP_PROTO(
+			const struct inode *inode,
+			unsigned int nr_pages
+		),
+
+		TP_ARGS(inode, nr_pages),
+
+		TP_STRUCT__entry(
+			__field(dev_t, dev)
+			__field(u32, fhandle)
+			__field(u64, fileid)
+			__field(u64, version)
+			__field(unsigned int, nr_pages)
+		),
+
+		TP_fast_assign(
+			const struct nfs_inode *nfsi = NFS_I(inode);
+
+			__entry->dev = inode->i_sb->s_dev;
+			__entry->fileid = nfsi->fileid;
+			__entry->fhandle = nfs_fhandle_hash(&nfsi->fh);
+			__entry->version = inode_peek_iversion_raw(inode);
+			__entry->nr_pages = nr_pages;
+		),
+
+		TP_printk(
+			"fileid=%02x:%02x:%llu fhandle=0x%08x version=%llu nr_pages=%u",
+			MAJOR(__entry->dev), MINOR(__entry->dev),
+			(unsigned long long)__entry->fileid,
+			__entry->fhandle, __entry->version,
+			__entry->nr_pages
+		)
+);
+
+TRACE_EVENT(nfs_aop_readahead_done,
+		TP_PROTO(
+			const struct inode *inode,
+			unsigned int nr_pages,
+			int ret
+		),
+
+		TP_ARGS(inode, nr_pages, ret),
+
+		TP_STRUCT__entry(
+			__field(dev_t, dev)
+			__field(u32, fhandle)
+			__field(int, ret)
+			__field(u64, fileid)
+			__field(u64, version)
+			__field(unsigned int, nr_pages)
+		),
+
+		TP_fast_assign(
+			const struct nfs_inode *nfsi = NFS_I(inode);
+
+			__entry->dev = inode->i_sb->s_dev;
+			__entry->fileid = nfsi->fileid;
+			__entry->fhandle = nfs_fhandle_hash(&nfsi->fh);
+			__entry->version = inode_peek_iversion_raw(inode);
+			__entry->nr_pages = nr_pages;
+			__entry->ret = ret;
+		),
+
+		TP_printk(
+			"fileid=%02x:%02x:%llu fhandle=0x%08x version=%llu nr_pages=%u ret=%d",
+			MAJOR(__entry->dev), MINOR(__entry->dev),
+			(unsigned long long)__entry->fileid,
+			__entry->fhandle, __entry->version,
+			__entry->nr_pages, __entry->ret
 		)
 );
 
@@ -1427,8 +1557,8 @@ DECLARE_EVENT_CLASS(nfs_xdr_event,
 			__assign_str(procedure, task->tk_msg.rpc_proc->p_name);
 		),
 
-		TP_printk(
-			"task:%u@%d xid=0x%08x %sv%d %s error=%ld (%s)",
+		TP_printk(SUNRPC_TRACE_TASK_SPECIFIER
+			  " xid=0x%08x %sv%d %s error=%ld (%s)",
 			__entry->task_id, __entry->client_id, __entry->xid,
 			__get_str(program), __entry->version,
 			__get_str(procedure), -__entry->error,
