@@ -180,7 +180,7 @@ EXPORT_SYMBOL_GPL(static_key_initialized);
 unsigned int reset_devices;
 EXPORT_SYMBOL(reset_devices);
 
-static int __init set_reset_devices(char *str)
+static int __init set_reset_devices(char *str __always_unused)
 {
 	reset_devices = 1;
 	return 1;
@@ -230,13 +230,13 @@ static bool __init obsolete_checksetup(char *line)
 unsigned long loops_per_jiffy = (1<<12);
 EXPORT_SYMBOL(loops_per_jiffy);
 
-static int __init debug_kernel(char *str)
+static int __init debug_kernel(char *str __always_unused)
 {
 	console_loglevel = CONSOLE_LOGLEVEL_DEBUG;
 	return 0;
 }
 
-static int __init quiet_kernel(char *str)
+static int __init quiet_kernel(char *str __always_unused)
 {
 	console_loglevel = CONSOLE_LOGLEVEL_QUIET;
 	return 0;
@@ -381,7 +381,7 @@ static char * __init xbc_make_cmdline(const char *key)
 	ret = xbc_snprint_cmdline(new_cmdline, len + 1, root);
 	if (ret < 0 || ret > len) {
 		pr_err("Failed to print extra kernel cmdline.\n");
-		memblock_free_ptr(new_cmdline, len + 1);
+		memblock_free(new_cmdline, len + 1);
 		return NULL;
 	}
 
@@ -473,7 +473,7 @@ static void __init setup_boot_config(void)
 	get_boot_config_from_initrd(NULL, NULL);
 }
 
-static int __init warn_bootconfig(char *str)
+static int __init warn_bootconfig(char *str __always_unused)
 {
 	pr_warn("WARNING: 'bootconfig' found on the kernel command line but CONFIG_BOOT_CONFIG is not set.\n");
 	return 0;
@@ -502,7 +502,8 @@ static void __init repair_env_string(char *param, char *val)
 
 /* Anything after -- gets handed straight to init. */
 static int __init set_init_arg(char *param, char *val,
-			       const char *unused, void *arg)
+			       const char *unused __always_unused,
+			       void *arg __always_unused)
 {
 	unsigned int i;
 
@@ -527,7 +528,8 @@ static int __init set_init_arg(char *param, char *val,
  * unused parameters (modprobe will find them in /proc/cmdline).
  */
 static int __init unknown_bootoption(char *param, char *val,
-				     const char *unused, void *arg)
+				     const char *unused __always_unused,
+				     void *arg __always_unused)
 {
 	size_t len = strlen(param);
 
@@ -727,7 +729,8 @@ noinline void __ref rest_init(void)
 
 /* Check for early params. */
 static int __init do_early_param(char *param, char *val,
-				 const char *unused, void *arg)
+				 const char *unused __always_unused,
+				 void *arg __always_unused)
 {
 	const struct obs_kernel_param *p;
 
@@ -915,8 +918,10 @@ static void __init print_unknown_bootoptions(void)
 	for (p = &envp_init[2]; *p; p++)
 		end += sprintf(end, " %s", *p);
 
-	pr_notice("Unknown command line parameters:%s\n", unknown_options);
-	memblock_free_ptr(unknown_options, len);
+	/* Start at unknown_options[1] to skip the initial space */
+	pr_notice("Unknown kernel command line parameters \"%s\", will be passed to user space.\n",
+		&unknown_options[1]);
+	memblock_free(unknown_options, len);
 }
 
 asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
@@ -1347,8 +1352,10 @@ static const char *initcall_level_names[] __initdata = {
 	"late",
 };
 
-static int __init ignore_unknown_bootoption(char *param, char *val,
-			       const char *unused, void *arg)
+static int __init ignore_unknown_bootoption(char *param __always_unused,
+					    char *val __always_unused,
+					    const char *unused __always_unused,
+					    void *arg __always_unused)
 {
 	return 0;
 }
@@ -1485,7 +1492,7 @@ void __weak free_initmem(void)
 	free_initmem_default(POISON_FREE_INITMEM);
 }
 
-static int __ref kernel_init(void *unused)
+static int __ref kernel_init(void *unused __always_unused)
 {
 	int ret;
 
@@ -1497,6 +1504,8 @@ static int __ref kernel_init(void *unused)
 	kernel_init_freeable();
 	/* need to finish all async __init code before freeing the memory */
 	async_synchronize_full();
+
+	system_state = SYSTEM_FREEING_INITMEM;
 	kprobe_free_init_mem();
 	ftrace_free_init_mem();
 	kgdb_free_init_mem();

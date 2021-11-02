@@ -79,7 +79,7 @@
 static DEFINE_WW_CLASS(crtc_ww_class);
 
 #if IS_ENABLED(CONFIG_DRM_DEBUG_MODESET_LOCK)
-static noinline depot_stack_handle_t __stack_depot_save(void)
+static noinline depot_stack_handle_t __drm_stack_depot_save(void)
 {
 	unsigned long entries[8];
 	unsigned int n;
@@ -108,7 +108,7 @@ static void __stack_depot_print(depot_stack_handle_t stack_depot)
 	kfree(buf);
 }
 #else /* CONFIG_DRM_DEBUG_MODESET_LOCK */
-static depot_stack_handle_t __stack_depot_save(void)
+static depot_stack_handle_t __drm_stack_depot_save(void)
 {
 	return 0;
 }
@@ -317,7 +317,7 @@ static inline int modeset_lock(struct drm_modeset_lock *lock,
 		ret = 0;
 	} else if (ret == -EDEADLK) {
 		ctx->contended = lock;
-		ctx->stack_depot = __stack_depot_save();
+		ctx->stack_depot = __drm_stack_depot_save();
 	}
 
 	return ret;
