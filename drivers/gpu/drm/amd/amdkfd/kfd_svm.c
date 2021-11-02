@@ -193,7 +193,6 @@ svm_range_dma_map(struct svm_range *prange, unsigned long *bitmap,
 
 	for_each_set_bit(gpuidx, bitmap, MAX_GPU_INSTANCE) {
 		struct kfd_process_device *pdd;
-		struct amdgpu_device *adev;
 
 		pr_debug("mapping to gpu idx 0x%x\n", gpuidx);
 		pdd = kfd_process_device_from_gpuidx(p, gpuidx);
@@ -201,9 +200,8 @@ svm_range_dma_map(struct svm_range *prange, unsigned long *bitmap,
 			pr_debug("failed to find device idx %d\n", gpuidx);
 			return -EINVAL;
 		}
-		adev = (struct amdgpu_device *)pdd->dev->kgd;
 
-		r = svm_range_dma_map_dev(adev, prange, offset, npages,
+		r = svm_range_dma_map_dev(pdd->dev->adev, prange, offset, npages,
 					  hmm_pfns, gpuidx);
 		if (r)
 			break;
@@ -581,7 +579,7 @@ svm_range_get_adev_by_id(struct svm_range *prange, uint32_t gpu_id)
 		return NULL;
 	}
 
-	return (struct amdgpu_device *)pdd->dev->kgd;
+	return pdd->dev->adev;
 }
 
 struct kfd_process_device *
@@ -593,7 +591,7 @@ svm_range_get_pdd_by_adev(struct svm_range *prange, struct amdgpu_device *adev)
 
 	p = container_of(prange->svms, struct kfd_process, svms);
 
-	r = kfd_process_gpuid_from_kgd(p, adev, &gpuid, &gpu_idx);
+	r = kfd_process_gpuid_from_adev(p, adev, &gpuid, &gpu_idx);
 	if (r) {
 		pr_debug("failed to get device id by adev %p\n", adev);
 		return NULL;
@@ -1129,7 +1127,6 @@ svm_range_unmap_from_gpus(struct svm_range *prange, unsigned long start,
 	DECLARE_BITMAP(bitmap, MAX_GPU_INSTANCE);
 	struct kfd_process_device *pdd;
 	struct dma_fence *fence = NULL;
-	struct amdgpu_device *adev;
 	struct kfd_process *p;
 	uint32_t gpuidx;
 	int r = 0;
@@ -1145,9 +1142,9 @@ svm_range_unmap_from_gpus(struct svm_range *prange, unsigned long start,
 			pr_debug("failed to find device idx %d\n", gpuidx);
 			return -EINVAL;
 		}
-		adev = (struct amdgpu_device *)pdd->dev->kgd;
 
-		r = svm_range_unmap_from_gpu(adev, drm_priv_to_vm(pdd->drm_priv),
+		r = svm_range_unmap_from_gpu(pdd->dev->adev,
+					     drm_priv_to_vm(pdd->drm_priv),
 					     start, last, &fence);
 		if (r)
 			break;
@@ -1159,7 +1156,7 @@ svm_range_unmap_from_gpus(struct svm_range *prange, unsigned long start,
 			if (r)
 				break;
 		}
-		amdgpu_amdkfd_flush_gpu_tlb_pasid((struct kgd_dev *)adev,
+		amdgpu_amdkfd_flush_gpu_tlb_pasid(pdd->dev->adev,
 					p->pasid, TLB_FLUSH_HEAVYWEIGHT);
 	}
 
@@ -1243,8 +1240,7 @@ svm_range_map_to_gpu(struct amdgpu_device *adev, struct amdgpu_vm *vm,
 		struct kfd_process *p;
 
 		p = container_of(prange->svms, struct kfd_process, svms);
-		amdgpu_amdkfd_flush_gpu_tlb_pasid((struct kgd_dev *)adev,
-						p->pasid, TLB_FLUSH_LEGACY);
+		amdgpu_amdkfd_flush_gpu_tlb_pasid(adev, p->pasid, TLB_FLUSH_LEGACY);
 	}
 out:
 	return r;
@@ -1257,7 +1253,6 @@ svm_range_map_to_gpus(struct svm_range *prange, unsigned long offset,
 {
 	struct kfd_process_device *pdd;
 	struct amdgpu_device *bo_adev;
-	struct amdgpu_device *adev;
 	struct kfd_process *p;
 	struct dma_fence *fence = NULL;
 	uint32_t gpuidx;
@@ -1276,19 +1271,18 @@ svm_range_map_to_gpus(struct svm_range *prange, unsigned long offset,
 			pr_debug("failed to find device idx %d\n", gpuidx);
 			return -EINVAL;
 		}
-		adev = (struct amdgpu_device *)pdd->dev->kgd;
 
 		pdd = kfd_bind_process_to_device(pdd->dev, p);
 		if (IS_ERR(pdd))
 			return -EINVAL;
 
-		if (bo_adev && adev != bo_adev &&
-		    !amdgpu_xgmi_same_hive(adev, bo_adev)) {
+		if (bo_adev && pdd->dev->adev != bo_adev &&
+		    !amdgpu_xgmi_same_hive(pdd->dev->adev, bo_adev)) {
 			pr_debug("cannot map to device idx %d\n", gpuidx);
 			continue;
 		}
 
-		r = svm_range_map_to_gpu(adev, drm_priv_to_vm(pdd->drm_priv),
+		r = svm_range_map_to_gpu(pdd->dev->adev, drm_priv_to_vm(pdd->drm_priv),
 					 prange, offset, npages, readonly,
 					 prange->dma_addr[gpuidx],
 					 bo_adev, wait ? &fence : NULL);
@@ -1322,7 +1316,6 @@ struct svm_validate_context {
 static int svm_range_reserve_bos(struct svm_validate_context *ctx)
 {
 	struct kfd_process_device *pdd;
-	struct amdgpu_device *adev;
 	struct amdgpu_vm *vm;
 	uint32_t gpuidx;
 	int r;
@@ -1334,7 +1327,6 @@ static int svm_range_reserve_bos(struct svm_validate_context *ctx)
 			pr_debug("failed to find device idx %d\n", gpuidx);
 			return -EINVAL;
 		}
-		adev = (struct amdgpu_device *)pdd->dev->kgd;
 		vm = drm_priv_to_vm(pdd->drm_priv);
 
 		ctx->tv[gpuidx].bo = &vm->root.bo->tbo;
@@ -1356,9 +1348,9 @@ static int svm_range_reserve_bos(struct svm_validate_context *ctx)
 			r = -EINVAL;
 			goto unreserve_out;
 		}
-		adev = (struct amdgpu_device *)pdd->dev->kgd;
 
-		r = amdgpu_vm_validate_pt_bos(adev, drm_priv_to_vm(pdd->drm_priv),
+		r = amdgpu_vm_validate_pt_bos(pdd->dev->adev,
+					      drm_priv_to_vm(pdd->drm_priv),
 					      svm_range_bo_validate, NULL);
 		if (r) {
 			pr_debug("failed %d validate pt bos\n", r);
@@ -1381,12 +1373,10 @@ static void svm_range_unreserve_bos(struct svm_validate_context *ctx)
 static void *kfd_svm_page_owner(struct kfd_process *p, int32_t gpuidx)
 {
 	struct kfd_process_device *pdd;
-	struct amdgpu_device *adev;
 
 	pdd = kfd_process_device_from_gpuidx(p, gpuidx);
-	adev = (struct amdgpu_device *)pdd->dev->kgd;
 
-	return SVM_ADEV_PGMAP_OWNER(adev);
+	return SVM_ADEV_PGMAP_OWNER(pdd->dev->adev);
 }
 
 /*
@@ -1964,7 +1954,6 @@ svm_range_handle_list_op(struct svm_range_list *svms, struct svm_range *prange)
 static void svm_range_drain_retry_fault(struct svm_range_list *svms)
 {
 	struct kfd_process_device *pdd;
-	struct amdgpu_device *adev;
 	struct kfd_process *p;
 	uint32_t i;
 
@@ -1976,9 +1965,9 @@ static void svm_range_drain_retry_fault(struct svm_range_list *svms)
 			continue;
 
 		pr_debug("drain retry fault gpu %d svms %p\n", i, svms);
-		adev = (struct amdgpu_device *)pdd->dev->kgd;
 
-		amdgpu_ih_wait_on_checkpoint_process(adev, &adev->irq.ih1);
+		amdgpu_ih_wait_on_checkpoint_process(pdd->dev->adev,
+						     &pdd->dev->adev->irq.ih1);
 		pr_debug("drain retry fault gpu %d svms 0x%p done\n", i, svms);
 	}
 }
@@ -2261,7 +2250,7 @@ svm_range_from_addr(struct svm_range_list *svms, unsigned long addr,
  * migration if actual loc is not best location, then update GPU page table
  * mapping to the best location.
  *
- * If vm fault gpu is range preferred loc, the best_loc is preferred loc.
+ * If the preferred loc is accessible by faulting GPU, use preferred loc.
  * If vm fault gpu idx is on range ACCESSIBLE bitmap, best_loc is vm fault gpu
  * If vm fault gpu idx is on range ACCESSIBLE_IN_PLACE bitmap, then
  *    if range actual loc is cpu, best_loc is cpu
@@ -2278,21 +2267,29 @@ svm_range_best_restore_location(struct svm_range *prange,
 				struct amdgpu_device *adev,
 				int32_t *gpuidx)
 {
-	struct amdgpu_device *bo_adev;
+	struct amdgpu_device *bo_adev, *preferred_adev;
 	struct kfd_process *p;
 	uint32_t gpuid;
 	int r;
 
 	p = container_of(prange->svms, struct kfd_process, svms);
 
-	r = kfd_process_gpuid_from_kgd(p, adev, &gpuid, gpuidx);
+	r = kfd_process_gpuid_from_adev(p, adev, &gpuid, gpuidx);
 	if (r < 0) {
 		pr_debug("failed to get gpuid from kgd\n");
 		return -1;
 	}
 
-	if (prange->preferred_loc == gpuid)
+	if (prange->preferred_loc == gpuid ||
+	    prange->preferred_loc == KFD_IOCTL_SVM_LOCATION_SYSMEM) {
 		return prange->preferred_loc;
+	} else if (prange->preferred_loc != KFD_IOCTL_SVM_LOCATION_UNDEFINED) {
+		preferred_adev = svm_range_get_adev_by_id(prange,
+							prange->preferred_loc);
+		if (amdgpu_xgmi_same_hive(adev, preferred_adev))
+			return prange->preferred_loc;
+		/* fall through */
+	}
 
 	if (test_bit(*gpuidx, prange->bitmap_access))
 		return gpuid;
@@ -2313,7 +2310,8 @@ svm_range_best_restore_location(struct svm_range *prange,
 
 static int
 svm_range_get_range_boundaries(struct kfd_process *p, int64_t addr,
-				unsigned long *start, unsigned long *last)
+			       unsigned long *start, unsigned long *last,
+			       bool *is_heap_stack)
 {
 	struct vm_area_struct *vma;
 	struct interval_tree_node *node;
@@ -2324,6 +2322,12 @@ svm_range_get_range_boundaries(struct kfd_process *p, int64_t addr,
 		pr_debug("VMA does not exist in address [0x%llx]\n", addr);
 		return -EFAULT;
 	}
+
+	*is_heap_stack = (vma->vm_start <= vma->vm_mm->brk &&
+			  vma->vm_end >= vma->vm_mm->start_brk) ||
+			 (vma->vm_start <= vma->vm_mm->start_stack &&
+			  vma->vm_end >= vma->vm_mm->start_stack);
+
 	start_limit = max(vma->vm_start >> PAGE_SHIFT,
 		      (unsigned long)ALIGN_DOWN(addr, 2UL << 8));
 	end_limit = min(vma->vm_end >> PAGE_SHIFT,
@@ -2353,9 +2357,9 @@ svm_range_get_range_boundaries(struct kfd_process *p, int64_t addr,
 	*start = start_limit;
 	*last = end_limit - 1;
 
-	pr_debug("vma start: 0x%lx start: 0x%lx vma end: 0x%lx last: 0x%lx\n",
-		  vma->vm_start >> PAGE_SHIFT, *start,
-		  vma->vm_end >> PAGE_SHIFT, *last);
+	pr_debug("vma [0x%lx 0x%lx] range [0x%lx 0x%lx] is_heap_stack %d\n",
+		 vma->vm_start >> PAGE_SHIFT, vma->vm_end >> PAGE_SHIFT,
+		 *start, *last, *is_heap_stack);
 
 	return 0;
 }
@@ -2420,11 +2424,13 @@ svm_range *svm_range_create_unregistered_range(struct amdgpu_device *adev,
 	struct svm_range *prange = NULL;
 	unsigned long start, last;
 	uint32_t gpuid, gpuidx;
+	bool is_heap_stack;
 	uint64_t bo_s = 0;
 	uint64_t bo_l = 0;
 	int r;
 
-	if (svm_range_get_range_boundaries(p, addr, &start, &last))
+	if (svm_range_get_range_boundaries(p, addr, &start, &last,
+					   &is_heap_stack))
 		return NULL;
 
 	r = svm_range_check_vm(p, start, last, &bo_s, &bo_l);
@@ -2445,11 +2451,14 @@ svm_range *svm_range_create_unregistered_range(struct amdgpu_device *adev,
 		pr_debug("Failed to create prange in address [0x%llx]\n", addr);
 		return NULL;
 	}
-	if (kfd_process_gpuid_from_kgd(p, adev, &gpuid, &gpuidx)) {
+	if (kfd_process_gpuid_from_adev(p, adev, &gpuid, &gpuidx)) {
 		pr_debug("failed to get gpuid from kgd\n");
 		svm_range_free(prange);
 		return NULL;
 	}
+
+	if (is_heap_stack)
+		prange->preferred_loc = KFD_IOCTL_SVM_LOCATION_SYSMEM;
 
 	svm_range_add_to_svms(prange);
 	svm_range_add_notifier_locked(mm, prange);
@@ -2509,7 +2518,7 @@ svm_range_count_fault(struct amdgpu_device *adev, struct kfd_process *p,
 		uint32_t gpuid;
 		int r;
 
-		r = kfd_process_gpuid_from_kgd(p, adev, &gpuid, &gpuidx);
+		r = kfd_process_gpuid_from_adev(p, adev, &gpuid, &gpuidx);
 		if (r < 0)
 			return;
 	}
@@ -2917,7 +2926,6 @@ svm_range_best_prefetch_location(struct svm_range *prange)
 	uint32_t best_loc = prange->prefetch_loc;
 	struct kfd_process_device *pdd;
 	struct amdgpu_device *bo_adev;
-	struct amdgpu_device *adev;
 	struct kfd_process *p;
 	uint32_t gpuidx;
 
@@ -2945,12 +2953,11 @@ svm_range_best_prefetch_location(struct svm_range *prange)
 			pr_debug("failed to get device by idx 0x%x\n", gpuidx);
 			continue;
 		}
-		adev = (struct amdgpu_device *)pdd->dev->kgd;
 
-		if (adev == bo_adev)
+		if (pdd->dev->adev == bo_adev)
 			continue;
 
-		if (!amdgpu_xgmi_same_hive(adev, bo_adev)) {
+		if (!amdgpu_xgmi_same_hive(pdd->dev->adev, bo_adev)) {
 			best_loc = 0;
 			break;
 		}
@@ -3076,6 +3083,8 @@ static void svm_range_evict_svm_bo_worker(struct work_struct *work)
 		struct svm_range *prange =
 				list_first_entry(&svm_bo->range_list,
 						struct svm_range, svm_bo_list);
+		int retries = 3;
+
 		list_del_init(&prange->svm_bo_list);
 		spin_unlock(&svm_bo->list_lock);
 
@@ -3083,7 +3092,11 @@ static void svm_range_evict_svm_bo_worker(struct work_struct *work)
 			 prange->start, prange->last);
 
 		mutex_lock(&prange->migrate_mutex);
-		svm_migrate_vram_to_ram(prange, svm_bo->eviction_fence->mm);
+		do {
+			svm_migrate_vram_to_ram(prange,
+						svm_bo->eviction_fence->mm);
+		} while (prange->actual_loc && --retries);
+		WARN(prange->actual_loc, "Migration failed during eviction");
 
 		mutex_lock(&prange->lock);
 		prange->svm_bo = NULL;

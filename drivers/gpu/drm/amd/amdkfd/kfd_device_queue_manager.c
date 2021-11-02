@@ -130,7 +130,7 @@ void program_sh_mem_settings(struct device_queue_manager *dqm,
 					struct qcm_process_device *qpd)
 {
 	return dqm->dev->kfd2kgd->program_sh_mem_settings(
-						dqm->dev->kgd, qpd->vmid,
+						dqm->dev->adev, qpd->vmid,
 						qpd->sh_mem_config,
 						qpd->sh_mem_ape1_base,
 						qpd->sh_mem_ape1_limit,
@@ -216,7 +216,7 @@ static void program_trap_handler_settings(struct device_queue_manager *dqm,
 {
 	if (dqm->dev->kfd2kgd->program_trap_handler_settings)
 		dqm->dev->kfd2kgd->program_trap_handler_settings(
-						dqm->dev->kgd, qpd->vmid,
+						dqm->dev->adev, qpd->vmid,
 						qpd->tba_addr, qpd->tma_addr);
 }
 
@@ -257,14 +257,14 @@ static int allocate_vmid(struct device_queue_manager *dqm,
 	/* qpd->page_table_base is set earlier when register_process()
 	 * is called, i.e. when the first queue is created.
 	 */
-	dqm->dev->kfd2kgd->set_vm_context_page_table_base(dqm->dev->kgd,
+	dqm->dev->kfd2kgd->set_vm_context_page_table_base(dqm->dev->adev,
 			qpd->vmid,
 			qpd->page_table_base);
 	/* invalidate the VM context after pasid and vmid mapping is set up */
 	kfd_flush_tlb(qpd_to_pdd(qpd), TLB_FLUSH_LEGACY);
 
 	if (dqm->dev->kfd2kgd->set_scratch_backing_va)
-		dqm->dev->kfd2kgd->set_scratch_backing_va(dqm->dev->kgd,
+		dqm->dev->kfd2kgd->set_scratch_backing_va(dqm->dev->adev,
 				qpd->sh_hidden_private_base, qpd->vmid);
 
 	return 0;
@@ -283,7 +283,7 @@ static int flush_texture_cache_nocpsch(struct kfd_dev *kdev,
 	if (ret)
 		return ret;
 
-	return amdgpu_amdkfd_submit_ib(kdev->kgd, KGD_ENGINE_MEC1, qpd->vmid,
+	return amdgpu_amdkfd_submit_ib(kdev->adev, KGD_ENGINE_MEC1, qpd->vmid,
 				qpd->ib_base, (uint32_t *)qpd->ib_kaddr,
 				pmf->release_mem_size / sizeof(uint32_t));
 }
@@ -557,7 +557,8 @@ static int destroy_queue_nocpsch(struct device_queue_manager *dqm,
 	return retval;
 }
 
-static int update_queue(struct device_queue_manager *dqm, struct queue *q)
+static int update_queue(struct device_queue_manager *dqm, struct queue *q,
+			struct mqd_update_info *minfo)
 {
 	int retval = 0;
 	struct mqd_manager *mqd_mgr;
@@ -605,7 +606,7 @@ static int update_queue(struct device_queue_manager *dqm, struct queue *q)
 		}
 	}
 
-	mqd_mgr->update_mqd(mqd_mgr, q->mqd, &q->properties);
+	mqd_mgr->update_mqd(mqd_mgr, q->mqd, &q->properties, minfo);
 
 	/*
 	 * check active state vs. the previous state and modify
@@ -775,7 +776,7 @@ static int restore_process_queues_nocpsch(struct device_queue_manager *dqm,
 
 	if (!list_empty(&qpd->queues_list)) {
 		dqm->dev->kfd2kgd->set_vm_context_page_table_base(
-				dqm->dev->kgd,
+				dqm->dev->adev,
 				qpd->vmid,
 				qpd->page_table_base);
 		kfd_flush_tlb(pdd, TLB_FLUSH_LEGACY);
@@ -953,7 +954,7 @@ set_pasid_vmid_mapping(struct device_queue_manager *dqm, u32 pasid,
 			unsigned int vmid)
 {
 	return dqm->dev->kfd2kgd->set_pasid_vmid_mapping(
-						dqm->dev->kgd, pasid, vmid);
+						dqm->dev->adev, pasid, vmid);
 }
 
 static void init_interrupts(struct device_queue_manager *dqm)
@@ -962,7 +963,7 @@ static void init_interrupts(struct device_queue_manager *dqm)
 
 	for (i = 0 ; i < get_pipes_per_mec(dqm) ; i++)
 		if (is_pipe_enabled(dqm, 0, i))
-			dqm->dev->kfd2kgd->init_interrupts(dqm->dev->kgd, i);
+			dqm->dev->kfd2kgd->init_interrupts(dqm->dev->adev, i);
 }
 
 static int initialize_nocpsch(struct device_queue_manager *dqm)
@@ -1131,7 +1132,7 @@ static int set_sched_resources(struct device_queue_manager *dqm)
 
 		res.queue_mask |= 1ull
 			<< amdgpu_queue_mask_bit_to_set_resource_bit(
-				(struct amdgpu_device *)dqm->dev->kgd, i);
+				dqm->dev->adev, i);
 	}
 	res.gws_mask = ~0ull;
 	res.oac_mask = res.gds_heap_base = res.gds_heap_size = 0;
@@ -1844,7 +1845,7 @@ static int allocate_hiq_sdma_mqd(struct device_queue_manager *dqm)
 		dev->device_info->num_sdma_queues_per_engine +
 		dqm->mqd_mgrs[KFD_MQD_TYPE_HIQ]->mqd_size;
 
-	retval = amdgpu_amdkfd_alloc_gtt_mem(dev->kgd, size,
+	retval = amdgpu_amdkfd_alloc_gtt_mem(dev->adev, size,
 		&(mem_obj->gtt_mem), &(mem_obj->gpu_addr),
 		(void *)&(mem_obj->cpu_ptr), false);
 
@@ -1994,7 +1995,7 @@ static void deallocate_hiq_sdma_mqd(struct kfd_dev *dev,
 {
 	WARN(!mqd, "No hiq sdma mqd trunk to free");
 
-	amdgpu_amdkfd_free_gtt_mem(dev->kgd, mqd->gtt_mem);
+	amdgpu_amdkfd_free_gtt_mem(dev->adev, mqd->gtt_mem);
 }
 
 void device_queue_manager_uninit(struct device_queue_manager *dqm)
@@ -2025,7 +2026,7 @@ static void kfd_process_hw_exception(struct work_struct *work)
 {
 	struct device_queue_manager *dqm = container_of(work,
 			struct device_queue_manager, hw_exception_work);
-	amdgpu_amdkfd_gpu_reset(dqm->dev->kgd);
+	amdgpu_amdkfd_gpu_reset(dqm->dev->adev);
 }
 
 #if defined(CONFIG_DEBUG_FS)
@@ -2064,7 +2065,7 @@ int dqm_debugfs_hqds(struct seq_file *m, void *data)
 		return 0;
 	}
 
-	r = dqm->dev->kfd2kgd->hqd_dump(dqm->dev->kgd,
+	r = dqm->dev->kfd2kgd->hqd_dump(dqm->dev->adev,
 					KFD_CIK_HIQ_PIPE, KFD_CIK_HIQ_QUEUE,
 					&dump, &n_regs);
 	if (!r) {
@@ -2086,7 +2087,7 @@ int dqm_debugfs_hqds(struct seq_file *m, void *data)
 				continue;
 
 			r = dqm->dev->kfd2kgd->hqd_dump(
-				dqm->dev->kgd, pipe, queue, &dump, &n_regs);
+				dqm->dev->adev, pipe, queue, &dump, &n_regs);
 			if (r)
 				break;
 
@@ -2103,7 +2104,7 @@ int dqm_debugfs_hqds(struct seq_file *m, void *data)
 		     queue < dqm->dev->device_info->num_sdma_queues_per_engine;
 		     queue++) {
 			r = dqm->dev->kfd2kgd->hqd_sdma_dump(
-				dqm->dev->kgd, pipe, queue, &dump, &n_regs);
+				dqm->dev->adev, pipe, queue, &dump, &n_regs);
 			if (r)
 				break;
 
