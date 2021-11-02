@@ -236,3 +236,6 @@ endif # SAMPLES
 
 config HAVE_SAMPLE_FTRACE_DIRECT
 	bool
+
+config HAVE_SAMPLE_FTRACE_MULTI_DIRECT
+	bool
