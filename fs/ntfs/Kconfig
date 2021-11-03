@@ -52,6 +52,7 @@ config NTFS_DEBUG
 config NTFS_RW
 	bool "NTFS write support"
 	depends on NTFS_FS
+	depends on BROKEN
 	help
 	  This enables the partial, but safe, write support in the NTFS driver.
 
