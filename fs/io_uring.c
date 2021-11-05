@@ -6950,10 +6950,6 @@ static void io_queue_sqe_arm_apoll(struct io_kiocb *req)
 
 	switch (io_arm_poll_handler(req)) {
 	case IO_APOLL_READY:
-		if (linked_timeout) {
-			io_queue_linked_timeout(linked_timeout);
-			linked_timeout = NULL;
-		}
 		io_req_task_queue(req);
 		break;
 	case IO_APOLL_ABORTED:
@@ -10798,7 +10794,6 @@ static __cold int io_register_iowq_max_workers(struct io_ring_ctx *ctx,
 	memcpy(ctx->iowq_limits, new_count, sizeof(new_count));
 	ctx->iowq_limits_set = true;
 
-	ret = -EINVAL;
 	if (tctx && tctx->io_wq) {
 		ret = io_wq_max_workers(tctx->io_wq, new_count);
 		if (ret)
