@@ -37,6 +37,7 @@
 
 void sparc_flush_page_to_ram(struct page *page);
 
+void flush_dcache_folio(struct folio *folio);
 #define ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE 1
 #define flush_dcache_page(page)			sparc_flush_page_to_ram(page)
 #define flush_dcache_mmap_lock(mapping)		do { } while (0)
