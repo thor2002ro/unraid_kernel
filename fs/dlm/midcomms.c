@@ -909,11 +909,11 @@ int dlm_process_incoming_buffer(int nodeid, unsigned char *buf, int len)
 		if (msglen > len)
 			break;
 
-		switch (le32_to_cpu(hd->h_version)) {
-		case DLM_VERSION_3_1:
+		switch (hd->h_version) {
+		case cpu_to_le32(DLM_VERSION_3_1):
 			dlm_midcomms_receive_buffer_3_1((union dlm_packet *)ptr, nodeid);
 			break;
-		case DLM_VERSION_3_2:
+		case cpu_to_le32(DLM_VERSION_3_2):
 			dlm_midcomms_receive_buffer_3_2((union dlm_packet *)ptr, nodeid);
 			break;
 		default:
@@ -1020,8 +1020,10 @@ static void dlm_fill_opts_header(struct dlm_opts *opts, uint16_t inner_len,
 	header_out(&opts->o_header);
 }
 
-static void midcomms_new_msg_cb(struct dlm_mhandle *mh)
+static void midcomms_new_msg_cb(void *data)
 {
+	struct dlm_mhandle *mh = data;
+
 	atomic_inc(&mh->node->send_queue_cnt);
 
 	spin_lock(&mh->node->send_queue_lock);
@@ -1231,7 +1233,7 @@ void dlm_midcomms_add_member(int nodeid)
 	}
 
 	node->users++;
-	pr_debug("users inc count %d\n", node->users);
+	pr_debug("node %d users inc count %d\n", nodeid, node->users);
 	spin_unlock(&node->state_lock);
 
 	srcu_read_unlock(&nodes_srcu, idx);
@@ -1254,7 +1256,7 @@ void dlm_midcomms_remove_member(int nodeid)
 
 	spin_lock(&node->state_lock);
 	node->users--;
-	pr_debug("users dec count %d\n", node->users);
+	pr_debug("node %d users dec count %d\n", nodeid, node->users);
 
 	/* hitting users count to zero means the
 	 * other side is running dlm_midcomms_stop()
@@ -1425,3 +1427,51 @@ int dlm_midcomms_close(int nodeid)
 
 	return ret;
 }
+
+/* debug functionality to send raw dlm msg from user space */
+struct dlm_rawmsg_data {
+	struct midcomms_node *node;
+	void *buf;
+};
+
+static void midcomms_new_rawmsg_cb(void *data)
+{
+	struct dlm_rawmsg_data *rd = data;
+	struct dlm_header *h = rd->buf;
+
+	switch (h->h_version) {
+	case cpu_to_le32(DLM_VERSION_3_1):
+		break;
+	default:
+		switch (h->h_cmd) {
+		case DLM_OPTS:
+			if (!h->u.h_seq)
+				h->u.h_seq = rd->node->seq_send++;
+			break;
+		default:
+			break;
+		}
+		break;
+	}
+}
+
+int dlm_midcomms_rawmsg_send(struct midcomms_node *node, void *buf,
+			     int buflen)
+{
+	struct dlm_rawmsg_data rd;
+	struct dlm_msg *msg;
+	char *msgbuf;
+
+	rd.node = node;
+	rd.buf = buf;
+
+	msg = dlm_lowcomms_new_msg(node->nodeid, buflen, GFP_NOFS,
+				   &msgbuf, midcomms_new_rawmsg_cb, &rd);
+	if (!msg)
+		return -ENOMEM;
+
+	memcpy(msgbuf, buf, buflen);
+	dlm_lowcomms_commit_msg(msg);
+	return 0;
+}
+
