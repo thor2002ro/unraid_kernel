@@ -164,8 +164,10 @@ int amdgpu_driver_load_kms(struct amdgpu_device *adev, unsigned long flags)
 	    !pci_is_thunderbolt_attached(to_pci_dev(dev->dev)))
 		flags |= AMD_IS_PX;
 
-	parent = pci_upstream_bridge(adev->pdev);
-	adev->has_pr3 = parent ? pci_pr3_present(parent) : false;
+	if (!(flags & AMD_IS_APU)) {
+		parent = pci_upstream_bridge(adev->pdev);
+		adev->has_pr3 = parent ? pci_pr3_present(parent) : false;
+	}
 
 	/* amdgpu_device_init should report only fatal error
 	 * like memory allocation failure or iomapping failure,
@@ -1040,6 +1042,22 @@ int amdgpu_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 				return -EINVAL;
 			}
 			ui32 /= 100;
+			break;
+		case AMDGPU_INFO_SENSOR_PROFILE_MODE_ACTIVE: {
+			const struct amd_pm_funcs *pp_funcs = adev->powerplay.pp_funcs;
+			enum amd_dpm_forced_level level;
+
+			if (pp_funcs->get_performance_level)
+				level = amdgpu_dpm_get_performance_level(adev);
+			else
+				level = adev->pm.dpm.forced_level;
+
+			if ((level == AMD_DPM_FORCED_LEVEL_PROFILE_STANDARD) ||
+			    (level == AMD_DPM_FORCED_LEVEL_PROFILE_MIN_SCLK) ||
+			    (level == AMD_DPM_FORCED_LEVEL_PROFILE_MIN_MCLK) ||
+			    (level == AMD_DPM_FORCED_LEVEL_PROFILE_PEAK))
+				ui32 = 1;
+		}
 			break;
 		default:
 			DRM_DEBUG_KMS("Invalid request %d\n",
