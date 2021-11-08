@@ -603,6 +603,9 @@ static const struct comment_style comment_style_c = {
 
 static void conf_write_heading(FILE *fp, const struct comment_style *cs)
 {
+	if (!cs) /* no heading for rustc_cfg? */
+		return;
+
 	fprintf(fp, "%s\n", cs->prefix);
 
 	fprintf(fp, "%s Automatically generated file; DO NOT EDIT.\n",
@@ -747,6 +750,38 @@ static void print_symbol_for_c(FILE *fp, struct symbol *sym)
 	fprintf(fp, "#define %s%s%s %s%s\n", CONFIG_, sym->name, sym_suffix,
 		val_prefix, val);
 
+	free(escaped);
+}
+
+/* rustc configuration */
+static void print_symbol_for_rustc_cfg(FILE *fp, struct symbol *sym)
+{
+	const char *val;
+	char *escaped;
+
+	if (sym->type == S_UNKNOWN)
+		return;
+
+	val = sym_get_string_value(sym);
+
+	if (sym->type == S_BOOLEAN || sym->type == S_TRISTATE) {
+		if (*val == 'n')
+			return;
+
+		/*
+		 * To have similar functionality to the C macro `IS_ENABLED()`
+		 * we provide an empty `--cfg CONFIG_X` here in both `y`
+		 * and `m` cases.
+		 *
+		 * Then, the common `fprintf()` below will also give us
+		 * a `--cfg CONFIG_X="y"` or `--cfg CONFIG_X="m"`, which can
+		 * be used as the equivalent of `IS_BUILTIN()`/`IS_MODULE()`.
+		 */
+		fprintf(fp, "--cfg=%s%s\n", CONFIG_, sym->name);
+	}
+
+	escaped = escape_string_value(val);
+	fprintf(fp, "--cfg=%s%s=%s\n", CONFIG_, sym->name, escaped);
 	free(escaped);
 }
 
@@ -1126,6 +1161,12 @@ int conf_write_autoconf(int overwrite)
 	ret = __conf_write_autoconf(conf_get_autoheader_name(),
 				    print_symbol_for_c,
 				    &comment_style_c);
+	if (ret)
+		return ret;
+
+	ret = __conf_write_autoconf("include/generated/rustc_cfg",
+				    print_symbol_for_rustc_cfg,
+				    NULL);
 	if (ret)
 		return ret;
 
