@@ -1217,7 +1217,13 @@ static int match_server(struct TCP_Server_Info *server, struct smb3_fs_context *
 {
 	struct sockaddr *addr = (struct sockaddr *)&ctx->dstaddr;
 
-	if (ctx->nosharesock)
+	if (ctx->nosharesock) {
+		server->nosharesock = true;
+		return 0;
+	}
+
+	/* this server does not share socket */
+	if (server->nosharesock)
 		return 0;
 
 	/* If multidialect negotiation see if existing sessions match one */
@@ -1940,6 +1946,12 @@ cifs_get_smb_ses(struct TCP_Server_Info *server, struct smb3_fs_context *ctx)
 	if (ctx->domainname) {
 		ses->domainName = kstrdup(ctx->domainname, GFP_KERNEL);
 		if (!ses->domainName)
+			goto get_ses_fail;
+	}
+	if (ctx->workstation_name) {
+		ses->workstation_name = kstrdup(ctx->workstation_name,
+						GFP_KERNEL);
+		if (!ses->workstation_name)
 			goto get_ses_fail;
 	}
 	if (ctx->domainauto)
