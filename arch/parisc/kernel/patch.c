@@ -81,7 +81,7 @@ void __kprobes __patch_text_multiple(void *addr, u32 *insn, unsigned int len)
 			 * We're crossing a page boundary, so
 			 * need to remap
 			 */
-			flush_kernel_vmap_range((void *)fixmap,
+			invalidate_kernel_vmap_range((void *)fixmap,
 						(p-fixmap) * sizeof(*p));
 			if (mapped)
 				patch_unmap(FIX_TEXT_POKE0, &flags);
@@ -90,9 +90,10 @@ void __kprobes __patch_text_multiple(void *addr, u32 *insn, unsigned int len)
 		}
 	}
 
-	flush_kernel_vmap_range((void *)fixmap, (p-fixmap) * sizeof(*p));
+	invalidate_kernel_vmap_range((void *)fixmap, (p-fixmap) * sizeof(*p));
 	if (mapped)
 		patch_unmap(FIX_TEXT_POKE0, &flags);
+	invalidate_kernel_vmap_range((void *)start, end - start);
 	flush_icache_range(start, end);
 }
 
