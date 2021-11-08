@@ -414,6 +414,15 @@ void btrfs_exclop_finish(struct btrfs_fs_info *fs_info)
 	sysfs_notify(&fs_info->fs_devices->fsid_kobj, NULL, "exclusive_operation");
 }
 
+void btrfs_exclop_pause_balance(struct btrfs_fs_info *fs_info)
+{
+	spin_lock(&fs_info->super_lock);
+	ASSERT(fs_info->exclusive_operation == BTRFS_EXCLOP_BALANCE ||
+	       fs_info->exclusive_operation == BTRFS_EXCLOP_DEV_ADD);
+	fs_info->exclusive_operation = BTRFS_EXCLOP_BALANCE_PAUSED;
+	spin_unlock(&fs_info->super_lock);
+}
+
 static int btrfs_ioctl_getversion(struct file *file, int __user *arg)
 {
 	struct inode *inode = file_inode(file);
@@ -4023,6 +4032,11 @@ again:
 			if (fs_info->balance_ctl &&
 			    !test_bit(BTRFS_FS_BALANCE_RUNNING, &fs_info->flags)) {
 				/* this is (3) */
+				spin_lock(&fs_info->super_lock);
+				ASSERT(fs_info->exclusive_operation ==
+				       BTRFS_EXCLOP_BALANCE_PAUSED);
+				fs_info->exclusive_operation = BTRFS_EXCLOP_BALANCE;
+				spin_unlock(&fs_info->super_lock);
 				need_unlock = false;
 				goto locked;
 			}
