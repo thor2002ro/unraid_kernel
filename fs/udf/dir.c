@@ -43,7 +43,7 @@ static int udf_readdir(struct file *file, struct dir_context *ctx)
 	struct fileIdentDesc *fi = NULL;
 	struct fileIdentDesc cfi;
 	udf_pblk_t block, iblock;
-	loff_t nf_pos;
+	loff_t nf_pos, emit_pos;
 	int flen;
 	unsigned char *fname = NULL, *copy_name = NULL;
 	unsigned char *nameptr;
@@ -66,6 +66,19 @@ static int udf_readdir(struct file *file, struct dir_context *ctx)
 	nf_pos = (ctx->pos - 1) << 2;
 	if (nf_pos >= size)
 		goto out;
+
+	/*
+	 * Did our position change since last readdir (likely lseek was
+	 * called)? We need to verify the position correctly points at the
+	 * beginning of some dir entry so that the directory parsing code does
+	 * not get confused. Since UDF does not have any reliable way of
+	 * identifying beginning of dir entry (names are under user control),
+	 * we need to scan the directory from the beginning.
+	 */
+	if (ctx->pos != (loff_t)file->private_data) {
+		emit_pos = nf_pos;
+		nf_pos = 0;
+	}
 
 	fname = kmalloc(UDF_NAME_LEN, GFP_NOFS);
 	if (!fname) {
@@ -122,13 +135,19 @@ static int udf_readdir(struct file *file, struct dir_context *ctx)
 
 	while (nf_pos < size) {
 		struct kernel_lb_addr tloc;
+		loff_t cur_pos = nf_pos;
 
-		ctx->pos = (nf_pos >> 2) + 1;
+		/* Update file position only if we got past the current one */
+		if (nf_pos >= emit_pos)
+			ctx->pos = (nf_pos >> 2) + 1;
 
 		fi = udf_fileident_read(dir, &nf_pos, &fibh, &cfi, &epos, &eloc,
 					&elen, &offset);
 		if (!fi)
 			goto out;
+		/* Still not at offset where user asked us to read from? */
+		if (cur_pos < emit_pos)
+			continue;
 
 		liu = le16_to_cpu(cfi.lengthOfImpUse);
 		lfi = cfi.lengthFileIdent;
@@ -188,6 +207,8 @@ static int udf_readdir(struct file *file, struct dir_context *ctx)
 	ctx->pos = (nf_pos >> 2) + 1;
 
 out:
+	/* Store position where we've ended */
+	file->private_data = (void *)ctx->pos;
 	if (fibh.sbh != fibh.ebh)
 		brelse(fibh.ebh);
 	brelse(fibh.sbh);
