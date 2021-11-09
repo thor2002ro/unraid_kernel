@@ -1467,13 +1467,12 @@ struct file *hugetlb_file_setup(const char *name, size_t size,
 		*ucounts = current_ucounts();
 		if (user_shm_lock(size, *ucounts)) {
 			task_lock(current);
-			pr_warn_once("%s (%d): Using mlock ulimits for SHM_HUGETLB is deprecated\n",
+			pr_warn_once("%s (%d): Using mlock ulimits for SHM_HUGETLB is obsolete\n",
 				current->comm, current->pid);
 			task_unlock(current);
-		} else {
-			*ucounts = NULL;
-			return ERR_PTR(-EPERM);
 		}
+		*ucounts = NULL;
+		return ERR_PTR(-EPERM);
 	}
 
 	file = ERR_PTR(-ENOSPC);
