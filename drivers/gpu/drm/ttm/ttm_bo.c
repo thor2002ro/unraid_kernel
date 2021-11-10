@@ -619,7 +619,8 @@ static bool ttm_bo_evict_swapout_allowable(struct ttm_buffer_object *bo,
 			*busy = !ret;
 	}
 
-	if (ret && place && !bo->bdev->funcs->eviction_valuable(bo, place)) {
+	if (ret && place && (bo->resource->mem_type != place->mem_type ||
+		!bo->bdev->funcs->eviction_valuable(bo, place))) {
 		ret = false;
 		if (*locked) {
 			dma_resv_unlock(bo->base.resv);
@@ -726,6 +727,8 @@ int ttm_mem_evict_first(struct ttm_device *bdev,
 	ret = ttm_bo_evict(bo, ctx);
 	if (locked)
 		ttm_bo_unreserve(bo);
+	else
+		ttm_bo_move_to_lru_tail_unlocked(bo);
 
 	ttm_bo_put(bo);
 	return ret;

@@ -221,9 +221,9 @@ static bool create_links(
 		link = link_create(&link_init_params);
 
 		if (link) {
-				dc->links[dc->link_count] = link;
-				link->dc = dc;
-				++dc->link_count;
+			dc->links[dc->link_count] = link;
+			link->dc = dc;
+			++dc->link_count;
 		}
 	}
 
@@ -1016,8 +1016,6 @@ static bool dc_construct(struct dc *dc,
 		goto fail;
 	}
 
-	dc_resource_state_construct(dc, dc->current_state);
-
 	if (!create_links(dc, init_params->num_virtual_links))
 		goto fail;
 
@@ -1027,8 +1025,7 @@ static bool dc_construct(struct dc *dc,
 	if (!create_link_encoders(dc))
 		goto fail;
 
-	/* Initialise DIG link encoder resource tracking variables. */
-	link_enc_cfg_init(dc, dc->current_state);
+	dc_resource_state_construct(dc, dc->current_state);
 
 	return true;
 
@@ -1892,6 +1889,7 @@ static bool is_flip_pending_in_pipes(struct dc *dc, struct dc_state *context)
 	return false;
 }
 
+#ifdef CONFIG_DRM_AMD_DC_DCN
 /* Perform updates here which need to be deferred until next vupdate
  *
  * i.e. blnd lut, 3dlut, and shaper lut bypass regs are double buffered
@@ -1901,7 +1899,6 @@ static bool is_flip_pending_in_pipes(struct dc *dc, struct dc_state *context)
  */
 static void process_deferred_updates(struct dc *dc)
 {
-#ifdef CONFIG_DRM_AMD_DC_DCN
 	int i = 0;
 
 	if (dc->debug.enable_mem_low_power.bits.cm) {
@@ -1910,8 +1907,8 @@ static void process_deferred_updates(struct dc *dc)
 			if (dc->res_pool->dpps[i]->funcs->dpp_deferred_update)
 				dc->res_pool->dpps[i]->funcs->dpp_deferred_update(dc->res_pool->dpps[i]);
 	}
-#endif
 }
+#endif /* CONFIG_DRM_AMD_DC_DCN */
 
 void dc_post_update_surfaces_to_stream(struct dc *dc)
 {
@@ -1938,7 +1935,9 @@ void dc_post_update_surfaces_to_stream(struct dc *dc)
 			dc->hwss.disable_plane(dc, &context->res_ctx.pipe_ctx[i]);
 		}
 
+#ifdef CONFIG_DRM_AMD_DC_DCN
 	process_deferred_updates(dc);
+#endif
 
 	dc->hwss.optimize_bandwidth(dc, context);
 
