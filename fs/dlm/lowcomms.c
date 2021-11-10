@@ -53,6 +53,8 @@
 #include <net/sctp/sctp.h>
 #include <net/ipv6.h>
 
+#include <trace/events/dlm.h>
+
 #include "dlm_internal.h"
 #include "lowcomms.h"
 #include "midcomms.h"
@@ -925,6 +927,7 @@ static int receive_from_sock(struct connection *con)
 		msg.msg_flags = MSG_DONTWAIT | MSG_NOSIGNAL;
 		ret = kernel_recvmsg(con->sock, &msg, &iov, 1, iov.iov_len,
 				     msg.msg_flags);
+		trace_dlm_recv(con->nodeid, ret);
 		if (ret == -EAGAIN)
 			break;
 		else if (ret <= 0)
@@ -1202,8 +1205,7 @@ static struct writequeue_entry *new_writequeue_entry(struct connection *con,
 
 static struct writequeue_entry *new_wq_entry(struct connection *con, int len,
 					     gfp_t allocation, char **ppc,
-					     void (*cb)(struct dlm_mhandle *mh),
-					     struct dlm_mhandle *mh)
+					     void (*cb)(void *data), void *data)
 {
 	struct writequeue_entry *e;
 
@@ -1215,7 +1217,7 @@ static struct writequeue_entry *new_wq_entry(struct connection *con, int len,
 
 			*ppc = page_address(e->page) + e->end;
 			if (cb)
-				cb(mh);
+				cb(data);
 
 			e->end += len;
 			e->users++;
@@ -1237,7 +1239,7 @@ static struct writequeue_entry *new_wq_entry(struct connection *con, int len,
 
 	spin_lock(&con->writequeue_lock);
 	if (cb)
-		cb(mh);
+		cb(data);
 
 	list_add_tail(&e->list, &con->writequeue);
 	spin_unlock(&con->writequeue_lock);
@@ -1247,8 +1249,8 @@ static struct writequeue_entry *new_wq_entry(struct connection *con, int len,
 
 static struct dlm_msg *dlm_lowcomms_new_msg_con(struct connection *con, int len,
 						gfp_t allocation, char **ppc,
-						void (*cb)(struct dlm_mhandle *mh),
-						struct dlm_mhandle *mh)
+						void (*cb)(void *data),
+						void *data)
 {
 	struct writequeue_entry *e;
 	struct dlm_msg *msg;
@@ -1271,7 +1273,7 @@ static struct dlm_msg *dlm_lowcomms_new_msg_con(struct connection *con, int len,
 
 	kref_init(&msg->ref);
 
-	e = new_wq_entry(con, len, allocation, ppc, cb, mh);
+	e = new_wq_entry(con, len, allocation, ppc, cb, data);
 	if (!e) {
 		if (sleepable)
 			mutex_unlock(&con->wq_alloc);
@@ -1291,8 +1293,8 @@ static struct dlm_msg *dlm_lowcomms_new_msg_con(struct connection *con, int len,
 }
 
 struct dlm_msg *dlm_lowcomms_new_msg(int nodeid, int len, gfp_t allocation,
-				     char **ppc, void (*cb)(struct dlm_mhandle *mh),
-				     struct dlm_mhandle *mh)
+				     char **ppc, void (*cb)(void *data),
+				     void *data)
 {
 	struct connection *con;
 	struct dlm_msg *msg;
@@ -1313,7 +1315,7 @@ struct dlm_msg *dlm_lowcomms_new_msg(int nodeid, int len, gfp_t allocation,
 		return NULL;
 	}
 
-	msg = dlm_lowcomms_new_msg_con(con, len, allocation, ppc, cb, mh);
+	msg = dlm_lowcomms_new_msg_con(con, len, allocation, ppc, cb, data);
 	if (!msg) {
 		srcu_read_unlock(&connections_srcu, idx);
 		return NULL;
@@ -1403,7 +1405,6 @@ static void send_to_sock(struct connection *con)
 		if (!e)
 			break;
 
-		e = list_first_entry(&con->writequeue, struct writequeue_entry, list);
 		len = e->len;
 		offset = e->offset;
 		BUG_ON(len == 0 && e->users == 0);
@@ -1411,6 +1412,7 @@ static void send_to_sock(struct connection *con)
 
 		ret = kernel_sendpage(con->sock, e->page, offset, len,
 				      msg_flags);
+		trace_dlm_send(con->nodeid, ret);
 		if (ret == -EAGAIN || ret == 0) {
 			if (ret == -EAGAIN &&
 			    test_bit(SOCKWQ_ASYNC_NOSPACE, &con->sock->flags) &&
@@ -1775,7 +1777,7 @@ static int dlm_listen_for_all(void)
 	result = sock_create_kern(&init_net, dlm_local_addr[0]->ss_family,
 				  SOCK_STREAM, dlm_proto_ops->proto, &sock);
 	if (result < 0) {
-		log_print("Can't create comms socket, check SCTP is loaded");
+		log_print("Can't create comms socket: %d", result);
 		goto out;
 	}
 
