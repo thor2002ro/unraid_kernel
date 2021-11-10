@@ -199,6 +199,85 @@ static inline int reconn_setup_dfs_targets(struct cifs_sb_info *cifs_sb,
 }
 #endif
 
+/**
+ * Mark all sessions and tcons for reconnect.
+ *
+ * @server needs to be previously set to CifsNeedReconnect.
+ */
+static void cifs_mark_tcp_ses_conns_for_reconnect(struct TCP_Server_Info *server)
+{
+	struct cifs_ses *ses;
+	struct cifs_tcon *tcon;
+	struct mid_q_entry *mid, *nmid;
+	struct list_head retry_list;
+
+	server->maxBuf = 0;
+	server->max_read = 0;
+
+	cifs_dbg(FYI, "Mark tcp session as need reconnect\n");
+	trace_smb3_reconnect(server->CurrentMid, server->conn_id, server->hostname);
+	/*
+	 * before reconnecting the tcp session, mark the smb session (uid) and the tid bad so they
+	 * are not used until reconnected.
+	 */
+	cifs_dbg(FYI, "%s: marking sessions and tcons for reconnect\n", __func__);
+	spin_lock(&cifs_tcp_ses_lock);
+	list_for_each_entry(ses, &server->smb_ses_list, smb_ses_list) {
+		ses->need_reconnect = true;
+		list_for_each_entry(tcon, &ses->tcon_list, tcon_list)
+			tcon->need_reconnect = true;
+		if (ses->tcon_ipc)
+			ses->tcon_ipc->need_reconnect = true;
+	}
+	spin_unlock(&cifs_tcp_ses_lock);
+
+	/* do not want to be sending data on a socket we are freeing */
+	cifs_dbg(FYI, "%s: tearing down socket\n", __func__);
+	mutex_lock(&server->srv_mutex);
+	if (server->ssocket) {
+		cifs_dbg(FYI, "State: 0x%x Flags: 0x%lx\n", server->ssocket->state,
+			 server->ssocket->flags);
+		kernel_sock_shutdown(server->ssocket, SHUT_WR);
+		cifs_dbg(FYI, "Post shutdown state: 0x%x Flags: 0x%lx\n", server->ssocket->state,
+			 server->ssocket->flags);
+		sock_release(server->ssocket);
+		server->ssocket = NULL;
+	}
+	server->sequence_number = 0;
+	server->session_estab = false;
+	kfree(server->session_key.response);
+	server->session_key.response = NULL;
+	server->session_key.len = 0;
+	server->lstrp = jiffies;
+
+	/* mark submitted MIDs for retry and issue callback */
+	INIT_LIST_HEAD(&retry_list);
+	cifs_dbg(FYI, "%s: moving mids to private list\n", __func__);
+	spin_lock(&GlobalMid_Lock);
+	list_for_each_entry_safe(mid, nmid, &server->pending_mid_q, qhead) {
+		kref_get(&mid->refcount);
+		if (mid->mid_state == MID_REQUEST_SUBMITTED)
+			mid->mid_state = MID_RETRY_NEEDED;
+		list_move(&mid->qhead, &retry_list);
+		mid->mid_flags |= MID_DELETED;
+	}
+	spin_unlock(&GlobalMid_Lock);
+	mutex_unlock(&server->srv_mutex);
+
+	cifs_dbg(FYI, "%s: issuing mid callbacks\n", __func__);
+	list_for_each_entry_safe(mid, nmid, &retry_list, qhead) {
+		list_del_init(&mid->qhead);
+		mid->callback(mid);
+		cifs_mid_q_entry_release(mid);
+	}
+
+	if (cifs_rdma_enabled(server)) {
+		mutex_lock(&server->srv_mutex);
+		smbd_destroy(server);
+		mutex_unlock(&server->srv_mutex);
+	}
+}
+
 /*
  * cifs tcp session reconnection
  *
@@ -211,11 +290,6 @@ int
 cifs_reconnect(struct TCP_Server_Info *server)
 {
 	int rc = 0;
-	struct list_head *tmp, *tmp2;
-	struct cifs_ses *ses;
-	struct cifs_tcon *tcon;
-	struct mid_q_entry *mid_entry;
-	struct list_head retry_list;
 #ifdef CONFIG_CIFS_DFS_UPCALL
 	struct super_block *sb = NULL;
 	struct cifs_sb_info *cifs_sb = NULL;
@@ -251,8 +325,7 @@ cifs_reconnect(struct TCP_Server_Info *server)
 	spin_lock(&GlobalMid_Lock);
 #endif
 	if (server->tcpStatus == CifsExiting) {
-		/* the demux thread will exit normally
-		next time through the loop */
+		/* the demux thread will exit normally next time through the loop */
 		spin_unlock(&GlobalMid_Lock);
 #ifdef CONFIG_CIFS_DFS_UPCALL
 		dfs_cache_free_tgts(&tgt_list);
@@ -263,76 +336,8 @@ cifs_reconnect(struct TCP_Server_Info *server)
 	} else
 		server->tcpStatus = CifsNeedReconnect;
 	spin_unlock(&GlobalMid_Lock);
-	server->maxBuf = 0;
-	server->max_read = 0;
 
-	cifs_dbg(FYI, "Mark tcp session as need reconnect\n");
-	trace_smb3_reconnect(server->CurrentMid, server->conn_id, server->hostname);
-
-	/* before reconnecting the tcp session, mark the smb session (uid)
-		and the tid bad so they are not used until reconnected */
-	cifs_dbg(FYI, "%s: marking sessions and tcons for reconnect\n",
-		 __func__);
-	spin_lock(&cifs_tcp_ses_lock);
-	list_for_each(tmp, &server->smb_ses_list) {
-		ses = list_entry(tmp, struct cifs_ses, smb_ses_list);
-		ses->need_reconnect = true;
-		list_for_each(tmp2, &ses->tcon_list) {
-			tcon = list_entry(tmp2, struct cifs_tcon, tcon_list);
-			tcon->need_reconnect = true;
-		}
-		if (ses->tcon_ipc)
-			ses->tcon_ipc->need_reconnect = true;
-	}
-	spin_unlock(&cifs_tcp_ses_lock);
-
-	/* do not want to be sending data on a socket we are freeing */
-	cifs_dbg(FYI, "%s: tearing down socket\n", __func__);
-	mutex_lock(&server->srv_mutex);
-	if (server->ssocket) {
-		cifs_dbg(FYI, "State: 0x%x Flags: 0x%lx\n",
-			 server->ssocket->state, server->ssocket->flags);
-		kernel_sock_shutdown(server->ssocket, SHUT_WR);
-		cifs_dbg(FYI, "Post shutdown state: 0x%x Flags: 0x%lx\n",
-			 server->ssocket->state, server->ssocket->flags);
-		sock_release(server->ssocket);
-		server->ssocket = NULL;
-	}
-	server->sequence_number = 0;
-	server->session_estab = false;
-	kfree(server->session_key.response);
-	server->session_key.response = NULL;
-	server->session_key.len = 0;
-	server->lstrp = jiffies;
-
-	/* mark submitted MIDs for retry and issue callback */
-	INIT_LIST_HEAD(&retry_list);
-	cifs_dbg(FYI, "%s: moving mids to private list\n", __func__);
-	spin_lock(&GlobalMid_Lock);
-	list_for_each_safe(tmp, tmp2, &server->pending_mid_q) {
-		mid_entry = list_entry(tmp, struct mid_q_entry, qhead);
-		kref_get(&mid_entry->refcount);
-		if (mid_entry->mid_state == MID_REQUEST_SUBMITTED)
-			mid_entry->mid_state = MID_RETRY_NEEDED;
-		list_move(&mid_entry->qhead, &retry_list);
-		mid_entry->mid_flags |= MID_DELETED;
-	}
-	spin_unlock(&GlobalMid_Lock);
-	mutex_unlock(&server->srv_mutex);
-
-	cifs_dbg(FYI, "%s: issuing mid callbacks\n", __func__);
-	list_for_each_safe(tmp, tmp2, &retry_list) {
-		mid_entry = list_entry(tmp, struct mid_q_entry, qhead);
-		list_del_init(&mid_entry->qhead);
-		mid_entry->callback(mid_entry);
-		cifs_mid_q_entry_release(mid_entry);
-	}
-
-	if (cifs_rdma_enabled(server)) {
-		mutex_lock(&server->srv_mutex);
-		smbd_destroy(server);
-		mutex_unlock(&server->srv_mutex);
-	}
+	cifs_mark_tcp_ses_conns_for_reconnect(server);
 
 	do {
 		try_to_freeze();
@@ -1217,7 +1222,13 @@ static int match_server(struct TCP_Server_Info *server, struct smb3_fs_context *
 {
 	struct sockaddr *addr = (struct sockaddr *)&ctx->dstaddr;
 
-	if (ctx->nosharesock)
+	if (ctx->nosharesock) {
+		server->nosharesock = true;
+		return 0;
+	}
+
+	/* this server does not share socket */
+	if (server->nosharesock)
 		return 0;
 
 	/* If multidialect negotiation see if existing sessions match one */
@@ -1940,6 +1951,12 @@ cifs_get_smb_ses(struct TCP_Server_Info *server, struct smb3_fs_context *ctx)
 	if (ctx->domainname) {
 		ses->domainName = kstrdup(ctx->domainname, GFP_KERNEL);
 		if (!ses->domainName)
+			goto get_ses_fail;
+	}
+	if (ctx->workstation_name) {
+		ses->workstation_name = kstrdup(ctx->workstation_name,
+						GFP_KERNEL);
+		if (!ses->workstation_name)
 			goto get_ses_fail;
 	}
 	if (ctx->domainauto)
