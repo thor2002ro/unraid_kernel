@@ -2953,7 +2953,9 @@ SMB2_open(const unsigned int xid, struct cifs_open_parms *oparms, __le16 *path,
 			tcon->need_reconnect = true;
 		}
 		goto creat_exit;
-	} else
+	} else if (rsp == NULL) /* unlikely to happen, but safer to check */
+		goto creat_exit;
+	else
 		trace_smb3_open_done(xid, le64_to_cpu(rsp->PersistentFileId),
 				     tcon->tid,
 				     ses->Suid, oparms->create_options,
