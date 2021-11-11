@@ -47,6 +47,7 @@ void flush_dcache_page_all(struct mm_struct *mm, struct page *page);
 void __flush_dcache_range(unsigned long start, unsigned long end);
 #define ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE 1
 void flush_dcache_page(struct page *page);
+void flush_dcache_folio(struct folio *folio);
 
 #define flush_icache_page(vma, pg)	do { } while(0)
 
