@@ -799,6 +799,14 @@ KBUILD_CFLAGS += -Wno-gnu
 # source of a reference will be _MergedGlobals and not on of the whitelisted names.
 # See modpost pattern 2
 KBUILD_CFLAGS += -mno-global-merge
+# Warn about unmarked fall-throughs in switch statement as long as
+# -Wunreachable-code-fallthrough is present. Clang prior to 14
+# warned on unreachable fallthroughs with -Wimplicit-fallthrough,
+# which is unacceptable due to IS_ENABLED().
+# https://bugs.llvm.org/show_bug.cgi?id=51094
+ifneq ($(call cc-option,-Wunreachable-code-fallthrough),)
+KBUILD_CFLAGS += -Wimplicit-fallthrough
+endif
 else
 
 # Warn about unmarked fall-throughs in switch statement.
