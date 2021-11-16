@@ -2283,8 +2283,7 @@ static void btrfs_init_qgroup(struct btrfs_fs_info *fs_info)
 	mutex_init(&fs_info->qgroup_rescan_lock);
 }
 
-static int btrfs_init_workqueues(struct btrfs_fs_info *fs_info,
-		struct btrfs_fs_devices *fs_devices)
+static int btrfs_init_workqueues(struct btrfs_fs_info *fs_info)
 {
 	u32 max_active = fs_info->thread_pool_size;
 	unsigned int flags = WQ_MEM_RECLAIM | WQ_FREEZABLE | WQ_UNBOUND;
@@ -3415,7 +3414,7 @@ int __cold open_ctree(struct super_block *sb, struct btrfs_fs_devices *fs_device
 		fs_info->subpage_info = subpage_info;
 	}
 
-	ret = btrfs_init_workqueues(fs_info, fs_devices);
+	ret = btrfs_init_workqueues(fs_info);
 	if (ret) {
 		err = ret;
 		goto fail_sb_buffer;
@@ -3562,6 +3561,8 @@ int __cold open_ctree(struct super_block *sb, struct btrfs_fs_devices *fs_device
 		btrfs_err(fs_info, "failed to read block groups: %d", ret);
 		goto fail_sysfs;
 	}
+
+	btrfs_free_zone_cache(fs_info);
 
 	if (!sb_rdonly(sb) && fs_info->fs_devices->missing_devices &&
 	    !btrfs_check_rw_degradable(fs_info, NULL)) {
@@ -3978,11 +3979,23 @@ static void btrfs_end_empty_barrier(struct bio *bio)
  */
 static void write_dev_flush(struct btrfs_device *device)
 {
-	struct request_queue *q = bdev_get_queue(device->bdev);
 	struct bio *bio = device->flush_bio;
 
+#ifndef CONFIG_BTRFS_FS_CHECK_INTEGRITY
+	/*
+	 * When a disk has write caching disabled, we skip submission of a bio
+	 * with flush and sync requests before writing the superblock, since
+	 * it's not needed. However when the integrity checker is enabled, this
+	 * results in reports that there are metadata blocks referred by a
+	 * superblock that were not properly flushed. So don't skip the bio
+	 * submission only when the integrity checker is enabled for the sake
+	 * of simplicity, since this is a debug tool and not meant for use in
+	 * non-debug builds.
+	 */
+	struct request_queue *q = bdev_get_queue(device->bdev);
 	if (!test_bit(QUEUE_FLAG_WC, &q->queue_flags))
 		return;
+#endif
 
 	bio_reset(bio);
 	bio->bi_end_io = btrfs_end_empty_barrier;

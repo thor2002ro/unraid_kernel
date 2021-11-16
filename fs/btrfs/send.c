@@ -898,7 +898,6 @@ static int iterate_inode_ref(struct btrfs_root *root, struct btrfs_path *path,
 			     iterate_inode_ref_t iterate, void *ctx)
 {
 	struct extent_buffer *eb = path->nodes[0];
-	struct btrfs_item *item;
 	struct btrfs_inode_ref *iref;
 	struct btrfs_inode_extref *extref;
 	struct btrfs_path *tmp_path;
@@ -930,12 +929,11 @@ static int iterate_inode_ref(struct btrfs_root *root, struct btrfs_path *path,
 	if (found_key->type == BTRFS_INODE_REF_KEY) {
 		ptr = (unsigned long)btrfs_item_ptr(eb, slot,
 						    struct btrfs_inode_ref);
-		item = btrfs_item_nr(slot);
-		total = btrfs_item_size(eb, item);
+		total = btrfs_item_size(eb, slot);
 		elem_size = sizeof(*iref);
 	} else {
 		ptr = btrfs_item_ptr_offset(eb, slot);
-		total = btrfs_item_size_nr(eb, slot);
+		total = btrfs_item_size(eb, slot);
 		elem_size = sizeof(*extref);
 	}
 
@@ -1004,7 +1002,7 @@ out:
 typedef int (*iterate_dir_item_t)(int num, struct btrfs_key *di_key,
 				  const char *name, int name_len,
 				  const char *data, int data_len,
-				  u8 type, void *ctx);
+				  void *ctx);
 
 /*
  * Helper function to iterate the entries in ONE btrfs_dir_item.
@@ -1018,7 +1016,6 @@ static int iterate_dir_item(struct btrfs_root *root, struct btrfs_path *path,
 {
 	int ret = 0;
 	struct extent_buffer *eb;
-	struct btrfs_item *item;
 	struct btrfs_dir_item *di;
 	struct btrfs_key di_key;
 	char *buf = NULL;
@@ -1030,7 +1027,6 @@ static int iterate_dir_item(struct btrfs_root *root, struct btrfs_path *path,
 	u32 total;
 	int slot;
 	int num;
-	u8 type;
 
 	/*
 	 * Start with a small buffer (1 page). If later we end up needing more
@@ -1047,20 +1043,18 @@ static int iterate_dir_item(struct btrfs_root *root, struct btrfs_path *path,
 
 	eb = path->nodes[0];
 	slot = path->slots[0];
-	item = btrfs_item_nr(slot);
 	di = btrfs_item_ptr(eb, slot, struct btrfs_dir_item);
 	cur = 0;
 	len = 0;
-	total = btrfs_item_size(eb, item);
+	total = btrfs_item_size(eb, slot);
 
 	num = 0;
 	while (cur < total) {
 		name_len = btrfs_dir_name_len(eb, di);
 		data_len = btrfs_dir_data_len(eb, di);
-		type = btrfs_dir_type(eb, di);
 		btrfs_dir_item_key_to_cpu(eb, di, &di_key);
 
-		if (type == BTRFS_FT_XATTR) {
+		if (btrfs_dir_type(eb, di) == BTRFS_FT_XATTR) {
 			if (name_len > XATTR_NAME_MAX) {
 				ret = -ENAMETOOLONG;
 				goto out;
@@ -1110,7 +1104,7 @@ static int iterate_dir_item(struct btrfs_root *root, struct btrfs_path *path,
 		cur += len;
 
 		ret = iterate(num, &di_key, buf, name_len, buf + name_len,
-				data_len, type, ctx);
+			      data_len, ctx);
 		if (ret < 0)
 			goto out;
 		if (ret) {
@@ -1692,8 +1686,7 @@ out:
  */
 static int lookup_dir_item_inode(struct btrfs_root *root,
 				 u64 dir, const char *name, int name_len,
-				 u64 *found_inode,
-				 u8 *found_type)
+				 u64 *found_inode)
 {
 	int ret = 0;
 	struct btrfs_dir_item *di;
@@ -1716,7 +1709,6 @@ static int lookup_dir_item_inode(struct btrfs_root *root,
 		goto out;
 	}
 	*found_inode = key.objectid;
-	*found_type = btrfs_dir_type(path->nodes[0], di);
 
 out:
 	btrfs_free_path(path);
@@ -1839,7 +1831,6 @@ static int will_overwrite_ref(struct send_ctx *sctx, u64 dir, u64 dir_gen,
 	int ret = 0;
 	u64 gen;
 	u64 other_inode = 0;
-	u8 other_type = 0;
 
 	if (!sctx->parent_root)
 		goto out;
@@ -1867,7 +1858,7 @@ static int will_overwrite_ref(struct send_ctx *sctx, u64 dir, u64 dir_gen,
 	}
 
 	ret = lookup_dir_item_inode(sctx->parent_root, dir, name, name_len,
-			&other_inode, &other_type);
+				    &other_inode);
 	if (ret < 0 && ret != -ENOENT)
 		goto out;
 	if (ret) {
@@ -1912,7 +1903,6 @@ static int did_overwrite_ref(struct send_ctx *sctx,
 	int ret = 0;
 	u64 gen;
 	u64 ow_inode;
-	u8 other_type;
 
 	if (!sctx->parent_root)
 		goto out;
@@ -1936,7 +1926,7 @@ static int did_overwrite_ref(struct send_ctx *sctx,
 
 	/* check if the ref was overwritten by another ref */
 	ret = lookup_dir_item_inode(sctx->send_root, dir, name, name_len,
-			&ow_inode, &other_type);
+				    &ow_inode);
 	if (ret < 0 && ret != -ENOENT)
 		goto out;
 	if (ret) {
@@ -3622,7 +3612,7 @@ static int is_ancestor(struct btrfs_root *root,
 		    key.type != BTRFS_INODE_EXTREF_KEY)
 			break;
 
-		item_size = btrfs_item_size_nr(leaf, slot);
+		item_size = btrfs_item_size(leaf, slot);
 		while (cur_offset < item_size) {
 			u64 parent;
 			u64 parent_gen;
@@ -4651,9 +4641,8 @@ out:
 }
 
 static int __process_new_xattr(int num, struct btrfs_key *di_key,
-			       const char *name, int name_len,
-			       const char *data, int data_len,
-			       u8 type, void *ctx)
+			       const char *name, int name_len, const char *data,
+			       int data_len, void *ctx)
 {
 	int ret;
 	struct send_ctx *sctx = ctx;
@@ -4697,8 +4686,7 @@ out:
 
 static int __process_deleted_xattr(int num, struct btrfs_key *di_key,
 				   const char *name, int name_len,
-				   const char *data, int data_len,
-				   u8 type, void *ctx)
+				   const char *data, int data_len, void *ctx)
 {
 	int ret;
 	struct send_ctx *sctx = ctx;
@@ -4743,10 +4731,8 @@ struct find_xattr_ctx {
 	int found_data_len;
 };
 
-static int __find_xattr(int num, struct btrfs_key *di_key,
-			const char *name, int name_len,
-			const char *data, int data_len,
-			u8 type, void *vctx)
+static int __find_xattr(int num, struct btrfs_key *di_key, const char *name,
+			int name_len, const char *data, int data_len, void *vctx)
 {
 	struct find_xattr_ctx *ctx = vctx;
 
@@ -4796,7 +4782,7 @@ static int find_xattr(struct btrfs_root *root,
 static int __process_changed_new_xattr(int num, struct btrfs_key *di_key,
 				       const char *name, int name_len,
 				       const char *data, int data_len,
-				       u8 type, void *ctx)
+				       void *ctx)
 {
 	int ret;
 	struct send_ctx *sctx = ctx;
@@ -4808,12 +4794,12 @@ static int __process_changed_new_xattr(int num, struct btrfs_key *di_key,
 			 &found_data_len);
 	if (ret == -ENOENT) {
 		ret = __process_new_xattr(num, di_key, name, name_len, data,
-				data_len, type, ctx);
+					  data_len, ctx);
 	} else if (ret >= 0) {
 		if (data_len != found_data_len ||
 		    memcmp(data, found_data, data_len)) {
 			ret = __process_new_xattr(num, di_key, name, name_len,
-					data, data_len, type, ctx);
+						  data, data_len, ctx);
 		} else {
 			ret = 0;
 		}
@@ -4826,7 +4812,7 @@ static int __process_changed_new_xattr(int num, struct btrfs_key *di_key,
 static int __process_changed_deleted_xattr(int num, struct btrfs_key *di_key,
 					   const char *name, int name_len,
 					   const char *data, int data_len,
-					   u8 type, void *ctx)
+					   void *ctx)
 {
 	int ret;
 	struct send_ctx *sctx = ctx;
@@ -4835,7 +4821,7 @@ static int __process_changed_deleted_xattr(int num, struct btrfs_key *di_key,
 			 name, name_len, NULL, NULL);
 	if (ret == -ENOENT)
 		ret = __process_deleted_xattr(num, di_key, name, name_len, data,
-				data_len, type, ctx);
+					      data_len, ctx);
 	else if (ret >= 0)
 		ret = 0;
 
@@ -6566,7 +6552,7 @@ static int compare_refs(struct send_ctx *sctx, struct btrfs_path *path,
 	}
 
 	leaf = path->nodes[0];
-	item_size = btrfs_item_size_nr(leaf, path->slots[0]);
+	item_size = btrfs_item_size(leaf, path->slots[0]);
 	ptr = btrfs_item_ptr_offset(leaf, path->slots[0]);
 	while (cur_offset < item_size) {
 		extref = (struct btrfs_inode_extref *)(ptr +
@@ -6791,8 +6777,8 @@ static int tree_compare_item(struct btrfs_path *left_path,
 	int len1, len2;
 	unsigned long off1, off2;
 
-	len1 = btrfs_item_size_nr(left_path->nodes[0], left_path->slots[0]);
-	len2 = btrfs_item_size_nr(right_path->nodes[0], right_path->slots[0]);
+	len1 = btrfs_item_size(left_path->nodes[0], left_path->slots[0]);
+	len2 = btrfs_item_size(right_path->nodes[0], right_path->slots[0]);
 	if (len1 != len2)
 		return 1;
 

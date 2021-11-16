@@ -73,8 +73,8 @@ struct scrub_page {
 	u64			physical_for_dev_replace;
 	atomic_t		refs;
 	u8			mirror_num;
-	int			have_csum:1;
-	int			io_error:1;
+	unsigned int		have_csum:1;
+	unsigned int		io_error:1;
 	u8			csum[BTRFS_CSUM_SIZE];
 
 	struct scrub_recover	*recover;
@@ -758,7 +758,7 @@ static void scrub_print_warning(const char *errstr, struct scrub_block *sblock)
 
 	eb = path->nodes[0];
 	ei = btrfs_item_ptr(eb, path->slots[0], struct btrfs_extent_item);
-	item_size = btrfs_item_size_nr(eb, path->slots[0]);
+	item_size = btrfs_item_size(eb, path->slots[0]);
 
 	if (flags & BTRFS_EXTENT_FLAG_TREE_BLOCK) {
 		do {
