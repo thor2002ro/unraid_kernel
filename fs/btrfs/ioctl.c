@@ -387,6 +387,7 @@ bool btrfs_exclop_start(struct btrfs_fs_info *fs_info,
  *
  * Compatibility:
  * - the same type is already running
+ * - when trying to add a device and balance has been paused
  * - not BTRFS_EXCLOP_NONE - this is intentionally incompatible and the caller
  *   must check the condition first that would allow none -> @type
  */
@@ -394,7 +395,9 @@ bool btrfs_exclop_start_try_lock(struct btrfs_fs_info *fs_info,
 				 enum btrfs_exclusive_operation type)
 {
 	spin_lock(&fs_info->super_lock);
-	if (fs_info->exclusive_operation == type)
+	if (fs_info->exclusive_operation == type ||
+	    (fs_info->exclusive_operation == BTRFS_EXCLOP_BALANCE_PAUSED &&
+	     type == BTRFS_EXCLOP_DEV_ADD))
 		return true;
 
 	spin_unlock(&fs_info->super_lock);
@@ -412,6 +415,15 @@ void btrfs_exclop_finish(struct btrfs_fs_info *fs_info)
 	WRITE_ONCE(fs_info->exclusive_operation, BTRFS_EXCLOP_NONE);
 	spin_unlock(&fs_info->super_lock);
 	sysfs_notify(&fs_info->fs_devices->fsid_kobj, NULL, "exclusive_operation");
+}
+
+void btrfs_exclop_pause_balance(struct btrfs_fs_info *fs_info)
+{
+	spin_lock(&fs_info->super_lock);
+	ASSERT(fs_info->exclusive_operation == BTRFS_EXCLOP_BALANCE ||
+	       fs_info->exclusive_operation == BTRFS_EXCLOP_DEV_ADD);
+	fs_info->exclusive_operation = BTRFS_EXCLOP_BALANCE_PAUSED;
+	spin_unlock(&fs_info->super_lock);
 }
 
 static int btrfs_ioctl_getversion(struct file *file, int __user *arg)
@@ -3146,13 +3158,25 @@ out:
 static long btrfs_ioctl_add_dev(struct btrfs_fs_info *fs_info, void __user *arg)
 {
 	struct btrfs_ioctl_vol_args *vol_args;
+	bool restore_op = false;
 	int ret;
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
-	if (!btrfs_exclop_start(fs_info, BTRFS_EXCLOP_DEV_ADD))
-		return BTRFS_ERROR_DEV_EXCL_RUN_IN_PROGRESS;
+	if (!btrfs_exclop_start(fs_info, BTRFS_EXCLOP_DEV_ADD)) {
+		if (!btrfs_exclop_start_try_lock(fs_info, BTRFS_EXCLOP_DEV_ADD))
+			return BTRFS_ERROR_DEV_EXCL_RUN_IN_PROGRESS;
+
+		/*
+		 * We can do the device add because we have a paused balanced,
+		 * change the exclusive op type and remember we should bring
+		 * back the paused balance
+		 */
+		fs_info->exclusive_operation = BTRFS_EXCLOP_DEV_ADD;
+		btrfs_exclop_start_unlock(fs_info);
+		restore_op = true;
+	}
 
 	vol_args = memdup_user(arg, sizeof(*vol_args));
 	if (IS_ERR(vol_args)) {
@@ -3168,7 +3192,10 @@ static long btrfs_ioctl_add_dev(struct btrfs_fs_info *fs_info, void __user *arg)
 
 	kfree(vol_args);
 out:
-	btrfs_exclop_finish(fs_info);
+	if (restore_op)
+		btrfs_exclop_pause_balance(fs_info);
+	else
+		btrfs_exclop_finish(fs_info);
 	return ret;
 }
 
@@ -4023,6 +4050,11 @@ again:
 			if (fs_info->balance_ctl &&
 			    !test_bit(BTRFS_FS_BALANCE_RUNNING, &fs_info->flags)) {
 				/* this is (3) */
+				spin_lock(&fs_info->super_lock);
+				ASSERT(fs_info->exclusive_operation ==
+				       BTRFS_EXCLOP_BALANCE_PAUSED);
+				fs_info->exclusive_operation = BTRFS_EXCLOP_BALANCE;
+				spin_unlock(&fs_info->super_lock);
 				need_unlock = false;
 				goto locked;
 			}
