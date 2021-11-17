@@ -173,7 +173,22 @@ static void ipc_log_header(struct device *dev, u8 *text, u32 cmd)
 		}
 		break;
 	case SOF_IPC_GLB_TRACE_MSG:
-		str = "GLB_TRACE_MSG"; break;
+		str = "GLB_TRACE_MSG";
+		switch (type) {
+		case SOF_IPC_TRACE_DMA_PARAMS:
+			str2 = "DMA_PARAMS"; break;
+		case SOF_IPC_TRACE_DMA_POSITION:
+			str2 = "DMA_POSITION"; break;
+		case SOF_IPC_TRACE_DMA_PARAMS_EXT:
+			str2 = "DMA_PARAMS_EXT"; break;
+		case SOF_IPC_TRACE_FILTER_UPDATE:
+			str2 = "FILTER_UPDATE"; break;
+		case SOF_IPC_TRACE_DMA_FREE:
+			str2 = "DMA_FREE"; break;
+		default:
+			str2 = "unknown type"; break;
+		}
+		break;
 	case SOF_IPC_GLB_TEST_MSG:
 		str = "GLB_TEST_MSG";
 		switch (type) {
@@ -378,6 +393,67 @@ int sof_ipc_tx_message_no_pm(struct snd_sof_ipc *ipc, u32 header,
 	return ret;
 }
 EXPORT_SYMBOL(sof_ipc_tx_message_no_pm);
+
+/* Generic helper function to retrieve the reply */
+void snd_sof_ipc_get_reply(struct snd_sof_dev *sdev)
+{
+	struct snd_sof_ipc_msg *msg = sdev->msg;
+	struct sof_ipc_reply reply;
+	int ret = 0;
+
+	/*
+	 * Sometimes, there is unexpected reply ipc arriving. The reply
+	 * ipc belongs to none of the ipcs sent from driver.
+	 * In this case, the driver must ignore the ipc.
+	 */
+	if (!msg) {
+		dev_warn(sdev->dev, "unexpected ipc interrupt raised!\n");
+		return;
+	}
+
+	/* get the generic reply */
+	snd_sof_dsp_mailbox_read(sdev, sdev->host_box.offset, &reply,
+				 sizeof(reply));
+
+	if (reply.error < 0) {
+		memcpy(msg->reply_data, &reply, sizeof(reply));
+		ret = reply.error;
+	} else if (!reply.hdr.size) {
+		/* Reply should always be >= sizeof(struct sof_ipc_reply) */
+		if (msg->reply_size)
+			dev_err(sdev->dev,
+				"empty reply received, expected %zu bytes\n",
+				msg->reply_size);
+		else
+			dev_err(sdev->dev, "empty reply received\n");
+
+		ret = -EINVAL;
+	} else if (msg->reply_size > 0) {
+		if (reply.hdr.size == msg->reply_size) {
+			ret = 0;
+		} else if (reply.hdr.size < msg->reply_size) {
+			dev_dbg(sdev->dev,
+				"reply size (%u) is less than expected (%zu)\n",
+				reply.hdr.size, msg->reply_size);
+
+			msg->reply_size = reply.hdr.size;
+			ret = 0;
+		} else {
+			dev_err(sdev->dev,
+				"reply size (%u) exceeds the buffer size (%zu)\n",
+				reply.hdr.size, msg->reply_size);
+			ret = -EINVAL;
+		}
+
+		/* get the full message if reply.hdr.size <= msg->reply_size */
+		if (!ret)
+			snd_sof_dsp_mailbox_read(sdev, sdev->host_box.offset,
+						 msg->reply_data, msg->reply_size);
+	}
+
+	msg->reply_error = ret;
+}
+EXPORT_SYMBOL(snd_sof_ipc_get_reply);
 
 /* handle reply message from DSP */
 void snd_sof_ipc_reply(struct snd_sof_dev *sdev, u32 msg_id)
