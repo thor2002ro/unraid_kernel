@@ -76,26 +76,6 @@ static DEFINE_MUTEX(nb_smu_ind_mutex);
 #define ZEN_CUR_TEMP_SHIFT			21
 #define ZEN_CUR_TEMP_RANGE_SEL_MASK		BIT(19)
 
-#define ZEN_SVI_BASE				0x0005A000
-
-/* F17h thermal registers through SMN */
-#define F17H_M01H_SVI_TEL_PLANE0		(ZEN_SVI_BASE + 0xc)
-#define F17H_M01H_SVI_TEL_PLANE1		(ZEN_SVI_BASE + 0x10)
-#define F17H_M31H_SVI_TEL_PLANE0		(ZEN_SVI_BASE + 0x14)
-#define F17H_M31H_SVI_TEL_PLANE1		(ZEN_SVI_BASE + 0x10)
-
-#define F17H_M01H_CFACTOR_ICORE			1000000	/* 1A / LSB	*/
-#define F17H_M01H_CFACTOR_ISOC			250000	/* 0.25A / LSB	*/
-#define F17H_M31H_CFACTOR_ICORE			1000000	/* 1A / LSB	*/
-#define F17H_M31H_CFACTOR_ISOC			310000	/* 0.31A / LSB	*/
-
-/* F19h thermal registers through SMN */
-#define F19H_M01_SVI_TEL_PLANE0			(ZEN_SVI_BASE + 0x14)
-#define F19H_M01_SVI_TEL_PLANE1			(ZEN_SVI_BASE + 0x10)
-
-#define F19H_M01H_CFACTOR_ICORE			1000000	/* 1A / LSB	*/
-#define F19H_M01H_CFACTOR_ISOC			310000	/* 0.31A / LSB	*/
-
 struct k10temp_data {
 	struct pci_dev *pdev;
 	void (*read_htcreg)(struct pci_dev *pdev, u32 *regval);
@@ -453,7 +433,9 @@ static int k10temp_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 			data->ccd_offset = 0x154;
 			k10temp_get_ccd_support(pdev, data, 8);
 			break;
+		case 0x10 ... 0x1f:
 		case 0x40 ... 0x4f:	/* Yellow Carp */
+		case 0xa0 ... 0xaf:
 			data->ccd_offset = 0x300;
 			k10temp_get_ccd_support(pdev, data, 8);
 			break;
@@ -497,6 +479,7 @@ static const struct pci_device_id k10temp_id_table[] = {
 	{ PCI_VDEVICE(AMD, PCI_DEVICE_ID_AMD_17H_M60H_DF_F3) },
 	{ PCI_VDEVICE(AMD, PCI_DEVICE_ID_AMD_17H_M70H_DF_F3) },
 	{ PCI_VDEVICE(AMD, PCI_DEVICE_ID_AMD_19H_DF_F3) },
+	{ PCI_VDEVICE(AMD, PCI_DEVICE_ID_AMD_19H_M10H_DF_F3) },
 	{ PCI_VDEVICE(AMD, PCI_DEVICE_ID_AMD_19H_M40H_DF_F3) },
 	{ PCI_VDEVICE(AMD, PCI_DEVICE_ID_AMD_19H_M50H_DF_F3) },
 	{ PCI_VDEVICE(HYGON, PCI_DEVICE_ID_AMD_17H_DF_F3) },
