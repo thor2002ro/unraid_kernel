@@ -82,7 +82,8 @@ static bool scmi_vio_have_vq_rx(struct virtio_device *vdev)
 }
 
 static int scmi_vio_feed_vq_rx(struct scmi_vio_channel *vioch,
-			       struct scmi_vio_msg *msg)
+			       struct scmi_vio_msg *msg,
+			       struct device *dev)
 {
 	struct scatterlist sg_in;
 	int rc;
@@ -94,8 +95,7 @@ static int scmi_vio_feed_vq_rx(struct scmi_vio_channel *vioch,
 
 	rc = virtqueue_add_inbuf(vioch->vqueue, &sg_in, 1, msg, GFP_ATOMIC);
 	if (rc)
-		dev_err_once(vioch->cinfo->dev,
-			     "failed to add to virtqueue (%d)\n", rc);
+		dev_err(dev, "failed to add to RX virtqueue (%d)\n", rc);
 	else
 		virtqueue_kick(vioch->vqueue);
 
@@ -108,7 +108,7 @@ static void scmi_finalize_message(struct scmi_vio_channel *vioch,
 				  struct scmi_vio_msg *msg)
 {
 	if (vioch->is_rx) {
-		scmi_vio_feed_vq_rx(vioch, msg);
+		scmi_vio_feed_vq_rx(vioch, msg, vioch->cinfo->dev);
 	} else {
 		/* Here IRQs are assumed to be already disabled by the caller */
 		spin_lock(&vioch->lock);
@@ -193,8 +193,8 @@ static unsigned int virtio_get_max_msg(struct scmi_chan_info *base_cinfo)
 static int virtio_link_supplier(struct device *dev)
 {
 	if (!scmi_vdev) {
-		dev_notice_once(dev,
-				"Deferring probe after not finding a bound scmi-virtio device\n");
+		dev_notice(dev,
+			   "Deferring probe after not finding a bound scmi-virtio device\n");
 		return -EPROBE_DEFER;
 	}
 
@@ -269,7 +269,7 @@ static int virtio_chan_setup(struct scmi_chan_info *cinfo, struct device *dev,
 			list_add_tail(&msg->list, &vioch->free_list);
 			spin_unlock_irqrestore(&vioch->lock, flags);
 		} else {
-			scmi_vio_feed_vq_rx(vioch, msg);
+			scmi_vio_feed_vq_rx(vioch, msg, cinfo->dev);
 		}
 	}
 
@@ -334,9 +334,8 @@ static int virtio_send_message(struct scmi_chan_info *cinfo,
 	rc = virtqueue_add_sgs(vioch->vqueue, sgs, 1, 1, msg, GFP_ATOMIC);
 	if (rc) {
 		list_add(&msg->list, &vioch->free_list);
-		dev_err_once(vioch->cinfo->dev,
-			     "%s() failed to add to virtqueue (%d)\n", __func__,
-			     rc);
+		dev_err(vioch->cinfo->dev,
+			"failed to add to TX virtqueue (%d)\n", rc);
 	} else {
 		virtqueue_kick(vioch->vqueue);
 	}
@@ -427,10 +426,10 @@ static int scmi_vio_probe(struct virtio_device *vdev)
 			sz /= DESCRIPTORS_PER_TX_MSG;
 
 		if (sz > MSG_TOKEN_MAX) {
-			dev_info_once(dev,
-				      "%s virtqueue could hold %d messages. Only %ld allowed to be pending.\n",
-				      channels[i].is_rx ? "rx" : "tx",
-				      sz, MSG_TOKEN_MAX);
+			dev_info(dev,
+				 "%s virtqueue could hold %d messages. Only %ld allowed to be pending.\n",
+				 channels[i].is_rx ? "rx" : "tx",
+				 sz, MSG_TOKEN_MAX);
 			sz = MSG_TOKEN_MAX;
 		}
 		channels[i].max_msg = sz;
@@ -460,12 +459,13 @@ static void scmi_vio_remove(struct virtio_device *vdev)
 
 static int scmi_vio_validate(struct virtio_device *vdev)
 {
+#ifdef CONFIG_ARM_SCMI_TRANSPORT_VIRTIO_VERSION1_COMPLIANCE
 	if (!virtio_has_feature(vdev, VIRTIO_F_VERSION_1)) {
 		dev_err(&vdev->dev,
 			"device does not comply with spec version 1.x\n");
 		return -EINVAL;
 	}
-
+#endif
 	return 0;
 }
 
