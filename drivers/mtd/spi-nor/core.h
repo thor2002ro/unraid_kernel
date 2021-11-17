@@ -250,7 +250,7 @@ struct spi_nor_otp {
  *                      higher index in the array, the higher priority.
  * @erase_map:		the erase map parsed from the SFDP Sector Map Parameter
  *                      Table.
- * @otp_info:		describes the OTP regions.
+ * @otp:		SPI NOR OTP info.
  * @octal_dtr_enable:	enables SPI NOR octal DTR mode.
  * @quad_enable:	enables SPI NOR quad mode.
  * @set_4byte_addr_mode: puts the SPI NOR in 4 byte addressing mode.
@@ -262,7 +262,6 @@ struct spi_nor_otp {
  *                      e.g. different opcodes, specific address calculation,
  *                      page size, etc.
  * @locking_ops:	SPI NOR locking methods.
- * @otp:		SPI NOR OTP methods.
  */
 struct spi_nor_flash_parameter {
 	u64				size;
@@ -298,6 +297,9 @@ struct spi_nor_flash_parameter {
  *             parameters that could not be extracted by other means (i.e.
  *             when information provided by the SFDP/flash_info tables are
  *             incomplete or wrong).
+ * @late_init: used to initialize flash parameters that are not declared in the
+ *             JESD216 SFDP standard, or where SFDP tables not defined at all.
+ *             Will replace the default_init() hook.
  *
  * Those hooks can be used to tweak the SPI NOR configuration when the SFDP
  * table is broken or not available.
@@ -308,6 +310,7 @@ struct spi_nor_fixups {
 			 const struct sfdp_parameter_header *bfpt_header,
 			 const struct sfdp_bfpt *bfpt);
 	void (*post_sfdp)(struct spi_nor *nor);
+	void (*late_init)(struct spi_nor *nor);
 };
 
 struct flash_info {
@@ -552,9 +555,9 @@ void spi_nor_try_unlock_all(struct spi_nor *nor);
 void spi_nor_register_locking_ops(struct spi_nor *nor);
 void spi_nor_otp_init(struct spi_nor *nor);
 
-static struct spi_nor __maybe_unused *mtd_to_spi_nor(struct mtd_info *mtd)
+static inline struct spi_nor *mtd_to_spi_nor(struct mtd_info *mtd)
 {
-	return mtd->priv;
+	return container_of(mtd, struct spi_nor, mtd);
 }
 
 #endif /* __LINUX_MTD_SPI_NOR_INTERNAL_H */
