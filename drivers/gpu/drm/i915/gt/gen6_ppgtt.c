@@ -185,7 +185,6 @@ static void gen6_alloc_va_range(struct i915_address_space *vm,
 
 			pt = stash->pt[0];
 			__i915_gem_object_pin_pages(pt->base);
-			i915_gem_object_make_unshrinkable(pt->base);
 
 			fill32_px(pt, vm->scratch[0]->encode);
 
@@ -403,17 +402,6 @@ void gen6_ppgtt_unpin(struct i915_ppgtt *base)
 	GEM_BUG_ON(!atomic_read(&ppgtt->pin_count));
 	if (atomic_dec_and_test(&ppgtt->pin_count))
 		i915_vma_unpin(ppgtt->vma);
-}
-
-void gen6_ppgtt_unpin_all(struct i915_ppgtt *base)
-{
-	struct gen6_ppgtt *ppgtt = to_gen6_ppgtt(base);
-
-	if (!atomic_read(&ppgtt->pin_count))
-		return;
-
-	i915_vma_unpin(ppgtt->vma);
-	atomic_set(&ppgtt->pin_count, 0);
 }
 
 struct i915_ppgtt *gen6_ppgtt_create(struct intel_gt *gt)
