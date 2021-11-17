@@ -238,7 +238,8 @@ static int insert_inline_extent(struct btrfs_trans_handle *trans,
 				struct btrfs_inode *inode, bool extent_inserted,
 				size_t size, size_t compressed_size,
 				int compress_type,
-				struct page **compressed_pages)
+				struct page **compressed_pages,
+				bool update_i_size)
 {
 	struct btrfs_root *root = inode->root;
 	struct extent_buffer *leaf;
@@ -248,6 +249,7 @@ static int insert_inline_extent(struct btrfs_trans_handle *trans,
 	struct btrfs_file_extent_item *ei;
 	int ret;
 	size_t cur_size = size;
+	u64 i_size;
 
 	ASSERT((compressed_size > 0 && compressed_pages) ||
 	       (compressed_size == 0 && !compressed_pages));
@@ -326,7 +328,12 @@ static int insert_inline_extent(struct btrfs_trans_handle *trans,
 	 * before we unlock the pages.  Otherwise we
 	 * could end up racing with unlink.
 	 */
-	inode->disk_i_size = i_size_read(&inode->vfs_inode);
+	i_size = i_size_read(&inode->vfs_inode);
+	if (update_i_size && size > i_size) {
+		i_size_write(&inode->vfs_inode, size);
+		i_size = size;
+	}
+	inode->disk_i_size = i_size;
 
 fail:
 	return ret;
@@ -341,7 +348,8 @@ fail:
 static noinline int cow_file_range_inline(struct btrfs_inode *inode, u64 size,
 					  size_t compressed_size,
 					  int compress_type,
-					  struct page **compressed_pages)
+					  struct page **compressed_pages,
+					  bool update_i_size)
 {
 	struct btrfs_drop_extents_args drop_args = { 0 };
 	struct btrfs_root *root = inode->root;
@@ -389,7 +397,7 @@ static noinline int cow_file_range_inline(struct btrfs_inode *inode, u64 size,
 	ret = insert_inline_extent(trans, path, inode,
 				   drop_args.extent_inserted, size,
 				   compressed_size, compress_type,
-				   compressed_pages);
+				   compressed_pages, update_i_size);
 	if (ret && ret != -ENOSPC) {
 		btrfs_abort_transaction(trans, ret);
 		goto out;
@@ -722,12 +730,13 @@ cont:
 			 */
 			ret = cow_file_range_inline(BTRFS_I(inode), actual_end,
 						    0, BTRFS_COMPRESS_NONE,
-						    NULL);
+						    NULL, false);
 		} else {
 			/* try making a compressed inline extent */
 			ret = cow_file_range_inline(BTRFS_I(inode), actual_end,
 						    total_compressed,
-						    compress_type, pages);
+						    compress_type, pages,
+						    false);
 		}
 		if (ret <= 0) {
 			unsigned long clear_flags = EXTENT_DELALLOC |
@@ -1145,7 +1154,7 @@ static noinline int cow_file_range(struct btrfs_inode *inode,
 
 		/* lets try to make an inline extent */
 		ret = cow_file_range_inline(inode, actual_end, 0,
-					    BTRFS_COMPRESS_NONE, NULL);
+					    BTRFS_COMPRESS_NONE, NULL, false);
 		if (ret == 0) {
 			/*
 			 * We use DO_ACCOUNTING here because we need the
