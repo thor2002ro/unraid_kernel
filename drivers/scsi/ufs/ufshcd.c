@@ -6070,8 +6070,8 @@ static bool ufshcd_is_pwr_mode_restore_needed(struct ufs_hba *hba)
  */
 static void ufshcd_err_handler(struct work_struct *work)
 {
-	int retries = MAX_ERR_HANDLER_RETRIES;
 	struct ufs_hba *hba;
+	int retries = MAX_ERR_HANDLER_RETRIES;
 	unsigned long flags;
 	bool needs_restore;
 	bool needs_reset;
