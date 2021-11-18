@@ -169,18 +169,13 @@ struct hal_data_8188e {
 	u16	BasicRateSet;
 
 	/* rf_ctrl */
-	u8	rf_chip;
 	u8	rf_type;
 
 	u8	BoardType;
 
 	/*  EEPROM setting. */
-	u16	EEPROMVID;
-	u16	EEPROMPID;
 	u16	EEPROMSVID;
 	u16	EEPROMSDID;
-	u8	EEPROMCustomerID;
-	u8	EEPROMSubCustomerID;
 	u8	EEPROMVersion;
 	u8	EEPROMRegulatory;
 
@@ -189,7 +184,6 @@ struct hal_data_8188e {
 	u8	bAPKThermalMeterIgnore;
 
 	bool	EepromOrEfuse;
-	struct efuse_hal	EfuseHal;
 
 	u8	Index24G_CCK_Base[RF_PATH_MAX][CHANNEL_MAX_NUMBER];
 	u8	Index24G_BW40_Base[RF_PATH_MAX][CHANNEL_MAX_NUMBER];
@@ -321,7 +315,6 @@ s32 InitLLTTable(struct adapter *padapter, u8 txpktbuf_bndy);
 
 /*  EFuse */
 u8 GetEEPROMSize8188E(struct adapter *padapter);
-void Hal_InitPGData88E(struct adapter *padapter);
 void Hal_EfuseParseIDCode88E(struct adapter *padapter, u8 *hwinfo);
 void Hal_ReadTxPowerInfo88E(struct adapter *padapter, u8 *hwinfo,
 			    bool AutoLoadFail);
@@ -329,8 +322,6 @@ void Hal_ReadTxPowerInfo88E(struct adapter *padapter, u8 *hwinfo,
 void Hal_EfuseParseEEPROMVer88E(struct adapter *padapter, u8 *hwinfo,
 				bool AutoLoadFail);
 void rtl8188e_EfuseParseChnlPlan(struct adapter *padapter, u8 *hwinfo,
-				 bool AutoLoadFail);
-void Hal_EfuseParseCustomerID88E(struct adapter *padapter, u8 *hwinfo,
 				 bool AutoLoadFail);
 void Hal_ReadAntennaDiversity88E(struct adapter *pAdapter,u8 *PROMContent,
 				 bool AutoLoadFail);

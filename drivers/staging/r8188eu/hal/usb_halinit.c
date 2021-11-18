@@ -980,31 +980,6 @@ static void _ReadLEDSetting(struct adapter *Adapter, u8 *PROMContent, bool Autol
 	haldata->bLedOpenDrain = true;/*  Support Open-drain arrangement for controlling the LED. */
 }
 
-static void Hal_EfuseParsePIDVID_8188EU(struct adapter *adapt, u8 *hwinfo, bool AutoLoadFail)
-{
-	struct hal_data_8188e	*haldata = GET_HAL_DATA(adapt);
-
-	if (!AutoLoadFail) {
-		/*  VID, PID */
-		haldata->EEPROMVID = EF2BYTE(*(__le16 *)&hwinfo[EEPROM_VID_88EU]);
-		haldata->EEPROMPID = EF2BYTE(*(__le16 *)&hwinfo[EEPROM_PID_88EU]);
-
-		/*  Customer ID, 0x00 and 0xff are reserved for Realtek. */
-		haldata->EEPROMCustomerID = *(u8 *)&hwinfo[EEPROM_CUSTOMERID_88E];
-		haldata->EEPROMSubCustomerID = EEPROM_Default_SubCustomerID;
-	} else {
-		haldata->EEPROMVID			= EEPROM_Default_VID;
-		haldata->EEPROMPID			= EEPROM_Default_PID;
-
-		/*  Customer ID, 0x00 and 0xff are reserved for Realtek. */
-		haldata->EEPROMCustomerID		= EEPROM_Default_CustomerID;
-		haldata->EEPROMSubCustomerID	= EEPROM_Default_SubCustomerID;
-	}
-
-	DBG_88E("VID = 0x%04X, PID = 0x%04X\n", haldata->EEPROMVID, haldata->EEPROMPID);
-	DBG_88E("Customer ID: 0x%02X, SubCustomer ID: 0x%02X\n", haldata->EEPROMCustomerID, haldata->EEPROMSubCustomerID);
-}
-
 static void Hal_EfuseParseMACAddr_8188EU(struct adapter *adapt, u8 *hwinfo, bool AutoLoadFail)
 {
 	u16 i;
@@ -1020,71 +995,39 @@ static void Hal_EfuseParseMACAddr_8188EU(struct adapter *adapt, u8 *hwinfo, bool
 	}
 }
 
-static void
-readAdapterInfo_8188EU(
-		struct adapter *adapt
-	)
-{
-	struct eeprom_priv *eeprom = &adapt->eeprompriv;
-
-	/* parse the eeprom/efuse content */
-	Hal_EfuseParseIDCode88E(adapt, eeprom->efuse_eeprom_data);
-	Hal_EfuseParsePIDVID_8188EU(adapt, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
-	Hal_EfuseParseMACAddr_8188EU(adapt, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
-
-	Hal_ReadPowerSavingMode88E(adapt, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
-	Hal_ReadTxPowerInfo88E(adapt, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
-	Hal_EfuseParseEEPROMVer88E(adapt, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
-	rtl8188e_EfuseParseChnlPlan(adapt, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
-	Hal_EfuseParseXtal_8188E(adapt, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
-	Hal_EfuseParseCustomerID88E(adapt, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
-	Hal_ReadAntennaDiversity88E(adapt, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
-	Hal_EfuseParseBoardType88E(adapt, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
-	Hal_ReadThermalMeter_88E(adapt, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
-
-	_ReadLEDSetting(adapt, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
-}
-
-static void _ReadPROMContent(
-	struct adapter *Adapter
-	)
+void ReadAdapterInfo8188EU(struct adapter *Adapter)
 {
 	struct eeprom_priv *eeprom = &Adapter->eeprompriv;
 	u8 eeValue;
 
+	/*  Read EEPROM size before call any EEPROM function */
+	Adapter->EepromAddressSize = GetEEPROMSize8188E(Adapter);
+
 	/* check system boot selection */
 	eeValue = rtw_read8(Adapter, REG_9346CR);
-	eeprom->EepromOrEfuse		= (eeValue & BOOT_FROM_EEPROM) ? true : false;
-	eeprom->bautoload_fail_flag	= (eeValue & EEPROM_EN) ? false : true;
+	eeprom->EepromOrEfuse		= (eeValue & BOOT_FROM_EEPROM);
+	eeprom->bautoload_fail_flag	= !(eeValue & EEPROM_EN);
 
 	DBG_88E("Boot from %s, Autoload %s !\n", (eeprom->EepromOrEfuse ? "EEPROM" : "EFUSE"),
 		(eeprom->bautoload_fail_flag ? "Fail" : "OK"));
 
-	Hal_InitPGData88E(Adapter);
-	readAdapterInfo_8188EU(Adapter);
-}
+	if (!is_boot_from_eeprom(Adapter))
+		EFUSE_ShadowMapUpdate(Adapter);
 
-static void _ReadRFType(struct adapter *Adapter)
-{
-	struct hal_data_8188e	*haldata = GET_HAL_DATA(Adapter);
+	/* parse the eeprom/efuse content */
+	Hal_EfuseParseIDCode88E(Adapter, eeprom->efuse_eeprom_data);
+	Hal_EfuseParseMACAddr_8188EU(Adapter, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
 
-	haldata->rf_chip = RF_6052;
-}
+	Hal_ReadPowerSavingMode88E(Adapter, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
+	Hal_ReadTxPowerInfo88E(Adapter, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
+	Hal_EfuseParseEEPROMVer88E(Adapter, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
+	rtl8188e_EfuseParseChnlPlan(Adapter, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
+	Hal_EfuseParseXtal_8188E(Adapter, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
+	Hal_ReadAntennaDiversity88E(Adapter, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
+	Hal_EfuseParseBoardType88E(Adapter, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
+	Hal_ReadThermalMeter_88E(Adapter, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
 
-static int _ReadAdapterInfo8188EU(struct adapter *Adapter)
-{
-	_ReadRFType(Adapter);/* rf_chip -> _InitRFType() */
-	_ReadPROMContent(Adapter);
-
-	return _SUCCESS;
-}
-
-void ReadAdapterInfo8188EU(struct adapter *Adapter)
-{
-	/*  Read EEPROM size before call any EEPROM function */
-	Adapter->EepromAddressSize = GetEEPROMSize8188E(Adapter);
-
-	_ReadAdapterInfo8188EU(Adapter);
+	_ReadLEDSetting(Adapter, eeprom->efuse_eeprom_data, eeprom->bautoload_fail_flag);
 }
 
 static void ResumeTxBeacon(struct adapter *adapt)

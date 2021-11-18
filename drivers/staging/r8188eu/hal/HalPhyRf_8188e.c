@@ -361,7 +361,7 @@ odm_TXPowerTrackingCallback_ThermalMeter_8188E(
 #define IQK_DELAY_TIME		1		/* ms */
 
 static u8 /* bit0 = 1 => Tx OK, bit1 = 1 => Rx OK */
-phy_PathA_IQK_8188E(struct adapter *adapt, bool configPathB)
+phy_PathA_IQK_8188E(struct adapter *adapt)
 {
 	u32 regeac, regE94, regE9C;
 	u8 result = 0x00;
@@ -399,7 +399,7 @@ phy_PathA_IQK_8188E(struct adapter *adapt, bool configPathB)
 }
 
 static u8 /* bit0 = 1 => Tx OK, bit1 = 1 => Rx OK */
-phy_PathA_RxIQK(struct adapter *adapt, bool configPathB)
+phy_PathA_RxIQK(struct adapter *adapt)
 {
 	u32 regeac, regE94, regE9C, regEA4, u4tmp;
 	u8 result = 0x00;
@@ -502,43 +502,6 @@ phy_PathA_RxIQK(struct adapter *adapt, bool configPathB)
 	return result;
 }
 
-static u8 /* bit0 = 1 => Tx OK, bit1 = 1 => Rx OK */
-phy_PathB_IQK_8188E(struct adapter *adapt)
-{
-	u32 regeac, regeb4, regebc, regec4, regecc;
-	u8 result = 0x00;
-	struct hal_data_8188e	*pHalData = GET_HAL_DATA(adapt);
-	struct odm_dm_struct *dm_odm = &pHalData->odmpriv;
-
-	/* One shot, path B LOK & IQK */
-	ODM_SetBBReg(dm_odm, rIQK_AGC_Cont, bMaskDWord, 0x00000002);
-	ODM_SetBBReg(dm_odm, rIQK_AGC_Cont, bMaskDWord, 0x00000000);
-
-	/*  delay x ms */
-	ODM_delay_ms(IQK_DELAY_TIME_88E);
-
-	/*  Check failed */
-	regeac = ODM_GetBBReg(dm_odm, rRx_Power_After_IQK_A_2, bMaskDWord);
-	regeb4 = ODM_GetBBReg(dm_odm, rTx_Power_Before_IQK_B, bMaskDWord);
-	regebc = ODM_GetBBReg(dm_odm, rTx_Power_After_IQK_B, bMaskDWord);
-	regec4 = ODM_GetBBReg(dm_odm, rRx_Power_Before_IQK_B_2, bMaskDWord);
-	regecc = ODM_GetBBReg(dm_odm, rRx_Power_After_IQK_B_2, bMaskDWord);
-
-	if (!(regeac & BIT(31)) &&
-	    (((regeb4 & 0x03FF0000) >> 16) != 0x142) &&
-	    (((regebc & 0x03FF0000) >> 16) != 0x42))
-		result |= 0x01;
-	else
-		return result;
-
-	if (!(regeac & BIT(30)) &&
-	    (((regec4 & 0x03FF0000) >> 16) != 0x132) &&
-	    (((regecc & 0x03FF0000) >> 16) != 0x36))
-		result |= 0x02;
-
-	return result;
-}
-
 static void patha_fill_iqk(struct adapter *adapt, bool iqkok, s32 result[][8], u8 final_candidate, bool txonly)
 {
 	u32 Oldval_0, X, TX0_A, reg;
@@ -601,12 +564,11 @@ static void _PHY_SaveMACRegisters(
 	)
 {
 	u32 i;
-	struct hal_data_8188e	*pHalData = GET_HAL_DATA(adapt);
-	struct odm_dm_struct *dm_odm = &pHalData->odmpriv;
-	for (i = 0; i < (IQK_MAC_REG_NUM - 1); i++) {
-		MACBackup[i] = ODM_Read1Byte(dm_odm, MACReg[i]);
-	}
-	MACBackup[i] = ODM_Read4Byte(dm_odm, MACReg[i]);
+
+	for (i = 0; i < (IQK_MAC_REG_NUM - 1); i++)
+		MACBackup[i] = rtw_read8(adapt, MACReg[i]);
+
+	MACBackup[i] = rtw_read32(adapt, MACReg[i]);
 }
 
 static void reload_adda_reg(struct adapter *adapt, u32 *ADDAReg, u32 *ADDABackup, u32 RegiesterNum)
@@ -627,38 +589,26 @@ _PHY_ReloadMACRegisters(
 	)
 {
 	u32 i;
-	struct hal_data_8188e	*pHalData = GET_HAL_DATA(adapt);
-	struct odm_dm_struct *dm_odm = &pHalData->odmpriv;
 
-	for (i = 0; i < (IQK_MAC_REG_NUM - 1); i++) {
-		ODM_Write1Byte(dm_odm, MACReg[i], (u8)MACBackup[i]);
-	}
-	ODM_Write4Byte(dm_odm, MACReg[i], MACBackup[i]);
+	for (i = 0; i < (IQK_MAC_REG_NUM - 1); i++)
+		rtw_write8(adapt, MACReg[i], (u8)MACBackup[i]);
+
+	rtw_write32(adapt, MACReg[i], MACBackup[i]);
 }
 
-void
+static void
 _PHY_PathADDAOn(
 		struct adapter *adapt,
-		u32 *ADDAReg,
-		bool isPathAOn,
-		bool is2t
-	)
+		u32 *ADDAReg)
 {
-	u32 pathOn;
 	u32 i;
 	struct hal_data_8188e	*pHalData = GET_HAL_DATA(adapt);
 	struct odm_dm_struct *dm_odm = &pHalData->odmpriv;
 
-	pathOn = isPathAOn ? 0x04db25a4 : 0x0b1b25a4;
-	if (!is2t) {
-		pathOn = 0x0bdb25a0;
-		ODM_SetBBReg(dm_odm, ADDAReg[0], bMaskDWord, 0x0b1b25a0);
-	} else {
-		ODM_SetBBReg(dm_odm, ADDAReg[0], bMaskDWord, pathOn);
-	}
+	ODM_SetBBReg(dm_odm, ADDAReg[0], bMaskDWord, 0x0b1b25a0);
 
 	for (i = 1; i < IQK_ADDA_REG_NUM; i++)
-		ODM_SetBBReg(dm_odm, ADDAReg[i], bMaskDWord, pathOn);
+		ODM_SetBBReg(dm_odm, ADDAReg[i], bMaskDWord, 0x0bdb25a0);
 }
 
 void
@@ -669,28 +619,13 @@ _PHY_MACSettingCalibration(
 	)
 {
 	u32 i = 0;
-	struct hal_data_8188e	*pHalData = GET_HAL_DATA(adapt);
-	struct odm_dm_struct *dm_odm = &pHalData->odmpriv;
 
-	ODM_Write1Byte(dm_odm, MACReg[i], 0x3F);
+	rtw_write8(adapt, MACReg[i], 0x3F);
 
-	for (i = 1; i < (IQK_MAC_REG_NUM - 1); i++) {
-		ODM_Write1Byte(dm_odm, MACReg[i], (u8)(MACBackup[i] & (~BIT(3))));
-	}
-	ODM_Write1Byte(dm_odm, MACReg[i], (u8)(MACBackup[i] & (~BIT(5))));
-}
+	for (i = 1; i < (IQK_MAC_REG_NUM - 1); i++)
+		rtw_write8(adapt, MACReg[i], (u8)(MACBackup[i] & (~BIT(3))));
 
-void
-_PHY_PathAStandBy(
-	struct adapter *adapt
-	)
-{
-	struct hal_data_8188e	*pHalData = GET_HAL_DATA(adapt);
-	struct odm_dm_struct *dm_odm = &pHalData->odmpriv;
-
-	ODM_SetBBReg(dm_odm, rFPGA0_IQK, bMaskDWord, 0x0);
-	ODM_SetBBReg(dm_odm, 0x840, bMaskDWord, 0x00010000);
-	ODM_SetBBReg(dm_odm, rFPGA0_IQK, bMaskDWord, 0x80800000);
+	rtw_write8(adapt, MACReg[i], (u8)(MACBackup[i] & (~BIT(5))));
 }
 
 static void _PHY_PIModeSwitch(
@@ -786,12 +721,12 @@ static bool phy_SimularityCompare_8188E(
 	}
 }
 
-static void phy_IQCalibrate_8188E(struct adapter *adapt, s32 result[][8], u8 t, bool is2t)
+static void phy_IQCalibrate_8188E(struct adapter *adapt, s32 result[][8], u8 t)
 {
 	struct hal_data_8188e	*pHalData = GET_HAL_DATA(adapt);
 	struct odm_dm_struct *dm_odm = &pHalData->odmpriv;
 	u32 i;
-	u8 PathAOK, PathBOK;
+	u8 PathAOK;
 	u32 ADDA_REG[IQK_ADDA_REG_NUM] = {
 						rFPGA0_XCD_SwitchControl, rBlue_Tooth,
 						rRx_Wait_CCA, 	rTx_CCK_RFON,
@@ -823,7 +758,7 @@ static void phy_IQCalibrate_8188E(struct adapter *adapt, s32 result[][8], u8 t, 
 		_PHY_SaveADDARegisters(adapt, IQK_BB_REG_92C, dm_odm->RFCalibrateInfo.IQK_BB_backup, IQK_BB_REG_NUM);
 	}
 
-	_PHY_PathADDAOn(adapt, ADDA_REG, true, is2t);
+	_PHY_PathADDAOn(adapt, ADDA_REG);
 	if (t == 0)
 		dm_odm->RFCalibrateInfo.bRfPiEnable = (u8)ODM_GetBBReg(dm_odm, rFPGA0_XA_HSSIParameter1, BIT(8));
 
@@ -843,11 +778,6 @@ static void phy_IQCalibrate_8188E(struct adapter *adapt, s32 result[][8], u8 t, 
 	ODM_SetBBReg(dm_odm, rFPGA0_XA_RFInterfaceOE, BIT(10), 0x00);
 	ODM_SetBBReg(dm_odm, rFPGA0_XB_RFInterfaceOE, BIT(10), 0x00);
 
-	if (is2t) {
-		ODM_SetBBReg(dm_odm, rFPGA0_XA_LSSIParameter, bMaskDWord, 0x00010000);
-		ODM_SetBBReg(dm_odm, rFPGA0_XB_LSSIParameter, bMaskDWord, 0x00010000);
-	}
-
 	/* MAC settings */
 	_PHY_MACSettingCalibration(adapt, IQK_MAC_REG, dm_odm->RFCalibrateInfo.IQK_MAC_backup);
 
@@ -855,8 +785,6 @@ static void phy_IQCalibrate_8188E(struct adapter *adapt, s32 result[][8], u8 t, 
 	/* AP or IQK */
 	ODM_SetBBReg(dm_odm, rConfig_AntA, bMaskDWord, 0x0f600000);
 
-	if (is2t)
-		ODM_SetBBReg(dm_odm, rConfig_AntB, bMaskDWord, 0x0f600000);
 
 	/*  IQ calibration setting */
 	ODM_SetBBReg(dm_odm, rFPGA0_IQK, bMaskDWord, 0x80800000);
@@ -864,7 +792,7 @@ static void phy_IQCalibrate_8188E(struct adapter *adapt, s32 result[][8], u8 t, 
 	ODM_SetBBReg(dm_odm, rRx_IQK, bMaskDWord, 0x81004800);
 
 	for (i = 0; i < retryCount; i++) {
-		PathAOK = phy_PathA_IQK_8188E(adapt, is2t);
+		PathAOK = phy_PathA_IQK_8188E(adapt);
 		if (PathAOK == 0x01) {
 			result[t][0] = (ODM_GetBBReg(dm_odm, rTx_Power_Before_IQK_A, bMaskDWord) & 0x3FF0000) >> 16;
 			result[t][1] = (ODM_GetBBReg(dm_odm, rTx_Power_After_IQK_A, bMaskDWord) & 0x3FF0000) >> 16;
@@ -873,32 +801,11 @@ static void phy_IQCalibrate_8188E(struct adapter *adapt, s32 result[][8], u8 t, 
 	}
 
 	for (i = 0; i < retryCount; i++) {
-		PathAOK = phy_PathA_RxIQK(adapt, is2t);
+		PathAOK = phy_PathA_RxIQK(adapt);
 		if (PathAOK == 0x03) {
 			result[t][2] = (ODM_GetBBReg(dm_odm, rRx_Power_Before_IQK_A_2, bMaskDWord) & 0x3FF0000) >> 16;
 			result[t][3] = (ODM_GetBBReg(dm_odm, rRx_Power_After_IQK_A_2, bMaskDWord) & 0x3FF0000) >> 16;
 			break;
-		}
-	}
-
-	if (is2t) {
-		_PHY_PathAStandBy(adapt);
-
-		/*  Turn Path B ADDA on */
-		_PHY_PathADDAOn(adapt, ADDA_REG, false, is2t);
-
-		for (i = 0; i < retryCount; i++) {
-			PathBOK = phy_PathB_IQK_8188E(adapt);
-			if (PathBOK == 0x03) {
-				result[t][4] = (ODM_GetBBReg(dm_odm, rTx_Power_Before_IQK_B, bMaskDWord) & 0x3FF0000) >> 16;
-				result[t][5] = (ODM_GetBBReg(dm_odm, rTx_Power_After_IQK_B, bMaskDWord) & 0x3FF0000) >> 16;
-				result[t][6] = (ODM_GetBBReg(dm_odm, rRx_Power_Before_IQK_B_2, bMaskDWord) & 0x3FF0000) >> 16;
-				result[t][7] = (ODM_GetBBReg(dm_odm, rRx_Power_After_IQK_B_2, bMaskDWord) & 0x3FF0000) >> 16;
-				break;
-			} else if (i == (retryCount - 1) && PathBOK == 0x01) {	/* Tx IQK OK */
-				result[t][4] = (ODM_GetBBReg(dm_odm, rTx_Power_Before_IQK_B, bMaskDWord) & 0x3FF0000) >> 16;
-				result[t][5] = (ODM_GetBBReg(dm_odm, rTx_Power_After_IQK_B, bMaskDWord) & 0x3FF0000) >> 16;
-			}
 		}
 	}
 
@@ -921,8 +828,6 @@ static void phy_IQCalibrate_8188E(struct adapter *adapt, s32 result[][8], u8 t, 
 
 		/*  Restore RX initial gain */
 		ODM_SetBBReg(dm_odm, rFPGA0_XA_LSSIParameter, bMaskDWord, 0x00032ed3);
-		if (is2t)
-			ODM_SetBBReg(dm_odm, rFPGA0_XB_LSSIParameter, bMaskDWord, 0x00032ed3);
 
 		/* load 0xe30 IQC default value */
 		ODM_SetBBReg(dm_odm, rTx_IQK_Tone_A, bMaskDWord, 0x01008c00);
@@ -938,12 +843,12 @@ static void phy_LCCalibrate_8188E(struct adapter *adapt, bool is2t)
 	struct odm_dm_struct *dm_odm = &pHalData->odmpriv;
 
 	/* Check continuous TX and Packet TX */
-	tmpreg = ODM_Read1Byte(dm_odm, 0xd03);
+	tmpreg = rtw_read8(adapt, 0xd03);
 
 	if ((tmpreg & 0x70) != 0)			/* Deal with contisuous TX case */
-		ODM_Write1Byte(dm_odm, 0xd03, tmpreg & 0x8F);	/* disable all continuous TX */
+		rtw_write8(adapt, 0xd03, tmpreg & 0x8F);	/* disable all continuous TX */
 	else							/*  Deal with Packet TX case */
-		ODM_Write1Byte(dm_odm, REG_TXPAUSE, 0xFF);			/*  block all queues */
+		rtw_write8(adapt, REG_TXPAUSE, 0xFF);		/*  block all queues */
 
 	if ((tmpreg & 0x70) != 0) {
 		/* 1. Read original RF mode */
@@ -975,7 +880,7 @@ static void phy_LCCalibrate_8188E(struct adapter *adapt, bool is2t)
 	if ((tmpreg & 0x70) != 0) {
 		/* Deal with continuous TX case */
 		/* Path-A */
-		ODM_Write1Byte(dm_odm, 0xd03, tmpreg);
+		rtw_write8(adapt, 0xd03, tmpreg);
 		ODM_SetRFReg(dm_odm, RF_PATH_A, RF_AC, bMask12Bits, RF_Amode);
 
 		/* Path-B */
@@ -983,7 +888,7 @@ static void phy_LCCalibrate_8188E(struct adapter *adapt, bool is2t)
 			ODM_SetRFReg(dm_odm, RF_PATH_B, RF_AC, bMask12Bits, RF_Bmode);
 	} else {
 		/*  Deal with Packet TX case */
-		ODM_Write1Byte(dm_odm, REG_TXPAUSE, 0x00);
+		rtw_write8(adapt, REG_TXPAUSE, 0x00);
 	}
 }
 
@@ -1032,7 +937,7 @@ void PHY_IQCalibrate_8188E(struct adapter *adapt, bool recovery)
 	is13simular = false;
 
 	for (i = 0; i < 3; i++) {
-		phy_IQCalibrate_8188E(adapt, result, i, false);
+		phy_IQCalibrate_8188E(adapt, result, i);
 
 		if (i == 1) {
 			is12simular = phy_SimularityCompare_8188E(adapt, result, 0, 1);
