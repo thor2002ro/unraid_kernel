@@ -218,8 +218,8 @@ next_session:
 	spin_unlock(&cifs_tcp_ses_lock);
 
 	/* do not want to be sending data on a socket we are freeing */
-	mutex_lock(&server->srv_mutex);
 	cifs_dbg(FYI, "%s: tearing down socket\n", __func__);
+	mutex_lock(&server->srv_mutex);
 	if (server->ssocket) {
 		cifs_dbg(FYI, "State: 0x%x Flags: 0x%lx\n", server->ssocket->state,
 			 server->ssocket->flags);
@@ -1831,7 +1831,6 @@ void cifs_put_smb_ses(struct cifs_ses *ses)
 
 	spin_lock(&ses->chan_lock);
 	chan_count = ses->chan_count;
-	spin_unlock(&ses->chan_lock);
 
 	/* close any extra channels */
 	if (chan_count > 1) {
@@ -1848,6 +1847,7 @@ void cifs_put_smb_ses(struct cifs_ses *ses)
 			ses->chans[i].server = NULL;
 		}
 	}
+	spin_unlock(&ses->chan_lock);
 
 	sesInfoFree(ses);
 	cifs_put_tcp_session(server, 0);
@@ -2123,8 +2123,10 @@ cifs_get_smb_ses(struct TCP_Server_Info *server, struct smb3_fs_context *ctx)
 	mutex_unlock(&ses->session_mutex);
 
 	/* each channel uses a different signing key */
+	spin_lock(&ses->chan_lock);
 	memcpy(ses->chans[0].signkey, ses->smb3signingkey,
 	       sizeof(ses->smb3signingkey));
+	spin_unlock(&ses->chan_lock);
 
 	if (rc)
 		goto get_ses_fail;
