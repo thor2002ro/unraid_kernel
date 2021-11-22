@@ -753,8 +753,7 @@ struct block_device *blkdev_get_no_open(dev_t dev)
 
 	if (!bdev)
 		return NULL;
-	if ((bdev->bd_disk->flags & GENHD_FL_HIDDEN) ||
-	    !try_module_get(bdev->bd_disk->fops->owner)) {
+	if (!try_module_get(bdev->bd_disk->fops->owner)) {
 		put_device(&bdev->bd_device);
 		return NULL;
 	}
