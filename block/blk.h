@@ -2,15 +2,10 @@
 #ifndef BLK_INTERNAL_H
 #define BLK_INTERNAL_H
 
-#include <linux/idr.h>
-#include <linux/blk-mq.h>
-#include <linux/part_stat.h>
 #include <linux/blk-crypto.h>
 #include <linux/memblock.h>	/* for max_pfn/max_low_pfn */
 #include <xen/xen.h>
 #include "blk-crypto-internal.h"
-#include "blk-mq.h"
-#include "blk-mq-sched.h"
 
 struct elevator_type;
 
@@ -34,12 +29,6 @@ struct blk_flush_queue {
 extern struct kmem_cache *blk_requestq_cachep;
 extern struct kobj_type blk_queue_ktype;
 extern struct ida blk_queue_ida;
-
-static inline struct blk_flush_queue *
-blk_get_flush_queue(struct request_queue *q, struct blk_mq_ctx *ctx)
-{
-	return blk_mq_map_queue(q, REQ_OP_FLUSH, ctx)->fq;
-}
 
 static inline void __blk_get_queue(struct request_queue *q)
 {
@@ -250,15 +239,12 @@ static inline void blk_integrity_del(struct gendisk *disk)
 
 unsigned long blk_rq_timeout(unsigned long timeout);
 void blk_add_timer(struct request *req);
-void blk_print_req_error(struct request *req, blk_status_t status);
+const char *blk_status_to_str(blk_status_t status);
 
 bool blk_attempt_plug_merge(struct request_queue *q, struct bio *bio,
-		unsigned int nr_segs, bool *same_queue_rq);
+		unsigned int nr_segs);
 bool blk_bio_list_merge(struct request_queue *q, struct list_head *list,
 			struct bio *bio, unsigned int nr_segs);
-
-void __blk_account_io_start(struct request *req);
-void __blk_account_io_done(struct request *req, u64 now);
 
 /*
  * Plug flush limits
@@ -275,18 +261,9 @@ void blk_insert_flush(struct request *rq);
 
 int elevator_switch_mq(struct request_queue *q,
 			      struct elevator_type *new_e);
-void __elevator_exit(struct request_queue *, struct elevator_queue *);
+void elevator_exit(struct request_queue *q);
 int elv_register_queue(struct request_queue *q, bool uevent);
 void elv_unregister_queue(struct request_queue *q);
-
-static inline void elevator_exit(struct request_queue *q,
-		struct elevator_queue *e)
-{
-	lockdep_assert_held(&q->sysfs_lock);
-
-	blk_mq_sched_free_rqs(q);
-	__elevator_exit(q, e);
-}
 
 ssize_t part_size_show(struct device *dev, struct device_attribute *attr,
 		char *buf);
@@ -350,23 +327,7 @@ static inline bool blk_do_io_stat(struct request *rq)
 	return (rq->rq_flags & RQF_IO_STAT) && rq->rq_disk;
 }
 
-static inline void blk_account_io_done(struct request *req, u64 now)
-{
-	/*
-	 * Account IO completion.  flush_rq isn't accounted as a
-	 * normal IO on queueing nor completion.  Accounting the
-	 * containing request is enough.
-	 */
-	if (blk_do_io_stat(req) && req->part &&
-	    !(req->rq_flags & RQF_FLUSH_SEQ))
-		__blk_account_io_done(req, now);
-}
-
-static inline void blk_account_io_start(struct request *req)
-{
-	if (blk_do_io_stat(req))
-		__blk_account_io_start(req);
-}
+void update_io_ticks(struct block_device *part, unsigned long now, bool end);
 
 static inline void req_set_nomerge(struct request_queue *q, struct request *req)
 {
@@ -468,6 +429,7 @@ int bio_add_hw_page(struct request_queue *q, struct bio *bio,
 		unsigned int max_sectors, bool *same_page);
 
 struct request_queue *blk_alloc_queue(int node_id);
+int disk_scan_partitions(struct gendisk *disk, fmode_t mode);
 
 int disk_alloc_events(struct gendisk *disk);
 void disk_add_events(struct gendisk *disk);
@@ -492,5 +454,15 @@ extern const struct address_space_operations def_blk_aops;
 int disk_register_independent_access_ranges(struct gendisk *disk,
 				struct blk_independent_access_ranges *new_iars);
 void disk_unregister_independent_access_ranges(struct gendisk *disk);
+
+#ifdef CONFIG_FAIL_MAKE_REQUEST
+bool should_fail_request(struct block_device *part, unsigned int bytes);
+#else /* CONFIG_FAIL_MAKE_REQUEST */
+static inline bool should_fail_request(struct block_device *part,
+					unsigned int bytes)
+{
+	return false;
+}
+#endif /* CONFIG_FAIL_MAKE_REQUEST */
 
 #endif /* BLK_INTERNAL_H */

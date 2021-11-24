@@ -16,6 +16,7 @@
 #include "blk.h"
 #include "blk-mq.h"
 #include "blk-mq-debugfs.h"
+#include "blk-mq-sched.h"
 #include "blk-wbt.h"
 #include "blk-throttle.h"
 
@@ -747,7 +748,7 @@ static void blk_exit_queue(struct request_queue *q)
 	 */
 	if (q->elevator) {
 		ioc_clear_queue(q);
-		__elevator_exit(q, q->elevator);
+		elevator_exit(q);
 	}
 
 	/*
@@ -785,11 +786,12 @@ static void blk_release_queue(struct kobject *kobj)
 
 	might_sleep();
 
-	if (test_bit(QUEUE_FLAG_POLL_STATS, &q->queue_flags))
+	if (q->poll_stat)
 		blk_stat_remove_callback(q, q->poll_cb);
 	blk_stat_free_callback(q->poll_cb);
 
 	blk_free_queue_stats(q->stats);
+	kfree(q->poll_stat);
 
 	blk_exit_queue(q);
 
