@@ -550,7 +550,7 @@ i8k_ioctl_unlocked(struct file *fp, struct dell_smm_data *data, unsigned int cmd
 
 static long i8k_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 {
-	struct dell_smm_data *data = PDE_DATA(file_inode(fp));
+	struct dell_smm_data *data = pde_data(file_inode(fp));
 	long ret;
 
 	mutex_lock(&data->i8k_mutex);
@@ -607,7 +607,7 @@ static int i8k_proc_show(struct seq_file *seq, void *offset)
 
 static int i8k_open_fs(struct inode *inode, struct file *file)
 {
-	return single_open(file, i8k_proc_show, PDE_DATA(inode));
+	return single_open(file, i8k_proc_show, pde_data(inode));
 }
 
 static const struct proc_ops i8k_proc_ops = {

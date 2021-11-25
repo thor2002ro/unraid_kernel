@@ -109,7 +109,7 @@ static int nubus_proc_rsrc_show(struct seq_file *m, void *v)
 	struct inode *inode = m->private;
 	struct nubus_proc_pde_data *pde_data;
 
-	pde_data = PDE_DATA(inode);
+	pde_data = pde_data(inode);
 	if (!pde_data)
 		return 0;
 
