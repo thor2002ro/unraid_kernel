@@ -301,6 +301,10 @@ void __lockfunc _raw_write_lock(rwlock_t *lock)
 }
 EXPORT_SYMBOL(_raw_write_lock);
 
+#ifndef CONFIG_DEBUG_LOCK_ALLOC
+#define __raw_write_lock_nested(lock, subclass)	__raw_write_lock(((void)(subclass), (lock)))
+#endif
+
 void __lockfunc _raw_write_lock_nested(rwlock_t *lock, int subclass)
 {
 	__raw_write_lock_nested(lock, subclass);
