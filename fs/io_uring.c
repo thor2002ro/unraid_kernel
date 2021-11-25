@@ -6537,12 +6537,15 @@ static __cold void io_drain_req(struct io_kiocb *req)
 	u32 seq = io_get_sequence(req);
 
 	/* Still need defer if there is pending req in defer list. */
+	spin_lock(&ctx->completion_lock);
 	if (!req_need_defer(req, seq) && list_empty_careful(&ctx->defer_list)) {
+		spin_unlock(&ctx->completion_lock);
 queue:
 		ctx->drain_active = false;
 		io_req_task_queue(req);
 		return;
 	}
+	spin_unlock(&ctx->completion_lock);
 
 	ret = io_req_prep_async(req);
 	if (ret) {
@@ -7092,10 +7095,10 @@ static void io_init_req_drain(struct io_kiocb *req)
 		 * If we need to drain a request in the middle of a link, drain
 		 * the head request and the next request/link after the current
 		 * link. Considering sequential execution of links,
-		 * IOSQE_IO_DRAIN will be maintained for every request of our
+		 * REQ_F_IO_DRAIN will be maintained for every request of our
 		 * link.
 		 */
-		head->flags |= IOSQE_IO_DRAIN | REQ_F_FORCE_ASYNC;
+		head->flags |= REQ_F_IO_DRAIN | REQ_F_FORCE_ASYNC;
 		ctx->drain_next = true;
 	}
 }
@@ -7146,7 +7149,7 @@ static int io_init_req(struct io_ring_ctx *ctx, struct io_kiocb *req,
 		if (unlikely(ctx->drain_next) && !ctx->submit_state.link.head) {
 			ctx->drain_next = false;
 			ctx->drain_active = true;
-			req->flags |= IOSQE_IO_DRAIN | REQ_F_FORCE_ASYNC;
+			req->flags |= REQ_F_IO_DRAIN | REQ_F_FORCE_ASYNC;
 		}
 	}
 
