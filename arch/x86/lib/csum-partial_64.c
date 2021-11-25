@@ -41,6 +41,7 @@ __wsum csum_partial(const void *buff, int len, __wsum sum)
 	if (unlikely(odd)) {
 		if (unlikely(len == 0))
 			return sum;
+		temp64 = ror32((__force u32)sum, 8);
 		temp64 += (*(unsigned char *)buff << 8);
 		len--;
 		buff++;
