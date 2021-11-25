@@ -233,8 +233,10 @@ fail:
 	}
 	if (io_gl)
 		gfs2_glock_put(io_gl);
-	if (gfs2_holder_initialized(&i_gh))
+	if (gfs2_holder_initialized(&i_gh)) {
+		glock_clear_object(ip->i_gl, ip);
 		gfs2_glock_dq_uninit(&i_gh);
+	}
 	iget_failed(inode);
 	return ERR_PTR(error);
 }
