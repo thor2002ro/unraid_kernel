@@ -2128,12 +2128,9 @@ bool gfs2_queue_delete_work(struct gfs2_glock *gl, unsigned long delay)
 	return queued;
 }
 
-void gfs2_cancel_delete_work(struct gfs2_glock *gl)
-{
-	if (cancel_delayed_work(&gl->gl_delete)) {
-		clear_bit(GLF_PENDING_DELETE, &gl->gl_flags);
-		gfs2_glock_put(gl);
-	}
+void delete_work_canceled(struct gfs2_glock *gl) {
+	clear_bit(GLF_PENDING_DELETE, &gl->gl_flags);
+	gfs2_glock_put(gl);
 }
 
 bool gfs2_delete_work_queued(const struct gfs2_glock *gl)
