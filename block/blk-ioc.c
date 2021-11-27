@@ -24,7 +24,7 @@ static struct kmem_cache *iocontext_cachep;
  *
  * Increment reference count to @ioc.
  */
-void get_io_context(struct io_context *ioc)
+static void get_io_context(struct io_context *ioc)
 {
 	BUG_ON(atomic_long_read(&ioc->refcount) <= 0);
 	atomic_long_inc(&ioc->refcount);
@@ -167,15 +167,16 @@ void put_io_context(struct io_context *ioc)
 	if (free_ioc)
 		kmem_cache_free(iocontext_cachep, ioc);
 }
+EXPORT_SYMBOL_GPL(put_io_context);
 
 /**
  * put_io_context_active - put active reference on ioc
  * @ioc: ioc of interest
  *
- * Undo get_io_context_active().  If active reference reaches zero after
+ * Put an active reference to an ioc.  If active reference reaches zero after
  * put, @ioc can never issue further IOs and ioscheds are notified.
  */
-void put_io_context_active(struct io_context *ioc)
+static void put_io_context_active(struct io_context *ioc)
 {
 	struct io_cq *icq;
 
@@ -248,17 +249,15 @@ void ioc_clear_queue(struct request_queue *q)
 	__ioc_clear_queue(&icq_list);
 }
 
-int create_task_io_context(struct task_struct *task, gfp_t gfp_flags, int node)
+static struct io_context *alloc_io_context(gfp_t gfp_flags, int node)
 {
 	struct io_context *ioc;
-	int ret;
 
 	ioc = kmem_cache_alloc_node(iocontext_cachep, gfp_flags | __GFP_ZERO,
 				    node);
 	if (unlikely(!ioc))
-		return -ENOMEM;
+		return NULL;
 
-	/* initialize */
 	atomic_long_set(&ioc->refcount, 1);
 	atomic_set(&ioc->nr_tasks, 1);
 	atomic_set(&ioc->active_ref, 1);
@@ -266,6 +265,17 @@ int create_task_io_context(struct task_struct *task, gfp_t gfp_flags, int node)
 	INIT_RADIX_TREE(&ioc->icq_tree, GFP_ATOMIC);
 	INIT_HLIST_HEAD(&ioc->icq_list);
 	INIT_WORK(&ioc->release_work, ioc_release_fn);
+	return ioc;
+}
+
+static struct io_context *create_task_io_context(struct task_struct *task,
+		gfp_t gfp_flags, int node)
+{
+	struct io_context *ioc;
+
+	ioc = alloc_io_context(gfp_flags, node);
+	if (!ioc)
+		return NULL;
 
 	/*
 	 * Try to install.  ioc shouldn't be installed if someone else
@@ -281,11 +291,11 @@ int create_task_io_context(struct task_struct *task, gfp_t gfp_flags, int node)
 	else
 		kmem_cache_free(iocontext_cachep, ioc);
 
-	ret = task->io_context ? 0 : -EBUSY;
-
+	ioc = task->io_context;
+	if (ioc)
+		get_io_context(ioc);
 	task_unlock(task);
-
-	return ret;
+	return ioc;
 }
 
 /**
@@ -308,30 +318,49 @@ struct io_context *get_task_io_context(struct task_struct *task,
 
 	might_sleep_if(gfpflags_allow_blocking(gfp_flags));
 
-	do {
-		task_lock(task);
-		ioc = task->io_context;
-		if (likely(ioc)) {
-			get_io_context(ioc);
-			task_unlock(task);
-			return ioc;
-		}
+	task_lock(task);
+	ioc = task->io_context;
+	if (unlikely(!ioc)) {
 		task_unlock(task);
-	} while (!create_task_io_context(task, gfp_flags, node));
+		return create_task_io_context(task, gfp_flags, node);
+	}
+	get_io_context(ioc);
+	task_unlock(task);
+	return ioc;
+}
 
-	return NULL;
+int __copy_io(unsigned long clone_flags, struct task_struct *tsk)
+{
+	struct io_context *ioc = current->io_context;
+
+	/*
+	 * Share io context with parent, if CLONE_IO is set
+	 */
+	if (clone_flags & CLONE_IO) {
+		atomic_long_inc(&ioc->refcount);
+		atomic_inc(&ioc->active_ref);
+		atomic_inc(&ioc->nr_tasks);
+		tsk->io_context = ioc;
+	} else if (ioprio_valid(ioc->ioprio)) {
+		tsk->io_context = alloc_io_context(GFP_KERNEL, NUMA_NO_NODE);
+		if (!tsk->io_context)
+			return -ENOMEM;
+		tsk->io_context->ioprio = ioc->ioprio;
+	}
+
+	return 0;
 }
 
 /**
  * ioc_lookup_icq - lookup io_cq from ioc
- * @ioc: the associated io_context
  * @q: the associated request_queue
  *
  * Look up io_cq associated with @ioc - @q pair from @ioc.  Must be called
  * with @q->queue_lock held.
  */
-struct io_cq *ioc_lookup_icq(struct io_context *ioc, struct request_queue *q)
+struct io_cq *ioc_lookup_icq(struct request_queue *q)
 {
+	struct io_context *ioc = current->io_context;
 	struct io_cq *icq;
 
 	lockdep_assert_held(&q->queue_lock);
@@ -360,9 +389,7 @@ EXPORT_SYMBOL(ioc_lookup_icq);
 
 /**
  * ioc_create_icq - create and link io_cq
- * @ioc: io_context of interest
  * @q: request_queue of interest
- * @gfp_mask: allocation mask
  *
  * Make sure io_cq linking @ioc and @q exists.  If icq doesn't exist, they
  * will be created using @gfp_mask.
@@ -370,19 +397,19 @@ EXPORT_SYMBOL(ioc_lookup_icq);
  * The caller is responsible for ensuring @ioc won't go away and @q is
  * alive and will stay alive until this function returns.
  */
-struct io_cq *ioc_create_icq(struct io_context *ioc, struct request_queue *q,
-			     gfp_t gfp_mask)
+static struct io_cq *ioc_create_icq(struct request_queue *q)
 {
+	struct io_context *ioc = current->io_context;
 	struct elevator_type *et = q->elevator->type;
 	struct io_cq *icq;
 
 	/* allocate stuff */
-	icq = kmem_cache_alloc_node(et->icq_cache, gfp_mask | __GFP_ZERO,
+	icq = kmem_cache_alloc_node(et->icq_cache, GFP_ATOMIC | __GFP_ZERO,
 				    q->node);
 	if (!icq)
 		return NULL;
 
-	if (radix_tree_maybe_preload(gfp_mask) < 0) {
+	if (radix_tree_maybe_preload(GFP_ATOMIC) < 0) {
 		kmem_cache_free(et->icq_cache, icq);
 		return NULL;
 	}
@@ -403,7 +430,7 @@ struct io_cq *ioc_create_icq(struct io_context *ioc, struct request_queue *q,
 			et->ops.init_icq(icq);
 	} else {
 		kmem_cache_free(et->icq_cache, icq);
-		icq = ioc_lookup_icq(ioc, q);
+		icq = ioc_lookup_icq(q);
 		if (!icq)
 			printk(KERN_ERR "cfq: icq link failed!\n");
 	}
@@ -413,6 +440,34 @@ struct io_cq *ioc_create_icq(struct io_context *ioc, struct request_queue *q,
 	radix_tree_preload_end();
 	return icq;
 }
+
+struct io_cq *ioc_find_get_icq(struct request_queue *q)
+{
+	struct io_context *ioc = current->io_context;
+	struct io_cq *icq = NULL;
+
+	if (unlikely(!ioc)) {
+		ioc = create_task_io_context(current, GFP_ATOMIC, q->node);
+		if (!ioc)
+			return NULL;
+	} else {
+		get_io_context(ioc);
+
+		spin_lock_irq(&q->queue_lock);
+		icq = ioc_lookup_icq(q);
+		spin_unlock_irq(&q->queue_lock);
+	}
+
+	if (!icq) {
+		icq = ioc_create_icq(q);
+		if (!icq) {
+			put_io_context(ioc);
+			return NULL;
+		}
+	}
+	return icq;
+}
+EXPORT_SYMBOL_GPL(ioc_find_get_icq);
 
 static int __init blk_ioc_init(void)
 {

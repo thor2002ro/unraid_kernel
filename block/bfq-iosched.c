@@ -433,26 +433,21 @@ static struct bfq_io_cq *icq_to_bic(struct io_cq *icq)
 
 /**
  * bfq_bic_lookup - search into @ioc a bic associated to @bfqd.
- * @bfqd: the lookup key.
- * @ioc: the io_context of the process doing I/O.
  * @q: the request queue.
  */
-static struct bfq_io_cq *bfq_bic_lookup(struct bfq_data *bfqd,
-					struct io_context *ioc,
-					struct request_queue *q)
+static struct bfq_io_cq *bfq_bic_lookup(struct request_queue *q)
 {
-	if (ioc) {
-		unsigned long flags;
-		struct bfq_io_cq *icq;
+	struct bfq_io_cq *icq;
+	unsigned long flags;
 
-		spin_lock_irqsave(&q->queue_lock, flags);
-		icq = icq_to_bic(ioc_lookup_icq(ioc, q));
-		spin_unlock_irqrestore(&q->queue_lock, flags);
+	if (!current->io_context)
+		return NULL;
 
-		return icq;
-	}
+	spin_lock_irqsave(&q->queue_lock, flags);
+	icq = icq_to_bic(ioc_lookup_icq(q));
+	spin_unlock_irqrestore(&q->queue_lock, flags);
 
-	return NULL;
+	return icq;
 }
 
 /*
@@ -668,7 +663,7 @@ static bool bfqq_request_over_limit(struct bfq_queue *bfqq, int limit)
 static void bfq_limit_depth(unsigned int op, struct blk_mq_alloc_data *data)
 {
 	struct bfq_data *bfqd = data->q->elevator->elevator_data;
-	struct bfq_io_cq *bic = icq_to_bic(blk_mq_sched_get_icq(data->q));
+	struct bfq_io_cq *bic = bfq_bic_lookup(data->q);
 	struct bfq_queue *bfqq = bic ? bic_to_bfqq(bic, op_is_sync(op)) : NULL;
 	int depth;
 	unsigned limit = data->q->nr_requests;
@@ -2457,7 +2452,7 @@ static bool bfq_bio_merge(struct request_queue *q, struct bio *bio,
 	 * returned by bfq_bic_lookup does not go away before
 	 * bfqd->lock is taken.
 	 */
-	struct bfq_io_cq *bic = bfq_bic_lookup(bfqd, current->io_context, q);
+	struct bfq_io_cq *bic = bfq_bic_lookup(q);
 	bool ret;
 
 	spin_lock_irq(&bfqd->lock);
@@ -6574,6 +6569,16 @@ static void bfq_finish_requeue_request(struct request *rq)
 	rq->elv.priv[1] = NULL;
 }
 
+static void bfq_finish_request(struct request *rq)
+{
+	bfq_finish_requeue_request(rq);
+
+	if (rq->elv.icq) {
+		put_io_context(rq->elv.icq->ioc);
+		rq->elv.icq = NULL;
+	}
+}
+
 /*
  * Removes the association between the current task and bfqq, assuming
  * that bic points to the bfq iocontext of the task.
@@ -6671,7 +6676,7 @@ static struct bfq_queue *bfq_get_bfqq_handle_split(struct bfq_data *bfqd,
  */
 static void bfq_prepare_request(struct request *rq)
 {
-	blk_mq_sched_assign_ioc(rq);
+	rq->elv.icq = ioc_find_get_icq(rq->q);
 
 	/*
 	 * Regardless of whether we have an icq attached, we have to
@@ -7393,7 +7398,7 @@ static struct elevator_type iosched_bfq_mq = {
 		.limit_depth		= bfq_limit_depth,
 		.prepare_request	= bfq_prepare_request,
 		.requeue_request        = bfq_finish_requeue_request,
-		.finish_request		= bfq_finish_requeue_request,
+		.finish_request		= bfq_finish_request,
 		.exit_icq		= bfq_exit_icq,
 		.insert_requests	= bfq_insert_requests,
 		.dispatch_request	= bfq_dispatch_request,
