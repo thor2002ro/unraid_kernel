@@ -24,6 +24,10 @@
 extern "C" {
 #endif
 
+LIBBPF_API __u32 libbpf_major_version(void);
+LIBBPF_API __u32 libbpf_minor_version(void);
+LIBBPF_API const char *libbpf_version_string(void);
+
 enum libbpf_errno {
 	__LIBBPF_ERRNO__START = 4000,
 
@@ -494,7 +498,7 @@ bpf_program__set_expected_attach_type(struct bpf_program *prog,
 				      enum bpf_attach_type type);
 
 LIBBPF_API __u32 bpf_program__flags(const struct bpf_program *prog);
-LIBBPF_API int bpf_program__set_extra_flags(struct bpf_program *prog, __u32 extra_flags);
+LIBBPF_API int bpf_program__set_flags(struct bpf_program *prog, __u32 flags);
 
 LIBBPF_API int
 bpf_program__set_attach_target(struct bpf_program *prog, int attach_prog_fd,

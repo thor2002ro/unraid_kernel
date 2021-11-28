@@ -168,6 +168,25 @@ int libbpf_set_strict_mode(enum libbpf_strict_mode mode)
 	return 0;
 }
 
+__u32 libbpf_major_version(void)
+{
+	return LIBBPF_MAJOR_VERSION;
+}
+
+__u32 libbpf_minor_version(void)
+{
+	return LIBBPF_MINOR_VERSION;
+}
+
+const char *libbpf_version_string(void)
+{
+#define __S(X) #X
+#define _S(X) __S(X)
+	return  "v" _S(LIBBPF_MAJOR_VERSION) "." _S(LIBBPF_MINOR_VERSION);
+#undef _S
+#undef __S
+}
+
 enum kern_feature_id {
 	/* v4.14: kernel support for program & map names. */
 	FEAT_PROG_NAME,
@@ -3350,7 +3369,8 @@ static int bpf_object__elf_collect(struct bpf_object *obj)
 
 	/* sort BPF programs by section name and in-section instruction offset
 	 * for faster search */
-	qsort(obj->programs, obj->nr_programs, sizeof(*obj->programs), cmp_progs);
+	if (obj->nr_programs)
+		qsort(obj->programs, obj->nr_programs, sizeof(*obj->programs), cmp_progs);
 
 	return bpf_object__init_btf(obj, btf_data, btf_ext_data);
 }
@@ -4342,7 +4362,6 @@ static int probe_kern_prog_name(void)
 
 static int probe_kern_global_data(void)
 {
-	struct bpf_create_map_attr map_attr;
 	char *cp, errmsg[STRERR_BUFSIZE];
 	struct bpf_insn insns[] = {
 		BPF_LD_MAP_VALUE(BPF_REG_1, 0, 16),
@@ -4352,13 +4371,7 @@ static int probe_kern_global_data(void)
 	};
 	int ret, map, insn_cnt = ARRAY_SIZE(insns);
 
-	memset(&map_attr, 0, sizeof(map_attr));
-	map_attr.map_type = BPF_MAP_TYPE_ARRAY;
-	map_attr.key_size = sizeof(int);
-	map_attr.value_size = 32;
-	map_attr.max_entries = 1;
-
-	map = bpf_create_map_xattr(&map_attr);
+	map = bpf_map_create(BPF_MAP_TYPE_ARRAY, NULL, sizeof(int), 32, 1, NULL);
 	if (map < 0) {
 		ret = -errno;
 		cp = libbpf_strerror_r(ret, errmsg, sizeof(errmsg));
@@ -4488,15 +4501,11 @@ static int probe_kern_btf_type_tag(void)
 
 static int probe_kern_array_mmap(void)
 {
-	struct bpf_create_map_attr attr = {
-		.map_type = BPF_MAP_TYPE_ARRAY,
-		.map_flags = BPF_F_MMAPABLE,
-		.key_size = sizeof(int),
-		.value_size = sizeof(int),
-		.max_entries = 1,
-	};
+	LIBBPF_OPTS(bpf_map_create_opts, opts, .map_flags = BPF_F_MMAPABLE);
+	int fd;
 
-	return probe_fd(bpf_create_map_xattr(&attr));
+	fd = bpf_map_create(BPF_MAP_TYPE_ARRAY, NULL, sizeof(int), sizeof(int), 1, &opts);
+	return probe_fd(fd);
 }
 
 static int probe_kern_exp_attach_type(void)
@@ -4535,7 +4544,6 @@ static int probe_kern_probe_read_kernel(void)
 
 static int probe_prog_bind_map(void)
 {
-	struct bpf_create_map_attr map_attr;
 	char *cp, errmsg[STRERR_BUFSIZE];
 	struct bpf_insn insns[] = {
 		BPF_MOV64_IMM(BPF_REG_0, 0),
@@ -4543,13 +4551,7 @@ static int probe_prog_bind_map(void)
 	};
 	int ret, map, prog, insn_cnt = ARRAY_SIZE(insns);
 
-	memset(&map_attr, 0, sizeof(map_attr));
-	map_attr.map_type = BPF_MAP_TYPE_ARRAY;
-	map_attr.key_size = sizeof(int);
-	map_attr.value_size = 32;
-	map_attr.max_entries = 1;
-
-	map = bpf_create_map_xattr(&map_attr);
+	map = bpf_map_create(BPF_MAP_TYPE_ARRAY, NULL, sizeof(int), 32, 1, NULL);
 	if (map < 0) {
 		ret = -errno;
 		cp = libbpf_strerror_r(ret, errmsg, sizeof(errmsg));
@@ -4820,19 +4822,16 @@ static void bpf_map__destroy(struct bpf_map *map);
 
 static int bpf_object__create_map(struct bpf_object *obj, struct bpf_map *map, bool is_inner)
 {
-	struct bpf_create_map_params create_attr;
+	LIBBPF_OPTS(bpf_map_create_opts, create_attr);
 	struct bpf_map_def *def = &map->def;
+	const char *map_name = NULL;
+	__u32 max_entries;
 	int err = 0;
 
-	memset(&create_attr, 0, sizeof(create_attr));
-
 	if (kernel_supports(obj, FEAT_PROG_NAME))
-		create_attr.name = map->name;
+		map_name = map->name;
 	create_attr.map_ifindex = map->map_ifindex;
-	create_attr.map_type = def->type;
 	create_attr.map_flags = def->map_flags;
-	create_attr.key_size = def->key_size;
-	create_attr.value_size = def->value_size;
 	create_attr.numa_node = map->numa_node;
 	create_attr.map_extra = map->map_extra;
 
@@ -4846,18 +4845,14 @@ static int bpf_object__create_map(struct bpf_object *obj, struct bpf_map *map, b
 			return nr_cpus;
 		}
 		pr_debug("map '%s': setting size to %d\n", map->name, nr_cpus);
-		create_attr.max_entries = nr_cpus;
+		max_entries = nr_cpus;
 	} else {
-		create_attr.max_entries = def->max_entries;
+		max_entries = def->max_entries;
 	}
 
 	if (bpf_map__is_struct_ops(map))
-		create_attr.btf_vmlinux_value_type_id =
-			map->btf_vmlinux_value_type_id;
+		create_attr.btf_vmlinux_value_type_id = map->btf_vmlinux_value_type_id;
 
-	create_attr.btf_fd = 0;
-	create_attr.btf_key_type_id = 0;
-	create_attr.btf_value_type_id = 0;
 	if (obj->btf && btf__fd(obj->btf) >= 0 && !bpf_map_find_btf_info(obj, map)) {
 		create_attr.btf_fd = btf__fd(obj->btf);
 		create_attr.btf_key_type_id = map->btf_key_type_id;
@@ -4903,13 +4898,17 @@ static int bpf_object__create_map(struct bpf_object *obj, struct bpf_map *map, b
 	}
 
 	if (obj->gen_loader) {
-		bpf_gen__map_create(obj->gen_loader, &create_attr, is_inner ? -1 : map - obj->maps);
+		bpf_gen__map_create(obj->gen_loader, def->type, map_name,
+				    def->key_size, def->value_size, max_entries,
+				    &create_attr, is_inner ? -1 : map - obj->maps);
 		/* Pretend to have valid FD to pass various fd >= 0 checks.
 		 * This fd == 0 will not be used with any syscall and will be reset to -1 eventually.
 		 */
 		map->fd = 0;
 	} else {
-		map->fd = libbpf__bpf_create_map_xattr(&create_attr);
+		map->fd = bpf_map_create(def->type, map_name,
+					 def->key_size, def->value_size,
+					 max_entries, &create_attr);
 	}
 	if (map->fd < 0 && (create_attr.btf_key_type_id ||
 			    create_attr.btf_value_type_id)) {
@@ -4924,7 +4923,9 @@ static int bpf_object__create_map(struct bpf_object *obj, struct bpf_map *map, b
 		create_attr.btf_value_type_id = 0;
 		map->btf_key_type_id = 0;
 		map->btf_value_type_id = 0;
-		map->fd = libbpf__bpf_create_map_xattr(&create_attr);
+		map->fd = bpf_map_create(def->type, map_name,
+					 def->key_size, def->value_size,
+					 max_entries, &create_attr);
 	}
 
 	err = map->fd < 0 ? -errno : 0;
@@ -4986,6 +4987,24 @@ bpf_object__create_maps(struct bpf_object *obj)
 
 	for (i = 0; i < obj->nr_maps; i++) {
 		map = &obj->maps[i];
+
+		/* To support old kernels, we skip creating global data maps
+		 * (.rodata, .data, .kconfig, etc); later on, during program
+		 * loading, if we detect that at least one of the to-be-loaded
+		 * programs is referencing any global data map, we'll error
+		 * out with program name and relocation index logged.
+		 * This approach allows to accommodate Clang emitting
+		 * unnecessary .rodata.str1.1 sections for string literals,
+		 * but also it allows to have CO-RE applications that use
+		 * global variables in some of BPF programs, but not others.
+		 * If those global variable-using programs are not loaded at
+		 * runtime due to bpf_program__set_autoload(prog, false),
+		 * bpf_object loading will succeed just fine even on old
+		 * kernels.
+		 */
+		if (bpf_map__is_internal(map) &&
+		    !kernel_supports(obj, FEAT_GLOBAL_DATA))
+			continue;
 
 		retried = false;
 retry:
@@ -5586,6 +5605,14 @@ bpf_object__relocate_data(struct bpf_object *obj, struct bpf_program *prog)
 				insn[0].src_reg = BPF_PSEUDO_MAP_IDX_VALUE;
 				insn[0].imm = relo->map_idx;
 			} else {
+				const struct bpf_map *map = &obj->maps[relo->map_idx];
+
+				if (bpf_map__is_internal(map) &&
+				    !kernel_supports(obj, FEAT_GLOBAL_DATA)) {
+					pr_warn("prog '%s': relo #%d: kernel doesn't support global data\n",
+						prog->name, i);
+					return -ENOTSUP;
+				}
 				insn[0].src_reg = BPF_PSEUDO_MAP_VALUE;
 				insn[0].imm = obj->maps[relo->map_idx].fd;
 			}
@@ -5797,6 +5824,8 @@ static int cmp_relo_by_insn_idx(const void *key, const void *elem)
 
 static struct reloc_desc *find_prog_insn_relo(const struct bpf_program *prog, size_t insn_idx)
 {
+	if (!prog->nr_reloc)
+		return NULL;
 	return bsearch(&insn_idx, prog->reloc_desc, prog->nr_reloc,
 		       sizeof(*prog->reloc_desc), cmp_relo_by_insn_idx);
 }
@@ -5812,8 +5841,9 @@ static int append_subprog_relos(struct bpf_program *main_prog, struct bpf_progra
 	relos = libbpf_reallocarray(main_prog->reloc_desc, new_cnt, sizeof(*relos));
 	if (!relos)
 		return -ENOMEM;
-	memcpy(relos + main_prog->nr_reloc, subprog->reloc_desc,
-	       sizeof(*relos) * subprog->nr_reloc);
+	if (subprog->nr_reloc)
+		memcpy(relos + main_prog->nr_reloc, subprog->reloc_desc,
+		       sizeof(*relos) * subprog->nr_reloc);
 
 	for (i = main_prog->nr_reloc; i < new_cnt; i++)
 		relos[i].insn_idx += subprog->sub_insn_off;
@@ -6120,6 +6150,8 @@ bpf_object__relocate(struct bpf_object *obj, const char *targ_btf_path)
 		 */
 		if (prog_is_subprog(obj, prog))
 			continue;
+		if (!prog->load)
+			continue;
 
 		err = bpf_object__relocate_calls(obj, prog);
 		if (err) {
@@ -6132,6 +6164,8 @@ bpf_object__relocate(struct bpf_object *obj, const char *targ_btf_path)
 	for (i = 0; i < obj->nr_programs; i++) {
 		prog = &obj->programs[i];
 		if (prog_is_subprog(obj, prog))
+			continue;
+		if (!prog->load)
 			continue;
 		err = bpf_object__relocate_data(obj, prog);
 		if (err) {
@@ -6920,10 +6954,6 @@ static int bpf_object__sanitize_maps(struct bpf_object *obj)
 	bpf_object__for_each_map(m, obj) {
 		if (!bpf_map__is_internal(m))
 			continue;
-		if (!kernel_supports(obj, FEAT_GLOBAL_DATA)) {
-			pr_warn("kernel doesn't support global data\n");
-			return -ENOTSUP;
-		}
 		if (!kernel_supports(obj, FEAT_ARRAY_MMAP))
 			m->def.map_flags ^= BPF_F_MMAPABLE;
 	}
@@ -8296,12 +8326,12 @@ __u32 bpf_program__flags(const struct bpf_program *prog)
 	return prog->prog_flags;
 }
 
-int bpf_program__set_extra_flags(struct bpf_program *prog, __u32 extra_flags)
+int bpf_program__set_flags(struct bpf_program *prog, __u32 flags)
 {
 	if (prog->obj->loaded)
 		return libbpf_err(-EBUSY);
 
-	prog->prog_flags |= extra_flags;
+	prog->prog_flags = flags;
 	return 0;
 }
 
