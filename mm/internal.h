@@ -74,6 +74,28 @@ static inline bool can_madv_lru_vma(struct vm_area_struct *vma)
 	return !(vma->vm_flags & (VM_LOCKED|VM_HUGETLB|VM_PFNMAP));
 }
 
+/*
+ * Parameter block passed down to zap_pte_range in exceptional cases.
+ */
+struct zap_details {
+	struct address_space *zap_mapping;	/* Check page->mapping if set */
+	struct folio *single_folio;	/* Locked folio to be unmapped */
+};
+
+/*
+ * We set details->zap_mappings when we want to unmap shared but keep private
+ * pages. Return true if skip zapping this page, false otherwise.
+ */
+static inline bool
+zap_skip_check_mapping(struct zap_details *details, struct page *page)
+{
+	if (!details || !page)
+		return false;
+
+	return details->zap_mapping &&
+	    (details->zap_mapping != page_rmapping(page));
+}
+
 void unmap_page_range(struct mmu_gather *tlb,
 			     struct vm_area_struct *vma,
 			     unsigned long addr, unsigned long end,
@@ -388,6 +410,7 @@ void __vma_link_list(struct mm_struct *mm, struct vm_area_struct *vma,
 void __vma_unlink_list(struct mm_struct *mm, struct vm_area_struct *vma);
 
 #ifdef CONFIG_MMU
+void unmap_mapping_folio(struct folio *folio);
 extern long populate_vma_page_range(struct vm_area_struct *vma,
 		unsigned long start, unsigned long end, int *locked);
 extern long faultin_vma_page_range(struct vm_area_struct *vma,
@@ -491,8 +514,8 @@ static inline struct file *maybe_unlock_mmap_for_io(struct vm_fault *vmf,
 	}
 	return fpin;
 }
-
 #else /* !CONFIG_MMU */
+static inline void unmap_mapping_folio(struct folio *folio) { }
 static inline void clear_page_mlock(struct page *page) { }
 static inline void mlock_vma_page(struct page *page) { }
 static inline void vunmap_range_noflush(unsigned long start, unsigned long end)
