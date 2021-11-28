@@ -1347,8 +1347,12 @@ static void azx_free(struct azx *chip)
 	if (hda->freed)
 		return;
 
-	if (azx_has_pm_runtime(chip) && chip->running)
+	if (azx_has_pm_runtime(chip) && chip->running) {
 		pm_runtime_get_noresume(&pci->dev);
+		pm_runtime_forbid(&pci->dev);
+		pm_runtime_dont_use_autosuspend(&pci->dev);
+	}
+
 	chip->running = 0;
 
 	azx_del_card_list(chip);
