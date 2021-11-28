@@ -154,8 +154,10 @@ struct inode *gfs2_inode_lookup(struct super_block *sb, unsigned int type,
 		error = gfs2_glock_get(sdp, no_addr, &gfs2_iopen_glops, CREATE, &io_gl);
 		if (unlikely(error))
 			goto fail;
-		if (blktype != GFS2_BLKST_UNLINKED)
-			gfs2_cancel_delete_work(io_gl);
+		if (blktype != GFS2_BLKST_UNLINKED) {
+			if (cancel_delayed_work(&io_gl->gl_delete))
+				delete_work_canceled(io_gl);
+		}
 
 		if (type == DT_UNKNOWN || blktype != GFS2_BLKST_FREE) {
 			/*
@@ -231,8 +233,10 @@ fail:
 	}
 	if (io_gl)
 		gfs2_glock_put(io_gl);
-	if (gfs2_holder_initialized(&i_gh))
+	if (gfs2_holder_initialized(&i_gh)) {
+		glock_clear_object(ip->i_gl, ip);
 		gfs2_glock_dq_uninit(&i_gh);
+	}
 	iget_failed(inode);
 	return ERR_PTR(error);
 }
@@ -735,7 +739,8 @@ static int gfs2_create_inode(struct inode *dir, struct dentry *dentry,
 	error = gfs2_glock_get(sdp, ip->i_no_addr, &gfs2_iopen_glops, CREATE, &io_gl);
 	if (error)
 		goto fail_free_inode;
-	gfs2_cancel_delete_work(io_gl);
+	if (cancel_delayed_work_sync(&io_gl->gl_delete))
+		delete_work_canceled(io_gl);
 
 	error = gfs2_glock_nq_init(ip->i_gl, LM_ST_EXCLUSIVE, GL_SKIP, ghs + 1);
 	if (error)
