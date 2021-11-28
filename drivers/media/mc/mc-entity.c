@@ -14,7 +14,7 @@
 #include <media/media-entity.h>
 #include <media/media-device.h>
 
-static inline const char *gobj_type(enum media_gobj_type type)
+static inline __maybe_unused const char *gobj_type(enum media_gobj_type type)
 {
 	switch (type) {
 	case MEDIA_GRAPH_ENTITY:
