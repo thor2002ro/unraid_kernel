@@ -14,12 +14,17 @@
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/fixp-arith.h>
-
-#include <linux/platform_data/ntc_thermistor.h>
-
 #include <linux/iio/consumer.h>
-
 #include <linux/hwmon.h>
+
+enum ntc_thermistor_type {
+	TYPE_B57330V2103,
+	TYPE_B57891S0103,
+	TYPE_NCPXXWB473,
+	TYPE_NCPXXWF104,
+	TYPE_NCPXXWL333,
+	TYPE_NCPXXXH103,
+};
 
 struct ntc_compensation {
 	int		temp_c;
@@ -313,16 +318,30 @@ static const struct ntc_type ntc_type[] = {
 	NTC_TYPE(TYPE_NCPXXXH103,  ncpXXxh103),
 };
 
+/*
+ * pullup_uV, pullup_ohm, pulldown_ohm, and connect are required.
+ *
+ * How to setup pullup_ohm, pulldown_ohm, and connect is
+ * described at Documentation/hwmon/ntc_thermistor.rst
+ *
+ * pullup/down_ohm: 0 for infinite / not-connected
+ *
+ * chan: iio_channel pointer to communicate with the ADC which the
+ * thermistor is using for conversion of the analog values.
+ */
 struct ntc_data {
-	struct ntc_thermistor_platform_data *pdata;
 	const struct ntc_compensation *comp;
 	int n_comp;
+	unsigned int pullup_uv;
+	unsigned int pullup_ohm;
+	unsigned int pulldown_ohm;
+	enum { NTC_CONNECTED_POSITIVE, NTC_CONNECTED_GROUND } connect;
+	struct iio_channel *chan;
 };
 
-#if defined(CONFIG_OF) && IS_ENABLED(CONFIG_IIO)
-static int ntc_adc_iio_read(struct ntc_thermistor_platform_data *pdata)
+static int ntc_adc_iio_read(struct ntc_data *data)
 {
-	struct iio_channel *channel = pdata->chan;
+	struct iio_channel *channel = data->chan;
 	int uv, ret;
 
 	ret = iio_read_channel_processed_scale(channel, &uv, 1000);
@@ -342,7 +361,7 @@ static int ntc_adc_iio_read(struct ntc_thermistor_platform_data *pdata)
 		ret = iio_convert_raw_to_processed(channel, raw, &uv, 1000);
 		if (ret < 0) {
 			/* Assume 12 bit ADC with vref at pullup_uv */
-			uv = (pdata->pullup_uv * (s64)raw) >> 12;
+			uv = (data->pullup_uv * (s64)raw) >> 12;
 		}
 	}
 
@@ -384,20 +403,19 @@ static const struct of_device_id ntc_match[] = {
 };
 MODULE_DEVICE_TABLE(of, ntc_match);
 
-static struct ntc_thermistor_platform_data *
-ntc_thermistor_parse_dt(struct device *dev)
+static struct ntc_data *ntc_thermistor_parse_dt(struct device *dev)
 {
+	struct ntc_data *data;
 	struct iio_channel *chan;
 	enum iio_chan_type type;
 	struct device_node *np = dev->of_node;
-	struct ntc_thermistor_platform_data *pdata;
 	int ret;
 
 	if (!np)
 		return NULL;
 
-	pdata = devm_kzalloc(dev, sizeof(*pdata), GFP_KERNEL);
-	if (!pdata)
+	data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
+	if (!data)
 		return ERR_PTR(-ENOMEM);
 
 	chan = devm_iio_channel_get(dev, NULL);
@@ -411,33 +429,22 @@ ntc_thermistor_parse_dt(struct device *dev)
 	if (type != IIO_VOLTAGE)
 		return ERR_PTR(-EINVAL);
 
-	if (of_property_read_u32(np, "pullup-uv", &pdata->pullup_uv))
+	if (of_property_read_u32(np, "pullup-uv", &data->pullup_uv))
 		return ERR_PTR(-ENODEV);
-	if (of_property_read_u32(np, "pullup-ohm", &pdata->pullup_ohm))
+	if (of_property_read_u32(np, "pullup-ohm", &data->pullup_ohm))
 		return ERR_PTR(-ENODEV);
-	if (of_property_read_u32(np, "pulldown-ohm", &pdata->pulldown_ohm))
+	if (of_property_read_u32(np, "pulldown-ohm", &data->pulldown_ohm))
 		return ERR_PTR(-ENODEV);
 
 	if (of_find_property(np, "connected-positive", NULL))
-		pdata->connect = NTC_CONNECTED_POSITIVE;
+		data->connect = NTC_CONNECTED_POSITIVE;
 	else /* status change should be possible if not always on. */
-		pdata->connect = NTC_CONNECTED_GROUND;
+		data->connect = NTC_CONNECTED_GROUND;
 
-	pdata->chan = chan;
-	pdata->read_uv = ntc_adc_iio_read;
+	data->chan = chan;
 
-	return pdata;
+	return data;
 }
-#else
-static struct ntc_thermistor_platform_data *
-ntc_thermistor_parse_dt(struct device *dev)
-{
-	return NULL;
-}
-
-#define ntc_match	NULL
-
-#endif
 
 static inline u64 div64_u64_safe(u64 dividend, u64 divisor)
 {
@@ -450,24 +457,23 @@ static inline u64 div64_u64_safe(u64 dividend, u64 divisor)
 
 static int get_ohm_of_thermistor(struct ntc_data *data, unsigned int uv)
 {
-	struct ntc_thermistor_platform_data *pdata = data->pdata;
-	u32 puv = pdata->pullup_uv;
+	u32 puv = data->pullup_uv;
 	u64 n, puo, pdo;
-	puo = pdata->pullup_ohm;
-	pdo = pdata->pulldown_ohm;
+	puo = data->pullup_ohm;
+	pdo = data->pulldown_ohm;
 
 	if (uv == 0)
-		return (pdata->connect == NTC_CONNECTED_POSITIVE) ?
+		return (data->connect == NTC_CONNECTED_POSITIVE) ?
 			INT_MAX : 0;
 	if (uv >= puv)
-		return (pdata->connect == NTC_CONNECTED_POSITIVE) ?
+		return (data->connect == NTC_CONNECTED_POSITIVE) ?
 			0 : INT_MAX;
 
-	if (pdata->connect == NTC_CONNECTED_POSITIVE && puo == 0)
+	if (data->connect == NTC_CONNECTED_POSITIVE && puo == 0)
 		n = div_u64(pdo * (puv - uv), uv);
-	else if (pdata->connect == NTC_CONNECTED_GROUND && pdo == 0)
+	else if (data->connect == NTC_CONNECTED_GROUND && pdo == 0)
 		n = div_u64(puo * uv, puv - uv);
-	else if (pdata->connect == NTC_CONNECTED_POSITIVE)
+	else if (data->connect == NTC_CONNECTED_POSITIVE)
 		n = div64_u64_safe(pdo * puo * (puv - uv),
 				puo * uv - pdo * (puv - uv));
 	else
@@ -567,16 +573,10 @@ static int ntc_thermistor_get_ohm(struct ntc_data *data)
 {
 	int read_uv;
 
-	if (data->pdata->read_ohm)
-		return data->pdata->read_ohm();
-
-	if (data->pdata->read_uv) {
-		read_uv = data->pdata->read_uv(data->pdata);
-		if (read_uv < 0)
-			return read_uv;
-		return get_ohm_of_thermistor(data, read_uv);
-	}
-	return -EINVAL;
+	read_uv = ntc_adc_iio_read(data);
+	if (read_uv < 0)
+		return read_uv;
+	return get_ohm_of_thermistor(data, read_uv);
 }
 
 static int ntc_read(struct device *dev, enum hwmon_sensor_types type,
@@ -644,52 +644,30 @@ static int ntc_thermistor_probe(struct platform_device *pdev)
 	const struct of_device_id *of_id =
 			of_match_device(of_match_ptr(ntc_match), dev);
 	const struct platform_device_id *pdev_id;
-	struct ntc_thermistor_platform_data *pdata;
 	struct device *hwmon_dev;
 	struct ntc_data *data;
 
-	pdata = ntc_thermistor_parse_dt(dev);
-	if (IS_ERR(pdata))
-		return PTR_ERR(pdata);
-	else if (pdata == NULL)
-		pdata = dev_get_platdata(dev);
+	data = ntc_thermistor_parse_dt(dev);
+	if (IS_ERR(data))
+		return PTR_ERR(data);
 
-	if (!pdata) {
+	if (!data) {
 		dev_err(dev, "No platform init data supplied.\n");
 		return -ENODEV;
 	}
 
-	/* Either one of the two is required. */
-	if (!pdata->read_uv && !pdata->read_ohm) {
-		dev_err(dev,
-			"Both read_uv and read_ohm missing. Need either one of the two.\n");
+	if (data->pullup_uv == 0 ||
+	    (data->pullup_ohm == 0 && data->connect ==
+	     NTC_CONNECTED_GROUND) ||
+	    (data->pulldown_ohm == 0 && data->connect ==
+	     NTC_CONNECTED_POSITIVE) ||
+	    (data->connect != NTC_CONNECTED_POSITIVE &&
+	     data->connect != NTC_CONNECTED_GROUND)) {
+		dev_err(dev, "Required data to use NTC driver not supplied.\n");
 		return -EINVAL;
 	}
-
-	if (pdata->read_uv && pdata->read_ohm) {
-		dev_warn(dev,
-			 "Only one of read_uv and read_ohm is needed; ignoring read_uv.\n");
-		pdata->read_uv = NULL;
-	}
-
-	if (pdata->read_uv && (pdata->pullup_uv == 0 ||
-				(pdata->pullup_ohm == 0 && pdata->connect ==
-				 NTC_CONNECTED_GROUND) ||
-				(pdata->pulldown_ohm == 0 && pdata->connect ==
-				 NTC_CONNECTED_POSITIVE) ||
-				(pdata->connect != NTC_CONNECTED_POSITIVE &&
-				 pdata->connect != NTC_CONNECTED_GROUND))) {
-		dev_err(dev, "Required data to use read_uv not supplied.\n");
-		return -EINVAL;
-	}
-
-	data = devm_kzalloc(dev, sizeof(struct ntc_data), GFP_KERNEL);
-	if (!data)
-		return -ENOMEM;
 
 	pdev_id = of_id ? of_id->data : platform_get_device_id(pdev);
-
-	data->pdata = pdata;
 
 	if (pdev_id->driver_data >= ARRAY_SIZE(ntc_type)) {
 		dev_err(dev, "Unknown device type: %lu(%s)\n",
