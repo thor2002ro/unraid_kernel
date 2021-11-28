@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: (BSD-3-Clause OR GPL-2.0-only)
-/* Copyright(c) 2020 Intel Corporation */
+/* Copyright(c) 2020 - 2021 Intel Corporation */
 #include <linux/iopoll.h>
 #include <adf_accel_devices.h>
 #include <adf_common_drv.h>
-#include <adf_pf2vf_msg.h>
 #include <adf_gen4_hw_data.h>
 #include "adf_4xxx_hw_data.h"
 #include "icp_qat_hw.h"
@@ -191,11 +190,6 @@ static int adf_init_device(struct adf_accel_dev *accel_dev)
 	return ret;
 }
 
-static int pfvf_comms_disabled(struct adf_accel_dev *accel_dev)
-{
-	return 0;
-}
-
 static u32 uof_get_num_objs(void)
 {
 	return ARRAY_SIZE(adf_4xxx_fw_config);
@@ -209,6 +203,12 @@ static char *uof_get_name(u32 obj_num)
 static u32 uof_get_ae_mask(u32 obj_num)
 {
 	return adf_4xxx_fw_config[obj_num].ae_mask;
+}
+
+static u32 get_vf2pf_sources(void __iomem *pmisc_addr)
+{
+	/* For the moment do not report vf2pf sources */
+	return 0;
 }
 
 void adf_init_hw_data_4xxx(struct adf_hw_device_data *hw_data)
@@ -253,9 +253,9 @@ void adf_init_hw_data_4xxx(struct adf_hw_device_data *hw_data)
 	hw_data->uof_get_ae_mask = uof_get_ae_mask;
 	hw_data->set_msix_rttable = set_msix_default_rttable;
 	hw_data->set_ssm_wdtimer = adf_gen4_set_ssm_wdtimer;
-	hw_data->enable_pfvf_comms = pfvf_comms_disabled;
+	hw_data->pfvf_ops.enable_comms = adf_pfvf_comms_disabled;
+	hw_data->pfvf_ops.get_vf2pf_sources = get_vf2pf_sources;
 	hw_data->disable_iov = adf_disable_sriov;
-	hw_data->min_iov_compat_ver = ADF_PFVF_COMPAT_THIS_VERSION;
 
 	adf_gen4_init_hw_csr_ops(&hw_data->csr_ops);
 }
