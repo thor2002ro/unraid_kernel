@@ -17,6 +17,7 @@
 #include <linux/skbuff.h>
 #include <linux/sctp.h>
 #include <net/gre.h>
+#include <net/gro.h>
 #include <net/ip6_checksum.h>
 #include <net/pkt_cls.h>
 #include <net/tcp.h>
@@ -52,10 +53,6 @@ static struct hnae3_client client;
 static int debug = -1;
 module_param(debug, int, 0);
 MODULE_PARM_DESC(debug, " Network interface message level setting");
-
-static unsigned int tx_spare_buf_size;
-module_param(tx_spare_buf_size, uint, 0400);
-MODULE_PARM_DESC(tx_spare_buf_size, "Size used to allocate tx spare buffer");
 
 static unsigned int tx_sgl = 1;
 module_param(tx_sgl, uint, 0600);
@@ -1041,8 +1038,7 @@ static void hns3_init_tx_spare_buffer(struct hns3_enet_ring *ring)
 	dma_addr_t dma;
 	int order;
 
-	alloc_size = tx_spare_buf_size ? tx_spare_buf_size :
-		     ring->tqp->handle->kinfo.tx_spare_buf_size;
+	alloc_size = ring->tqp->handle->kinfo.tx_spare_buf_size;
 	if (!alloc_size)
 		return;
 
@@ -2255,6 +2251,8 @@ out_err_tx_ok:
 
 static int hns3_nic_net_set_mac_address(struct net_device *netdev, void *p)
 {
+	char format_mac_addr_perm[HNAE3_FORMAT_MAC_ADDR_LEN];
+	char format_mac_addr_sa[HNAE3_FORMAT_MAC_ADDR_LEN];
 	struct hnae3_handle *h = hns3_get_handle(netdev);
 	struct sockaddr *mac_addr = p;
 	int ret;
@@ -2263,8 +2261,9 @@ static int hns3_nic_net_set_mac_address(struct net_device *netdev, void *p)
 		return -EADDRNOTAVAIL;
 
 	if (ether_addr_equal(netdev->dev_addr, mac_addr->sa_data)) {
-		netdev_info(netdev, "already using mac address %pM\n",
-			    mac_addr->sa_data);
+		hnae3_format_mac_addr(format_mac_addr_sa, mac_addr->sa_data);
+		netdev_info(netdev, "already using mac address %s\n",
+			    format_mac_addr_sa);
 		return 0;
 	}
 
@@ -2273,8 +2272,10 @@ static int hns3_nic_net_set_mac_address(struct net_device *netdev, void *p)
 	 */
 	if (!hns3_is_phys_func(h->pdev) &&
 	    !is_zero_ether_addr(netdev->perm_addr)) {
-		netdev_err(netdev, "has permanent MAC %pM, user MAC %pM not allow\n",
-			   netdev->perm_addr, mac_addr->sa_data);
+		hnae3_format_mac_addr(format_mac_addr_perm, netdev->perm_addr);
+		hnae3_format_mac_addr(format_mac_addr_sa, mac_addr->sa_data);
+		netdev_err(netdev, "has permanent MAC %s, user MAC %s not allow\n",
+			   format_mac_addr_perm, format_mac_addr_sa);
 		return -EPERM;
 	}
 
@@ -2678,10 +2679,17 @@ static bool hns3_get_tx_timeo_queue_info(struct net_device *ndev)
 		unsigned long trans_start;
 
 		q = netdev_get_tx_queue(ndev, i);
-		trans_start = q->trans_start;
+		trans_start = READ_ONCE(q->trans_start);
 		if (netif_xmit_stopped(q) &&
 		    time_after(jiffies,
 			       (trans_start + ndev->watchdog_timeo))) {
+#ifdef CONFIG_BQL
+			struct dql *dql = &q->dql;
+
+			netdev_info(ndev, "DQL info last_cnt: %u, queued: %u, adj_limit: %u, completed: %u\n",
+				    dql->last_obj_cnt, dql->num_queued,
+				    dql->adj_limit, dql->num_completed);
+#endif
 			timeout_queue = i;
 			netdev_info(ndev, "queue state: 0x%lx, delta msecs: %u\n",
 				    q->state,
@@ -2836,14 +2844,16 @@ static int hns3_nic_set_vf_rate(struct net_device *ndev, int vf,
 static int hns3_nic_set_vf_mac(struct net_device *netdev, int vf_id, u8 *mac)
 {
 	struct hnae3_handle *h = hns3_get_handle(netdev);
+	char format_mac_addr[HNAE3_FORMAT_MAC_ADDR_LEN];
 
 	if (!h->ae_algo->ops->set_vf_mac)
 		return -EOPNOTSUPP;
 
 	if (is_multicast_ether_addr(mac)) {
+		hnae3_format_mac_addr(format_mac_addr, mac);
 		netdev_err(netdev,
-			   "Invalid MAC:%pM specified. Could not set MAC\n",
-			   mac);
+			   "Invalid MAC:%s specified. Could not set MAC\n",
+			   format_mac_addr);
 		return -EINVAL;
 	}
 
@@ -4934,6 +4944,7 @@ static void hns3_uninit_all_ring(struct hns3_nic_priv *priv)
 static int hns3_init_mac_addr(struct net_device *netdev)
 {
 	struct hns3_nic_priv *priv = netdev_priv(netdev);
+	char format_mac_addr[HNAE3_FORMAT_MAC_ADDR_LEN];
 	struct hnae3_handle *h = priv->ae_handle;
 	u8 mac_addr_temp[ETH_ALEN];
 	int ret = 0;
@@ -4944,8 +4955,9 @@ static int hns3_init_mac_addr(struct net_device *netdev)
 	/* Check if the MAC address is valid, if not get a random one */
 	if (!is_valid_ether_addr(mac_addr_temp)) {
 		eth_hw_addr_random(netdev);
-		dev_warn(priv->dev, "using random MAC address %pM\n",
-			 netdev->dev_addr);
+		hnae3_format_mac_addr(format_mac_addr, netdev->dev_addr);
+		dev_warn(priv->dev, "using random MAC address %s\n",
+			 format_mac_addr);
 	} else if (!ether_addr_equal(netdev->dev_addr, mac_addr_temp)) {
 		eth_hw_addr_set(netdev, mac_addr_temp);
 		ether_addr_copy(netdev->perm_addr, mac_addr_temp);
@@ -4997,8 +5009,10 @@ static void hns3_client_stop(struct hnae3_handle *handle)
 static void hns3_info_show(struct hns3_nic_priv *priv)
 {
 	struct hnae3_knic_private_info *kinfo = &priv->ae_handle->kinfo;
+	char format_mac_addr[HNAE3_FORMAT_MAC_ADDR_LEN];
 
-	dev_info(priv->dev, "MAC address: %pM\n", priv->netdev->dev_addr);
+	hnae3_format_mac_addr(format_mac_addr, priv->netdev->dev_addr);
+	dev_info(priv->dev, "MAC address: %s\n", format_mac_addr);
 	dev_info(priv->dev, "Task queue pairs numbers: %u\n", kinfo->num_tqps);
 	dev_info(priv->dev, "RSS size: %u\n", kinfo->rss_size);
 	dev_info(priv->dev, "Allocated RSS size: %u\n", kinfo->req_rss_size);
@@ -5531,8 +5545,8 @@ static int hns3_reset_notify_uninit_enet(struct hnae3_handle *handle)
 	return 0;
 }
 
-static int hns3_reset_notify(struct hnae3_handle *handle,
-			     enum hnae3_reset_notify_type type)
+int hns3_reset_notify(struct hnae3_handle *handle,
+		      enum hnae3_reset_notify_type type)
 {
 	int ret = 0;
 

@@ -240,24 +240,32 @@ static int felix_tag_8021q_vlan_del(struct dsa_switch *ds, int port, u16 vid)
  */
 static void felix_8021q_cpu_port_init(struct ocelot *ocelot, int port)
 {
+	mutex_lock(&ocelot->fwd_domain_lock);
+
 	ocelot->ports[port]->is_dsa_8021q_cpu = true;
 	ocelot->npi = -1;
 
 	/* Overwrite PGID_CPU with the non-tagging port */
 	ocelot_write_rix(ocelot, BIT(port), ANA_PGID_PGID, PGID_CPU);
 
-	ocelot_apply_bridge_fwd_mask(ocelot);
+	ocelot_apply_bridge_fwd_mask(ocelot, true);
+
+	mutex_unlock(&ocelot->fwd_domain_lock);
 }
 
 static void felix_8021q_cpu_port_deinit(struct ocelot *ocelot, int port)
 {
+	mutex_lock(&ocelot->fwd_domain_lock);
+
 	ocelot->ports[port]->is_dsa_8021q_cpu = false;
 
 	/* Restore PGID_CPU */
 	ocelot_write_rix(ocelot, BIT(ocelot->num_phys_ports), ANA_PGID_PGID,
 			 PGID_CPU);
 
-	ocelot_apply_bridge_fwd_mask(ocelot);
+	ocelot_apply_bridge_fwd_mask(ocelot, true);
+
+	mutex_unlock(&ocelot->fwd_domain_lock);
 }
 
 /* Set up a VCAP IS2 rule for delivering PTP frames to the CPU port module.
@@ -989,6 +997,10 @@ static int felix_init_structs(struct felix *felix, int num_phys_ports)
 	ocelot->num_stats	= felix->info->num_stats;
 	ocelot->num_mact_rows	= felix->info->num_mact_rows;
 	ocelot->vcap		= felix->info->vcap;
+	ocelot->vcap_pol.base	= felix->info->vcap_pol_base;
+	ocelot->vcap_pol.max	= felix->info->vcap_pol_max;
+	ocelot->vcap_pol.base2	= felix->info->vcap_pol_base2;
+	ocelot->vcap_pol.max2	= felix->info->vcap_pol_max2;
 	ocelot->ops		= felix->info->ops;
 	ocelot->npi_inj_prefix	= OCELOT_TAG_PREFIX_SHORT;
 	ocelot->npi_xtr_prefix	= OCELOT_TAG_PREFIX_SHORT;

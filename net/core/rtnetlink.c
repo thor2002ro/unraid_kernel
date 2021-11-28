@@ -2539,13 +2539,12 @@ static int do_set_proto_down(struct net_device *dev,
 			     struct netlink_ext_ack *extack)
 {
 	struct nlattr *pdreason[IFLA_PROTO_DOWN_REASON_MAX + 1];
-	const struct net_device_ops *ops = dev->netdev_ops;
 	unsigned long mask = 0;
 	u32 value;
 	bool proto_down;
 	int err;
 
-	if (!ops->ndo_change_proto_down) {
+	if (!(dev->priv_flags & IFF_CHANGE_PROTO_DOWN)) {
 		NL_SET_ERR_MSG(extack,  "Protodown not supported by device");
 		return -EOPNOTSUPP;
 	}
@@ -2768,7 +2767,7 @@ static int do_setlink(const struct sk_buff *skb,
 		}
 
 		if (dev->gso_max_segs ^ max_segs) {
-			dev->gso_max_segs = max_segs;
+			netif_set_gso_max_segs(dev, max_segs);
 			status |= DO_SETLINK_MODIFIED;
 		}
 	}
@@ -3222,7 +3221,7 @@ struct net_device *rtnl_create_link(struct net *net, const char *ifname,
 	if (tb[IFLA_GSO_MAX_SIZE])
 		netif_set_gso_max_size(dev, nla_get_u32(tb[IFLA_GSO_MAX_SIZE]));
 	if (tb[IFLA_GSO_MAX_SEGS])
-		dev->gso_max_segs = nla_get_u32(tb[IFLA_GSO_MAX_SEGS]);
+		netif_set_gso_max_segs(dev, nla_get_u32(tb[IFLA_GSO_MAX_SEGS]));
 
 	return dev;
 }

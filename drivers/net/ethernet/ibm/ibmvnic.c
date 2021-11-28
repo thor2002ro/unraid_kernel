@@ -2058,7 +2058,7 @@ static netdev_tx_t ibmvnic_xmit(struct sk_buff *skb, struct net_device *netdev)
 
 	tx_packets++;
 	tx_bytes += skb->len;
-	txq->trans_start = jiffies;
+	txq_trans_cond_update(txq);
 	ret = NETDEV_TX_OK;
 	goto out;
 
@@ -3088,7 +3088,9 @@ static u32 ibmvnic_get_link(struct net_device *netdev)
 }
 
 static void ibmvnic_get_ringparam(struct net_device *netdev,
-				  struct ethtool_ringparam *ring)
+				  struct ethtool_ringparam *ring,
+				  struct kernel_ethtool_ringparam *kernel_ring,
+				  struct netlink_ext_ack *extack)
 {
 	struct ibmvnic_adapter *adapter = netdev_priv(netdev);
 
@@ -3108,7 +3110,9 @@ static void ibmvnic_get_ringparam(struct net_device *netdev,
 }
 
 static int ibmvnic_set_ringparam(struct net_device *netdev,
-				 struct ethtool_ringparam *ring)
+				 struct ethtool_ringparam *ring,
+				 struct kernel_ethtool_ringparam *kernel_ring,
+				 struct netlink_ext_ack *extack)
 {
 	struct ibmvnic_adapter *adapter = netdev_priv(netdev);
 	int ret;

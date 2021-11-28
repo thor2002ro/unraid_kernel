@@ -3823,8 +3823,6 @@ static void mvneta_validate(struct phylink_config *config,
 			    unsigned long *supported,
 			    struct phylink_link_state *state)
 {
-	__ETHTOOL_DECLARE_LINK_MODE_MASK(mask) = { 0, };
-
 	/* We only support QSGMII, SGMII, 802.3z and RGMII modes.
 	 * When in 802.3z mode, we must have AN enabled:
 	 * "Bit 2 Field InBandAnEn In-band Auto-Negotiation enable. ...
@@ -3836,34 +3834,7 @@ static void mvneta_validate(struct phylink_config *config,
 		return;
 	}
 
-	/* Allow all the expected bits */
-	phylink_set(mask, Autoneg);
-	phylink_set_port_modes(mask);
-
-	/* Asymmetric pause is unsupported */
-	phylink_set(mask, Pause);
-
-	/* Half-duplex at speeds higher than 100Mbit is unsupported */
-	if (state->interface != PHY_INTERFACE_MODE_2500BASEX) {
-		phylink_set(mask, 1000baseT_Full);
-		phylink_set(mask, 1000baseX_Full);
-	}
-
-	if (state->interface == PHY_INTERFACE_MODE_2500BASEX) {
-		phylink_set(mask, 2500baseT_Full);
-		phylink_set(mask, 2500baseX_Full);
-	}
-
-	if (!phy_interface_mode_is_8023z(state->interface)) {
-		/* 10M and 100M are only supported in non-802.3z mode */
-		phylink_set(mask, 10baseT_Half);
-		phylink_set(mask, 10baseT_Full);
-		phylink_set(mask, 100baseT_Half);
-		phylink_set(mask, 100baseT_Full);
-	}
-
-	linkmode_and(supported, supported, mask);
-	linkmode_and(state->advertising, state->advertising, mask);
+	phylink_generic_validate(config, supported, state);
 }
 
 static void mvneta_mac_pcs_get_state(struct phylink_config *config,
@@ -4539,8 +4510,11 @@ static void mvneta_ethtool_get_drvinfo(struct net_device *dev,
 }
 
 
-static void mvneta_ethtool_get_ringparam(struct net_device *netdev,
-					 struct ethtool_ringparam *ring)
+static void
+mvneta_ethtool_get_ringparam(struct net_device *netdev,
+			     struct ethtool_ringparam *ring,
+			     struct kernel_ethtool_ringparam *kernel_ring,
+			     struct netlink_ext_ack *extack)
 {
 	struct mvneta_port *pp = netdev_priv(netdev);
 
@@ -4550,8 +4524,11 @@ static void mvneta_ethtool_get_ringparam(struct net_device *netdev,
 	ring->tx_pending = pp->tx_ring_size;
 }
 
-static int mvneta_ethtool_set_ringparam(struct net_device *dev,
-					struct ethtool_ringparam *ring)
+static int
+mvneta_ethtool_set_ringparam(struct net_device *dev,
+			     struct ethtool_ringparam *ring,
+			     struct kernel_ethtool_ringparam *kernel_ring,
+			     struct netlink_ext_ack *extack)
 {
 	struct mvneta_port *pp = netdev_priv(dev);
 
@@ -5166,6 +5143,9 @@ static int mvneta_probe(struct platform_device *pdev)
 
 	pp->phylink_config.dev = &dev->dev;
 	pp->phylink_config.type = PHYLINK_NETDEV;
+	pp->phylink_config.mac_capabilities = MAC_SYM_PAUSE | MAC_10 |
+		MAC_100 | MAC_1000FD | MAC_2500FD;
+
 	phy_interface_set_rgmii(pp->phylink_config.supported_interfaces);
 	__set_bit(PHY_INTERFACE_MODE_QSGMII,
 		  pp->phylink_config.supported_interfaces);
@@ -5355,7 +5335,7 @@ static int mvneta_probe(struct platform_device *pdev)
 	dev->hw_features |= dev->features;
 	dev->vlan_features |= dev->features;
 	dev->priv_flags |= IFF_LIVE_ADDR_CHANGE;
-	dev->gso_max_segs = MVNETA_MAX_TSO_SEGS;
+	netif_set_gso_max_segs(dev, MVNETA_MAX_TSO_SEGS);
 
 	/* MTU range: 68 - 9676 */
 	dev->min_mtu = ETH_MIN_MTU;

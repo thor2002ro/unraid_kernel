@@ -166,6 +166,259 @@ static const char *phylink_an_mode_str(unsigned int mode)
 	return mode < ARRAY_SIZE(modestr) ? modestr[mode] : "unknown";
 }
 
+static void phylink_caps_to_linkmodes(unsigned long *linkmodes,
+				      unsigned long caps)
+{
+	if (caps & MAC_SYM_PAUSE)
+		__set_bit(ETHTOOL_LINK_MODE_Pause_BIT, linkmodes);
+
+	if (caps & MAC_ASYM_PAUSE)
+		__set_bit(ETHTOOL_LINK_MODE_Asym_Pause_BIT, linkmodes);
+
+	if (caps & MAC_10HD)
+		__set_bit(ETHTOOL_LINK_MODE_10baseT_Half_BIT, linkmodes);
+
+	if (caps & MAC_10FD)
+		__set_bit(ETHTOOL_LINK_MODE_10baseT_Full_BIT, linkmodes);
+
+	if (caps & MAC_100HD) {
+		__set_bit(ETHTOOL_LINK_MODE_100baseT_Half_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_100baseFX_Half_BIT, linkmodes);
+	}
+
+	if (caps & MAC_100FD) {
+		__set_bit(ETHTOOL_LINK_MODE_100baseT_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_100baseT1_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_100baseFX_Full_BIT, linkmodes);
+	}
+
+	if (caps & MAC_1000HD)
+		__set_bit(ETHTOOL_LINK_MODE_1000baseT_Half_BIT, linkmodes);
+
+	if (caps & MAC_1000FD) {
+		__set_bit(ETHTOOL_LINK_MODE_1000baseT_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_1000baseKX_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_1000baseX_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_1000baseT1_Full_BIT, linkmodes);
+	}
+
+	if (caps & MAC_2500FD) {
+		__set_bit(ETHTOOL_LINK_MODE_2500baseT_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_2500baseX_Full_BIT, linkmodes);
+	}
+
+	if (caps & MAC_5000FD)
+		__set_bit(ETHTOOL_LINK_MODE_5000baseT_Full_BIT, linkmodes);
+
+	if (caps & MAC_10000FD) {
+		__set_bit(ETHTOOL_LINK_MODE_10000baseT_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_10000baseKX4_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_10000baseKR_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_10000baseR_FEC_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_10000baseCR_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_10000baseSR_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_10000baseLR_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_10000baseLRM_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_10000baseER_Full_BIT, linkmodes);
+	}
+
+	if (caps & MAC_25000FD) {
+		__set_bit(ETHTOOL_LINK_MODE_25000baseCR_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_25000baseKR_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_25000baseSR_Full_BIT, linkmodes);
+	}
+
+	if (caps & MAC_40000FD) {
+		__set_bit(ETHTOOL_LINK_MODE_40000baseKR4_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_40000baseCR4_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_40000baseSR4_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_40000baseLR4_Full_BIT, linkmodes);
+	}
+
+	if (caps & MAC_50000FD) {
+		__set_bit(ETHTOOL_LINK_MODE_50000baseCR2_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_50000baseKR2_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_50000baseSR2_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_50000baseKR_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_50000baseSR_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_50000baseCR_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_50000baseLR_ER_FR_Full_BIT,
+			  linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_50000baseDR_Full_BIT, linkmodes);
+	}
+
+	if (caps & MAC_56000FD) {
+		__set_bit(ETHTOOL_LINK_MODE_56000baseKR4_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_56000baseCR4_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_56000baseSR4_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_56000baseLR4_Full_BIT, linkmodes);
+	}
+
+	if (caps & MAC_100000FD) {
+		__set_bit(ETHTOOL_LINK_MODE_100000baseKR4_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_100000baseSR4_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_100000baseCR4_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_100000baseLR4_ER4_Full_BIT,
+			  linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_100000baseKR2_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_100000baseSR2_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_100000baseCR2_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_100000baseLR2_ER2_FR2_Full_BIT,
+			  linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_100000baseDR2_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_100000baseKR_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_100000baseSR_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_100000baseLR_ER_FR_Full_BIT,
+			  linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_100000baseCR_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_100000baseDR_Full_BIT, linkmodes);
+	}
+
+	if (caps & MAC_200000FD) {
+		__set_bit(ETHTOOL_LINK_MODE_200000baseKR4_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_200000baseSR4_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_200000baseLR4_ER4_FR4_Full_BIT,
+			  linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_200000baseDR4_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_200000baseCR4_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_200000baseKR2_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_200000baseSR2_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_200000baseLR2_ER2_FR2_Full_BIT,
+			  linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_200000baseDR2_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_200000baseCR2_Full_BIT, linkmodes);
+	}
+
+	if (caps & MAC_400000FD) {
+		__set_bit(ETHTOOL_LINK_MODE_400000baseKR8_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_400000baseSR8_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_400000baseLR8_ER8_FR8_Full_BIT,
+			  linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_400000baseDR8_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_400000baseCR8_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_400000baseKR4_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_400000baseSR4_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_400000baseLR4_ER4_FR4_Full_BIT,
+			  linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_400000baseDR4_Full_BIT, linkmodes);
+		__set_bit(ETHTOOL_LINK_MODE_400000baseCR4_Full_BIT, linkmodes);
+	}
+}
+
+/**
+ * phylink_get_linkmodes() - get acceptable link modes
+ * @linkmodes: ethtool linkmode mask (must be already initialised)
+ * @interface: phy interface mode defined by &typedef phy_interface_t
+ * @mac_capabilities: bitmask of MAC capabilities
+ *
+ * Set all possible pause, speed and duplex linkmodes in @linkmodes that
+ * are supported by the @interface mode and @mac_capabilities. @linkmodes
+ * must have been initialised previously.
+ */
+void phylink_get_linkmodes(unsigned long *linkmodes, phy_interface_t interface,
+			   unsigned long mac_capabilities)
+{
+	unsigned long caps = MAC_SYM_PAUSE | MAC_ASYM_PAUSE;
+
+	switch (interface) {
+	case PHY_INTERFACE_MODE_USXGMII:
+		caps |= MAC_10000FD | MAC_5000FD | MAC_2500FD;
+		fallthrough;
+
+	case PHY_INTERFACE_MODE_RGMII_TXID:
+	case PHY_INTERFACE_MODE_RGMII_RXID:
+	case PHY_INTERFACE_MODE_RGMII_ID:
+	case PHY_INTERFACE_MODE_RGMII:
+	case PHY_INTERFACE_MODE_QSGMII:
+	case PHY_INTERFACE_MODE_SGMII:
+	case PHY_INTERFACE_MODE_GMII:
+		caps |= MAC_1000HD | MAC_1000FD;
+		fallthrough;
+
+	case PHY_INTERFACE_MODE_REVRMII:
+	case PHY_INTERFACE_MODE_RMII:
+	case PHY_INTERFACE_MODE_SMII:
+	case PHY_INTERFACE_MODE_REVMII:
+	case PHY_INTERFACE_MODE_MII:
+		caps |= MAC_10HD | MAC_10FD;
+		fallthrough;
+
+	case PHY_INTERFACE_MODE_100BASEX:
+		caps |= MAC_100HD | MAC_100FD;
+		break;
+
+	case PHY_INTERFACE_MODE_TBI:
+	case PHY_INTERFACE_MODE_MOCA:
+	case PHY_INTERFACE_MODE_RTBI:
+	case PHY_INTERFACE_MODE_1000BASEX:
+		caps |= MAC_1000HD;
+		fallthrough;
+	case PHY_INTERFACE_MODE_TRGMII:
+		caps |= MAC_1000FD;
+		break;
+
+	case PHY_INTERFACE_MODE_2500BASEX:
+		caps |= MAC_2500FD;
+		break;
+
+	case PHY_INTERFACE_MODE_5GBASER:
+		caps |= MAC_5000FD;
+		break;
+
+	case PHY_INTERFACE_MODE_XGMII:
+	case PHY_INTERFACE_MODE_RXAUI:
+	case PHY_INTERFACE_MODE_XAUI:
+	case PHY_INTERFACE_MODE_10GBASER:
+	case PHY_INTERFACE_MODE_10GKR:
+		caps |= MAC_10000FD;
+		break;
+
+	case PHY_INTERFACE_MODE_25GBASER:
+		caps |= MAC_25000FD;
+		break;
+
+	case PHY_INTERFACE_MODE_XLGMII:
+		caps |= MAC_40000FD;
+		break;
+
+	case PHY_INTERFACE_MODE_INTERNAL:
+		caps |= ~0;
+		break;
+
+	case PHY_INTERFACE_MODE_NA:
+	case PHY_INTERFACE_MODE_MAX:
+		break;
+	}
+
+	phylink_caps_to_linkmodes(linkmodes, caps & mac_capabilities);
+}
+EXPORT_SYMBOL_GPL(phylink_get_linkmodes);
+
+/**
+ * phylink_generic_validate() - generic validate() callback implementation
+ * @config: a pointer to a &struct phylink_config.
+ * @supported: ethtool bitmask for supported link modes.
+ * @state: a pointer to a &struct phylink_link_state.
+ *
+ * Generic implementation of the validate() callback that MAC drivers can
+ * use when they pass the range of supported interfaces and MAC capabilities.
+ * This makes use of phylink_get_linkmodes().
+ */
+void phylink_generic_validate(struct phylink_config *config,
+			      unsigned long *supported,
+			      struct phylink_link_state *state)
+{
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(mask) = { 0, };
+
+	phylink_set_port_modes(mask);
+	phylink_set(mask, Autoneg);
+	phylink_get_linkmodes(mask, state->interface, config->mac_capabilities);
+
+	linkmode_and(supported, supported, mask);
+	linkmode_and(state->advertising, state->advertising, mask);
+}
+EXPORT_SYMBOL_GPL(phylink_generic_validate);
+
 static int phylink_validate_any(struct phylink *pl, unsigned long *supported,
 				struct phylink_link_state *state)
 {
@@ -1096,7 +1349,8 @@ static int phylink_bringup_phy(struct phylink *pl, struct phy_device *phy,
 	mutex_unlock(&phy->lock);
 
 	phylink_dbg(pl,
-		    "phy: setting supported %*pb advertising %*pb\n",
+		    "phy: %s setting supported %*pb advertising %*pb\n",
+		    phy_modes(interface),
 		    __ETHTOOL_LINK_MODE_MASK_NBITS, pl->supported,
 		    __ETHTOOL_LINK_MODE_MASK_NBITS, phy->advertising);
 
@@ -1213,6 +1467,12 @@ int phylink_fwnode_phy_connect(struct phylink *pl,
 	fwnode_handle_put(phy_fwnode);
 	if (!phy_dev)
 		return -ENODEV;
+
+	/* Use PHY device/driver interface */
+	if (pl->link_interface == PHY_INTERFACE_MODE_NA) {
+		pl->link_interface = phy_dev->interface;
+		pl->link_config.interface = pl->link_interface;
+	}
 
 	ret = phy_attach_direct(pl->netdev, phy_dev, flags,
 				pl->link_interface);
@@ -2586,31 +2846,22 @@ void phylink_decode_usxgmii_word(struct phylink_link_state *state,
 EXPORT_SYMBOL_GPL(phylink_decode_usxgmii_word);
 
 /**
- * phylink_mii_c22_pcs_get_state() - read the MAC PCS state
- * @pcs: a pointer to a &struct mdio_device.
+ * phylink_mii_c22_pcs_decode_state() - Decode MAC PCS state from MII registers
  * @state: a pointer to a &struct phylink_link_state.
+ * @bmsr: The value of the %MII_BMSR register
+ * @lpa: The value of the %MII_LPA register
  *
  * Helper for MAC PCS supporting the 802.3 clause 22 register set for
  * clause 37 negotiation and/or SGMII control.
  *
- * Read the MAC PCS state from the MII device configured in @config and
- * parse the Clause 37 or Cisco SGMII link partner negotiation word into
- * the phylink @state structure. This is suitable to be directly plugged
- * into the mac_pcs_get_state() member of the struct phylink_mac_ops
- * structure.
+ * Parse the Clause 37 or Cisco SGMII link partner negotiation word into
+ * the phylink @state structure. This is suitable to be used for implementing
+ * the mac_pcs_get_state() member of the struct phylink_mac_ops structure if
+ * accessing @bmsr and @lpa cannot be done with MDIO directly.
  */
-void phylink_mii_c22_pcs_get_state(struct mdio_device *pcs,
-				   struct phylink_link_state *state)
+void phylink_mii_c22_pcs_decode_state(struct phylink_link_state *state,
+				      u16 bmsr, u16 lpa)
 {
-	int bmsr, lpa;
-
-	bmsr = mdiodev_read(pcs, MII_BMSR);
-	lpa = mdiodev_read(pcs, MII_LPA);
-	if (bmsr < 0 || lpa < 0) {
-		state->link = false;
-		return;
-	}
-
 	state->link = !!(bmsr & BMSR_LSTATUS);
 	state->an_complete = !!(bmsr & BMSR_ANEGCOMPLETE);
 	/* If there is no link or autonegotiation is disabled, the LP advertisement
@@ -2638,28 +2889,54 @@ void phylink_mii_c22_pcs_get_state(struct mdio_device *pcs,
 		break;
 	}
 }
+EXPORT_SYMBOL_GPL(phylink_mii_c22_pcs_decode_state);
+
+/**
+ * phylink_mii_c22_pcs_get_state() - read the MAC PCS state
+ * @pcs: a pointer to a &struct mdio_device.
+ * @state: a pointer to a &struct phylink_link_state.
+ *
+ * Helper for MAC PCS supporting the 802.3 clause 22 register set for
+ * clause 37 negotiation and/or SGMII control.
+ *
+ * Read the MAC PCS state from the MII device configured in @config and
+ * parse the Clause 37 or Cisco SGMII link partner negotiation word into
+ * the phylink @state structure. This is suitable to be directly plugged
+ * into the mac_pcs_get_state() member of the struct phylink_mac_ops
+ * structure.
+ */
+void phylink_mii_c22_pcs_get_state(struct mdio_device *pcs,
+				   struct phylink_link_state *state)
+{
+	int bmsr, lpa;
+
+	bmsr = mdiodev_read(pcs, MII_BMSR);
+	lpa = mdiodev_read(pcs, MII_LPA);
+	if (bmsr < 0 || lpa < 0) {
+		state->link = false;
+		return;
+	}
+
+	phylink_mii_c22_pcs_decode_state(state, bmsr, lpa);
+}
 EXPORT_SYMBOL_GPL(phylink_mii_c22_pcs_get_state);
 
 /**
- * phylink_mii_c22_pcs_set_advertisement() - configure the clause 37 PCS
+ * phylink_mii_c22_pcs_encode_advertisement() - configure the clause 37 PCS
  *	advertisement
- * @pcs: a pointer to a &struct mdio_device.
  * @interface: the PHY interface mode being configured
  * @advertising: the ethtool advertisement mask
  *
  * Helper for MAC PCS supporting the 802.3 clause 22 register set for
  * clause 37 negotiation and/or SGMII control.
  *
- * Configure the clause 37 PCS advertisement as specified by @state. This
- * does not trigger a renegotiation; phylink will do that via the
- * mac_an_restart() method of the struct phylink_mac_ops structure.
+ * Encode the clause 37 PCS advertisement as specified by @interface and
+ * @advertising.
  *
- * Returns negative error code on failure to configure the advertisement,
- * zero if no change has been made, or one if the advertisement has changed.
+ * Return: The new value for @adv, or ``-EINVAL`` if it should not be changed.
  */
-int phylink_mii_c22_pcs_set_advertisement(struct mdio_device *pcs,
-					  phy_interface_t interface,
-					  const unsigned long *advertising)
+int phylink_mii_c22_pcs_encode_advertisement(phy_interface_t interface,
+					     const unsigned long *advertising)
 {
 	u16 adv;
 
@@ -2673,18 +2950,15 @@ int phylink_mii_c22_pcs_set_advertisement(struct mdio_device *pcs,
 		if (linkmode_test_bit(ETHTOOL_LINK_MODE_Asym_Pause_BIT,
 				      advertising))
 			adv |= ADVERTISE_1000XPSE_ASYM;
-
-		return mdiodev_modify_changed(pcs, MII_ADVERTISE, 0xffff, adv);
-
+		return adv;
 	case PHY_INTERFACE_MODE_SGMII:
-		return mdiodev_modify_changed(pcs, MII_ADVERTISE, 0xffff, 0x0001);
-
+		return 0x0001;
 	default:
 		/* Nothing to do for other modes */
-		return 0;
+		return -EINVAL;
 	}
 }
-EXPORT_SYMBOL_GPL(phylink_mii_c22_pcs_set_advertisement);
+EXPORT_SYMBOL_GPL(phylink_mii_c22_pcs_encode_advertisement);
 
 /**
  * phylink_mii_c22_pcs_config() - configure clause 22 PCS
@@ -2702,16 +2976,18 @@ int phylink_mii_c22_pcs_config(struct mdio_device *pcs, unsigned int mode,
 			       phy_interface_t interface,
 			       const unsigned long *advertising)
 {
-	bool changed;
+	bool changed = 0;
 	u16 bmcr;
-	int ret;
+	int ret, adv;
 
-	ret = phylink_mii_c22_pcs_set_advertisement(pcs, interface,
-						    advertising);
-	if (ret < 0)
-		return ret;
-
-	changed = ret > 0;
+	adv = phylink_mii_c22_pcs_encode_advertisement(interface, advertising);
+	if (adv >= 0) {
+		ret = mdiobus_modify_changed(pcs->bus, pcs->addr,
+					     MII_ADVERTISE, 0xffff, adv);
+		if (ret < 0)
+			return ret;
+		changed = ret;
+	}
 
 	/* Ensure ISOLATE bit is disabled */
 	if (mode == MLO_AN_INBAND &&
@@ -2724,7 +3000,7 @@ int phylink_mii_c22_pcs_config(struct mdio_device *pcs, unsigned int mode,
 	if (ret < 0)
 		return ret;
 
-	return changed ? 1 : 0;
+	return changed;
 }
 EXPORT_SYMBOL_GPL(phylink_mii_c22_pcs_config);
 
