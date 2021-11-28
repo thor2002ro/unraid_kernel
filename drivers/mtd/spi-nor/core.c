@@ -1952,6 +1952,7 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 	struct spi_nor *nor = mtd_to_spi_nor(mtd);
 	size_t page_offset, page_remain, i;
 	ssize_t ret;
+	u32 page_size = nor->params->page_size;
 
 	dev_dbg(nor->dev, "to 0x%08x, len %zd\n", (u32)to, len);
 
@@ -1968,16 +1969,15 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 		 * calculated with an AND operation. On the other cases we
 		 * need to do a modulus operation (more expensive).
 		 */
-		if (is_power_of_2(nor->page_size)) {
-			page_offset = addr & (nor->page_size - 1);
+		if (is_power_of_2(page_size)) {
+			page_offset = addr & (page_size - 1);
 		} else {
 			uint64_t aux = addr;
 
-			page_offset = do_div(aux, nor->page_size);
+			page_offset = do_div(aux, page_size);
 		}
 		/* the size of data remaining on the first page */
-		page_remain = min_t(size_t,
-				    nor->page_size - page_offset, len - i);
+		page_remain = min_t(size_t, page_size - page_offset, len - i);
 
 		addr = spi_nor_convert_addr(nor, addr);
 
@@ -2666,11 +2666,19 @@ static void spi_nor_post_sfdp_fixups(struct spi_nor *nor)
  * spi_nor_late_init_params() - Late initialization of default flash parameters.
  * @nor:	pointer to a 'struct spi_nor'
  *
- * Used to set default flash parameters and settings when the ->default_init()
- * hook or the SFDP parser let voids.
+ * Used to initialize flash parameters that are not declared in the JESD216
+ * SFDP standard, or where SFDP tables are not defined at all.
+ * Will replace the spi_nor_manufacturer_init_params() method.
  */
 static void spi_nor_late_init_params(struct spi_nor *nor)
 {
+	if (nor->manufacturer && nor->manufacturer->fixups &&
+	    nor->manufacturer->fixups->late_init)
+		nor->manufacturer->fixups->late_init(nor);
+
+	if (nor->info->fixups && nor->info->fixups->late_init)
+		nor->info->fixups->late_init(nor);
+
 	/*
 	 * NOR protection support. When locking_ops are not provided, we pick
 	 * the default ones.
@@ -2712,8 +2720,9 @@ static void spi_nor_late_init_params(struct spi_nor *nor)
  *    wrong).
  *		spi_nor_post_sfdp_fixups()
  *
- * 5/ Late default flash parameters initialization, used when the
- * ->default_init() hook or the SFDP parser do not set specific params.
+ * 5/ Late flash parameters initialization, used to initialize flash
+ * parameters that are not declared in the JESD216 SFDP standard, or where SFDP
+ * tables are not defined at all.
  *		spi_nor_late_init_params()
  */
 static int spi_nor_init_params(struct spi_nor *nor)
@@ -3094,7 +3103,7 @@ int spi_nor_scan(struct spi_nor *nor, const char *name,
 	 * We need the bounce buffer early to read/write registers when going
 	 * through the spi-mem layer (buffers have to be DMA-able).
 	 * For spi-mem drivers, we'll reallocate a new buffer if
-	 * nor->page_size turns out to be greater than PAGE_SIZE (which
+	 * nor->params->page_size turns out to be greater than PAGE_SIZE (which
 	 * shouldn't happen before long since NOR pages are usually less
 	 * than 1KB) after spi_nor_scan() returns.
 	 */
@@ -3134,7 +3143,6 @@ int spi_nor_scan(struct spi_nor *nor, const char *name,
 
 	if (!mtd->name)
 		mtd->name = dev_name(dev);
-	mtd->priv = nor;
 	mtd->type = MTD_NORFLASH;
 	mtd->writesize = nor->params->writesize;
 	mtd->flags = MTD_CAP_NORFLASH;
@@ -3171,8 +3179,7 @@ int spi_nor_scan(struct spi_nor *nor, const char *name,
 		mtd->flags |= MTD_NO_ERASE;
 
 	mtd->dev.parent = dev;
-	nor->page_size = nor->params->page_size;
-	mtd->writebufsize = nor->page_size;
+	mtd->writebufsize = nor->params->page_size;
 
 	if (of_property_read_bool(np, "broken-flash-reset"))
 		nor->flags |= SNOR_F_BROKEN_RESET;
@@ -3341,8 +3348,8 @@ static int spi_nor_probe(struct spi_mem *spimem)
 	 * and add this logic so that if anyone ever adds support for such
 	 * a NOR we don't end up with buffer overflows.
 	 */
-	if (nor->page_size > PAGE_SIZE) {
-		nor->bouncebuf_size = nor->page_size;
+	if (nor->params->page_size > PAGE_SIZE) {
+		nor->bouncebuf_size = nor->params->page_size;
 		devm_kfree(nor->dev, nor->bouncebuf);
 		nor->bouncebuf = devm_kmalloc(nor->dev,
 					      nor->bouncebuf_size,
