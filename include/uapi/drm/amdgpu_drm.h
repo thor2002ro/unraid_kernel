@@ -206,6 +206,7 @@ union drm_amdgpu_bo_list {
 #define AMDGPU_CTX_OP_FREE_CTX	2
 #define AMDGPU_CTX_OP_QUERY_STATE	3
 #define AMDGPU_CTX_OP_QUERY_STATE2	4
+#define AMDGPU_CTX_OP_SET_PSTATE_PROFILE	5
 
 /* GPU reset status */
 #define AMDGPU_CTX_NO_RESET		0
@@ -237,6 +238,14 @@ union drm_amdgpu_bo_list {
 */
 #define AMDGPU_CTX_PRIORITY_HIGH        512
 #define AMDGPU_CTX_PRIORITY_VERY_HIGH   1023
+
+/* select a profiling pstate for perfmon tools */
+#define AMDGPU_CTX_PSTATE_PROFILE_FLAGS_MASK  0xf
+#define AMDGPU_CTX_PSTATE_PROFILE_NONE  0
+#define AMDGPU_CTX_PSTATE_PROFILE_STANDARD  1
+#define AMDGPU_CTX_PSTATE_PROFILE_MIN_SCLK  2
+#define AMDGPU_CTX_PSTATE_PROFILE_MIN_MCLK  3
+#define AMDGPU_CTX_PSTATE_PROFILE_PEAK  4
 
 struct drm_amdgpu_ctx_in {
 	/** AMDGPU_CTX_OP_* */
@@ -781,6 +790,8 @@ struct drm_amdgpu_cs_chunk_data {
 	#define AMDGPU_INFO_SENSOR_STABLE_PSTATE_GFX_SCLK		0x8
 	/* Subquery id: Query GPU stable pstate memory clock */
 	#define AMDGPU_INFO_SENSOR_STABLE_PSTATE_GFX_MCLK		0x9
+	/* Subquery id: Query GPU profile mode active */
+	#define AMDGPU_INFO_SENSOR_PROFILE_MODE_ACTIVE	0xA
 /* Number of VRAM page faults on CPU access. */
 #define AMDGPU_INFO_NUM_VRAM_CPU_PAGE_FAULTS	0x1E
 #define AMDGPU_INFO_VRAM_LOST_COUNTER		0x1F
