@@ -2521,28 +2521,6 @@ struct mm_struct *copy_init_mm(void)
 	return dup_mm(NULL, &init_mm);
 }
 
-/*
- * This is like kernel_clone(), but shaved down and tailored to just
- * creating io_uring workers. It returns a created task, or an error pointer.
- * The returned task is inactive, and the caller must fire it up through
- * wake_up_new_task(p). All signals are blocked in the created task.
- */
-struct task_struct *create_io_thread(int (*fn)(void *), void *arg, int node)
-{
-	unsigned long flags = CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|
-				CLONE_IO;
-	struct kernel_clone_args args = {
-		.flags		= ((lower_32_bits(flags) | CLONE_VM |
-				    CLONE_UNTRACED) & ~CSIGNAL),
-		.exit_signal	= (lower_32_bits(flags) & CSIGNAL),
-		.stack		= (unsigned long)fn,
-		.stack_size	= (unsigned long)arg,
-		.worker_flags	= USER_WORKER | USER_WORKER_IO,
-	};
-
-	return copy_process(NULL, 0, node, &args);
-}
-
 static bool user_worker_flags_valid(struct kernel_clone_args *kargs)
 {
 	/* Verify that no unknown flags are passed along. */
