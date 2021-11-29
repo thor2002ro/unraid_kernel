@@ -67,6 +67,11 @@ struct mhi_ep_db_info {
  * @cmd_ctx_host_pa: Physical address of host command context data structure
  * @chdb: Array of channel doorbell interrupt info
  * @event_lock: Lock for protecting event rings
+ * @list_lock: Lock for protecting state transition and channel doorbell lists
+ * @state_lock: Lock for protecting state transitions
+ * @st_transition_list: List of state transitions
+ * @wq: Dedicated workqueue for handling rings and state changes
+ * @state_work: State transition worker
  * @raise_irq: CB function for raising IRQ to the host
  * @alloc_addr: CB function for allocating memory in endpoint for storing host context
  * @map_addr: CB function for mapping host context to endpoint
@@ -102,6 +107,13 @@ struct mhi_ep_cntrl {
 
 	struct mhi_ep_db_info chdb[4];
 	struct mutex event_lock;
+	spinlock_t list_lock;
+	spinlock_t state_lock;
+
+	struct list_head st_transition_list;
+
+	struct workqueue_struct *wq;
+	struct work_struct state_work;
 
 	void (*raise_irq)(struct mhi_ep_cntrl *mhi_cntrl, u32 vector);
 	void __iomem *(*alloc_addr)(struct mhi_ep_cntrl *mhi_cntrl, phys_addr_t *phys_addr,
