@@ -11,6 +11,7 @@
 #include "blk.h"
 #include "blk-mq.h"
 #include "blk-mq-debugfs.h"
+#include "blk-mq-sched.h"
 #include "blk-mq-tag.h"
 #include "blk-rq-qos.h"
 
@@ -122,7 +123,6 @@ static const char *const blk_queue_flag_name[] = {
 	QUEUE_FLAG_NAME(FUA),
 	QUEUE_FLAG_NAME(DAX),
 	QUEUE_FLAG_NAME(STATS),
-	QUEUE_FLAG_NAME(POLL_STATS),
 	QUEUE_FLAG_NAME(REGISTERED),
 	QUEUE_FLAG_NAME(QUIESCED),
 	QUEUE_FLAG_NAME(PCI_P2PDMA),
