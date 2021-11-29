@@ -76,6 +76,7 @@ struct mhi_ep_db_info {
  * @ch_db_list: List of queued channel doorbells
  * @wq: Dedicated workqueue for handling rings and state changes
  * @state_work: State transition worker
+ * @reset_work: Worker for MHI Endpoint reset
  * @raise_irq: CB function for raising IRQ to the host
  * @alloc_addr: CB function for allocating memory in endpoint for storing host context
  * @map_addr: CB function for mapping host context to endpoint
@@ -124,6 +125,7 @@ struct mhi_ep_cntrl {
 
 	struct workqueue_struct *wq;
 	struct work_struct state_work;
+	struct work_struct reset_work;
 
 	void (*raise_irq)(struct mhi_ep_cntrl *mhi_cntrl, u32 vector);
 	void __iomem *(*alloc_addr)(struct mhi_ep_cntrl *mhi_cntrl, phys_addr_t *phys_addr,
