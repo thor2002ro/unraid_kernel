@@ -104,7 +104,7 @@ static void wdtest_ktime_clocksource_reset(void)
 static int wdtest_func(void *arg)
 {
 	unsigned long j1, j2;
-	char *s;
+	char *s1, *s2;
 	int i;
 
 	schedule_timeout_uninterruptible(holdoff * HZ);
@@ -141,17 +141,22 @@ static int wdtest_func(void *arg)
 	/* Verify tsc-like stability with various numbers of errors injected. */
 	for (i = 0; i <= max_cswd_read_retries + 1; i++) {
 		if (i <= 1 && i < max_cswd_read_retries)
-			s = "";
+			s1 = "";
 		else if (i <= max_cswd_read_retries)
-			s = ", expect message";
+			s1 = ", expect message";
 		else
-			s = ", expect clock skew";
-		pr_info("--- Watchdog with %dx error injection, %lu retries%s.\n", i, max_cswd_read_retries, s);
+			s1 = ", expect coarse-grained clock skew check and re-initialization";
+		if (i != max_cswd_coarse_reads)
+			s2 = "";
+		else if (!s1[0])
+			s2 = ", expect splat";
+		else
+			s2 = " along with a splat";
+		pr_info("--- Watchdog with %dx error injection, %lu retries%s%s.\n", i, max_cswd_read_retries, s1, s2);
 		WRITE_ONCE(wdtest_ktime_read_ndelays, i);
 		schedule_timeout_uninterruptible(2 * HZ);
 		WARN_ON_ONCE(READ_ONCE(wdtest_ktime_read_ndelays));
-		WARN_ON_ONCE((i <= max_cswd_read_retries) !=
-			     !(clocksource_wdtest_ktime.flags & CLOCK_SOURCE_UNSTABLE));
+		WARN_ON_ONCE(clocksource_wdtest_ktime.flags & CLOCK_SOURCE_UNSTABLE);
 		wdtest_ktime_clocksource_reset();
 	}
 
