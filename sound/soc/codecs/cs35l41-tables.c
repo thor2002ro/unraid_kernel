@@ -8,7 +8,7 @@
 
 #include "cs35l41.h"
 
-const struct reg_default cs35l41_reg[CS35L41_MAX_CACHE_REG] = {
+static const struct reg_default cs35l41_reg[] = {
 	{ CS35L41_PWR_CTRL1,			0x00000000 },
 	{ CS35L41_PWR_CTRL3,			0x01000010 },
 	{ CS35L41_GPIO_PAD_CONTROL,		0x00000000 },
@@ -47,7 +47,7 @@ const struct reg_default cs35l41_reg[CS35L41_MAX_CACHE_REG] = {
 	{ CS35L41_MIXER_NGATE_CH2_CFG,		0x00000303 },
 };
 
-bool cs35l41_readable_reg(struct device *dev, unsigned int reg)
+static bool cs35l41_readable_reg(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
 	case CS35L41_DEVID:
@@ -200,6 +200,83 @@ bool cs35l41_readable_reg(struct device *dev, unsigned int reg)
 	case CS35L41_DIE_STS2:
 	case CS35L41_TEMP_CAL1:
 	case CS35L41_TEMP_CAL2:
+	case CS35L41_DSP1_TIMESTAMP_COUNT:
+	case CS35L41_DSP1_SYS_ID:
+	case CS35L41_DSP1_SYS_VERSION:
+	case CS35L41_DSP1_SYS_CORE_ID:
+	case CS35L41_DSP1_SYS_AHB_ADDR:
+	case CS35L41_DSP1_SYS_XSRAM_SIZE:
+	case CS35L41_DSP1_SYS_YSRAM_SIZE:
+	case CS35L41_DSP1_SYS_PSRAM_SIZE:
+	case CS35L41_DSP1_SYS_PM_BOOT_SIZE:
+	case CS35L41_DSP1_SYS_FEATURES:
+	case CS35L41_DSP1_SYS_FIR_FILTERS:
+	case CS35L41_DSP1_SYS_LMS_FILTERS:
+	case CS35L41_DSP1_SYS_XM_BANK_SIZE:
+	case CS35L41_DSP1_SYS_YM_BANK_SIZE:
+	case CS35L41_DSP1_SYS_PM_BANK_SIZE:
+	case CS35L41_DSP1_RX1_RATE:
+	case CS35L41_DSP1_RX2_RATE:
+	case CS35L41_DSP1_RX3_RATE:
+	case CS35L41_DSP1_RX4_RATE:
+	case CS35L41_DSP1_RX5_RATE:
+	case CS35L41_DSP1_RX6_RATE:
+	case CS35L41_DSP1_RX7_RATE:
+	case CS35L41_DSP1_RX8_RATE:
+	case CS35L41_DSP1_TX1_RATE:
+	case CS35L41_DSP1_TX2_RATE:
+	case CS35L41_DSP1_TX3_RATE:
+	case CS35L41_DSP1_TX4_RATE:
+	case CS35L41_DSP1_TX5_RATE:
+	case CS35L41_DSP1_TX6_RATE:
+	case CS35L41_DSP1_TX7_RATE:
+	case CS35L41_DSP1_TX8_RATE:
+	case CS35L41_DSP1_SCRATCH1:
+	case CS35L41_DSP1_SCRATCH2:
+	case CS35L41_DSP1_SCRATCH3:
+	case CS35L41_DSP1_SCRATCH4:
+	case CS35L41_DSP1_CCM_CORE_CTRL:
+	case CS35L41_DSP1_CCM_CLK_OVERRIDE:
+	case CS35L41_DSP1_XM_MSTR_EN:
+	case CS35L41_DSP1_XM_CORE_PRI:
+	case CS35L41_DSP1_XM_AHB_PACK_PL_PRI:
+	case CS35L41_DSP1_XM_AHB_UP_PL_PRI:
+	case CS35L41_DSP1_XM_ACCEL_PL0_PRI:
+	case CS35L41_DSP1_XM_NPL0_PRI:
+	case CS35L41_DSP1_YM_MSTR_EN:
+	case CS35L41_DSP1_YM_CORE_PRI:
+	case CS35L41_DSP1_YM_AHB_PACK_PL_PRI:
+	case CS35L41_DSP1_YM_AHB_UP_PL_PRI:
+	case CS35L41_DSP1_YM_ACCEL_PL0_PRI:
+	case CS35L41_DSP1_YM_NPL0_PRI:
+	case CS35L41_DSP1_MPU_XM_ACCESS0:
+	case CS35L41_DSP1_MPU_YM_ACCESS0:
+	case CS35L41_DSP1_MPU_WNDW_ACCESS0:
+	case CS35L41_DSP1_MPU_XREG_ACCESS0:
+	case CS35L41_DSP1_MPU_YREG_ACCESS0:
+	case CS35L41_DSP1_MPU_XM_ACCESS1:
+	case CS35L41_DSP1_MPU_YM_ACCESS1:
+	case CS35L41_DSP1_MPU_WNDW_ACCESS1:
+	case CS35L41_DSP1_MPU_XREG_ACCESS1:
+	case CS35L41_DSP1_MPU_YREG_ACCESS1:
+	case CS35L41_DSP1_MPU_XM_ACCESS2:
+	case CS35L41_DSP1_MPU_YM_ACCESS2:
+	case CS35L41_DSP1_MPU_WNDW_ACCESS2:
+	case CS35L41_DSP1_MPU_XREG_ACCESS2:
+	case CS35L41_DSP1_MPU_YREG_ACCESS2:
+	case CS35L41_DSP1_MPU_XM_ACCESS3:
+	case CS35L41_DSP1_MPU_YM_ACCESS3:
+	case CS35L41_DSP1_MPU_WNDW_ACCESS3:
+	case CS35L41_DSP1_MPU_XREG_ACCESS3:
+	case CS35L41_DSP1_MPU_YREG_ACCESS3:
+	case CS35L41_DSP1_MPU_XM_VIO_ADDR:
+	case CS35L41_DSP1_MPU_XM_VIO_STATUS:
+	case CS35L41_DSP1_MPU_YM_VIO_ADDR:
+	case CS35L41_DSP1_MPU_YM_VIO_STATUS:
+	case CS35L41_DSP1_MPU_PM_VIO_ADDR:
+	case CS35L41_DSP1_MPU_PM_VIO_STATUS:
+	case CS35L41_DSP1_MPU_LOCK_CONFIG:
+	case CS35L41_DSP1_MPU_WDT_RST_CTRL:
 	case CS35L41_OTP_TRIM_1:
 	case CS35L41_OTP_TRIM_2:
 	case CS35L41_OTP_TRIM_3:
@@ -237,6 +314,13 @@ bool cs35l41_readable_reg(struct device *dev, unsigned int reg)
 	case CS35L41_OTP_TRIM_35:
 	case CS35L41_OTP_TRIM_36:
 	case CS35L41_OTP_MEM0 ... CS35L41_OTP_MEM31:
+	case CS35L41_DSP1_XMEM_PACK_0 ... CS35L41_DSP1_XMEM_PACK_3068:
+	case CS35L41_DSP1_XMEM_UNPACK32_0 ... CS35L41_DSP1_XMEM_UNPACK32_2046:
+	case CS35L41_DSP1_XMEM_UNPACK24_0 ... CS35L41_DSP1_XMEM_UNPACK24_4093:
+	case CS35L41_DSP1_YMEM_PACK_0 ... CS35L41_DSP1_YMEM_PACK_1532:
+	case CS35L41_DSP1_YMEM_UNPACK32_0 ... CS35L41_DSP1_YMEM_UNPACK32_1022:
+	case CS35L41_DSP1_YMEM_UNPACK24_0 ... CS35L41_DSP1_YMEM_UNPACK24_2045:
+	case CS35L41_DSP1_PMEM_0 ... CS35L41_DSP1_PMEM_5114:
 	/*test regs*/
 	case CS35L41_PLL_OVR:
 	case CS35L41_BST_TEST_DUTY:
@@ -247,17 +331,20 @@ bool cs35l41_readable_reg(struct device *dev, unsigned int reg)
 	}
 }
 
-bool cs35l41_precious_reg(struct device *dev, unsigned int reg)
+static bool cs35l41_precious_reg(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
 	case CS35L41_OTP_MEM0 ... CS35L41_OTP_MEM31:
+	case CS35L41_DSP1_XMEM_PACK_0 ... CS35L41_DSP1_XMEM_PACK_3068:
+	case CS35L41_DSP1_YMEM_PACK_0 ... CS35L41_DSP1_YMEM_PACK_1532:
+	case CS35L41_DSP1_PMEM_0 ... CS35L41_DSP1_PMEM_5114:
 		return true;
 	default:
 		return false;
 	}
 }
 
-bool cs35l41_volatile_reg(struct device *dev, unsigned int reg)
+static bool cs35l41_volatile_reg(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
 	case CS35L41_DEVID:
@@ -342,6 +429,15 @@ bool cs35l41_volatile_reg(struct device *dev, unsigned int reg)
 	case CS35L41_OTP_TRIM_34:
 	case CS35L41_OTP_TRIM_35:
 	case CS35L41_OTP_TRIM_36:
+	case CS35L41_DSP_MBOX_1 ... CS35L41_DSP_VIRT2_MBOX_8:
+	case CS35L41_DSP1_XMEM_PACK_0 ... CS35L41_DSP1_XMEM_PACK_3068:
+	case CS35L41_DSP1_XMEM_UNPACK32_0 ... CS35L41_DSP1_XMEM_UNPACK32_2046:
+	case CS35L41_DSP1_XMEM_UNPACK24_0 ... CS35L41_DSP1_XMEM_UNPACK24_4093:
+	case CS35L41_DSP1_YMEM_PACK_0 ... CS35L41_DSP1_YMEM_PACK_1532:
+	case CS35L41_DSP1_YMEM_UNPACK32_0 ... CS35L41_DSP1_YMEM_UNPACK32_1022:
+	case CS35L41_DSP1_YMEM_UNPACK24_0 ... CS35L41_DSP1_YMEM_UNPACK24_2045:
+	case CS35L41_DSP1_PMEM_0 ... CS35L41_DSP1_PMEM_5114:
+	case CS35L41_DSP1_CCM_CORE_CTRL ... CS35L41_DSP1_WDT_STATUS:
 	case CS35L41_OTP_MEM0 ... CS35L41_OTP_MEM31:
 		return true;
 	default:
@@ -592,3 +688,36 @@ const struct cs35l41_otp_map_element_t cs35l41_otp_map_map[CS35L41_NUM_OTP_MAPS]
 		.word_offset = 2,
 	},
 };
+
+struct regmap_config cs35l41_regmap_i2c = {
+	.reg_bits = 32,
+	.val_bits = 32,
+	.reg_stride = CS35L41_REGSTRIDE,
+	.reg_format_endian = REGMAP_ENDIAN_BIG,
+	.val_format_endian = REGMAP_ENDIAN_BIG,
+	.max_register = CS35L41_LASTREG,
+	.reg_defaults = cs35l41_reg,
+	.num_reg_defaults = ARRAY_SIZE(cs35l41_reg),
+	.volatile_reg = cs35l41_volatile_reg,
+	.readable_reg = cs35l41_readable_reg,
+	.precious_reg = cs35l41_precious_reg,
+	.cache_type = REGCACHE_RBTREE,
+};
+EXPORT_SYMBOL_GPL(cs35l41_regmap_i2c);
+
+struct regmap_config cs35l41_regmap_spi = {
+	.reg_bits = 32,
+	.val_bits = 32,
+	.pad_bits = 16,
+	.reg_stride = CS35L41_REGSTRIDE,
+	.reg_format_endian = REGMAP_ENDIAN_BIG,
+	.val_format_endian = REGMAP_ENDIAN_BIG,
+	.max_register = CS35L41_LASTREG,
+	.reg_defaults = cs35l41_reg,
+	.num_reg_defaults = ARRAY_SIZE(cs35l41_reg),
+	.volatile_reg = cs35l41_volatile_reg,
+	.readable_reg = cs35l41_readable_reg,
+	.precious_reg = cs35l41_precious_reg,
+	.cache_type = REGCACHE_RBTREE,
+};
+EXPORT_SYMBOL_GPL(cs35l41_regmap_spi);
