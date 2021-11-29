@@ -160,7 +160,7 @@ static noinline int do_fw_call_hvc(u64 arg0, u64 arg1, u64 arg2,
  *
  * Return: Returns status, either success or error+reason
  */
-static int zynqmp_pm_feature(u32 api_id)
+int zynqmp_pm_feature(const u32 api_id)
 {
 	int ret;
 	u32 ret_payload[PAYLOAD_ARG_CNT];
@@ -197,6 +197,7 @@ static int zynqmp_pm_feature(u32 api_id)
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(zynqmp_pm_feature);
 
 /**
  * zynqmp_pm_invoke_fn() - Invoke the system-level platform management layer
@@ -1115,6 +1116,29 @@ int zynqmp_pm_aes_engine(const u64 address, u32 *out)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(zynqmp_pm_aes_engine);
+
+/**
+ * zynqmp_pm_register_notifier() - PM API for register a subsystem
+ *                                to be notified about specific
+ *                                event/error.
+ * @node:	Node ID to which the event is related.
+ * @event:	Event Mask of Error events for which wants to get notified.
+ * @wake:	Wake subsystem upon capturing the event if value 1
+ * @enable:	Enable the registration for value 1, disable for value 0
+ *
+ * This function is used to register/un-register for particular node-event
+ * combination in firmware.
+ *
+ * Return: Returns status, either success or error+reason
+ */
+
+int zynqmp_pm_register_notifier(const u32 node, const u32 event,
+				const u32 wake, const u32 enable)
+{
+	return zynqmp_pm_invoke_fn(PM_REGISTER_NOTIFIER, node, event,
+				   wake, enable, NULL);
+}
+EXPORT_SYMBOL_GPL(zynqmp_pm_register_notifier);
 
 /**
  * zynqmp_pm_system_shutdown - PM call to request a system shutdown or restart
