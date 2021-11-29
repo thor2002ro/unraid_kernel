@@ -399,7 +399,7 @@ void rtw_stop_drv_threads(struct adapter *padapter)
 		wait_for_completion(&padapter->cmdpriv.stop_cmd_thread);
 }
 
-static u8 rtw_init_default_value(struct adapter *padapter)
+static void rtw_init_default_value(struct adapter *padapter)
 {
 	struct registry_priv *pregistrypriv = &padapter->registrypriv;
 	struct xmit_priv	*pxmitpriv = &padapter->xmitpriv;
@@ -444,7 +444,6 @@ static u8 rtw_init_default_value(struct adapter *padapter)
 	padapter->bRxRSSIDisplay = 0;
 	padapter->bNotifyChannelChange = 0;
 	padapter->bShowGetP2PState = 1;
-	return _SUCCESS;
 }
 
 u8 rtw_reset_drv_sw(struct adapter *padapter)
@@ -478,50 +477,37 @@ u8 rtw_reset_drv_sw(struct adapter *padapter)
 
 u8 rtw_init_drv_sw(struct adapter *padapter)
 {
-	u8	ret8 = _SUCCESS;
-
-	if ((rtw_init_cmd_priv(&padapter->cmdpriv)) == _FAIL) {
-		ret8 = _FAIL;
-		goto exit;
-	}
+	if ((rtw_init_cmd_priv(&padapter->cmdpriv)) == _FAIL)
+		return _FAIL;
 
 	padapter->cmdpriv.padapter = padapter;
 
-	if ((rtw_init_evt_priv(&padapter->evtpriv)) == _FAIL) {
-		ret8 = _FAIL;
-		goto exit;
-	}
+	if ((rtw_init_evt_priv(&padapter->evtpriv)) == _FAIL)
+		return _FAIL;
 
-	if (rtw_init_mlme_priv(padapter) == _FAIL) {
-		ret8 = _FAIL;
-		goto exit;
-	}
+	if (rtw_init_mlme_priv(padapter) == _FAIL)
+		return _FAIL;
 
 	rtw_init_wifidirect_timers(padapter);
 	init_wifidirect_info(padapter, P2P_ROLE_DISABLE);
 	reset_global_wifidirect_info(padapter);
 
-	if (init_mlme_ext_priv(padapter) == _FAIL) {
-		ret8 = _FAIL;
-		goto exit;
-	}
+	if (init_mlme_ext_priv(padapter) == _FAIL)
+		return _FAIL;
 
 	if (_rtw_init_xmit_priv(&padapter->xmitpriv, padapter) == _FAIL) {
 		DBG_88E("Can't _rtw_init_xmit_priv\n");
-		ret8 = _FAIL;
-		goto exit;
+		return _FAIL;
 	}
 
 	if (_rtw_init_recv_priv(&padapter->recvpriv, padapter) == _FAIL) {
 		DBG_88E("Can't _rtw_init_recv_priv\n");
-		ret8 = _FAIL;
-		goto exit;
+		return _FAIL;
 	}
 
 	if (_rtw_init_sta_priv(&padapter->stapriv) == _FAIL) {
 		DBG_88E("Can't _rtw_init_sta_priv\n");
-		ret8 = _FAIL;
-		goto exit;
+		return _FAIL;
 	}
 
 	padapter->stapriv.padapter = padapter;
@@ -530,15 +516,14 @@ u8 rtw_init_drv_sw(struct adapter *padapter)
 
 	rtw_init_pwrctrl_priv(padapter);
 
-	ret8 = rtw_init_default_value(padapter);
+	rtw_init_default_value(padapter);
 
 	rtl8188e_init_dm_priv(padapter);
 	rtl8188eu_InitSwLeds(padapter);
 
 	spin_lock_init(&padapter->br_ext_lock);
 
-exit:
-	return ret8;
+	return _SUCCESS;
 }
 
 void rtw_cancel_all_timer(struct adapter *padapter)
