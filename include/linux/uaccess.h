@@ -271,6 +271,27 @@ static inline bool pagefault_disabled(void)
  */
 #define faulthandler_disabled() (pagefault_disabled() || in_atomic())
 
+#ifndef CONFIG_ARCH_HAS_SUBPAGE_FAULTS
+/**
+ * probe_user_writable: probe for sub-page faults in the user range
+ * @uaddr: start of address range
+ * @size: size of address range
+ *
+ * Returns the number of bytes not accessible (like copy_to_user() and
+ * copy_from_user()).
+ *
+ * Architectures that can generate sub-page faults (e.g. arm64 MTE) should
+ * implement this function. It is expected that the caller checked for the
+ * write permission of each page in the range either by put_user() or GUP.
+ * The architecture port can implement a more efficient get_user() probing of
+ * the range if sub-page faults are triggered by either a load or store.
+ */
+static inline size_t probe_user_writable(void __user *uaddr, size_t size)
+{
+	return 0;
+}
+#endif
+
 #ifndef ARCH_HAS_NOCACHE_UACCESS
 
 static inline __must_check unsigned long

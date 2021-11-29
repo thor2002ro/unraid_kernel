@@ -27,6 +27,13 @@ config HAVE_IMA_KEXEC
 config SET_FS
 	bool
 
+config ARCH_HAS_SUBPAGE_FAULTS
+	bool
+	help
+	  Select if the architecture can check permissions at sub-page
+	  granularity (e.g. arm64 MTE). The probe_user_*() functions
+	  must be implemented.
+
 config HOTPLUG_SMT
 	bool
 
@@ -1295,6 +1302,9 @@ config HAVE_ARCH_PFN_VALID
 	bool
 
 config ARCH_SUPPORTS_DEBUG_PAGEALLOC
+	bool
+
+config ARCH_SUPPORTS_PAGE_TABLE_CHECK
 	bool
 
 config ARCH_SPLIT_ARG64
