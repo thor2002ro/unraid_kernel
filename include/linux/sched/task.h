@@ -95,6 +95,11 @@ struct mm_struct *copy_init_mm(void);
 extern pid_t kernel_thread(int (*fn)(void *), void *arg, unsigned long flags);
 extern long kernel_wait4(pid_t, int __user *, int, struct rusage *);
 int kernel_wait(pid_t pid, int *stat);
+struct task_struct *user_worker_create(int (*fn)(void *), void *arg, int node,
+				       unsigned long clone_flags,
+				       u32 worker_flags);
+__printf(2, 3)
+void user_worker_start(struct task_struct *tsk, const char namefmt[], ...);
 
 extern void free_task(struct task_struct *tsk);
 
