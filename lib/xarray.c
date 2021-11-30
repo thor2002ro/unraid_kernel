@@ -1204,6 +1204,10 @@ void *__xas_next(struct xa_state *xas)
 
 	for (;;) {
 		entry = xa_entry(xas->xa, xas->xa_node, xas->xa_offset);
+		if (xa_is_sibling(entry)) {
+			xas->xa_offset++;
+			continue;
+		}
 		if (!xa_is_node(entry))
 			return entry;
 
