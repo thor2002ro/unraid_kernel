@@ -41,12 +41,8 @@ enum dw_pci_ctl_id_t {
 struct dw_scl_sda_cfg {
 	u32 ss_hcnt;
 	u32 fs_hcnt;
-	u32 fp_hcnt;
-	u32 hs_hcnt;
 	u32 ss_lcnt;
 	u32 fs_lcnt;
-	u32 fp_lcnt;
-	u32 hs_lcnt;
 	u32 sda_hold;
 };
 
@@ -82,19 +78,6 @@ static struct dw_scl_sda_cfg hsw_config = {
 	.ss_lcnt = 0x01fb,
 	.fs_lcnt = 0xa0,
 	.sda_hold = 0x9,
-};
-
-/* Elkhart Lake HCNT/LCNT/SDA hold time */
-static struct dw_scl_sda_cfg ehl_config = {
-	.ss_hcnt = 0x190,
-	.fs_hcnt = 0x4E,
-	.fp_hcnt = 0x1A,
-	.hs_hcnt = 0x1F,
-	.ss_lcnt = 0x1d6,
-	.fs_lcnt = 0x96,
-	.fp_lcnt = 0x32,
-	.hs_lcnt = 0x36,
-	.sda_hold = 0x1E,
 };
 
 /* NAVI-AMD HCNT/LCNT/SDA hold time */
@@ -213,7 +196,6 @@ static struct dw_pci_controller dw_pci_controllers[] = {
 	},
 	[elkhartlake] = {
 		.bus_num = -1,
-		.scl_sda_cfg = &ehl_config,
 		.get_clk_rate_khz = ehl_get_clk_rate_khz,
 	},
 	[navi_amd] = {
@@ -324,12 +306,8 @@ static int i2c_dw_pci_probe(struct pci_dev *pdev,
 		cfg = controller->scl_sda_cfg;
 		dev->ss_hcnt = cfg->ss_hcnt;
 		dev->fs_hcnt = cfg->fs_hcnt;
-		dev->fp_hcnt = cfg->fp_hcnt;
-		dev->hs_hcnt = cfg->hs_hcnt;
 		dev->ss_lcnt = cfg->ss_lcnt;
 		dev->fs_lcnt = cfg->fs_lcnt;
-		dev->fp_lcnt = cfg->fp_lcnt;
-		dev->hs_lcnt = cfg->hs_lcnt;
 		dev->sda_hold_time = cfg->sda_hold;
 	}
 
