@@ -54,7 +54,7 @@ static inline unsigned long virt_to_fix(const unsigned long vaddr)
 #define FIXMAP_PAGE_NOCACHE PAGE_KERNEL_NOCACHE
 #endif
 #ifndef FIXMAP_PAGE_IO
-#define FIXMAP_PAGE_IO PAGE_KERNEL_IO
+#define FIXMAP_PAGE_IO PAGE_KERNEL
 #endif
 #ifndef FIXMAP_PAGE_CLEAR
 #define FIXMAP_PAGE_CLEAR __pgprot(0)
