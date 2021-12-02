@@ -3790,7 +3790,7 @@ static void reserve_chunk_space(struct btrfs_trans_handle *trans,
 	}
 
 	if (!ret) {
-		ret = btrfs_block_rsv_add(fs_info->chunk_root,
+		ret = btrfs_block_rsv_add(fs_info,
 					  &fs_info->chunk_block_rsv,
 					  bytes, BTRFS_RESERVE_NO_FLUSH);
 		if (!ret)
@@ -3911,9 +3911,7 @@ int btrfs_free_block_groups(struct btrfs_fs_info *info)
 		list_del_init(&block_group->bg_list);
 		btrfs_put_block_group(block_group);
 	}
-	spin_unlock(&info->unused_bgs_lock);
 
-	spin_lock(&info->unused_bgs_lock);
 	while (!list_empty(&info->reclaim_bgs)) {
 		block_group = list_first_entry(&info->reclaim_bgs,
 					       struct btrfs_block_group,
