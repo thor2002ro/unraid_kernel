@@ -32,6 +32,14 @@
 		};
 	};
 
+	/* used for FD650 LED display driver */
+	i2c {
+		compatible = "i2c-gpio";
+		sda-gpios = <&pio 7 6 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>; /* PH6 */
+		scl-gpios = <&pio 7 5 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>; /* PH5 */
+		i2c-gpio,delay-us = <5>;
+	};
+
 	reg_vcc1v8: regulator-vcc1v8 {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc1v8";
@@ -51,6 +59,24 @@
 		regulator-name = "vdd-cpu-gpu";
 		regulator-min-microvolt = <1135000>;
 		regulator-max-microvolt = <1135000>;
+	};
+
+	sound-spdif {
+		compatible = "simple-audio-card";
+		simple-audio-card,name = "sun50i-h6-spdif";
+
+		simple-audio-card,cpu {
+			sound-dai = <&spdif>;
+		};
+
+		simple-audio-card,codec {
+			sound-dai = <&spdif_out>;
+		};
+	};
+
+	spdif_out: spdif-out {
+		#sound-dai-cells = <0>;
+		compatible = "linux,spdif-dit";
 	};
 };
 
@@ -124,6 +150,10 @@
 
 &r_ir {
 	linux,rc-map-name = "rc-tanix-tx5max";
+	status = "okay";
+};
+
+&spdif {
 	status = "okay";
 };
 
