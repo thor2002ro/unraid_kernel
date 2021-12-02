@@ -22,11 +22,12 @@ Linux PCI总线子系统
    :numbered:
 
    pci
+   pciebus-howto
+   pci-iov-howto
 
 Todolist:
 
-   pciebus-howto
-   pci-iov-howto
+
    msi-howto
    sysfs-pci
    acpi-info
