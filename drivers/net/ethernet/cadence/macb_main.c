@@ -506,74 +506,6 @@ static void macb_set_tx_clk(struct macb *bp, int speed)
 		netdev_err(bp->dev, "adjusting tx_clk failed.\n");
 }
 
-static void macb_validate(struct phylink_config *config,
-			  unsigned long *supported,
-			  struct phylink_link_state *state)
-{
-	struct net_device *ndev = to_net_dev(config->dev);
-	__ETHTOOL_DECLARE_LINK_MODE_MASK(mask) = { 0, };
-	struct macb *bp = netdev_priv(ndev);
-
-	/* We only support MII, RMII, GMII, RGMII & SGMII. */
-	if (state->interface != PHY_INTERFACE_MODE_NA &&
-	    state->interface != PHY_INTERFACE_MODE_MII &&
-	    state->interface != PHY_INTERFACE_MODE_RMII &&
-	    state->interface != PHY_INTERFACE_MODE_GMII &&
-	    state->interface != PHY_INTERFACE_MODE_SGMII &&
-	    state->interface != PHY_INTERFACE_MODE_10GBASER &&
-	    !phy_interface_mode_is_rgmii(state->interface)) {
-		linkmode_zero(supported);
-		return;
-	}
-
-	if (!macb_is_gem(bp) &&
-	    (state->interface == PHY_INTERFACE_MODE_GMII ||
-	     phy_interface_mode_is_rgmii(state->interface))) {
-		linkmode_zero(supported);
-		return;
-	}
-
-	if (state->interface == PHY_INTERFACE_MODE_10GBASER &&
-	    !(bp->caps & MACB_CAPS_HIGH_SPEED &&
-	      bp->caps & MACB_CAPS_PCS)) {
-		linkmode_zero(supported);
-		return;
-	}
-
-	phylink_set_port_modes(mask);
-	phylink_set(mask, Autoneg);
-	phylink_set(mask, Asym_Pause);
-
-	if (bp->caps & MACB_CAPS_GIGABIT_MODE_AVAILABLE &&
-	    (state->interface == PHY_INTERFACE_MODE_NA ||
-	     state->interface == PHY_INTERFACE_MODE_10GBASER)) {
-		phylink_set_10g_modes(mask);
-		phylink_set(mask, 10000baseKR_Full);
-		if (state->interface != PHY_INTERFACE_MODE_NA)
-			goto out;
-	}
-
-	phylink_set(mask, 10baseT_Half);
-	phylink_set(mask, 10baseT_Full);
-	phylink_set(mask, 100baseT_Half);
-	phylink_set(mask, 100baseT_Full);
-
-	if (bp->caps & MACB_CAPS_GIGABIT_MODE_AVAILABLE &&
-	    (state->interface == PHY_INTERFACE_MODE_NA ||
-	     state->interface == PHY_INTERFACE_MODE_GMII ||
-	     state->interface == PHY_INTERFACE_MODE_SGMII ||
-	     phy_interface_mode_is_rgmii(state->interface))) {
-		phylink_set(mask, 1000baseT_Full);
-		phylink_set(mask, 1000baseX_Full);
-
-		if (!(bp->caps & MACB_CAPS_NO_GIGABIT_HALF))
-			phylink_set(mask, 1000baseT_Half);
-	}
-out:
-	linkmode_and(supported, supported, mask);
-	linkmode_and(state->advertising, state->advertising, mask);
-}
-
 static void macb_usx_pcs_link_up(struct phylink_pcs *pcs, unsigned int mode,
 				 phy_interface_t interface, int speed,
 				 int duplex)
@@ -815,7 +747,7 @@ static int macb_mac_prepare(struct phylink_config *config, unsigned int mode,
 }
 
 static const struct phylink_mac_ops macb_phylink_ops = {
-	.validate = macb_validate,
+	.validate = phylink_generic_validate,
 	.mac_prepare = macb_mac_prepare,
 	.mac_config = macb_mac_config,
 	.mac_link_down = macb_mac_link_down,
@@ -880,6 +812,35 @@ static int macb_mii_probe(struct net_device *dev)
 	if (bp->phy_interface == PHY_INTERFACE_MODE_SGMII) {
 		bp->phylink_config.poll_fixed_state = true;
 		bp->phylink_config.get_fixed_state = macb_get_pcs_fixed_state;
+	}
+
+	bp->phylink_config.mac_capabilities = MAC_ASYM_PAUSE |
+		MAC_10 | MAC_100;
+
+	__set_bit(PHY_INTERFACE_MODE_MII,
+		  bp->phylink_config.supported_interfaces);
+	__set_bit(PHY_INTERFACE_MODE_RMII,
+		  bp->phylink_config.supported_interfaces);
+
+	/* Determine what modes are supported */
+	if (macb_is_gem(bp) && (bp->caps & MACB_CAPS_GIGABIT_MODE_AVAILABLE)) {
+		bp->phylink_config.mac_capabilities |= MAC_1000FD;
+		if (!(bp->caps & MACB_CAPS_NO_GIGABIT_HALF))
+			bp->phylink_config.mac_capabilities |= MAC_1000HD;
+
+		__set_bit(PHY_INTERFACE_MODE_GMII,
+			  bp->phylink_config.supported_interfaces);
+		phy_interface_set_rgmii(bp->phylink_config.supported_interfaces);
+
+		if (bp->caps & MACB_CAPS_PCS)
+			__set_bit(PHY_INTERFACE_MODE_SGMII,
+				  bp->phylink_config.supported_interfaces);
+
+		if (bp->caps & MACB_CAPS_HIGH_SPEED) {
+			__set_bit(PHY_INTERFACE_MODE_10GBASER,
+				  bp->phylink_config.supported_interfaces);
+			bp->phylink_config.mac_capabilities |= MAC_10000FD;
+		}
 	}
 
 	bp->phylink = phylink_create(&bp->phylink_config, bp->pdev->dev.fwnode,
@@ -3101,7 +3062,9 @@ static int macb_set_link_ksettings(struct net_device *netdev,
 }
 
 static void macb_get_ringparam(struct net_device *netdev,
-			       struct ethtool_ringparam *ring)
+			       struct ethtool_ringparam *ring,
+			       struct kernel_ethtool_ringparam *kernel_ring,
+			       struct netlink_ext_ack *extack)
 {
 	struct macb *bp = netdev_priv(netdev);
 
@@ -3113,7 +3076,9 @@ static void macb_get_ringparam(struct net_device *netdev,
 }
 
 static int macb_set_ringparam(struct net_device *netdev,
-			      struct ethtool_ringparam *ring)
+			      struct ethtool_ringparam *ring,
+			      struct kernel_ethtool_ringparam *kernel_ring,
+			      struct netlink_ext_ack *extack)
 {
 	struct macb *bp = netdev_priv(netdev);
 	u32 new_rx_size, new_tx_size;

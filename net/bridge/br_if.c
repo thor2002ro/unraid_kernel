@@ -397,10 +397,10 @@ static int find_portno(struct net_bridge *br)
 	if (!inuse)
 		return -ENOMEM;
 
-	set_bit(0, inuse);	/* zero is reserved */
-	list_for_each_entry(p, &br->port_list, list) {
-		set_bit(p->port_no, inuse);
-	}
+	__set_bit(0, inuse);	/* zero is reserved */
+	list_for_each_entry(p, &br->port_list, list)
+		__set_bit(p->port_no, inuse);
+
 	index = find_first_zero_bit(inuse, BR_MAX_PORTS);
 	bitmap_free(inuse);
 
@@ -525,8 +525,8 @@ static void br_set_gso_limits(struct net_bridge *br)
 		gso_max_size = min(gso_max_size, p->dev->gso_max_size);
 		gso_max_segs = min(gso_max_segs, p->dev->gso_max_segs);
 	}
-	br->dev->gso_max_size = gso_max_size;
-	br->dev->gso_max_segs = gso_max_segs;
+	netif_set_gso_max_size(br->dev, gso_max_size);
+	netif_set_gso_max_segs(br->dev, gso_max_segs);
 }
 
 /*
