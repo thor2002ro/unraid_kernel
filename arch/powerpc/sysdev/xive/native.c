@@ -41,7 +41,7 @@ static u32 xive_queue_shift;
 static u32 xive_pool_vps = XIVE_INVALID_VP;
 static struct kmem_cache *xive_provision_cache;
 static bool xive_has_single_esc;
-static bool xive_has_save_restore;
+bool xive_has_save_restore;
 
 int xive_native_populate_irq_data(u32 hw_irq, struct xive_irq_data *data)
 {
@@ -62,6 +62,8 @@ int xive_native_populate_irq_data(u32 hw_irq, struct xive_irq_data *data)
 
 	opal_flags = be64_to_cpu(flags);
 	if (opal_flags & OPAL_XIVE_IRQ_STORE_EOI)
+		data->flags |= XIVE_IRQ_FLAG_STORE_EOI;
+	if (opal_flags & OPAL_XIVE_IRQ_STORE_EOI2)
 		data->flags |= XIVE_IRQ_FLAG_STORE_EOI;
 	if (opal_flags & OPAL_XIVE_IRQ_LSI)
 		data->flags |= XIVE_IRQ_FLAG_LSI;
