@@ -656,8 +656,8 @@ static int exfat_walk_fat_chain(struct super_block *sb,
 	return 0;
 }
 
-int exfat_find_location(struct super_block *sb, struct exfat_chain *p_dir,
-		int entry, sector_t *sector, int *offset)
+static int exfat_find_location(struct super_block *sb, struct exfat_chain *p_dir,
+			       int entry, sector_t *sector, int *offset)
 {
 	int ret;
 	unsigned int off, clu = 0;
@@ -892,7 +892,7 @@ struct exfat_entry_set_cache *exfat_get_dentry_set(struct super_block *sb,
 		es->bh[es->num_bh++] = bh;
 	}
 
-	/* validiate cached dentries */
+	/* validate cached dentries */
 	for (i = 1; i < num_entries; i++) {
 		ep = exfat_get_dentry_cached(es, i);
 		if (!exfat_validate_entry(exfat_get_entry_type(ep), &mode))
