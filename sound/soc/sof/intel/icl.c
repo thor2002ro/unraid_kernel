@@ -77,6 +77,7 @@ const struct snd_sof_dsp_ops sof_icl_ops = {
 	.pcm_hw_free	= hda_dsp_stream_hw_free,
 	.pcm_trigger	= hda_dsp_pcm_trigger,
 	.pcm_pointer	= hda_dsp_pcm_pointer,
+	.pcm_ack	= hda_dsp_pcm_ack,
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_PROBES)
 	/* probe callbacks */
@@ -97,9 +98,8 @@ const struct snd_sof_dsp_ops sof_icl_ops = {
 	/* parse platform specific extended manifest */
 	.parse_platform_ext_manifest = hda_dsp_ext_man_get_cavs_config_data,
 
-	/* dsp core power up/down */
-	.core_power_up = hda_dsp_enable_core,
-	.core_power_down = hda_dsp_core_reset_power_down,
+	/* dsp core get/put */
+	.core_get = hda_dsp_core_get,
 
 	/* firmware run */
 	.run = hda_dsp_cl_boot_firmware_iccmax,
