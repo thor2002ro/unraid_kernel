@@ -57,13 +57,13 @@ int register_firmware_config_sysctl(void)
 		return -ENOMEM;
 	return 0;
 }
-EXPORT_SYMBOL_NS_GPL(register_firmware_config_sysctl);
+EXPORT_SYMBOL_NS_GPL(register_firmware_config_sysctl, FIRMWARE_LOADER_PRIVATE);
 
 void unregister_firmware_config_sysctl(void)
 {
 	unregister_sysctl_table(firmware_config_sysct_table_header);
 	firmware_config_sysct_table_header = NULL;
 }
-EXPORT_SYMBOL_NS_GPL(unregister_firmware_config_sysctl);
+EXPORT_SYMBOL_NS_GPL(unregister_firmware_config_sysctl, FIRMWARE_LOADER_PRIVATE);
 
 #endif /* CONFIG_SYSCTL */
