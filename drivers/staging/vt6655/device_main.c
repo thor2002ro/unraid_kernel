@@ -369,11 +369,11 @@ static void device_init_registers(struct vnt_private *priv)
 	/* Set Short Slot Time, xIFS, and RSPINF. */
 	priv->wCurrentRate = RATE_54M;
 
-	priv->bRadioOff = false;
+	priv->radio_off = false;
 
 	priv->byRadioCtl = SROMbyReadEmbedded(priv->port_offset,
 					      EEP_OFS_RADIOCTL);
-	priv->bHWRadioOff = false;
+	priv->hw_radio_off = false;
 
 	if (priv->byRadioCtl & EEP_RADIOCTL_ENABLE) {
 		/* Get GPIO */
@@ -383,10 +383,10 @@ static void device_init_registers(struct vnt_private *priv)
 		     !(priv->byRadioCtl & EEP_RADIOCTL_INV)) ||
 		     (!(priv->byGPIO & GPIO0_DATA) &&
 		     (priv->byRadioCtl & EEP_RADIOCTL_INV)))
-			priv->bHWRadioOff = true;
+			priv->hw_radio_off = true;
 	}
 
-	if (priv->bHWRadioOff || priv->bRadioControlOff)
+	if (priv->hw_radio_off || priv->bRadioControlOff)
 		CARDbRadioPowerOff(priv);
 
 	/* get Permanent network address */
