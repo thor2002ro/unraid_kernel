@@ -208,6 +208,7 @@ config HID_CHERRY
 config HID_CHICONY
 	tristate "Chicony devices"
 	depends on HID
+	depends on BROKEN
 	default !EXPERT
 	help
 	Support for Chicony Tactical pad and special keys on Chicony keyboards.
