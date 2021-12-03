@@ -992,11 +992,17 @@ static noinline void check_multi_find_3(struct xarray *xa)
 	unsigned int order;
 
 	for (order = 5; order < order_limit; order++) {
+		XA_STATE(xas, xa, 0);
 		unsigned long index = 1UL << (order - 5);
+		void *entry;
 
 		XA_BUG_ON(xa, !xa_empty(xa));
 		xa_store_order(xa, 0, order - 4, xa_mk_index(0), GFP_KERNEL);
 		XA_BUG_ON(xa, xa_find_after(xa, &index, ULONG_MAX, XA_PRESENT));
+
+		for (entry = xas_load(&xas); entry; entry = xas_next(&xas))
+			XA_BUG_ON(xa, entry != xa_mk_index(0));
+
 		xa_erase_index(xa, 0);
 	}
 }
