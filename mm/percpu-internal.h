@@ -123,8 +123,9 @@ static inline int pcpu_chunk_map_bits(struct pcpu_chunk *chunk)
  */
 static inline size_t pcpu_obj_full_size(size_t size)
 {
-	size_t extra_size =
-		size / PCPU_MIN_ALLOC_SIZE * sizeof(struct obj_cgroup *);
+	size_t extra_size;
+
+	extra_size = size / PCPU_MIN_ALLOC_SIZE * sizeof(struct obj_cgroup *);
 
 	return size * num_possible_cpus() + extra_size;
 }
