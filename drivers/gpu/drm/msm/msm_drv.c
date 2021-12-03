@@ -752,13 +752,7 @@ static void context_close(struct msm_file_private *ctx)
 
 static void msm_postclose(struct drm_device *dev, struct drm_file *file)
 {
-	struct msm_drm_private *priv = dev->dev_private;
 	struct msm_file_private *ctx = file->driver_priv;
-
-	mutex_lock(&dev->struct_mutex);
-	if (ctx == priv->lastctx)
-		priv->lastctx = NULL;
-	mutex_unlock(&dev->struct_mutex);
 
 	context_close(ctx);
 }
@@ -973,7 +967,7 @@ static int wait_fence(struct msm_gpu_submitqueue *queue, uint32_t fence_id,
 	struct dma_fence *fence;
 	int ret;
 
-	if (fence_id > queue->last_fence) {
+	if (fence_after(fence_id, queue->last_fence)) {
 		DRM_ERROR_RATELIMITED("waiting on invalid fence: %u (of %u)\n",
 				      fence_id, queue->last_fence);
 		return -EINVAL;
@@ -1292,9 +1286,10 @@ static int add_components_mdp(struct device *mdp_dev,
 	return 0;
 }
 
-static int compare_name_mdp(struct device *dev, void *data)
+static int find_mdp_node(struct device *dev, void *data)
 {
-	return (strstr(dev_name(dev), "mdp") != NULL);
+	return of_match_node(dpu_dt_match, dev->of_node) ||
+		of_match_node(mdp5_dt_match, dev->of_node);
 }
 
 static int add_display_components(struct platform_device *pdev,
@@ -1319,7 +1314,7 @@ static int add_display_components(struct platform_device *pdev,
 			return ret;
 		}
 
-		mdp_dev = device_find_child(dev, NULL, compare_name_mdp);
+		mdp_dev = device_find_child(dev, NULL, find_mdp_node);
 		if (!mdp_dev) {
 			DRM_DEV_ERROR(dev, "failed to find MDSS MDP node\n");
 			of_platform_depopulate(dev);
@@ -1478,7 +1473,6 @@ static int __init msm_drm_register(void)
 	msm_mdp_register();
 	msm_dpu_register();
 	msm_dsi_register();
-	msm_edp_register();
 	msm_hdmi_register();
 	msm_dp_register();
 	adreno_register();
@@ -1492,7 +1486,6 @@ static void __exit msm_drm_unregister(void)
 	msm_dp_unregister();
 	msm_hdmi_unregister();
 	adreno_unregister();
-	msm_edp_unregister();
 	msm_dsi_unregister();
 	msm_mdp_unregister();
 	msm_dpu_unregister();
