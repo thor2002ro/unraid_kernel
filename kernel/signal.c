@@ -907,8 +907,15 @@ static bool prepare_signal(int sig, struct task_struct *p, bool force)
 	sigset_t flush;
 
 	if (signal->flags & (SIGNAL_GROUP_EXIT | SIGNAL_GROUP_COREDUMP)) {
-		if (!(signal->flags & SIGNAL_GROUP_EXIT))
-			return sig == SIGKILL;
+		struct core_state *core_state = signal->core_state;
+		if (core_state) {
+			if (sig == SIGKILL) {
+				struct task_struct *dumper = core_state->dumper.task;
+				sigaddset(&dumper->pending.signal, SIGKILL);
+				signal_wake_up(dumper, 1);
+			}
+			return false;
+		}
 		/*
 		 * The process is in the middle of dying, nothing to do.
 		 */

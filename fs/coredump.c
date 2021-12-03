@@ -448,7 +448,7 @@ static void coredump_finish(bool core_dumped)
 static bool dump_interrupted(void)
 {
 	/*
-	 * SIGKILL or freezing() interrupt the coredumping. Perhaps we
+	 * SIGKILL or freezing() interrupted the coredumping. Perhaps we
 	 * can do try_to_freeze() and check __fatal_signal_pending(),
 	 * but then we need to teach dump_write() to restart and clear
 	 * TIF_SIGPENDING.
@@ -471,7 +471,7 @@ static void wait_for_dump_helpers(struct file *file)
 	 * We actually want wait_event_freezable() but then we need
 	 * to clear TIF_SIGPENDING and improve dump_interrupted().
 	 */
-	wait_event_interruptible(pipe->rd_wait, pipe->readers == 1);
+	wait_event_killable(pipe->rd_wait, pipe->readers == 1);
 
 	pipe_lock(pipe);
 	pipe->readers--;
