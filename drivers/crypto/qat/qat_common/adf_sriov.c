@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: (BSD-3-Clause OR GPL-2.0-only)
-/* Copyright(c) 2015 - 2020 Intel Corporation */
+/* Copyright(c) 2015 - 2021 Intel Corporation */
 #include <linux/workqueue.h>
 #include <linux/pci.h>
 #include <linux/device.h>
 #include <linux/iommu.h>
 #include "adf_common_drv.h"
 #include "adf_cfg.h"
-#include "adf_pf2vf_msg.h"
+#include "adf_pfvf_pf_msg.h"
 
 static struct workqueue_struct *pf2vf_resp_wq;
 
@@ -19,8 +19,16 @@ static void adf_iov_send_resp(struct work_struct *work)
 {
 	struct adf_pf2vf_resp *pf2vf_resp =
 		container_of(work, struct adf_pf2vf_resp, pf2vf_resp_work);
+	struct adf_accel_vf_info *vf_info = pf2vf_resp->vf_info;
+	struct adf_accel_dev *accel_dev = vf_info->accel_dev;
+	u32 vf_nr = vf_info->vf_nr;
+	bool ret;
 
-	adf_vf2pf_req_hndl(pf2vf_resp->vf_info);
+	ret = adf_recv_and_handle_vf2pf_msg(accel_dev, vf_nr);
+	if (ret)
+		/* re-enable interrupt on PF from this VF */
+		adf_enable_vf2pf_interrupts(accel_dev, 1 << vf_nr);
+
 	kfree(pf2vf_resp);
 }
 
@@ -62,7 +70,7 @@ static int adf_enable_sriov(struct adf_accel_dev *accel_dev)
 		hw_data->configure_iov_threads(accel_dev, true);
 
 	/* Enable VF to PF interrupts for all VFs */
-	if (hw_data->get_pf2vf_offset)
+	if (hw_data->pfvf_ops.get_pf2vf_offset)
 		adf_enable_vf2pf_interrupts(accel_dev, BIT_ULL(totalvfs) - 1);
 
 	/*
@@ -92,13 +100,13 @@ void adf_disable_sriov(struct adf_accel_dev *accel_dev)
 	if (!accel_dev->pf.vf_info)
 		return;
 
-	if (hw_data->get_pf2vf_offset)
+	if (hw_data->pfvf_ops.get_pf2vf_offset)
 		adf_pf2vf_notify_restarting(accel_dev);
 
 	pci_disable_sriov(accel_to_pci_dev(accel_dev));
 
 	/* Disable VF to PF interrupts */
-	if (hw_data->get_pf2vf_offset)
+	if (hw_data->pfvf_ops.get_pf2vf_offset)
 		adf_disable_vf2pf_interrupts(accel_dev, GENMASK(31, 0));
 
 	/* Clear Valid bits in AE Thread to PCIe Function Mapping */
