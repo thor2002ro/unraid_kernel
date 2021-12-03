@@ -19,6 +19,7 @@ static bool __page_table_check_enabled __initdata =
 				IS_ENABLED(CONFIG_PAGE_TABLE_CHECK_ENFORCED);
 
 DEFINE_STATIC_KEY_TRUE_RO(page_table_check_disabled);
+EXPORT_SYMBOL(page_table_check_disabled);
 
 static int __init early_page_table_check_param(char *buf)
 {
@@ -217,6 +218,7 @@ void __page_table_check_pte_set(struct mm_struct *mm, unsigned long addr,
 				     pte_write(pte));
 	}
 }
+EXPORT_SYMBOL(__page_table_check_pte_set);
 
 void __page_table_check_pmd_set(struct mm_struct *mm, unsigned long addr,
 				pmd_t *pmdp, pmd_t pmd)
