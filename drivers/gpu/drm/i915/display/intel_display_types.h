@@ -1788,7 +1788,7 @@ intel_get_first_crtc(struct drm_i915_private *dev_priv)
 }
 
 static inline struct intel_crtc *
-intel_get_crtc_for_pipe(struct drm_i915_private *dev_priv, enum pipe pipe)
+intel_crtc_for_pipe(struct drm_i915_private *dev_priv, enum pipe pipe)
 {
 	/* pipe_to_crtc_mapping may have hole on any of 3 display pipe system */
 	drm_WARN_ON(&dev_priv->drm,
@@ -1797,7 +1797,7 @@ intel_get_crtc_for_pipe(struct drm_i915_private *dev_priv, enum pipe pipe)
 }
 
 static inline struct intel_crtc *
-intel_get_crtc_for_plane(struct drm_i915_private *dev_priv, enum i9xx_plane_id plane)
+intel_crtc_for_plane(struct drm_i915_private *dev_priv, enum i9xx_plane_id plane)
 {
 	return dev_priv->plane_to_crtc_mapping[plane];
 }
@@ -2020,20 +2020,18 @@ intel_crtc_needs_modeset(const struct intel_crtc_state *crtc_state)
 }
 
 static inline void
-intel_wait_for_vblank(struct drm_i915_private *dev_priv, enum pipe pipe)
+intel_crtc_wait_for_next_vblank(struct intel_crtc *crtc)
 {
-	struct intel_crtc *crtc = intel_get_crtc_for_pipe(dev_priv, pipe);
-
 	drm_crtc_wait_one_vblank(&crtc->base);
 }
 
 static inline void
 intel_wait_for_vblank_if_active(struct drm_i915_private *dev_priv, enum pipe pipe)
 {
-	const struct intel_crtc *crtc = intel_get_crtc_for_pipe(dev_priv, pipe);
+	struct intel_crtc *crtc = intel_crtc_for_pipe(dev_priv, pipe);
 
 	if (crtc->active)
-		intel_wait_for_vblank(dev_priv, pipe);
+		intel_crtc_wait_for_next_vblank(crtc);
 }
 
 static inline bool intel_modifier_uses_dpt(struct drm_i915_private *i915, u64 modifier)
