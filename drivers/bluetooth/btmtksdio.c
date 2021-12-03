@@ -98,6 +98,7 @@ MODULE_DEVICE_TABLE(sdio, btmtksdio_table);
 #define MTK_SDIO_BLOCK_SIZE	256
 
 #define BTMTKSDIO_TX_WAIT_VND_EVT	1
+#define BTMTKSDIO_HW_TX_READY		2
 
 struct mtkbtsdio_hdr {
 	__le16	len;
@@ -113,7 +114,6 @@ struct btmtksdio_dev {
 	struct work_struct txrx_work;
 	unsigned long tx_state;
 	struct sk_buff_head txq;
-	bool hw_tx_ready;
 
 	struct sk_buff *evt_skb;
 
@@ -254,7 +254,7 @@ static int btmtksdio_tx_packet(struct btmtksdio_dev *bdev,
 	sdio_hdr->reserved = cpu_to_le16(0);
 	sdio_hdr->bt_type = hci_skb_pkt_type(skb);
 
-	bdev->hw_tx_ready = false;
+	clear_bit(BTMTKSDIO_HW_TX_READY, &bdev->tx_state);
 	err = sdio_writesb(bdev->func, MTK_REG_CTDR, skb->data,
 			   round_up(skb->len, MTK_SDIO_BLOCK_SIZE));
 	if (err < 0)
@@ -324,8 +324,29 @@ err_out:
 	return err;
 }
 
+static int btmtksdio_recv_acl(struct hci_dev *hdev, struct sk_buff *skb)
+{
+	struct btmtksdio_dev *bdev = hci_get_drvdata(hdev);
+	u16 handle = le16_to_cpu(hci_acl_hdr(skb)->handle);
+
+	switch (handle) {
+	case 0xfc6f:
+		/* Firmware dump from device: when the firmware hangs, the
+		 * device can no longer suspend and thus disable auto-suspend.
+		 */
+		pm_runtime_forbid(bdev->dev);
+		fallthrough;
+	case 0x05ff:
+	case 0x05fe:
+		/* Firmware debug logging */
+		return hci_recv_diag(hdev, skb);
+	}
+
+	return hci_recv_frame(hdev, skb);
+}
+
 static const struct h4_recv_pkt mtk_recv_pkts[] = {
-	{ H4_RECV_ACL,      .recv = hci_recv_frame },
+	{ H4_RECV_ACL,      .recv = btmtksdio_recv_acl },
 	{ H4_RECV_SCO,      .recv = hci_recv_frame },
 	{ H4_RECV_EVENT,    .recv = btmtksdio_recv_event },
 };
@@ -463,11 +484,12 @@ static void btmtksdio_txrx_work(struct work_struct *work)
 			bt_dev_dbg(bdev->hdev, "Get fw own back");
 
 		if (int_status & TX_EMPTY)
-			bdev->hw_tx_ready = true;
+			set_bit(BTMTKSDIO_HW_TX_READY, &bdev->tx_state);
+
 		else if (unlikely(int_status & TX_FIFO_OVERFLOW))
 			bt_dev_warn(bdev->hdev, "Tx fifo overflow");
 
-		if (bdev->hw_tx_ready) {
+		if (test_bit(BTMTKSDIO_HW_TX_READY, &bdev->tx_state)) {
 			skb = skb_dequeue(&bdev->txq);
 			if (skb) {
 				err = btmtksdio_tx_packet(bdev, skb);
@@ -811,7 +833,7 @@ static int btmtksdio_setup(struct hci_dev *hdev)
 	u32 fw_version = 0;
 
 	calltime = ktime_get();
-	bdev->hw_tx_ready = true;
+	set_bit(BTMTKSDIO_HW_TX_READY, &bdev->tx_state);
 
 	switch (bdev->data->chipid) {
 	case 0x7921:
