@@ -10,6 +10,7 @@
 #include <linux/cdev.h>
 #include <linux/idr.h>
 #include <linux/pci.h>
+#include <linux/ioasid.h>
 #include <linux/perf_event.h>
 #include <uapi/linux/idxd.h>
 #include "registers.h"
@@ -64,6 +65,7 @@ extern struct idxd_device_driver idxd_drv;
 extern struct idxd_device_driver idxd_dmaengine_drv;
 extern struct idxd_device_driver idxd_user_drv;
 
+#define INVALID_INT_HANDLE	-1
 struct idxd_irq_entry {
 	struct idxd_device *idxd;
 	int id;
@@ -75,6 +77,9 @@ struct idxd_irq_entry {
 	 * and irq thread processing error descriptor.
 	 */
 	spinlock_t list_lock;
+	int int_handle;
+	struct idxd_wq *wq;
+	ioasid_t pasid;
 };
 
 struct idxd_group {
@@ -166,11 +171,13 @@ struct idxd_wq {
 	u32 portal_offset;
 	struct percpu_ref wq_active;
 	struct completion wq_dead;
+	struct completion wq_resurrect;
 	struct idxd_dev idxd_dev;
 	struct idxd_cdev *idxd_cdev;
 	struct wait_queue_head err_queue;
 	struct idxd_device *idxd;
 	int id;
+	struct idxd_irq_entry *ie;
 	enum idxd_wq_type type;
 	struct idxd_group *group;
 	int client_count;
@@ -266,6 +273,8 @@ struct idxd_device {
 	unsigned int pasid;
 
 	int num_groups;
+	int irq_cnt;
+	bool request_int_handles;
 
 	u32 msix_perm_offset;
 	u32 wqcfg_offset;
@@ -291,8 +300,6 @@ struct idxd_device {
 	struct idxd_dma_dev *idxd_dma;
 	struct workqueue_struct *wq;
 	struct work_struct work;
-
-	int *int_handles;
 
 	struct idxd_pmu *idxd_pmu;
 };
@@ -518,6 +525,7 @@ void idxd_unregister_devices(struct idxd_device *idxd);
 int idxd_register_driver(void);
 void idxd_unregister_driver(void);
 void idxd_wqs_quiesce(struct idxd_device *idxd);
+bool idxd_queue_int_handle_resubmit(struct idxd_desc *desc);
 
 /* device interrupt control */
 void idxd_msix_perm_setup(struct idxd_device *idxd);
@@ -564,6 +572,7 @@ int idxd_wq_map_portal(struct idxd_wq *wq);
 void idxd_wq_unmap_portal(struct idxd_wq *wq);
 int idxd_wq_set_pasid(struct idxd_wq *wq, int pasid);
 int idxd_wq_disable_pasid(struct idxd_wq *wq);
+void __idxd_wq_quiesce(struct idxd_wq *wq);
 void idxd_wq_quiesce(struct idxd_wq *wq);
 int idxd_wq_init_percpu_ref(struct idxd_wq *wq);
 
@@ -579,7 +588,7 @@ int idxd_register_dma_channel(struct idxd_wq *wq);
 void idxd_unregister_dma_channel(struct idxd_wq *wq);
 void idxd_parse_completion_status(u8 status, enum dmaengine_tx_result *res);
 void idxd_dma_complete_txd(struct idxd_desc *desc,
-			   enum idxd_complete_type comp_type);
+			   enum idxd_complete_type comp_type, bool free_desc);
 
 /* cdev */
 int idxd_cdev_register(void);
@@ -602,11 +611,5 @@ static inline void perfmon_counter_overflow(struct idxd_device *idxd) {}
 static inline void perfmon_init(void) {}
 static inline void perfmon_exit(void) {}
 #endif
-
-static inline void complete_desc(struct idxd_desc *desc, enum idxd_complete_type reason)
-{
-	idxd_dma_complete_txd(desc, reason);
-	idxd_free_desc(desc->wq, desc);
-}
 
 #endif
