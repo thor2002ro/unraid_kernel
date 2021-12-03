@@ -113,6 +113,7 @@ struct dc_link {
 	 * DIG encoder. */
 	bool is_dig_mapping_flexible;
 	bool hpd_status; /* HPD status of link without physical HPD pin. */
+	bool is_hpd_pending; /* Indicates a new received hpd */
 
 	bool edp_sink_present;
 
@@ -184,6 +185,10 @@ struct dc_link {
 
 	/* Drive settings read from integrated info table */
 	struct dc_lane_settings bios_forced_drive_settings;
+
+	/* Vendor specific LTTPR workaround variables */
+	uint8_t vendor_specific_lttpr_link_rate_wa;
+	bool apply_vendor_specific_lttpr_link_rate_wa;
 
 	/* MST record stream using this link */
 	struct link_flags {
@@ -289,6 +294,10 @@ bool dc_link_setup_psr(struct dc_link *dc_link,
 
 void dc_link_get_psr_residency(const struct dc_link *link, uint32_t *residency);
 
+void dc_link_blank_all_dp_displays(struct dc *dc);
+
+void dc_link_blank_dp_stream(struct dc_link *link, bool hw_init);
+
 /* Request DC to detect if there is a Panel connected.
  * boot - If this call is during initial boot.
  * Return false for any type of detection failure or MST detection
@@ -300,7 +309,7 @@ enum dc_detect_reason {
 	DETECT_REASON_HPD,
 	DETECT_REASON_HPDRX,
 	DETECT_REASON_FALLBACK,
-	DETECT_REASON_RETRAIN
+	DETECT_REASON_RETRAIN,
 };
 
 bool dc_link_detect(struct dc_link *dc_link, enum dc_detect_reason reason);
@@ -440,6 +449,7 @@ bool dc_link_is_fec_supported(const struct dc_link *link);
 bool dc_link_should_enable_fec(const struct dc_link *link);
 
 #if defined(CONFIG_DRM_AMD_DC_DCN)
+uint32_t dc_link_bw_kbps_from_raw_frl_link_rate_data(uint8_t bw);
 enum dp_link_encoding dc_link_dp_mst_decide_link_encoding_format(const struct dc_link *link);
 #endif
 #endif /* DC_LINK_H_ */

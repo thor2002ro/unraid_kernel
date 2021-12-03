@@ -45,6 +45,7 @@
 #include "amdgpu_sched.h"
 #include "amdgpu_fdinfo.h"
 #include "amdgpu_amdkfd.h"
+#include "amdgpu_profile.h"
 
 #include "amdgpu_ras.h"
 #include "amdgpu_xgmi.h"
@@ -98,9 +99,10 @@
  * - 3.42.0 - Add 16bpc fixed point display support
  * - 3.43.0 - Add device hot plug/unplug support
  * - 3.44.0 - DCN3 supports DCC independent block settings: !64B && 128B, 64B && 128B
+ * - 3.45.0 - Add PROFILE IOCTL
  */
 #define KMS_DRIVER_MAJOR	3
-#define KMS_DRIVER_MINOR	44
+#define KMS_DRIVER_MINOR	45
 #define KMS_DRIVER_PATCHLEVEL	0
 
 int amdgpu_vram_limit;
@@ -313,9 +315,12 @@ module_param_named(dpm, amdgpu_dpm, int, 0444);
 
 /**
  * DOC: fw_load_type (int)
- * Set different firmware loading type for debugging (0 = direct, 1 = SMU, 2 = PSP). The default is -1 (auto).
+ * Set different firmware loading type for debugging, if supported.
+ * Set to 0 to force direct loading if supported by the ASIC.  Set
+ * to -1 to select the default loading mode for the ASIC, as defined
+ * by the driver.  The default is -1 (auto).
  */
-MODULE_PARM_DESC(fw_load_type, "firmware loading type (0 = direct, 1 = SMU, 2 = PSP, -1 = auto)");
+MODULE_PARM_DESC(fw_load_type, "firmware loading type (0 = force direct if supported, -1 = auto)");
 module_param_named(fw_load_type, amdgpu_fw_load_type, int, 0444);
 
 /**
@@ -2001,6 +2006,19 @@ retry_init:
 		goto err_pci;
 	}
 
+	/*
+	 * 1. don't init fbdev on hw without DCE
+	 * 2. don't init fbdev if there are no connectors
+	 */
+	if (adev->mode_info.mode_config_initialized &&
+	    !list_empty(&adev_to_drm(adev)->mode_config.connector_list)) {
+		/* select 8 bpp console on low vram cards */
+		if (adev->gmc.real_vram_size <= (32*1024*1024))
+			drm_fbdev_generic_setup(adev_to_drm(adev), 8);
+		else
+			drm_fbdev_generic_setup(adev_to_drm(adev), 32);
+	}
+
 	ret = amdgpu_debugfs_init(adev);
 	if (ret)
 		DRM_ERROR("Creating debugfs files failed (%d).\n", ret);
@@ -2450,6 +2468,7 @@ const struct drm_ioctl_desc amdgpu_ioctls_kms[] = {
 	DRM_IOCTL_DEF_DRV(AMDGPU_GEM_VA, amdgpu_gem_va_ioctl, DRM_AUTH|DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(AMDGPU_GEM_OP, amdgpu_gem_op_ioctl, DRM_AUTH|DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(AMDGPU_GEM_USERPTR, amdgpu_gem_userptr_ioctl, DRM_AUTH|DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(AMDGPU_PROFILE, amdgpu_profile_ioctl, DRM_AUTH|DRM_RENDER_ALLOW),
 };
 
 static const struct drm_driver amdgpu_kms_driver = {

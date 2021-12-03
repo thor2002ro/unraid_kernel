@@ -54,6 +54,7 @@ extern "C" {
 #define DRM_AMDGPU_VM			0x13
 #define DRM_AMDGPU_FENCE_TO_HANDLE	0x14
 #define DRM_AMDGPU_SCHED		0x15
+#define DRM_AMDGPU_PROFILE		0x16
 
 #define DRM_IOCTL_AMDGPU_GEM_CREATE	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDGPU_GEM_CREATE, union drm_amdgpu_gem_create)
 #define DRM_IOCTL_AMDGPU_GEM_MMAP	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDGPU_GEM_MMAP, union drm_amdgpu_gem_mmap)
@@ -71,6 +72,7 @@ extern "C" {
 #define DRM_IOCTL_AMDGPU_VM		DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDGPU_VM, union drm_amdgpu_vm)
 #define DRM_IOCTL_AMDGPU_FENCE_TO_HANDLE DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDGPU_FENCE_TO_HANDLE, union drm_amdgpu_fence_to_handle)
 #define DRM_IOCTL_AMDGPU_SCHED		DRM_IOW(DRM_COMMAND_BASE + DRM_AMDGPU_SCHED, union drm_amdgpu_sched)
+#define DRM_IOCTL_AMDGPU_PROFILE	DRM_IOW(DRM_COMMAND_BASE + DRM_AMDGPU_PROFILE, union drm_amdgpu_profile)
 
 /**
  * DOC: memory domains
@@ -1118,6 +1120,32 @@ struct drm_amdgpu_info_video_codec_info {
 
 struct drm_amdgpu_info_video_caps {
 	struct drm_amdgpu_info_video_codec_info codec_info[AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_COUNT];
+};
+
+/* profile ioctl */
+#define AMDGPU_PROFILE_OP_GET_STABLE_PSTATE	1
+#define AMDGPU_PROFILE_OP_SET_STABLE_PSTATE	2
+
+#define AMDGPU_PROFILE_FLAGS_STABLE_PSTATE_MASK	0xf
+#define AMDGPU_PROFILE_FLAGS_STABLE_PSTATE_NONE	0
+#define AMDGPU_PROFILE_FLAGS_STABLE_PSTATE_STANDARD	1
+#define AMDGPU_PROFILE_FLAGS_STABLE_PSTATE_MIN_SCLK	2
+#define AMDGPU_PROFILE_FLAGS_STABLE_PSTATE_MIN_MCLK	3
+#define AMDGPU_PROFILE_FLAGS_STABLE_PSTATE_PEAK	4
+
+struct drm_amdgpu_profile_in {
+	/** AMDGPU_PROFILE_OP_* */
+	__u32	op;
+	__u32	flags;
+};
+
+struct drm_amdgpu_profile_out {
+	__u64	flags;
+};
+
+union drm_amdgpu_profile {
+	struct drm_amdgpu_profile_in in;
+	struct drm_amdgpu_profile_out out;
 };
 
 /*

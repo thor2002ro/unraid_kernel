@@ -790,8 +790,7 @@ static void dm_dmub_outbox1_low_irq(void *interrupt_params)
 					plink = adev->dm.dc->links[notify.link_index];
 					if (plink) {
 						plink->hpd_status =
-							notify.hpd_status ==
-							DP_HPD_PLUG ? true : false;
+							notify.hpd_status == DP_HPD_PLUG;
 					}
 				}
 				queue_work(adev->dm.delayed_hpd_wq, &dmub_hpd_wrk->handle_hpd_work);
@@ -1456,6 +1455,12 @@ static int amdgpu_dm_init(struct amdgpu_device *adev)
 
 	init_data.flags.power_down_display_on_boot = true;
 
+	if (check_seamless_boot_capability(adev)) {
+		init_data.flags.power_down_display_on_boot = false;
+		init_data.flags.allow_seamless_boot_optimization = true;
+		DRM_INFO("Seamless boot condition check passed\n");
+	}
+
 	INIT_LIST_HEAD(&adev->dm.da_list);
 	/* Display Core create. */
 	adev->dm.dc = dc_create(&init_data);
@@ -1480,8 +1485,10 @@ static int amdgpu_dm_init(struct amdgpu_device *adev)
 	if (amdgpu_dc_debug_mask & DC_DISABLE_STUTTER)
 		adev->dm.dc->debug.disable_stutter = true;
 
-	if (amdgpu_dc_debug_mask & DC_DISABLE_DSC)
+	if (amdgpu_dc_debug_mask & DC_DISABLE_DSC) {
 		adev->dm.dc->debug.disable_dsc = true;
+		adev->dm.dc->debug.disable_dsc_edp = true;
+	}
 
 	if (amdgpu_dc_debug_mask & DC_DISABLE_CLOCK_GATING)
 		adev->dm.dc->debug.disable_clock_gate = true;
@@ -2304,14 +2311,6 @@ static enum dc_status amdgpu_dm_commit_zero_streams(struct dc *dc)
 			goto fail;
 	}
 
-
-	res = dc_validate_global_state(dc, context, false);
-
-	if (res != DC_OK) {
-		DRM_ERROR("%s:resource validation failed, dc_status:%d\n", __func__, res);
-		goto fail;
-	}
-
 	res = dc_commit_state(dc, context);
 
 fail:
@@ -2594,15 +2593,6 @@ static int dm_resume(void *handle)
 					= 0xffffffff;
 			}
 		}
-#if defined(CONFIG_DRM_AMD_DC_DCN)
-		/*
-		 * Resource allocation happens for link encoders for newer ASIC in
-		 * dc_validate_global_state, so we need to revalidate it.
-		 *
-		 * This shouldn't fail (it passed once before), so warn if it does.
-		 */
-		WARN_ON(dc_validate_global_state(dm->dc, dc_state, false) != DC_OK);
-#endif
 
 		WARN_ON(!dc_commit_state(dm->dc, dc_state));
 
@@ -4270,6 +4260,14 @@ static int amdgpu_dm_initialize_drm_device(struct amdgpu_device *adev)
 
 
 	}
+
+	/*
+	 * Disable vblank IRQs aggressively for power-saving.
+	 *
+	 * TODO: Fix vblank control helpers to delay PSR entry to allow this when PSR
+	 * is also supported.
+	 */
+	adev_to_drm(adev)->vblank_disable_immediate = !psr_feature_enabled;
 
 	/* Software is initialized. Now we can register interrupt handlers. */
 	switch (adev->asic_type) {
@@ -6056,11 +6054,72 @@ static void update_dsc_caps(struct amdgpu_dm_connector *aconnector,
 {
 	stream->timing.flags.DSC = 0;
 
-	if (aconnector->dc_link && sink->sink_signal == SIGNAL_TYPE_DISPLAY_PORT) {
-		dc_dsc_parse_dsc_dpcd(aconnector->dc_link->ctx->dc,
-				      aconnector->dc_link->dpcd_caps.dsc_caps.dsc_basic_caps.raw,
-				      aconnector->dc_link->dpcd_caps.dsc_caps.dsc_branch_decoder_caps.raw,
-				      dsc_caps);
+	if (aconnector->dc_link && (sink->sink_signal == SIGNAL_TYPE_DISPLAY_PORT ||
+		sink->sink_signal == SIGNAL_TYPE_EDP)) {
+		if (sink->link->dpcd_caps.dongle_type == DISPLAY_DONGLE_NONE ||
+			sink->link->dpcd_caps.dongle_type == DISPLAY_DONGLE_DP_HDMI_CONVERTER)
+			dc_dsc_parse_dsc_dpcd(aconnector->dc_link->ctx->dc,
+				aconnector->dc_link->dpcd_caps.dsc_caps.dsc_basic_caps.raw,
+				aconnector->dc_link->dpcd_caps.dsc_caps.dsc_branch_decoder_caps.raw,
+				dsc_caps);
+	}
+}
+
+static void apply_dsc_policy_for_edp(struct amdgpu_dm_connector *aconnector,
+				    struct dc_sink *sink, struct dc_stream_state *stream,
+				    struct dsc_dec_dpcd_caps *dsc_caps,
+				    uint32_t max_dsc_target_bpp_limit_override)
+{
+	const struct dc_link_settings *verified_link_cap = NULL;
+	uint32_t link_bw_in_kbps;
+	uint32_t edp_min_bpp_x16, edp_max_bpp_x16;
+	struct dc *dc = sink->ctx->dc;
+	struct dc_dsc_bw_range bw_range = {0};
+	struct dc_dsc_config dsc_cfg = {0};
+
+	verified_link_cap = dc_link_get_link_cap(stream->link);
+	link_bw_in_kbps = dc_link_bandwidth_kbps(stream->link, verified_link_cap);
+	edp_min_bpp_x16 = 8 * 16;
+	edp_max_bpp_x16 = 8 * 16;
+
+	if (edp_max_bpp_x16 > dsc_caps->edp_max_bits_per_pixel)
+		edp_max_bpp_x16 = dsc_caps->edp_max_bits_per_pixel;
+
+	if (edp_max_bpp_x16 < edp_min_bpp_x16)
+		edp_min_bpp_x16 = edp_max_bpp_x16;
+
+	if (dc_dsc_compute_bandwidth_range(dc->res_pool->dscs[0],
+				dc->debug.dsc_min_slice_height_override,
+				edp_min_bpp_x16, edp_max_bpp_x16,
+				dsc_caps,
+				&stream->timing,
+				&bw_range)) {
+
+		if (bw_range.max_kbps < link_bw_in_kbps) {
+			if (dc_dsc_compute_config(dc->res_pool->dscs[0],
+					dsc_caps,
+					dc->debug.dsc_min_slice_height_override,
+					max_dsc_target_bpp_limit_override,
+					0,
+					&stream->timing,
+					&dsc_cfg)) {
+				stream->timing.dsc_cfg = dsc_cfg;
+				stream->timing.flags.DSC = 1;
+				stream->timing.dsc_cfg.bits_per_pixel = edp_max_bpp_x16;
+			}
+			return;
+		}
+	}
+
+	if (dc_dsc_compute_config(dc->res_pool->dscs[0],
+				dsc_caps,
+				dc->debug.dsc_min_slice_height_override,
+				max_dsc_target_bpp_limit_override,
+				link_bw_in_kbps,
+				&stream->timing,
+				&dsc_cfg)) {
+		stream->timing.dsc_cfg = dsc_cfg;
+		stream->timing.flags.DSC = 1;
 	}
 }
 
@@ -6071,6 +6130,9 @@ static void apply_dsc_policy_for_stream(struct amdgpu_dm_connector *aconnector,
 	struct drm_connector *drm_connector = &aconnector->base;
 	uint32_t link_bandwidth_kbps;
 	uint32_t max_dsc_target_bpp_limit_override = 0;
+	struct dc *dc = sink->ctx->dc;
+	uint32_t max_supported_bw_in_kbps, timing_bw_in_kbps;
+	uint32_t dsc_max_supported_bw_in_kbps;
 
 	link_bandwidth_kbps = dc_link_bandwidth_kbps(aconnector->dc_link,
 							dc_link_get_link_cap(aconnector->dc_link));
@@ -6083,17 +6145,43 @@ static void apply_dsc_policy_for_stream(struct amdgpu_dm_connector *aconnector,
 	dc_dsc_policy_set_enable_dsc_when_not_needed(
 		aconnector->dsc_settings.dsc_force_enable == DSC_CLK_FORCE_ENABLE);
 
-	if (aconnector->dc_link && sink->sink_signal == SIGNAL_TYPE_DISPLAY_PORT) {
+	if (aconnector->dc_link && sink->sink_signal == SIGNAL_TYPE_EDP && !dc->debug.disable_dsc_edp &&
+	    dc->caps.edp_dsc_support && aconnector->dsc_settings.dsc_force_enable != DSC_CLK_FORCE_DISABLE) {
 
-		if (dc_dsc_compute_config(aconnector->dc_link->ctx->dc->res_pool->dscs[0],
+		apply_dsc_policy_for_edp(aconnector, sink, stream, dsc_caps, max_dsc_target_bpp_limit_override);
+
+	} else if (aconnector->dc_link && sink->sink_signal == SIGNAL_TYPE_DISPLAY_PORT) {
+		if (sink->link->dpcd_caps.dongle_type == DISPLAY_DONGLE_NONE) {
+			if (dc_dsc_compute_config(aconnector->dc_link->ctx->dc->res_pool->dscs[0],
 						dsc_caps,
 						aconnector->dc_link->ctx->dc->debug.dsc_min_slice_height_override,
 						max_dsc_target_bpp_limit_override,
 						link_bandwidth_kbps,
 						&stream->timing,
 						&stream->timing.dsc_cfg)) {
-			stream->timing.flags.DSC = 1;
-			DRM_DEBUG_DRIVER("%s: [%s] DSC is selected from SST RX\n", __func__, drm_connector->name);
+				stream->timing.flags.DSC = 1;
+				DRM_DEBUG_DRIVER("%s: [%s] DSC is selected from SST RX\n",
+								 __func__, drm_connector->name);
+			}
+		} else if (sink->link->dpcd_caps.dongle_type == DISPLAY_DONGLE_DP_HDMI_CONVERTER) {
+			timing_bw_in_kbps = dc_bandwidth_in_kbps_from_timing(&stream->timing);
+			max_supported_bw_in_kbps = link_bandwidth_kbps;
+			dsc_max_supported_bw_in_kbps = link_bandwidth_kbps;
+
+			if (timing_bw_in_kbps > max_supported_bw_in_kbps &&
+					max_supported_bw_in_kbps > 0 &&
+					dsc_max_supported_bw_in_kbps > 0)
+				if (dc_dsc_compute_config(aconnector->dc_link->ctx->dc->res_pool->dscs[0],
+						dsc_caps,
+						aconnector->dc_link->ctx->dc->debug.dsc_min_slice_height_override,
+						max_dsc_target_bpp_limit_override,
+						dsc_max_supported_bw_in_kbps,
+						&stream->timing,
+						&stream->timing.dsc_cfg)) {
+					stream->timing.flags.DSC = 1;
+					DRM_DEBUG_DRIVER("%s: [%s] DSC is selected from DP-HDMI PCON\n",
+									 __func__, drm_connector->name);
+				}
 		}
 	}
 
@@ -10648,6 +10736,24 @@ static int dm_update_plane_state(struct dc *dc,
 	return ret;
 }
 
+static void dm_get_oriented_plane_size(struct drm_plane_state *plane_state,
+				       int *src_w, int *src_h)
+{
+	switch (plane_state->rotation & DRM_MODE_ROTATE_MASK) {
+	case DRM_MODE_ROTATE_90:
+	case DRM_MODE_ROTATE_270:
+		*src_w = plane_state->src_h >> 16;
+		*src_h = plane_state->src_w >> 16;
+		break;
+	case DRM_MODE_ROTATE_0:
+	case DRM_MODE_ROTATE_180:
+	default:
+		*src_w = plane_state->src_w >> 16;
+		*src_h = plane_state->src_h >> 16;
+		break;
+	}
+}
+
 static int dm_check_crtc_cursor(struct drm_atomic_state *state,
 				struct drm_crtc *crtc,
 				struct drm_crtc_state *new_crtc_state)
@@ -10656,6 +10762,8 @@ static int dm_check_crtc_cursor(struct drm_atomic_state *state,
 	struct drm_plane_state *new_cursor_state, *new_underlying_state;
 	int i;
 	int cursor_scale_w, cursor_scale_h, underlying_scale_w, underlying_scale_h;
+	int cursor_src_w, cursor_src_h;
+	int underlying_src_w, underlying_src_h;
 
 	/* On DCE and DCN there is no dedicated hardware cursor plane. We get a
 	 * cursor per pipe but it's going to inherit the scaling and
@@ -10667,10 +10775,9 @@ static int dm_check_crtc_cursor(struct drm_atomic_state *state,
 		return 0;
 	}
 
-	cursor_scale_w = new_cursor_state->crtc_w * 1000 /
-			 (new_cursor_state->src_w >> 16);
-	cursor_scale_h = new_cursor_state->crtc_h * 1000 /
-			 (new_cursor_state->src_h >> 16);
+	dm_get_oriented_plane_size(new_cursor_state, &cursor_src_w, &cursor_src_h);
+	cursor_scale_w = new_cursor_state->crtc_w * 1000 / cursor_src_w;
+	cursor_scale_h = new_cursor_state->crtc_h * 1000 / cursor_src_h;
 
 	for_each_new_plane_in_state_reverse(state, underlying, new_underlying_state, i) {
 		/* Narrow down to non-cursor planes on the same CRTC as the cursor */
@@ -10681,10 +10788,10 @@ static int dm_check_crtc_cursor(struct drm_atomic_state *state,
 		if (!new_underlying_state->fb)
 			continue;
 
-		underlying_scale_w = new_underlying_state->crtc_w * 1000 /
-				     (new_underlying_state->src_w >> 16);
-		underlying_scale_h = new_underlying_state->crtc_h * 1000 /
-				     (new_underlying_state->src_h >> 16);
+		dm_get_oriented_plane_size(new_underlying_state,
+					   &underlying_src_w, &underlying_src_h);
+		underlying_scale_w = new_underlying_state->crtc_w * 1000 / underlying_src_w;
+		underlying_scale_h = new_underlying_state->crtc_h * 1000 / underlying_src_h;
 
 		if (cursor_scale_w != underlying_scale_w ||
 		    cursor_scale_h != underlying_scale_h) {
@@ -10779,8 +10886,10 @@ static int amdgpu_dm_atomic_check(struct drm_device *dev,
 	trace_amdgpu_dm_atomic_check_begin(state);
 
 	ret = drm_atomic_helper_check_modeset(dev, state);
-	if (ret)
+	if (ret) {
+		DRM_DEBUG_DRIVER("drm_atomic_helper_check_modeset() failed\n");
 		goto fail;
+	}
 
 	/* Check connector changes */
 	for_each_oldnew_connector_in_state(state, connector, old_con_state, new_con_state, i) {
@@ -10796,6 +10905,7 @@ static int amdgpu_dm_atomic_check(struct drm_device *dev,
 
 		new_crtc_state = drm_atomic_get_crtc_state(state, new_con_state->crtc);
 		if (IS_ERR(new_crtc_state)) {
+			DRM_DEBUG_DRIVER("drm_atomic_get_crtc_state() failed\n");
 			ret = PTR_ERR(new_crtc_state);
 			goto fail;
 		}
@@ -10810,8 +10920,10 @@ static int amdgpu_dm_atomic_check(struct drm_device *dev,
 		for_each_oldnew_crtc_in_state(state, crtc, old_crtc_state, new_crtc_state, i) {
 			if (drm_atomic_crtc_needs_modeset(new_crtc_state)) {
 				ret = add_affected_mst_dsc_crtcs(state, crtc);
-				if (ret)
+				if (ret) {
+					DRM_DEBUG_DRIVER("add_affected_mst_dsc_crtcs() failed\n");
 					goto fail;
+				}
 			}
 		}
 	}
@@ -10826,19 +10938,25 @@ static int amdgpu_dm_atomic_check(struct drm_device *dev,
 			continue;
 
 		ret = amdgpu_dm_verify_lut_sizes(new_crtc_state);
-		if (ret)
+		if (ret) {
+			DRM_DEBUG_DRIVER("amdgpu_dm_verify_lut_sizes() failed\n");
 			goto fail;
+		}
 
 		if (!new_crtc_state->enable)
 			continue;
 
 		ret = drm_atomic_add_affected_connectors(state, crtc);
-		if (ret)
+		if (ret) {
+			DRM_DEBUG_DRIVER("drm_atomic_add_affected_connectors() failed\n");
 			goto fail;
+		}
 
 		ret = drm_atomic_add_affected_planes(state, crtc);
-		if (ret)
+		if (ret) {
+			DRM_DEBUG_DRIVER("drm_atomic_add_affected_planes() failed\n");
 			goto fail;
+		}
 
 		if (dm_old_crtc_state->dsc_force_changed)
 			new_crtc_state->mode_changed = true;
@@ -10875,6 +10993,7 @@ static int amdgpu_dm_atomic_check(struct drm_device *dev,
 
 			if (IS_ERR(new_plane_state)) {
 				ret = PTR_ERR(new_plane_state);
+				DRM_DEBUG_DRIVER("new_plane_state is BAD\n");
 				goto fail;
 			}
 		}
@@ -10887,8 +11006,10 @@ static int amdgpu_dm_atomic_check(struct drm_device *dev,
 					    new_plane_state,
 					    false,
 					    &lock_and_validation_needed);
-		if (ret)
+		if (ret) {
+			DRM_DEBUG_DRIVER("dm_update_plane_state() failed\n");
 			goto fail;
+		}
 	}
 
 	/* Disable all crtcs which require disable */
@@ -10898,8 +11019,10 @@ static int amdgpu_dm_atomic_check(struct drm_device *dev,
 					   new_crtc_state,
 					   false,
 					   &lock_and_validation_needed);
-		if (ret)
+		if (ret) {
+			DRM_DEBUG_DRIVER("DISABLE: dm_update_crtc_state() failed\n");
 			goto fail;
+		}
 	}
 
 	/* Enable all crtcs which require enable */
@@ -10909,8 +11032,10 @@ static int amdgpu_dm_atomic_check(struct drm_device *dev,
 					   new_crtc_state,
 					   true,
 					   &lock_and_validation_needed);
-		if (ret)
+		if (ret) {
+			DRM_DEBUG_DRIVER("ENABLE: dm_update_crtc_state() failed\n");
 			goto fail;
+		}
 	}
 
 	/* Add new/modified planes */
@@ -10920,20 +11045,26 @@ static int amdgpu_dm_atomic_check(struct drm_device *dev,
 					    new_plane_state,
 					    true,
 					    &lock_and_validation_needed);
-		if (ret)
+		if (ret) {
+			DRM_DEBUG_DRIVER("dm_update_plane_state() failed\n");
 			goto fail;
+		}
 	}
 
 	/* Run this here since we want to validate the streams we created */
 	ret = drm_atomic_helper_check_planes(dev, state);
-	if (ret)
+	if (ret) {
+		DRM_DEBUG_DRIVER("drm_atomic_helper_check_planes() failed\n");
 		goto fail;
+	}
 
 	/* Check cursor planes scaling */
 	for_each_new_crtc_in_state(state, crtc, new_crtc_state, i) {
 		ret = dm_check_crtc_cursor(state, crtc, new_crtc_state);
-		if (ret)
+		if (ret) {
+			DRM_DEBUG_DRIVER("dm_check_crtc_cursor() failed\n");
 			goto fail;
+		}
 	}
 
 	if (state->legacy_cursor_update) {
@@ -11020,20 +11151,28 @@ static int amdgpu_dm_atomic_check(struct drm_device *dev,
 	 */
 	if (lock_and_validation_needed) {
 		ret = dm_atomic_get_state(state, &dm_state);
-		if (ret)
+		if (ret) {
+			DRM_DEBUG_DRIVER("dm_atomic_get_state() failed\n");
 			goto fail;
+		}
 
 		ret = do_aquire_global_lock(dev, state);
-		if (ret)
+		if (ret) {
+			DRM_DEBUG_DRIVER("do_aquire_global_lock() failed\n");
 			goto fail;
+		}
 
 #if defined(CONFIG_DRM_AMD_DC_DCN)
-		if (!compute_mst_dsc_configs_for_state(state, dm_state->context, vars))
+		if (!compute_mst_dsc_configs_for_state(state, dm_state->context, vars)) {
+			DRM_DEBUG_DRIVER("compute_mst_dsc_configs_for_state() failed\n");
 			goto fail;
+		}
 
 		ret = dm_update_mst_vcpi_slots_for_dsc(state, dm_state->context, vars);
-		if (ret)
+		if (ret) {
+			DRM_DEBUG_DRIVER("dm_update_mst_vcpi_slots_for_dsc() failed\n");
 			goto fail;
+		}
 #endif
 
 		/*
@@ -11043,12 +11182,13 @@ static int amdgpu_dm_atomic_check(struct drm_device *dev,
 		 * to get stuck in an infinite loop and hang eventually.
 		 */
 		ret = drm_dp_mst_atomic_check(state);
-		if (ret)
+		if (ret) {
+			DRM_DEBUG_DRIVER("drm_dp_mst_atomic_check() failed\n");
 			goto fail;
-		status = dc_validate_global_state(dc, dm_state->context, false);
+		}
+		status = dc_validate_global_state(dc, dm_state->context, true);
 		if (status != DC_OK) {
-			drm_dbg_atomic(dev,
-				       "DC global validation failure: %s (%d)",
+			DRM_DEBUG_DRIVER("DC global validation failure: %s (%d)",
 				       dc_status_to_str(status), status);
 			ret = -EINVAL;
 			goto fail;
@@ -11548,4 +11688,25 @@ int amdgpu_dm_process_dmub_aux_transfer_sync(bool is_cmd_aux, struct dc_context 
 	return amdgpu_dm_set_dmub_async_sync_status(is_cmd_aux,
 			ctx, DMUB_ASYNC_TO_SYNC_ACCESS_SUCCESS,
 			(uint32_t *)operation_result);
+}
+
+/*
+ * Check whether seamless boot is supported.
+ *
+ * So far we only support seamless boot on CHIP_VANGOGH.
+ * If everything goes well, we may consider expanding
+ * seamless boot to other ASICs.
+ */
+bool check_seamless_boot_capability(struct amdgpu_device *adev)
+{
+	switch (adev->asic_type) {
+	case CHIP_VANGOGH:
+		if (!adev->mman.keep_stolen_vga_memory)
+			return true;
+		break;
+	default:
+		break;
+	}
+
+	return false;
 }

@@ -69,7 +69,7 @@ static struct cmn2asic_msg_mapping vangogh_message_map[SMU_MSG_MAX_COUNT] = {
 	MSG_MAP(PowerUpIspByTile,               PPSMC_MSG_PowerUpIspByTile,		0),
 	MSG_MAP(PowerDownVcn,                   PPSMC_MSG_PowerDownVcn,			0),
 	MSG_MAP(PowerUpVcn,                     PPSMC_MSG_PowerUpVcn,			0),
-	MSG_MAP(RlcPowerNotify,                 PPSMC_MSG_RlcPowerNotify,		0),
+	MSG_MAP(RlcPowerDownNotify,             PPSMC_MSG_RlcPowerDownNotify,		0),
 	MSG_MAP(SetHardMinVcn,                  PPSMC_MSG_SetHardMinVcn,		0),
 	MSG_MAP(SetSoftMinGfxclk,               PPSMC_MSG_SetSoftMinGfxclk,		0),
 	MSG_MAP(ActiveProcessNotify,            PPSMC_MSG_ActiveProcessNotify,		0),
@@ -1039,14 +1039,6 @@ failed:
 static int vangogh_get_power_profile_mode(struct smu_context *smu,
 					   char *buf)
 {
-	static const char *profile_name[] = {
-					"BOOTUP_DEFAULT",
-					"3D_FULL_SCREEN",
-					"POWER_SAVING",
-					"VIDEO",
-					"VR",
-					"COMPUTE",
-					"CUSTOM"};
 	uint32_t i, size = 0;
 	int16_t workload_type = 0;
 
@@ -1066,7 +1058,7 @@ static int vangogh_get_power_profile_mode(struct smu_context *smu,
 			continue;
 
 		size += sysfs_emit_at(buf, size, "%2d %14s%s\n",
-			i, profile_name[i], (i == smu->power_profile_mode) ? "*" : " ");
+			i, amdgpu_pp_profile_name[i], (i == smu->power_profile_mode) ? "*" : " ");
 	}
 
 	return size;
@@ -1978,7 +1970,7 @@ static int vangogh_system_features_control(struct smu_context *smu, bool en)
 	int ret = 0;
 
 	if (adev->pm.fw_version >= 0x43f1700 && !en)
-		ret = smu_cmn_send_smc_msg_with_param(smu, SMU_MSG_RlcPowerNotify,
+		ret = smu_cmn_send_smc_msg_with_param(smu, SMU_MSG_RlcPowerDownNotify,
 						      RLC_STATUS_OFF, NULL);
 
 	bitmap_zero(feature->enabled, feature->feature_num);
