@@ -24,7 +24,7 @@ struct firmware_fallback_config fw_fallback_config = {
 EXPORT_SYMBOL_NS_GPL(fw_fallback_config, FIRMWARE_LOADER_PRIVATE);
 
 #ifdef CONFIG_SYSCTL
-struct ctl_table firmware_config_table[] = {
+static struct ctl_table firmware_config_table[] = {
 	{
 		.procname	= "force_sysfs_fallback",
 		.data		= &fw_fallback_config.force_sysfs_fallback,
@@ -45,4 +45,21 @@ struct ctl_table firmware_config_table[] = {
 	},
 	{ }
 };
-#endif
+
+static struct ctl_table_header *firmware_config_sysct_table_header;
+int register_firmware_config_sysctl(void)
+{
+	firmware_config_sysct_table_header =
+		register_sysctl("kernel/firmware_config",
+				firmware_config_table);
+	if (!firmware_config_sysct_table_header)
+		return -ENOMEM;
+	return 0;
+}
+
+void unregister_firmware_config_sysctl(void)
+{
+	unregister_sysctl_table(firmware_config_sysct_table_header);
+	firmware_config_sysct_table_header = NULL;
+}
+#endif /* CONFIG_SYSCTL */
