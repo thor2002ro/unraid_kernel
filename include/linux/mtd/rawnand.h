@@ -1237,9 +1237,7 @@ struct nand_secure_region {
  * @pagecache.page: Page number currently in the cache. -1 means no page is
  *                  currently cached
  * @buf_align: Minimum buffer alignment required by a platform
- * @lock: Lock protecting the suspended field. Also used to serialize accesses
- *        to the NAND device
- * @suspended: Set to 1 when the device is suspended, 0 when it's not
+ * @lock: Lock to serialize accesses to the NAND device
  * @cur_cs: Currently selected target. -1 means no target selected, otherwise we
  *          should always have cur_cs >= 0 && cur_cs < nanddev_ntargets().
  *          NAND Controller drivers should not modify this value, but they're
@@ -1293,7 +1291,6 @@ struct nand_chip {
 
 	/* Internals */
 	struct mutex lock;
-	unsigned int suspended : 1;
 	int cur_cs;
 	int read_retries;
 	struct nand_secure_region *secure_regions;
