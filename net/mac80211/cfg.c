@@ -4268,6 +4268,21 @@ ieee80211_color_change_bss_config_notify(struct ieee80211_sub_if_data *sdata,
 	changed |= BSS_CHANGED_HE_BSS_COLOR;
 
 	ieee80211_bss_info_change_notify(sdata, changed);
+
+	if (!sdata->vif.bss_conf.nontransmitted && sdata->vif.mbssid_tx_vif) {
+		struct ieee80211_sub_if_data *child;
+
+		mutex_lock(&sdata->local->iflist_mtx);
+		list_for_each_entry(child, &sdata->local->interfaces, list) {
+			if (child != sdata && child->vif.mbssid_tx_vif == &sdata->vif) {
+				child->vif.bss_conf.he_bss_color.color = color;
+				child->vif.bss_conf.he_bss_color.enabled = enable;
+				ieee80211_bss_info_change_notify(child,
+								 BSS_CHANGED_HE_BSS_COLOR);
+			}
+		}
+		mutex_unlock(&sdata->local->iflist_mtx);
+	}
 }
 
 static int ieee80211_color_change_finalize(struct ieee80211_sub_if_data *sdata)
@@ -4352,6 +4367,9 @@ ieee80211_color_change(struct wiphy *wiphy, struct net_device *dev,
 
 	sdata_assert_lock(sdata);
 
+	if (sdata->vif.bss_conf.nontransmitted)
+		return -EINVAL;
+
 	mutex_lock(&local->mtx);
 
 	/* don't allow another color change if one is already active or if csa
@@ -4381,6 +4399,18 @@ out:
 	mutex_unlock(&local->mtx);
 
 	return err;
+}
+
+static int
+ieee80211_set_radar_offchan(struct wiphy *wiphy,
+			    struct cfg80211_chan_def *chandef)
+{
+	struct ieee80211_local *local = wiphy_priv(wiphy);
+
+	if (!local->ops->set_radar_offchan)
+		return -EOPNOTSUPP;
+
+	return local->ops->set_radar_offchan(&local->hw, chandef);
 }
 
 const struct cfg80211_ops mac80211_config_ops = {
@@ -4487,4 +4517,5 @@ const struct cfg80211_ops mac80211_config_ops = {
 	.reset_tid_config = ieee80211_reset_tid_config,
 	.set_sar_specs = ieee80211_set_sar_specs,
 	.color_change = ieee80211_color_change,
+	.set_radar_offchan = ieee80211_set_radar_offchan,
 };
