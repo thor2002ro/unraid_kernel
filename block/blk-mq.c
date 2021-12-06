@@ -2048,7 +2048,7 @@ void blk_mq_run_hw_queue(struct blk_mq_hw_ctx *hctx, bool async)
 	 * And queue will be rerun in blk_mq_unquiesce_queue() if it is
 	 * quiesced.
 	 */
-	blk_mq_run_dispatch_ops(hctx->queue,
+	__blk_mq_run_dispatch_ops(hctx->queue, false,
 		need_run = !blk_queue_quiesced(hctx->queue) &&
 		blk_mq_hctx_has_pending(hctx));
 
@@ -2521,7 +2521,9 @@ void blk_mq_flush_plug_list(struct blk_plug *plug, bool from_schedule)
 	plug->rq_count = 0;
 
 	if (!plug->multiple_queues && !plug->has_elevator && !from_schedule) {
-		blk_mq_run_dispatch_ops(plug->mq_list->q,
+		struct request_queue *q = rq_list_peek(&plug->mq_list)->q;
+
+		blk_mq_run_dispatch_ops(q,
 				blk_mq_plug_issue_direct(plug, false));
 		if (rq_list_empty(plug->mq_list))
 			return;
