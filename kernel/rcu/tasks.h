@@ -388,7 +388,6 @@ static int rcu_tasks_need_gpcb(struct rcu_tasks *rtp)
 		if (rcu_segcblist_empty(&rtpcp->cblist))
 			continue;
 		raw_spin_lock_irqsave_rcu_node(rtpcp, flags);
-		smp_mb__after_spinlock(); // Order updates vs. GP.
 		// Should we shrink down to a single callback queue?
 		if (!rcu_segcblist_empty(&rtpcp->cblist)) {
 			n = rcu_segcblist_n_cbs(&rtpcp->cblist);
@@ -461,7 +460,6 @@ static void rcu_tasks_invoke_cbs(struct rcu_tasks *rtp, struct rcu_tasks_percpu 
 	if (rcu_segcblist_empty(&rtpcp->cblist))
 		return;
 	raw_spin_lock_irqsave_rcu_node(rtpcp, flags);
-	smp_mb__after_spinlock(); // Order updates vs. GP.
 	rcu_segcblist_advance(&rtpcp->cblist, rcu_seq_current(&rtp->tasks_gp_seq));
 	rcu_segcblist_extract_done_cbs(&rtpcp->cblist, &rcl);
 	raw_spin_unlock_irqrestore_rcu_node(rtpcp, flags);
@@ -700,10 +698,10 @@ static void rcu_tasks_wait_gp(struct rcu_tasks *rtp)
 // exit_tasks_rcu_finish() functions begin and end, respectively, the SRCU
 // read-side critical sections waited for by rcu_tasks_postscan().
 //
-// Pre-grace-period update-side code is ordered before the grace via the
-// ->cbs_lock and the smp_mb__after_spinlock().  Pre-grace-period read-side
-// code is ordered before the grace period via synchronize_rcu() call
-// in rcu_tasks_pregp_step() and by the scheduler's locks and interrupt
+// Pre-grace-period update-side code is ordered before the grace
+// via the raw_spin_lock.*rcu_node().  Pre-grace-period read-side code
+// is ordered before the grace period via synchronize_rcu() call in
+// rcu_tasks_pregp_step() and by the scheduler's locks and interrupt
 // disabling.
 
 /* Pre-grace-period preparation. */
