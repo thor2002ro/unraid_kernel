@@ -397,9 +397,6 @@ struct fwnode_handle *fwnode_graph_get_remote_port(
 	const struct fwnode_handle *fwnode);
 struct fwnode_handle *fwnode_graph_get_remote_endpoint(
 	const struct fwnode_handle *fwnode);
-struct fwnode_handle *
-fwnode_graph_get_remote_node(const struct fwnode_handle *fwnode, u32 port,
-			     u32 endpoint);
 
 static inline bool fwnode_graph_is_endpoint(struct fwnode_handle *fwnode)
 {
@@ -414,7 +411,8 @@ static inline bool fwnode_graph_is_endpoint(struct fwnode_handle *fwnode)
  *				one.
  * @FWNODE_GRAPH_DEVICE_DISABLED: That the device to which the remote
  *				  endpoint of the given endpoint belongs to,
- *				  may be disabled.
+ *				  may be disabled, or that the endpoint is not
+ *				  connected.
  */
 #define FWNODE_GRAPH_ENDPOINT_NEXT	BIT(0)
 #define FWNODE_GRAPH_DEVICE_DISABLED	BIT(1)
@@ -422,6 +420,8 @@ static inline bool fwnode_graph_is_endpoint(struct fwnode_handle *fwnode)
 struct fwnode_handle *
 fwnode_graph_get_endpoint_by_id(const struct fwnode_handle *fwnode,
 				u32 port, u32 endpoint, unsigned long flags);
+unsigned int fwnode_graph_get_endpoint_count(struct fwnode_handle *fwnode,
+					     unsigned long flags);
 
 #define fwnode_graph_for_each_endpoint(fwnode, child)			\
 	for (child = NULL;						\
