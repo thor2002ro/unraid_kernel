@@ -7,6 +7,7 @@
 #include <linux/lockdep.h>
 #include <linux/scatterlist.h>
 #include <linux/prefetch.h>
+#include <linux/atomic-ref.h>
 
 struct blk_mq_tags;
 struct blk_flush_queue;
