@@ -32,6 +32,7 @@
 #include <linux/sched.h>
 #include <linux/pgtable.h>
 #include <linux/kasan.h>
+#include <linux/atomic-ref.h>
 
 struct mempolicy;
 struct anon_vma;
@@ -1181,10 +1182,6 @@ static inline bool is_pci_p2pdma_page(const struct page *page)
 		page->pgmap->type == MEMORY_DEVICE_PCI_P2PDMA;
 }
 
-/* 127: arbitrary random number, small enough to assemble well */
-#define folio_ref_zero_or_close_to_overflow(folio) \
-	((unsigned int) folio_ref_count(folio) + 127u <= 127u)
-
 /**
  * folio_get - Increment the reference count on a folio.
  * @folio: The folio.
@@ -1195,7 +1192,7 @@ static inline bool is_pci_p2pdma_page(const struct page *page)
  */
 static inline void folio_get(struct folio *folio)
 {
-	VM_BUG_ON_FOLIO(folio_ref_zero_or_close_to_overflow(folio), folio);
+	VM_BUG_ON_FOLIO(atomic_ref_zero_or_close_to_overflow(&folio->page._refcount), folio);
 	folio_ref_inc(folio);
 }
 
