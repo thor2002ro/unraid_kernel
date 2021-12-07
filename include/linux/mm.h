@@ -3167,7 +3167,6 @@ int drop_caches_sysctl_handler(struct ctl_table *, int, void *, size_t *,
 #endif
 
 void drop_slab(void);
-void drop_slab_node(int nid);
 
 #ifndef CONFIG_MMU
 #define randomize_va_space 0
