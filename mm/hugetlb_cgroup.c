@@ -847,7 +847,7 @@ static void __init __hugetlb_cgroup_file_legacy_init(int idx)
 	cft->read_u64 = hugetlb_cgroup_read_u64;
 
 	/* Add the numa stat file */
-	cft = &h->cgroup_files_dfl[8];
+	cft = &h->cgroup_files_legacy[8];
 	snprintf(cft->name, MAX_CFTYPE_NAME, "%s.numa_stat", buf);
 	cft->private = MEMFILE_PRIVATE(idx, 1);
 	cft->seq_show = hugetlb_cgroup_read_numa_stat;
