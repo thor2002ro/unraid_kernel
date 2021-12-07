@@ -40,11 +40,24 @@
 			compatible = "nvidia,tegra234-sdhci", "nvidia,tegra186-sdhci";
 			reg = <0x03460000 0x20000>;
 			interrupts = <GIC_SPI 65 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&bpmp TEGRA234_CLK_SDMMC4>;
-			clock-names = "sdhci";
+			clocks = <&bpmp TEGRA234_CLK_SDMMC4>,
+				 <&bpmp TEGRA234_CLK_SDMMC_LEGACY_TM>;
+			clock-names = "sdhci", "tmclk";
+			assigned-clocks = <&bpmp TEGRA234_CLK_SDMMC4>,
+					  <&bpmp TEGRA234_CLK_PLLC4>;
+			assigned-clock-parents = <&bpmp TEGRA234_CLK_PLLC4>;
 			resets = <&bpmp TEGRA234_RESET_SDMMC4>;
 			reset-names = "sdhci";
-			dma-coherent;
+			nvidia,pad-autocal-pull-up-offset-hs400 = <0x00>;
+			nvidia,pad-autocal-pull-down-offset-hs400 = <0x00>;
+			nvidia,pad-autocal-pull-up-offset-1v8-timeout = <0x0a>;
+			nvidia,pad-autocal-pull-down-offset-1v8-timeout = <0x0a>;
+			nvidia,pad-autocal-pull-up-offset-3v3-timeout = <0x0a>;
+			nvidia,pad-autocal-pull-down-offset-3v3-timeout = <0x0a>;
+			nvidia,default-tap = <0x8>;
+			nvidia,default-trim = <0x14>;
+			nvidia,dqs-trim = <40>;
+			supports-cqe;
 			status = "disabled";
 		};
 
@@ -93,6 +106,8 @@
 			reg = <0x0c2a0000 0x10000>;
 			interrupt-parent = <&pmc>;
 			interrupts = <73 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&bpmp TEGRA234_CLK_CLK_32K>;
+			clock-names = "rtc";
 			status = "disabled";
 		};
 
@@ -122,21 +137,21 @@
 		};
 	};
 
-	sysram@40000000 {
+	sram@40000000 {
 		compatible = "nvidia,tegra234-sysram", "mmio-sram";
-		reg = <0x0 0x40000000 0x0 0x50000>;
+		reg = <0x0 0x40000000 0x0 0x80000>;
 		#address-cells = <1>;
 		#size-cells = <1>;
-		ranges = <0x0 0x0 0x40000000 0x50000>;
+		ranges = <0x0 0x0 0x40000000 0x80000>;
 
-		cpu_bpmp_tx: shmem@4e000 {
-			reg = <0x4e000 0x1000>;
+		cpu_bpmp_tx: sram@70000 {
+			reg = <0x70000 0x1000>;
 			label = "cpu-bpmp-tx";
 			pool;
 		};
 
-		cpu_bpmp_rx: shmem@4f000 {
-			reg = <0x4f000 0x1000>;
+		cpu_bpmp_rx: sram@71000 {
+			reg = <0x71000 0x1000>;
 			label = "cpu-bpmp-rx";
 			pool;
 		};
@@ -146,7 +161,7 @@
 		compatible = "nvidia,tegra234-bpmp", "nvidia,tegra186-bpmp";
 		mboxes = <&hsp_top0 TEGRA_HSP_MBOX_TYPE_DB
 				    TEGRA_HSP_DB_MASTER_BPMP>;
-		shmem = <&cpu_bpmp_tx &cpu_bpmp_rx>;
+		shmem = <&cpu_bpmp_tx>, <&cpu_bpmp_rx>;
 		#clock-cells = <1>;
 		#reset-cells = <1>;
 		#power-domain-cells = <1>;
@@ -175,6 +190,14 @@
 		compatible = "arm,psci-1.0";
 		status = "okay";
 		method = "smc";
+	};
+
+	tcu: serial {
+		compatible = "nvidia,tegra234-tcu", "nvidia,tegra194-tcu";
+		mboxes = <&hsp_top0 TEGRA_HSP_MBOX_TYPE_SM TEGRA_HSP_SM_RX(0)>,
+			 <&hsp_aon TEGRA_HSP_MBOX_TYPE_SM TEGRA_HSP_SM_TX(1)>;
+		mbox-names = "rx", "tx";
+		status = "disabled";
 	};
 
 	timer {
