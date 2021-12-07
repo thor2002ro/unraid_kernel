@@ -114,8 +114,6 @@ static const struct proc_ops led_proc_ops = {
 };
 #endif
 
-static struct proc_dir_entry *led;
-
 #define LED_VERSION	"0.1"
 
 static int __init led_init(void)
@@ -123,8 +121,7 @@ static int __init led_init(void)
 	timer_setup(&led_blink_timer, led_blink, 0);
 
 #ifdef CONFIG_PROC_FS
-	led = proc_create("led", 0, NULL, &led_proc_ops);
-	if (!led)
+	if (!proc_create("led", 0, NULL, &led_proc_ops))
 		return -ENOMEM;
 #endif
 	printk(KERN_INFO
