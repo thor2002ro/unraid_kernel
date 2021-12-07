@@ -257,43 +257,6 @@ nfsd4_decode_verifier4(struct nfsd4_compoundargs *argp, nfs4_verifier *verf)
 	return nfs_ok;
 }
 
-/**
- * nfsd4_decode_bitmap4 - Decode an NFSv4 bitmap4
- * @argp: NFSv4 compound argument structure
- * @bmval: pointer to an array of u32's to decode into
- * @bmlen: size of the @bmval array
- *
- * The server needs to return nfs_ok rather than nfserr_bad_xdr when
- * encountering bitmaps containing bits it does not recognize. This
- * includes bits in bitmap words past WORDn, where WORDn is the last
- * bitmap WORD the implementation currently supports. Thus we are
- * careful here to simply ignore bits in bitmap words that this
- * implementation has yet to support explicitly.
- *
- * Return values:
- *   %nfs_ok: @bmval populated successfully
- *   %nfserr_bad_xdr: the encoded bitmap was invalid
- */
-static __be32
-nfsd4_decode_bitmap4(struct nfsd4_compoundargs *argp, u32 *bmval, u32 bmlen)
-{
-	u32 i, count;
-	__be32 *p;
-
-	if (xdr_stream_decode_u32(argp->xdr, &count) < 0)
-		return nfserr_bad_xdr;
-	/* request sanity */
-	if (count > 1000)
-		return nfserr_bad_xdr;
-	p = xdr_inline_decode(argp->xdr, count << 2);
-	if (!p)
-		return nfserr_bad_xdr;
-	for (i = 0; i < bmlen; i++)
-		bmval[i] = (i < count) ? be32_to_cpup(p++) : 0;
-
-	return nfs_ok;
-}
-
 static __be32
 nfsd4_decode_nfsace4(struct nfsd4_compoundargs *argp, struct nfs4_ace *ace)
 {
@@ -395,8 +358,7 @@ nfsd4_decode_fattr4(struct nfsd4_compoundargs *argp, u32 *bmval, u32 bmlen,
 	__be32 *p, status;
 
 	iattr->ia_valid = 0;
-	status = nfsd4_decode_bitmap4(argp, bmval, bmlen);
-	if (status)
+	if (xdr_stream_decode_uint32_array(argp->xdr, bmval, bmlen) < 0)
 		return nfserr_bad_xdr;
 
 	if (bmval[0] & ~NFSD_WRITEABLE_ATTRS_WORD0
@@ -850,8 +812,10 @@ nfsd4_decode_delegreturn(struct nfsd4_compoundargs *argp, struct nfsd4_delegretu
 static inline __be32
 nfsd4_decode_getattr(struct nfsd4_compoundargs *argp, struct nfsd4_getattr *getattr)
 {
-	return nfsd4_decode_bitmap4(argp, getattr->ga_bmval,
-				    ARRAY_SIZE(getattr->ga_bmval));
+	if (xdr_stream_decode_uint32_array(argp->xdr, getattr->ga_bmval,
+					   ARRAY_SIZE(getattr->ga_bmval)) < 0)
+		return nfserr_bad_xdr;
+	return nfs_ok;
 }
 
 static __be32
@@ -1369,12 +1333,11 @@ nfsd4_decode_setclientid_confirm(struct nfsd4_compoundargs *argp, struct nfsd4_s
 static __be32
 nfsd4_decode_verify(struct nfsd4_compoundargs *argp, struct nfsd4_verify *verify)
 {
-	__be32 *p, status;
+	__be32 *p;
 
-	status = nfsd4_decode_bitmap4(argp, verify->ve_bmval,
-				      ARRAY_SIZE(verify->ve_bmval));
-	if (status)
-		return status;
+	if (xdr_stream_decode_uint32_array(argp->xdr, verify->ve_bmval,
+					   ARRAY_SIZE(verify->ve_bmval)) < 0)
+		return nfserr_bad_xdr;
 
 	/* For convenience's sake, we compare raw xdr'd attributes in
 	 * nfsd4_proc_verify */
@@ -1459,15 +1422,11 @@ static __be32
 nfsd4_decode_state_protect_ops(struct nfsd4_compoundargs *argp,
 			       struct nfsd4_exchange_id *exid)
 {
-	__be32 status;
-
-	status = nfsd4_decode_bitmap4(argp, exid->spo_must_enforce,
-				      ARRAY_SIZE(exid->spo_must_enforce));
-	if (status)
+	if (xdr_stream_decode_uint32_array(argp->xdr, exid->spo_must_enforce,
+					   ARRAY_SIZE(exid->spo_must_enforce)) < 0)
 		return nfserr_bad_xdr;
-	status = nfsd4_decode_bitmap4(argp, exid->spo_must_allow,
-				      ARRAY_SIZE(exid->spo_must_allow));
-	if (status)
+	if (xdr_stream_decode_uint32_array(argp->xdr, exid->spo_must_allow,
+					   ARRAY_SIZE(exid->spo_must_allow)) < 0)
 		return nfserr_bad_xdr;
 
 	return nfs_ok;
@@ -4804,8 +4763,8 @@ nfsd4_encode_read_plus_hole(struct nfsd4_compoundres *resp,
 		return nfserr_resource;
 
 	*p++ = htonl(NFS4_CONTENT_HOLE);
-	 p   = xdr_encode_hyper(p, read->rd_offset);
-	 p   = xdr_encode_hyper(p, count);
+	p = xdr_encode_hyper(p, read->rd_offset);
+	p = xdr_encode_hyper(p, count);
 
 	*eof = (read->rd_offset + count) >= f_size;
 	*maxcount = min_t(unsigned long, count, *maxcount);
