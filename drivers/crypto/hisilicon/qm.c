@@ -501,10 +501,30 @@ static const char * const qp_s[] = {
 	"none", "init", "start", "stop", "close",
 };
 
-static const u32 typical_qos_val[QM_QOS_TYPICAL_NUM] = {100, 250, 500, 1000,
-						10000, 25000, 50000, 100000};
-static const u32 typical_qos_cbs_s[QM_QOS_TYPICAL_NUM] = {9, 10, 11, 12, 16,
-							 17, 18, 19};
+struct qm_typical_qos_table {
+	u32 start;
+	u32 end;
+	u32 val;
+};
+
+/* the qos step is 100 */
+static struct qm_typical_qos_table shaper_cir_s[] = {
+	{100, 100, 4},
+	{200, 200, 3},
+	{300, 500, 2},
+	{600, 1000, 1},
+	{1100, 100000, 0},
+};
+
+static struct qm_typical_qos_table shaper_cbs_s[] = {
+	{100, 200, 9},
+	{300, 500, 11},
+	{600, 1000, 12},
+	{1100, 10000, 16},
+	{10100, 25000, 17},
+	{25100, 50000, 18},
+	{50100, 100000, 19}
+};
 
 static bool qm_avail_state(struct hisi_qm *qm, enum qm_state new)
 {
@@ -988,12 +1008,14 @@ static void qm_init_prefetch(struct hisi_qm *qm)
 }
 
 /*
+ * acc_shaper_para_calc() Get the IR value by the qos formula, the return value
+ * is the expected qos calculated.
  * the formula:
  * IR = X Mbps if ir = 1 means IR = 100 Mbps, if ir = 10000 means = 10Gbps
  *
- *		        IR_b * (2 ^ IR_u) * 8
- * IR(Mbps) * 10 ^ -3 = -------------------------
- *		        Tick * (2 ^ IR_s)
+ *		IR_b * (2 ^ IR_u) * 8000
+ * IR(Mbps) = -------------------------
+ *		  Tick * (2 ^ IR_s)
  */
 static u32 acc_shaper_para_calc(u64 cir_b, u64 cir_u, u64 cir_s)
 {
@@ -1003,17 +1025,28 @@ static u32 acc_shaper_para_calc(u64 cir_b, u64 cir_u, u64 cir_s)
 
 static u32 acc_shaper_calc_cbs_s(u32 ir)
 {
+	int table_size = ARRAY_SIZE(shaper_cbs_s);
 	int i;
 
-	if (ir < typical_qos_val[0])
-		return QM_SHAPER_MIN_CBS_S;
-
-	for (i = 1; i < QM_QOS_TYPICAL_NUM; i++) {
-		if (ir >= typical_qos_val[i - 1] && ir < typical_qos_val[i])
-			return typical_qos_cbs_s[i - 1];
+	for (i = 0; i < table_size; i++) {
+		if (ir >= shaper_cbs_s[i].start && ir <= shaper_cbs_s[i].end)
+			return shaper_cbs_s[i].val;
 	}
 
-	return typical_qos_cbs_s[QM_QOS_TYPICAL_NUM - 1];
+	return QM_SHAPER_MIN_CBS_S;
+}
+
+static u32 acc_shaper_calc_cir_s(u32 ir)
+{
+	int table_size = ARRAY_SIZE(shaper_cir_s);
+	int i;
+
+	for (i = 0; i < table_size; i++) {
+		if (ir >= shaper_cir_s[i].start && ir <= shaper_cir_s[i].end)
+			return shaper_cir_s[i].val;
+	}
+
+	return 0;
 }
 
 static int qm_get_shaper_para(u32 ir, struct qm_shaper_factor *factor)
@@ -1022,25 +1055,18 @@ static int qm_get_shaper_para(u32 ir, struct qm_shaper_factor *factor)
 	u32 error_rate;
 
 	factor->cbs_s = acc_shaper_calc_cbs_s(ir);
+	cir_s = acc_shaper_calc_cir_s(ir);
 
 	for (cir_b = QM_QOS_MIN_CIR_B; cir_b <= QM_QOS_MAX_CIR_B; cir_b++) {
 		for (cir_u = 0; cir_u <= QM_QOS_MAX_CIR_U; cir_u++) {
-			for (cir_s = 0; cir_s <= QM_QOS_MAX_CIR_S; cir_s++) {
-				/** the formula is changed to:
-				 *	   IR_b * (2 ^ IR_u) * DIVISOR_CLK
-				 * IR(Mbps) = -------------------------
-				 *	       768 * (2 ^ IR_s)
-				 */
-				ir_calc = acc_shaper_para_calc(cir_b, cir_u,
-							       cir_s);
-				error_rate = QM_QOS_EXPAND_RATE * (u32)abs(ir_calc - ir) / ir;
-				if (error_rate <= QM_QOS_MIN_ERROR_RATE) {
-					factor->cir_b = cir_b;
-					factor->cir_u = cir_u;
-					factor->cir_s = cir_s;
+			ir_calc = acc_shaper_para_calc(cir_b, cir_u, cir_s);
 
-					return 0;
-				}
+			error_rate = QM_QOS_EXPAND_RATE * (u32)abs(ir_calc - ir) / ir;
+			if (error_rate <= QM_QOS_MIN_ERROR_RATE) {
+				factor->cir_b = cir_b;
+				factor->cir_u = cir_u;
+				factor->cir_s = cir_s;
+				return 0;
 			}
 		}
 	}
@@ -1126,10 +1152,10 @@ static int qm_set_vft_common(struct hisi_qm *qm, enum vft_type type,
 
 static int qm_shaper_init_vft(struct hisi_qm *qm, u32 fun_num)
 {
+	u32 qos = qm->factor[fun_num].func_qos;
 	int ret, i;
 
-	qm->factor[fun_num].func_qos = QM_QOS_MAX_VAL;
-	ret = qm_get_shaper_para(QM_QOS_MAX_VAL * QM_QOS_RATE, &qm->factor[fun_num]);
+	ret = qm_get_shaper_para(qos * QM_QOS_RATE, &qm->factor[fun_num]);
 	if (ret) {
 		dev_err(&qm->pdev->dev, "failed to calculate shaper parameter!\n");
 		return ret;
@@ -4231,65 +4257,68 @@ static ssize_t qm_qos_value_init(const char *buf, unsigned long *val)
 	return 0;
 }
 
+static ssize_t qm_get_qos_value(struct hisi_qm *qm, const char *buf,
+			       unsigned long *val,
+			       unsigned int *fun_index)
+{
+	char tbuf_bdf[QM_DBG_READ_LEN] = {0};
+	char val_buf[QM_QOS_VAL_MAX_LEN] = {0};
+	u32 tmp1, device, function;
+	int ret, bus;
+
+	ret = sscanf(buf, "%s %s", tbuf_bdf, val_buf);
+	if (ret != QM_QOS_PARAM_NUM)
+		return -EINVAL;
+
+	ret = qm_qos_value_init(val_buf, val);
+	if (*val == 0 || *val > QM_QOS_MAX_VAL || ret) {
+		pci_err(qm->pdev, "input qos value is error, please set 1~1000!\n");
+		return -EINVAL;
+	}
+
+	ret = sscanf(tbuf_bdf, "%u:%x:%u.%u", &tmp1, &bus, &device, &function);
+	if (ret != QM_QOS_BDF_PARAM_NUM) {
+		pci_err(qm->pdev, "input pci bdf value is error!\n");
+		return -EINVAL;
+	}
+
+	*fun_index = PCI_DEVFN(device, function);
+
+	return 0;
+}
+
 static ssize_t qm_algqos_write(struct file *filp, const char __user *buf,
 			       size_t count, loff_t *pos)
 {
 	struct hisi_qm *qm = filp->private_data;
 	char tbuf[QM_DBG_READ_LEN];
-	int tmp1, bus, device, function;
-	char tbuf_bdf[QM_DBG_READ_LEN] = {0};
-	char val_buf[QM_QOS_VAL_MAX_LEN] = {0};
 	unsigned int fun_index;
-	unsigned long val = 0;
+	unsigned long val;
 	int len, ret;
 
 	if (qm->fun_type == QM_HW_VF)
 		return -EINVAL;
+
+	if (*pos != 0)
+		return 0;
+
+	if (count >= QM_DBG_READ_LEN)
+		return -ENOSPC;
+
+	len = simple_write_to_buffer(tbuf, QM_DBG_READ_LEN - 1, pos, buf, count);
+	if (len < 0)
+		return len;
+
+	tbuf[len] = '\0';
+	ret = qm_get_qos_value(qm, tbuf, &val, &fun_index);
+	if (ret)
+		return ret;
 
 	/* Mailbox and reset cannot be operated at the same time */
 	if (test_and_set_bit(QM_RESETTING, &qm->misc_ctl)) {
 		pci_err(qm->pdev, "dev resetting, write alg qos failed!\n");
 		return -EAGAIN;
 	}
-
-	if (*pos != 0) {
-		ret = 0;
-		goto err_get_status;
-	}
-
-	if (count >= QM_DBG_READ_LEN) {
-		ret = -ENOSPC;
-		goto err_get_status;
-	}
-
-	len = simple_write_to_buffer(tbuf, QM_DBG_READ_LEN - 1, pos, buf, count);
-	if (len < 0) {
-		ret = len;
-		goto err_get_status;
-	}
-
-	tbuf[len] = '\0';
-	ret = sscanf(tbuf, "%s %s", tbuf_bdf, val_buf);
-	if (ret != QM_QOS_PARAM_NUM) {
-		ret = -EINVAL;
-		goto err_get_status;
-	}
-
-	ret = qm_qos_value_init(val_buf, &val);
-	if (val == 0 || val > QM_QOS_MAX_VAL || ret) {
-		pci_err(qm->pdev, "input qos value is error, please set 1~1000!\n");
-		ret = -EINVAL;
-		goto err_get_status;
-	}
-
-	ret = sscanf(tbuf_bdf, "%d:%x:%d.%d", &tmp1, &bus, &device, &function);
-	if (ret != QM_QOS_BDF_PARAM_NUM) {
-		pci_err(qm->pdev, "input pci bdf value is error!\n");
-		ret = -EINVAL;
-		goto err_get_status;
-	}
-
-	fun_index = device * 8 + function;
 
 	ret = qm_pm_get_sync(qm);
 	if (ret) {
@@ -4304,6 +4333,8 @@ static ssize_t qm_algqos_write(struct file *filp, const char __user *buf,
 		goto err_put_sync;
 	}
 
+	pci_info(qm->pdev, "the qos value of function%u is set to %lu.\n",
+		 fun_index, val);
 	ret = count;
 
 err_put_sync:
@@ -5750,13 +5781,15 @@ err_init_qp_mem:
 static int hisi_qm_memory_init(struct hisi_qm *qm)
 {
 	struct device *dev = &qm->pdev->dev;
-	int ret, total_vfs;
+	int ret, total_func, i;
 	size_t off = 0;
 
-	total_vfs = pci_sriov_get_totalvfs(qm->pdev);
-	qm->factor = kcalloc(total_vfs + 1, sizeof(struct qm_shaper_factor), GFP_KERNEL);
+	total_func = pci_sriov_get_totalvfs(qm->pdev) + 1;
+	qm->factor = kcalloc(total_func, sizeof(struct qm_shaper_factor), GFP_KERNEL);
 	if (!qm->factor)
 		return -ENOMEM;
+	for (i = 0; i < total_func; i++)
+		qm->factor[i].func_qos = QM_QOS_MAX_VAL;
 
 #define QM_INIT_BUF(qm, type, num) do { \
 	(qm)->type = ((qm)->qdma.va + (off)); \
