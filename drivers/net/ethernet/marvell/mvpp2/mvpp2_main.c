@@ -1488,6 +1488,7 @@ static bool mvpp2_port_supports_rgmii(struct mvpp2_port *port)
 static bool mvpp2_is_xlg(phy_interface_t interface)
 {
 	return interface == PHY_INTERFACE_MODE_10GBASER ||
+	       interface == PHY_INTERFACE_MODE_5GBASER ||
 	       interface == PHY_INTERFACE_MODE_XAUI;
 }
 
@@ -1627,6 +1628,7 @@ static int mvpp22_gop_init(struct mvpp2_port *port, phy_interface_t interface)
 	case PHY_INTERFACE_MODE_2500BASEX:
 		mvpp22_gop_init_sgmii(port);
 		break;
+	case PHY_INTERFACE_MODE_5GBASER:
 	case PHY_INTERFACE_MODE_10GBASER:
 		if (!mvpp2_port_supports_xlg(port))
 			goto invalid_conf;
@@ -2186,6 +2188,7 @@ static void mvpp22_pcs_reset_deassert(struct mvpp2_port *port,
 	xpcs = priv->iface_base + MVPP22_XPCS_BASE(port->gop_id);
 
 	switch (interface) {
+	case PHY_INTERFACE_MODE_5GBASER:
 	case PHY_INTERFACE_MODE_10GBASER:
 		val = readl(mpcs + MVPP22_MPCS_CLK_RESET);
 		val |= MAC_CLK_RESET_MAC | MAC_CLK_RESET_SD_RX |
@@ -5433,8 +5436,11 @@ static void mvpp2_ethtool_get_drvinfo(struct net_device *dev,
 		sizeof(drvinfo->bus_info));
 }
 
-static void mvpp2_ethtool_get_ringparam(struct net_device *dev,
-					struct ethtool_ringparam *ring)
+static void
+mvpp2_ethtool_get_ringparam(struct net_device *dev,
+			    struct ethtool_ringparam *ring,
+			    struct kernel_ethtool_ringparam *kernel_ring,
+			    struct netlink_ext_ack *extack)
 {
 	struct mvpp2_port *port = netdev_priv(dev);
 
@@ -5444,8 +5450,11 @@ static void mvpp2_ethtool_get_ringparam(struct net_device *dev,
 	ring->tx_pending = port->tx_ring_size;
 }
 
-static int mvpp2_ethtool_set_ringparam(struct net_device *dev,
-				       struct ethtool_ringparam *ring)
+static int
+mvpp2_ethtool_set_ringparam(struct net_device *dev,
+			    struct ethtool_ringparam *ring,
+			    struct kernel_ethtool_ringparam *kernel_ring,
+			    struct netlink_ext_ack *extack)
 {
 	struct mvpp2_port *port = netdev_priv(dev);
 	u16 prev_rx_ring_size = port->rx_ring_size;
@@ -6120,7 +6129,10 @@ static void mvpp2_xlg_pcs_get_state(struct phylink_pcs *pcs,
 	struct mvpp2_port *port = mvpp2_pcs_to_port(pcs);
 	u32 val;
 
-	state->speed = SPEED_10000;
+	if (port->phy_interface == PHY_INTERFACE_MODE_5GBASER)
+		state->speed = SPEED_5000;
+	else
+		state->speed = SPEED_10000;
 	state->duplex = 1;
 	state->an_complete = 1;
 
@@ -6262,9 +6274,6 @@ static void mvpp2_phylink_validate(struct phylink_config *config,
 				   unsigned long *supported,
 				   struct phylink_link_state *state)
 {
-	struct mvpp2_port *port = mvpp2_phylink_to_port(config);
-	__ETHTOOL_DECLARE_LINK_MODE_MASK(mask) = { 0, };
-
 	/* When in 802.3z mode, we must have AN enabled:
 	 * Bit 2 Field InBandAnEn In-band Auto-Negotiation enable. ...
 	 * When <PortType> = 1 (1000BASE-X) this field must be set to 1.
@@ -6273,52 +6282,7 @@ static void mvpp2_phylink_validate(struct phylink_config *config,
 	    !phylink_test(state->advertising, Autoneg))
 		goto empty_set;
 
-	phylink_set(mask, Autoneg);
-	phylink_set_port_modes(mask);
-
-	if (port->priv->global_tx_fc) {
-		phylink_set(mask, Pause);
-		phylink_set(mask, Asym_Pause);
-	}
-
-	switch (state->interface) {
-	case PHY_INTERFACE_MODE_10GBASER:
-	case PHY_INTERFACE_MODE_XAUI:
-		if (mvpp2_port_supports_xlg(port)) {
-			phylink_set_10g_modes(mask);
-			phylink_set(mask, 10000baseKR_Full);
-		}
-		break;
-
-	case PHY_INTERFACE_MODE_RGMII:
-	case PHY_INTERFACE_MODE_RGMII_ID:
-	case PHY_INTERFACE_MODE_RGMII_RXID:
-	case PHY_INTERFACE_MODE_RGMII_TXID:
-	case PHY_INTERFACE_MODE_SGMII:
-		phylink_set(mask, 10baseT_Half);
-		phylink_set(mask, 10baseT_Full);
-		phylink_set(mask, 100baseT_Half);
-		phylink_set(mask, 100baseT_Full);
-		phylink_set(mask, 1000baseT_Full);
-		phylink_set(mask, 1000baseX_Full);
-		break;
-
-	case PHY_INTERFACE_MODE_1000BASEX:
-		phylink_set(mask, 1000baseT_Full);
-		phylink_set(mask, 1000baseX_Full);
-		break;
-
-	case PHY_INTERFACE_MODE_2500BASEX:
-		phylink_set(mask, 2500baseT_Full);
-		phylink_set(mask, 2500baseX_Full);
-		break;
-
-	default:
-		goto empty_set;
-	}
-
-	linkmode_and(supported, supported, mask);
-	linkmode_and(state->advertising, state->advertising, mask);
+	phylink_generic_validate(config, supported, state);
 	return;
 
 empty_set:
@@ -6901,7 +6865,7 @@ static int mvpp2_port_probe(struct platform_device *pdev,
 		mvpp2_set_hw_csum(port, port->pool_long->id);
 
 	dev->vlan_features |= features;
-	dev->gso_max_segs = MVPP2_MAX_TSO_SEGS;
+	netif_set_gso_max_segs(dev, MVPP2_MAX_TSO_SEGS);
 	dev->priv_flags |= IFF_UNICAST_FLT;
 
 	/* MTU range: 68 - 9704 */
@@ -6913,12 +6877,44 @@ static int mvpp2_port_probe(struct platform_device *pdev,
 	if (!mvpp2_use_acpi_compat_mode(port_fwnode)) {
 		port->phylink_config.dev = &dev->dev;
 		port->phylink_config.type = PHYLINK_NETDEV;
+		port->phylink_config.mac_capabilities =
+			MAC_2500FD | MAC_1000FD | MAC_100 | MAC_10;
+
+		if (port->priv->global_tx_fc)
+			port->phylink_config.mac_capabilities |=
+				MAC_SYM_PAUSE | MAC_ASYM_PAUSE;
 
 		if (mvpp2_port_supports_xlg(port)) {
-			__set_bit(PHY_INTERFACE_MODE_10GBASER,
-				  port->phylink_config.supported_interfaces);
-			__set_bit(PHY_INTERFACE_MODE_XAUI,
-				  port->phylink_config.supported_interfaces);
+			/* If a COMPHY is present, we can support any of
+			 * the serdes modes and switch between them.
+			 */
+			if (comphy) {
+				__set_bit(PHY_INTERFACE_MODE_5GBASER,
+					  port->phylink_config.supported_interfaces);
+				__set_bit(PHY_INTERFACE_MODE_10GBASER,
+					  port->phylink_config.supported_interfaces);
+				__set_bit(PHY_INTERFACE_MODE_XAUI,
+					  port->phylink_config.supported_interfaces);
+			} else if (phy_mode == PHY_INTERFACE_MODE_5GBASER) {
+				__set_bit(PHY_INTERFACE_MODE_5GBASER,
+					  port->phylink_config.supported_interfaces);
+			} else if (phy_mode == PHY_INTERFACE_MODE_10GBASER) {
+				__set_bit(PHY_INTERFACE_MODE_10GBASER,
+					  port->phylink_config.supported_interfaces);
+			} else if (phy_mode == PHY_INTERFACE_MODE_XAUI) {
+				__set_bit(PHY_INTERFACE_MODE_XAUI,
+					  port->phylink_config.supported_interfaces);
+			}
+
+			if (comphy)
+				port->phylink_config.mac_capabilities |=
+					MAC_10000FD | MAC_5000FD;
+			else if (phy_mode == PHY_INTERFACE_MODE_5GBASER)
+				port->phylink_config.mac_capabilities |=
+					MAC_5000FD;
+			else
+				port->phylink_config.mac_capabilities |=
+					MAC_10000FD;
 		}
 
 		if (mvpp2_port_supports_rgmii(port))

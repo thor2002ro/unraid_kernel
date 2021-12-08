@@ -181,7 +181,7 @@ static int hclge_get_ring_chain_from_mbx(
 		if (req->msg.param[i].tqp_index >= vport->nic.kinfo.rss_size) {
 			dev_err(&hdev->pdev->dev, "tqp index(%u) is out of range(0-%u)\n",
 				req->msg.param[i].tqp_index,
-				vport->nic.kinfo.rss_size - 1);
+				vport->nic.kinfo.rss_size - 1U);
 			return -EINVAL;
 		}
 	}
@@ -848,6 +848,14 @@ void hclge_mbx_handler(struct hclge_dev *hdev)
 		if (hnae3_get_bit(req->mbx_need_resp, HCLGE_MBX_NEED_RESP_B) &&
 		    req->msg.code < HCLGE_MBX_GET_VF_FLR_STATUS) {
 			resp_msg.status = ret;
+			if (time_is_before_jiffies(hdev->last_mbx_scheduled +
+						   HCLGE_MBX_SCHED_TIMEOUT))
+				dev_warn(&hdev->pdev->dev,
+					 "resp vport%u mbx(%u,%u) late\n",
+					 req->mbx_src_vfid,
+					 req->msg.code,
+					 req->msg.subcode);
+
 			hclge_gen_resp_to_vf(vport, req, &resp_msg);
 		}
 
