@@ -17,6 +17,8 @@ solution to the problem to avoid everybody inventing their own.  The IDR
 provides the ability to map an ID to a pointer, while the IDA provides
 only ID allocation, and as a result is much more memory-efficient.
 
+The IDR interface is deprecated; please use the XArray_ instead.
+
 IDR usage
 =========
 
