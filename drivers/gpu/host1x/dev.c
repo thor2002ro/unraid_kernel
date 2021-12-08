@@ -132,6 +132,12 @@ static const struct host1x_sid_entry tegra186_sid_table[] = {
 		.offset = 0x30,
 		.limit = 0x34
 	},
+	{
+		/* NVDEC */
+		.base = 0x1b00,
+		.offset = 0x30,
+		.limit = 0x34
+	},
 };
 
 static const struct host1x_info host1x06_info = {
@@ -153,6 +159,18 @@ static const struct host1x_sid_entry tegra194_sid_table[] = {
 	{
 		/* VIC */
 		.base = 0x1af0,
+		.offset = 0x30,
+		.limit = 0x34
+	},
+	{
+		/* NVDEC */
+		.base = 0x1b00,
+		.offset = 0x30,
+		.limit = 0x34
+	},
+	{
+		/* NVDEC1 */
+		.base = 0x1bc0,
 		.offset = 0x30,
 		.limit = 0x34
 	},
@@ -386,6 +404,7 @@ static int host1x_probe(struct platform_device *pdev)
 	if (syncpt_irq < 0)
 		return syncpt_irq;
 
+	host1x_bo_cache_init(&host->cache);
 	mutex_init(&host->devices_lock);
 	INIT_LIST_HEAD(&host->devices);
 	INIT_LIST_HEAD(&host->list);
@@ -512,6 +531,7 @@ static int host1x_remove(struct platform_device *pdev)
 	reset_control_assert(host->rst);
 	clk_disable_unprepare(host->clk);
 	host1x_iommu_exit(host);
+	host1x_bo_cache_destroy(&host->cache);
 
 	return 0;
 }
