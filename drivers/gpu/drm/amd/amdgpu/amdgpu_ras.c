@@ -892,6 +892,38 @@ void amdgpu_ras_mca_query_error_status(struct amdgpu_device *adev,
 	}
 }
 
+static void amdgpu_ras_get_ecc_info(struct amdgpu_device *adev, struct ras_err_data *err_data)
+{
+	struct amdgpu_ras *ras = amdgpu_ras_get_context(adev);
+	int ret = 0;
+
+	/*
+	 * choosing right query method according to
+	 * whether smu support query error information
+	 */
+	ret = smu_get_ecc_info(&adev->smu, (void *)&(ras->umc_ecc));
+	if (ret == -EOPNOTSUPP) {
+		if (adev->umc.ras_funcs &&
+			adev->umc.ras_funcs->query_ras_error_count)
+			adev->umc.ras_funcs->query_ras_error_count(adev, err_data);
+
+		/* umc query_ras_error_address is also responsible for clearing
+		 * error status
+		 */
+		if (adev->umc.ras_funcs &&
+		    adev->umc.ras_funcs->query_ras_error_address)
+			adev->umc.ras_funcs->query_ras_error_address(adev, err_data);
+	} else if (!ret) {
+		if (adev->umc.ras_funcs &&
+			adev->umc.ras_funcs->ecc_info_query_ras_error_count)
+			adev->umc.ras_funcs->ecc_info_query_ras_error_count(adev, err_data);
+
+		if (adev->umc.ras_funcs &&
+			adev->umc.ras_funcs->ecc_info_query_ras_error_address)
+			adev->umc.ras_funcs->ecc_info_query_ras_error_address(adev, err_data);
+	}
+}
+
 /* query/inject/cure begin */
 int amdgpu_ras_query_error_status(struct amdgpu_device *adev,
 				  struct ras_query_if *info)
@@ -905,15 +937,7 @@ int amdgpu_ras_query_error_status(struct amdgpu_device *adev,
 
 	switch (info->head.block) {
 	case AMDGPU_RAS_BLOCK__UMC:
-		if (adev->umc.ras_funcs &&
-		    adev->umc.ras_funcs->query_ras_error_count)
-			adev->umc.ras_funcs->query_ras_error_count(adev, &err_data);
-		/* umc query_ras_error_address is also responsible for clearing
-		 * error status
-		 */
-		if (adev->umc.ras_funcs &&
-		    adev->umc.ras_funcs->query_ras_error_address)
-			adev->umc.ras_funcs->query_ras_error_address(adev, &err_data);
+		amdgpu_ras_get_ecc_info(adev, &err_data);
 		break;
 	case AMDGPU_RAS_BLOCK__SDMA:
 		if (adev->sdma.funcs->query_ras_error_count) {
@@ -1723,6 +1747,16 @@ static void amdgpu_ras_log_on_err_counter(struct amdgpu_device *adev)
 		if (info.head.block == AMDGPU_RAS_BLOCK__PCIE_BIF)
 			continue;
 
+		/*
+		 * this is a workaround for aldebaran, skip send msg to
+		 * smu to get ecc_info table due to smu handle get ecc
+		 * info table failed temporarily.
+		 * should be removed until smu fix handle ecc_info table.
+		 */
+		if ((info.head.block == AMDGPU_RAS_BLOCK__UMC) &&
+			(adev->ip_versions[MP1_HWIP][0] == IP_VERSION(13, 0, 2)))
+			continue;
+
 		amdgpu_ras_query_error_status(adev, &info);
 	}
 }
@@ -1935,9 +1969,11 @@ int amdgpu_ras_save_bad_pages(struct amdgpu_device *adev)
 	if (!con || !con->eh_data)
 		return 0;
 
+	mutex_lock(&con->recovery_lock);
 	control = &con->eeprom_control;
 	data = con->eh_data;
 	save_count = data->count - control->ras_num_recs;
+	mutex_unlock(&con->recovery_lock);
 	/* only new entries are saved */
 	if (save_count > 0) {
 		if (amdgpu_ras_eeprom_append(control,
@@ -2477,7 +2513,6 @@ void amdgpu_ras_late_fini(struct amdgpu_device *adev,
 	amdgpu_ras_sysfs_remove(adev, ras_block);
 	if (ih_info->cb)
 		amdgpu_ras_interrupt_remove_handler(adev, ih_info);
-	amdgpu_ras_feature_enable(adev, ras_block, 0);
 }
 
 /* do some init work after IP late init as dependence.
