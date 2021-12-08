@@ -487,6 +487,8 @@ struct sof_intel_hda_stream {
 	(SOF_HDA_ADSP_SD_ENTRY_SIZE * ((s)->index) \
 	 + SOF_HDA_ADSP_LOADER_BASE)
 
+#define SOF_STREAM_SD_OFFSET_CRST 0x1
+
 /*
  * DSP Core services.
  */
@@ -496,6 +498,7 @@ int hda_dsp_core_run(struct snd_sof_dev *sdev, unsigned int core_mask);
 int hda_dsp_enable_core(struct snd_sof_dev *sdev, unsigned int core_mask);
 int hda_dsp_core_reset_power_down(struct snd_sof_dev *sdev,
 				  unsigned int core_mask);
+int hda_dsp_core_get(struct snd_sof_dev *sdev, int core);
 void hda_dsp_ipc_int_enable(struct snd_sof_dev *sdev);
 void hda_dsp_ipc_int_disable(struct snd_sof_dev *sdev);
 
@@ -533,6 +536,7 @@ int hda_dsp_pcm_trigger(struct snd_sof_dev *sdev,
 			struct snd_pcm_substream *substream, int cmd);
 snd_pcm_uframes_t hda_dsp_pcm_pointer(struct snd_sof_dev *sdev,
 				      struct snd_pcm_substream *substream);
+int hda_dsp_pcm_ack(struct snd_sof_dev *sdev, struct snd_pcm_substream *substream);
 
 /*
  * DSP Stream Operations.
@@ -735,7 +739,7 @@ int hda_pci_intel_probe(struct pci_dev *pci, const struct pci_device_id *pci_id)
 
 struct snd_sof_dai;
 struct sof_ipc_dai_config;
-int hda_ctrl_dai_widget_setup(struct snd_soc_dapm_widget *w);
-int hda_ctrl_dai_widget_free(struct snd_soc_dapm_widget *w);
+int hda_ctrl_dai_widget_setup(struct snd_soc_dapm_widget *w, unsigned int quirk_flags);
+int hda_ctrl_dai_widget_free(struct snd_soc_dapm_widget *w, unsigned int quirk_flags);
 
 #endif
