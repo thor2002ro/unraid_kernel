@@ -335,6 +335,23 @@ void hci_cmd_sync_clear(struct hci_dev *hdev)
 	}
 }
 
+void hci_cmd_sync_cancel(struct hci_dev *hdev, int err)
+{
+	bt_dev_dbg(hdev, "err 0x%2.2x", err);
+
+	if (hdev->req_status == HCI_REQ_PEND) {
+		hdev->req_result = err;
+		hdev->req_status = HCI_REQ_CANCELED;
+
+		cancel_delayed_work_sync(&hdev->cmd_timer);
+		cancel_delayed_work_sync(&hdev->ncmd_timer);
+		atomic_set(&hdev->cmd_cnt, 1);
+
+		wake_up_interruptible(&hdev->req_wait_q);
+	}
+}
+EXPORT_SYMBOL(hci_cmd_sync_cancel);
+
 int hci_cmd_sync_queue(struct hci_dev *hdev, hci_cmd_sync_work_func_t func,
 		       void *data, hci_cmd_sync_work_destroy_t destroy)
 {
@@ -1580,8 +1597,40 @@ done:
 				     sizeof(cp), &cp, HCI_CMD_TIMEOUT);
 }
 
+/* Set Device Privacy Mode. */
+static int hci_le_set_privacy_mode_sync(struct hci_dev *hdev,
+					struct hci_conn_params *params)
+{
+	struct hci_cp_le_set_privacy_mode cp;
+	struct smp_irk *irk;
+
+	/* If device privacy mode has already been set there is nothing to do */
+	if (params->privacy_mode == HCI_DEVICE_PRIVACY)
+		return 0;
+
+	/* Check if HCI_CONN_FLAG_DEVICE_PRIVACY has been set as it also
+	 * indicates that LL Privacy has been enabled and
+	 * HCI_OP_LE_SET_PRIVACY_MODE is supported.
+	 */
+	if (!test_bit(HCI_CONN_FLAG_DEVICE_PRIVACY, params->flags))
+		return 0;
+
+	irk = hci_find_irk_by_addr(hdev, &params->addr, params->addr_type);
+	if (!irk)
+		return 0;
+
+	memset(&cp, 0, sizeof(cp));
+	cp.bdaddr_type = irk->addr_type;
+	bacpy(&cp.bdaddr, &irk->bdaddr);
+	cp.mode = HCI_DEVICE_PRIVACY;
+
+	return __hci_cmd_sync_status(hdev, HCI_OP_LE_SET_PRIVACY_MODE,
+				     sizeof(cp), &cp, HCI_CMD_TIMEOUT);
+}
+
 /* Adds connection to allow list if needed, if the device uses RPA (has IRK)
- * this attempts to program the device in the resolving list as well.
+ * this attempts to program the device in the resolving list as well and
+ * properly set the privacy mode.
  */
 static int hci_le_add_accept_list_sync(struct hci_dev *hdev,
 				       struct hci_conn_params *params,
@@ -1589,11 +1638,6 @@ static int hci_le_add_accept_list_sync(struct hci_dev *hdev,
 {
 	struct hci_cp_le_add_to_accept_list cp;
 	int err;
-
-	/* Already in accept list */
-	if (hci_bdaddr_list_lookup(&hdev->le_accept_list, &params->addr,
-				   params->addr_type))
-		return 0;
 
 	/* Select filter policy to accept all advertising */
 	if (*num_entries >= hdev->le_accept_list_size)
@@ -1606,8 +1650,8 @@ static int hci_le_add_accept_list_sync(struct hci_dev *hdev,
 	}
 
 	/* During suspend, only wakeable devices can be in acceptlist */
-	if (hdev->suspended && !hci_conn_test_flag(HCI_CONN_FLAG_REMOTE_WAKEUP,
-						   params->current_flags))
+	if (hdev->suspended &&
+	    !test_bit(HCI_CONN_FLAG_REMOTE_WAKEUP, params->flags))
 		return 0;
 
 	/* Attempt to program the device in the resolving list first to avoid
@@ -1619,6 +1663,18 @@ static int hci_le_add_accept_list_sync(struct hci_dev *hdev,
 		bt_dev_err(hdev, "Unable to add to resolve list: %d", err);
 		return err;
 	}
+
+	/* Set Privacy Mode */
+	err = hci_le_set_privacy_mode_sync(hdev, params);
+	if (err) {
+		bt_dev_err(hdev, "Unable to set privacy mode: %d", err);
+		return err;
+	}
+
+	/* Check if already in accept list */
+	if (hci_bdaddr_list_lookup(&hdev->le_accept_list, &params->addr,
+				   params->addr_type))
+		return 0;
 
 	*num_entries += 1;
 	cp.bdaddr_type = params->addr_type;
@@ -3283,7 +3339,8 @@ static int hci_le_read_adv_tx_power_sync(struct hci_dev *hdev)
 /* Read LE Min/Max Tx Power*/
 static int hci_le_read_tx_power_sync(struct hci_dev *hdev)
 {
-	if (!(hdev->commands[38] & 0x80))
+	if (!(hdev->commands[38] & 0x80) ||
+	    test_bit(HCI_QUIRK_BROKEN_READ_TRANSMIT_POWER, &hdev->quirks))
 		return 0;
 
 	return __hci_cmd_sync_status(hdev, HCI_OP_LE_READ_TRANSMIT_POWER,
@@ -4749,8 +4806,7 @@ static int hci_update_event_filter_sync(struct hci_dev *hdev)
 	hci_clear_event_filter_sync(hdev);
 
 	list_for_each_entry(b, &hdev->accept_list, list) {
-		if (!hci_conn_test_flag(HCI_CONN_FLAG_REMOTE_WAKEUP,
-					b->current_flags))
+		if (!test_bit(HCI_CONN_FLAG_REMOTE_WAKEUP, b->flags))
 			continue;
 
 		bt_dev_dbg(hdev, "Adding event filters for %pMR", &b->bdaddr);
