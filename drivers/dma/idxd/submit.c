@@ -21,15 +21,6 @@ static struct idxd_desc *__get_desc(struct idxd_wq *wq, int idx, int cpu)
 	if (device_pasid_enabled(idxd))
 		desc->hw->pasid = idxd->pasid;
 
-	/*
-	 * On host, MSIX vecotr 0 is used for misc interrupt. Therefore when we match
-	 * vector 1:1 to the WQ id, we need to add 1
-	 */
-	if (!idxd->int_handles)
-		desc->hw->int_handle = wq->id + 1;
-	else
-		desc->hw->int_handle = idxd->int_handles[wq->id];
-
 	return desc;
 }
 
@@ -129,24 +120,24 @@ static void llist_abort_desc(struct idxd_wq *wq, struct idxd_irq_entry *ie,
 	spin_unlock(&ie->list_lock);
 
 	if (found)
-		complete_desc(found, IDXD_COMPLETE_ABORT);
+		idxd_dma_complete_txd(found, IDXD_COMPLETE_ABORT, false);
 }
 
 int idxd_submit_desc(struct idxd_wq *wq, struct idxd_desc *desc)
 {
 	struct idxd_device *idxd = wq->idxd;
 	struct idxd_irq_entry *ie = NULL;
+	u32 desc_flags = desc->hw->flags;
 	void __iomem *portal;
 	int rc;
 
-	if (idxd->state != IDXD_DEV_ENABLED) {
-		idxd_free_desc(wq, desc);
+	if (idxd->state != IDXD_DEV_ENABLED)
 		return -EIO;
-	}
 
 	if (!percpu_ref_tryget_live(&wq->wq_active)) {
-		idxd_free_desc(wq, desc);
-		return -ENXIO;
+		wait_for_completion(&wq->wq_resurrect);
+		if (!percpu_ref_tryget_live(&wq->wq_active))
+			return -ENXIO;
 	}
 
 	portal = idxd_wq_portal_addr(wq);
@@ -162,8 +153,13 @@ int idxd_submit_desc(struct idxd_wq *wq, struct idxd_desc *desc)
 	 * Pending the descriptor to the lockless list for the irq_entry
 	 * that we designated the descriptor to.
 	 */
-	if (desc->hw->flags & IDXD_OP_FLAG_RCI) {
-		ie = &idxd->irq_entries[wq->id + 1];
+	if (desc_flags & IDXD_OP_FLAG_RCI) {
+		ie = wq->ie;
+		if (ie->int_handle == INVALID_INT_HANDLE)
+			desc->hw->int_handle = ie->id;
+		else
+			desc->hw->int_handle = ie->int_handle;
+
 		llist_add(&desc->llnode, &ie->pending_llist);
 	}
 
@@ -182,8 +178,6 @@ int idxd_submit_desc(struct idxd_wq *wq, struct idxd_desc *desc)
 			/* abort operation frees the descriptor */
 			if (ie)
 				llist_abort_desc(wq, ie, desc);
-			else
-				idxd_free_desc(wq, desc);
 			return rc;
 		}
 	}
