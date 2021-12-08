@@ -1268,6 +1268,10 @@ PAGE_SIZE multiple when read back.
 		The number of processes belonging to this cgroup
 		killed by any kind of OOM killer.
 
+          oom_group_kill
+                The number of times all tasks in the cgroup were killed
+                due to memory.oom.group.
+
   memory.events.local
 	Similar to memory.events but the fields in the file are local
 	to the cgroup i.e. not hierarchical. The file modified event
@@ -2259,6 +2263,11 @@ HugeTLB Interface Files
 	Similar to hugetlb.<hugepagesize>.events but the fields in the file
 	are local to the cgroup i.e. not hierarchical. The file modified event
 	generated on this file reflects only the local events.
+
+  hugetlb.<hugepagesize>.numa_stat
+	Similar to memory.numa_stat, it shows the numa information of the
+        hugetlb pages of <hugepagesize> in this cgroup.  Only active in
+        use hugetlb pages are included.  The per-node values are in bytes.
 
 Misc
 ----
