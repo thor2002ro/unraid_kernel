@@ -243,6 +243,7 @@ bool tsc_store_and_check_tsc_adjust(bool bootcpu)
  * Entry/exit counters that make sure that both CPUs
  * run the measurement code at once:
  */
+static atomic_t tsc_sync_cpu = ATOMIC_INIT(-1);
 static atomic_t start_count;
 static atomic_t stop_count;
 static atomic_t skip_test;
@@ -367,6 +368,8 @@ void check_tsc_sync_source(int cpu)
 		atomic_set(&test_runs, 1);
 	else
 		atomic_set(&test_runs, 3);
+
+	atomic_set(&tsc_sync_cpu, cpu);
 retry:
 	/*
 	 * Wait for the target to start or to skip the test:
@@ -447,6 +450,10 @@ void check_tsc_sync_target(void)
 	/* Also aborts if there is no TSC. */
 	if (unsynchronized_tsc())
 		return;
+
+	/* Wait for this CPU's turn */
+	while (atomic_read(&tsc_sync_cpu) != cpu)
+		cpu_relax();
 
 	/*
 	 * Store, verify and sanitize the TSC adjust register. If
