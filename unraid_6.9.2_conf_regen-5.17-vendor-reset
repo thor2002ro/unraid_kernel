@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/x86 5.16.0-rc3 Kernel Configuration
+# Linux/x86 5.16.0-rc4 Kernel Configuration
 #
 CONFIG_CC_VERSION_TEXT="Ubuntu clang version 14.0.0-++20210924122635+4a57f5d1e1c5-1~exp1"
 CONFIG_GCC_VERSION=0
@@ -103,6 +103,7 @@ CONFIG_NO_HZ_IDLE=y
 # CONFIG_NO_HZ_FULL is not set
 CONFIG_NO_HZ=y
 CONFIG_HIGH_RES_TIMERS=y
+CONFIG_CLOCKSOURCE_WATCHDOG_MAX_SKEW_US=100
 # end of Timers subsystem
 
 CONFIG_BPF=y
@@ -4187,6 +4188,7 @@ CONFIG_HID_BELKIN=y
 # CONFIG_HID_BETOP_FF is not set
 # CONFIG_HID_BIGBEN_FF is not set
 CONFIG_HID_CHERRY=y
+CONFIG_HID_CHICONY=m
 CONFIG_HID_CORSAIR=m
 # CONFIG_HID_COUGAR is not set
 # CONFIG_HID_MACALLY is not set
@@ -5111,7 +5113,6 @@ CONFIG_ND_BLK=y
 CONFIG_ND_CLAIM=y
 CONFIG_ND_BTT=y
 CONFIG_BTT=y
-CONFIG_DAX_DRIVER=y
 CONFIG_DAX=y
 # CONFIG_DEV_DAX is not set
 CONFIG_NVMEM=y
@@ -5911,6 +5912,11 @@ CONFIG_HAVE_KCSAN_COMPILER=y
 # end of Generic Kernel Debugging Instruments
 
 # CONFIG_DEBUG_KERNEL is not set
+
+#
+# Networking Debugging
+#
+# end of Networking Debugging
 
 #
 # Memory Debugging
