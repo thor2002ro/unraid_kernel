@@ -1174,8 +1174,6 @@ static void rcu_spawn_one_boost_kthread(struct rcu_node *rnp)
 	if (rnp->boost_kthread_task || !rcu_scheduler_fully_active)
 		goto out;
 
-	rcu_state.boost = 1;
-
 	t = kthread_create(rcu_boost_kthread, (void *)rnp,
 			   "rcub/%d", rnp_index);
 	if (WARN_ON_ONCE(IS_ERR(t)))
