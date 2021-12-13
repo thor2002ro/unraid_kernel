@@ -1,0 +1,58 @@
+arm/soc
+
+arm/dt
+	patch
+		ARM: dts: milbeaut: add a clock node for M10V
+		ARM: dts: milbeaut: set clock phandle to timer node
+		ARM: dts: milbeaut: set clock phandle to uart node
+		ARM: dts: spear3xx: Use plgpio regmap in SPEAr310 and SPEAr320
+		ARM: dts: spear3xx: Add spear320s dtsi
+	renesas/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-dt-for-v5.17-tag1
+	renesas/dt-bindings
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-dt-bindings-for-v5.17-tag1
+	ux500/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/linusw/linux-nomadik tags/ux500-dts-v5.17-1
+	patch
+		ARM: dts: gemini: NAS4220-B: fis-index-block with 128 KiB sectors
+	apple/dt
+		https://github.com/AsahiLinux/linux tags/asahi-soc-dt-5.17
+	rockchip/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.17-rockchip-dts64-1
+	amlogic/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/amlogic/linux tags/amlogic-arm64-dt-for-v5.17
+	at91/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-dt-5.17
+
+arm/drivers
+
+arm/defconfigs
+
+arm/newsoc
+
+arm/late
+
+arm/fixes
+	<no branch> (69125b4b9440be015783312e1b8753ec96febde0)
+		git://git.pengutronix.de/pza/linux tags/reset-fixes-for-v5.16
+	<no branch> (c88c5e461939a06ae769a01649d5c6b5a156f883)
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-5.16
+	<no branch> (9d7482771fac8d8e38e763263f2ca0ca12dd22c6)
+		git://git.linaro.org/people/jens.wiklander/linux-tee tags/amdtee-fix-for-v5.16
+	<no branch> (5ad77b1272fce36604779efe6e2036c500e6fe7a)
+		git://git.kernel.org/pub/scm/linux/kernel/git/amlogic/linux v5.16/fixes
+	<no branch> (cb25b11943cbcc5a34531129952870420f8be858)
+		git://git.kernel.org/pub/scm/linux/kernel/git/dinguyen/linux tags/socfpga_fix_for_v5.16_part_2
+	<no branch> (0668639eaf14813a39a8d3e0e6597d568581d4ea)
+		https://github.com/AsahiLinux/linux tags/asahi-soc-fixes-5.16
+	<no branch> (711e26c00e4c7b7cef0420c76a61e6d818e12687)
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.16-firmware-fixes
+	<no branch> (4ebd29f91629e69da7d57390cdc953772eee03ab)
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-5.16-2
+	<no branch> (aef4b9a89a376a9cabe5e744729914e7766c59bb)
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.16-rockchip-dtsfixes1
+	<no branch> (423e85e97aaf69e5198bbec6811e3825c8b5019a)
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.16-rockchip-socfixes1
+	patch
+		firmware: arm_scpi: Fix string overflow in SCPI genpd driver
+
