@@ -390,12 +390,14 @@ static ssize_t amdgpu_set_power_dpm_force_performance_level(struct device *dev,
 		return -EINVAL;
 	}
 
+	mutex_lock(&adev->pm.stable_pstate_ctx_lock);
 	if (pp_funcs->force_performance_level) {
 		mutex_lock(&adev->pm.mutex);
 		if (adev->pm.dpm.thermal_active) {
 			mutex_unlock(&adev->pm.mutex);
 			pm_runtime_mark_last_busy(ddev->dev);
 			pm_runtime_put_autosuspend(ddev->dev);
+			mutex_unlock(&adev->pm.stable_pstate_ctx_lock);
 			return -EINVAL;
 		}
 		ret = amdgpu_dpm_force_performance_level(adev, level);
@@ -403,6 +405,7 @@ static ssize_t amdgpu_set_power_dpm_force_performance_level(struct device *dev,
 			mutex_unlock(&adev->pm.mutex);
 			pm_runtime_mark_last_busy(ddev->dev);
 			pm_runtime_put_autosuspend(ddev->dev);
+			mutex_unlock(&adev->pm.stable_pstate_ctx_lock);
 			return -EINVAL;
 		} else {
 			adev->pm.dpm.forced_level = level;
@@ -411,6 +414,10 @@ static ssize_t amdgpu_set_power_dpm_force_performance_level(struct device *dev,
 	}
 	pm_runtime_mark_last_busy(ddev->dev);
 	pm_runtime_put_autosuspend(ddev->dev);
+
+	/* override whatever a user ctx may have set */
+	adev->pm.stable_pstate_ctx = NULL;
+	mutex_unlock(&adev->pm.stable_pstate_ctx_lock);
 
 	return count;
 }

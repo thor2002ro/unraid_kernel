@@ -468,6 +468,9 @@ struct amdgpu_pm {
 	 * 0 = disabled (default), otherwise enable corresponding debug mode
 	 */
 	uint32_t		smu_debug_mask;
+
+	struct mutex            stable_pstate_ctx_lock;
+	struct amdgpu_ctx       *stable_pstate_ctx;
 };
 
 #define R600_SSTU_DFLT                               0
