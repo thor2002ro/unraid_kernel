@@ -700,7 +700,7 @@ static void print_symbol_for_dotconfig(FILE *fp, struct symbol *sym)
 
 static void print_symbol_for_autoconf(FILE *fp, struct symbol *sym)
 {
-	__print_symbol(fp, sym, OUTPUT_N_NONE, true);
+	__print_symbol(fp, sym, OUTPUT_N_NONE, false);
 }
 
 void print_symbol_for_listconfig(struct symbol *sym)
