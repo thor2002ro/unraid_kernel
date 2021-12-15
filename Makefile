@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: GPL-2.0
 VERSION = 5
-PATCHLEVEL = 15
+PATCHLEVEL = 16
 SUBLEVEL = 0
-EXTRAVERSION =
-NAME = Trick or Treat
+EXTRAVERSION = -rc5
+NAME = Gobble Gobble
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
@@ -789,7 +789,7 @@ stackp-flags-$(CONFIG_STACKPROTECTOR_STRONG)      := -fstack-protector-strong
 KBUILD_CFLAGS += $(stackp-flags-y)
 
 KBUILD_CFLAGS-$(CONFIG_WERROR) += -Werror
-KBUILD_CFLAGS += $(KBUILD_CFLAGS-y)
+KBUILD_CFLAGS += $(KBUILD_CFLAGS-y) $(CONFIG_CC_IMPLICIT_FALLTHROUGH:"%"=%)
 
 ifdef CONFIG_CC_IS_CLANG
 KBUILD_CPPFLAGS += -Qunused-arguments
@@ -801,10 +801,6 @@ KBUILD_CFLAGS += -Wno-gnu
 KBUILD_CFLAGS += -mno-global-merge
 else
 
-# Warn about unmarked fall-throughs in switch statement.
-# Disabled for clang while comment to attribute conversion happens and
-# https://github.com/ClangBuiltLinux/linux/issues/636 is discussed.
-KBUILD_CFLAGS += $(call cc-option,-Wimplicit-fallthrough=5,)
 # gcc inanely warns about local variables called 'main'
 KBUILD_CFLAGS += -Wno-main
 endif
@@ -849,44 +845,6 @@ KBUILD_CFLAGS	+= $(call cc-option, -fno-stack-clash-protection)
 ifdef CONFIG_ZERO_CALL_USED_REGS
 KBUILD_CFLAGS	+= -fzero-call-used-regs=used-gpr
 endif
-
-DEBUG_CFLAGS	:=
-
-ifdef CONFIG_DEBUG_INFO
-
-ifdef CONFIG_DEBUG_INFO_SPLIT
-DEBUG_CFLAGS	+= -gsplit-dwarf
-else
-DEBUG_CFLAGS	+= -g
-endif
-
-ifndef CONFIG_AS_IS_LLVM
-KBUILD_AFLAGS	+= -Wa,-gdwarf-2
-endif
-
-ifndef CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT
-dwarf-version-$(CONFIG_DEBUG_INFO_DWARF4) := 4
-dwarf-version-$(CONFIG_DEBUG_INFO_DWARF5) := 5
-DEBUG_CFLAGS	+= -gdwarf-$(dwarf-version-y)
-endif
-
-ifdef CONFIG_DEBUG_INFO_REDUCED
-DEBUG_CFLAGS	+= -fno-var-tracking
-ifdef CONFIG_CC_IS_GCC
-DEBUG_CFLAGS	+= -femit-struct-debug-baseonly
-endif
-endif
-
-ifdef CONFIG_DEBUG_INFO_COMPRESSED
-DEBUG_CFLAGS	+= -gz=zlib
-KBUILD_AFLAGS	+= -gz=zlib
-KBUILD_LDFLAGS	+= --compress-debug-sections=zlib
-endif
-
-endif # CONFIG_DEBUG_INFO
-
-KBUILD_CFLAGS += $(DEBUG_CFLAGS)
-export DEBUG_CFLAGS
 
 ifdef CONFIG_FUNCTION_TRACER
 ifdef CONFIG_FTRACE_MCOUNT_USE_CC
@@ -984,7 +942,7 @@ KBUILD_CFLAGS += -falign-functions=64
 endif
 
 # arch Makefile may override CC so keep this after arch Makefile is included
-NOSTDINC_FLAGS += -nostdinc -isystem $(shell $(CC) -print-file-name=include)
+NOSTDINC_FLAGS += -nostdinc
 
 # warn about C99 declaration after statement
 KBUILD_CFLAGS += -Wdeclaration-after-statement
@@ -1051,6 +1009,7 @@ KBUILD_CPPFLAGS += $(call cc-option,-fmacro-prefix-map=$(srctree)/=)
 
 # include additional Makefiles when needed
 include-y			:= scripts/Makefile.extrawarn
+include-$(CONFIG_DEBUG_INFO)	+= scripts/Makefile.debug
 include-$(CONFIG_KASAN)		+= scripts/Makefile.kasan
 include-$(CONFIG_KCSAN)		+= scripts/Makefile.kcsan
 include-$(CONFIG_UBSAN)		+= scripts/Makefile.ubsan
@@ -1415,17 +1374,17 @@ endif
 
 ifneq ($(dtstree),)
 
-%.dtb: dt_binding_check include/config/kernel.release scripts_dtc
-	$(Q)$(MAKE) $(build)=$(dtstree) $(dtstree)/$@ $(dtstree)/$*.dt.yaml
+%.dtb: include/config/kernel.release scripts_dtc
+	$(Q)$(MAKE) $(build)=$(dtstree) $(dtstree)/$@
 
-%.dtbo: dt_binding_check include/config/kernel.release scripts_dtc
-	$(Q)$(MAKE) $(build)=$(dtstree) $(dtstree)/$@ $(dtstree)/$*.dt.yaml
+%.dtbo: include/config/kernel.release scripts_dtc
+	$(Q)$(MAKE) $(build)=$(dtstree) $(dtstree)/$@
 
 PHONY += dtbs dtbs_install dtbs_check
 dtbs: include/config/kernel.release scripts_dtc
 	$(Q)$(MAKE) $(build)=$(dtstree)
 
-ifneq ($(filter dtbs_check %.dtb %.dtbo, $(MAKECMDGOALS)),)
+ifneq ($(filter dtbs_check, $(MAKECMDGOALS)),)
 export CHECK_DTBS=y
 dtbs: dt_binding_check
 endif

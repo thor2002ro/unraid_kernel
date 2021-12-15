@@ -4210,7 +4210,10 @@ static int __dev_queue_xmit(struct sk_buff *skb, struct net_device *sb_dev)
 	if (dev->flags & IFF_UP) {
 		int cpu = smp_processor_id(); /* ok because BHs are off */
 
-		if (txq->xmit_lock_owner != cpu) {
+		/* Other cpus might concurrently change txq->xmit_lock_owner
+		 * to -1 or to their cpu id, but not to our id.
+		 */
+		if (READ_ONCE(txq->xmit_lock_owner) != cpu) {
 			if (dev_xmit_recursion())
 				goto recursion_alert;
 
@@ -6928,7 +6931,7 @@ void napi_disable(struct napi_struct *n)
 	might_sleep();
 	set_bit(NAPI_STATE_DISABLE, &n->state);
 
-	do {
+	for ( ; ; ) {
 		val = READ_ONCE(n->state);
 		if (val & (NAPIF_STATE_SCHED | NAPIF_STATE_NPSVC)) {
 			usleep_range(20, 200);
@@ -6937,7 +6940,10 @@ void napi_disable(struct napi_struct *n)
 
 		new = val | NAPIF_STATE_SCHED | NAPIF_STATE_NPSVC;
 		new &= ~(NAPIF_STATE_THREADED | NAPIF_STATE_PREFER_BUSY_POLL);
-	} while (cmpxchg(&n->state, val, new) != val);
+
+		if (cmpxchg(&n->state, val, new) == val)
+			break;
+	}
 
 	hrtimer_cancel(&n->timer);
 

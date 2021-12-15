@@ -289,7 +289,7 @@ mlx5_lag_create_definer(struct mlx5_lag *ldev, enum netdev_lag_hash hash,
 
 	lag_definer = kzalloc(sizeof(*lag_definer), GFP_KERNEL);
 	if (!lag_definer)
-		return ERR_PTR(ENOMEM);
+		return ERR_PTR(-ENOMEM);
 
 	match_definer_mask = kvzalloc(MLX5_FLD_SZ_BYTES(match_definer,
 							match_mask),
@@ -608,4 +608,5 @@ void mlx5_lag_port_sel_destroy(struct mlx5_lag *ldev)
 	if (port_sel->tunnel)
 		mlx5_destroy_ttc_table(port_sel->inner.ttc);
 	mlx5_lag_destroy_definers(ldev);
+	memset(port_sel, 0, sizeof(*port_sel));
 }

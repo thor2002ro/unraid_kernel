@@ -2138,7 +2138,7 @@ static enum link_training_result dp_perform_8b_10b_link_training(
 		}
 
 		for (lane = 0; lane < (uint8_t)lt_settings->link_settings.lane_count; lane++)
-			lt_settings->dpcd_lane_settings[lane].bits.VOLTAGE_SWING_SET = VOLTAGE_SWING_LEVEL0;
+			lt_settings->dpcd_lane_settings[lane].raw = 0;
 	}
 
 	if (status == LINK_TRAINING_SUCCESS) {
@@ -5329,6 +5329,14 @@ bool dc_link_dp_set_test_pattern(
 			return false;
 
 		if (link->dpcd_caps.dpcd_rev.raw >= DPCD_REV_12) {
+#if defined(CONFIG_DRM_AMD_DC_DCN)
+			if (test_pattern == DP_TEST_PATTERN_SQUARE_PULSE)
+				core_link_write_dpcd(link,
+						DP_LINK_SQUARE_PATTERN,
+						p_custom_pattern,
+						1);
+
+#endif
 			/* tell receiver that we are sending qualification
 			 * pattern DP 1.2 or later - DP receiver's link quality
 			 * pattern is set using DPCD LINK_QUAL_LANEx_SET

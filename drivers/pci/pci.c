@@ -733,6 +733,38 @@ u16 pci_find_vsec_capability(struct pci_dev *dev, u16 vendor, int cap)
 EXPORT_SYMBOL_GPL(pci_find_vsec_capability);
 
 /**
+ * pci_find_dvsec_capability - Find DVSEC for vendor
+ * @dev: PCI device to query
+ * @vendor: Vendor ID to match for the DVSEC
+ * @dvsec: Designated Vendor-specific capability ID
+ *
+ * If DVSEC has Vendor ID @vendor and DVSEC ID @dvsec return the capability
+ * offset in config space; otherwise return 0.
+ */
+u16 pci_find_dvsec_capability(struct pci_dev *dev, u16 vendor, u16 dvsec)
+{
+	int pos;
+
+	pos = pci_find_ext_capability(dev, PCI_EXT_CAP_ID_DVSEC);
+	if (!pos)
+		return 0;
+
+	while (pos) {
+		u16 v, id;
+
+		pci_read_config_word(dev, pos + PCI_DVSEC_HEADER1, &v);
+		pci_read_config_word(dev, pos + PCI_DVSEC_HEADER2, &id);
+		if (vendor == v && dvsec == id)
+			return pos;
+
+		pos = pci_find_next_ext_capability(dev, pos, PCI_EXT_CAP_ID_DVSEC);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(pci_find_dvsec_capability);
+
+/**
  * pci_find_parent_resource - return resource region of parent bus of given
  *			      region
  * @dev: PCI device structure contains resources to be searched
@@ -5074,12 +5106,13 @@ static int pci_reset_bus_function(struct pci_dev *dev, bool probe)
 	return pci_parent_bus_reset(dev, probe);
 }
 
-static void pci_dev_lock(struct pci_dev *dev)
+void pci_dev_lock(struct pci_dev *dev)
 {
 	pci_cfg_access_lock(dev);
 	/* block PM suspend, driver probe, etc. */
 	device_lock(&dev->dev);
 }
+EXPORT_SYMBOL_GPL(pci_dev_lock);
 
 /* Return 1 on successful lock, 0 on contention */
 int pci_dev_trylock(struct pci_dev *dev)
@@ -5103,14 +5136,13 @@ EXPORT_SYMBOL_GPL(pci_dev_unlock);
 
 static void pci_dev_save_and_disable(struct pci_dev *dev)
 {
-	struct pci_driver *drv = to_pci_driver(dev->dev.driver);
 	const struct pci_error_handlers *err_handler =
-			drv ? drv->err_handler : NULL;
+			dev->driver ? dev->driver->err_handler : NULL;
 
 	/*
-	 * drv->err_handler->reset_prepare() is protected against races
-	 * with ->remove() by the device lock, which must be held by the
-	 * caller.
+	 * dev->driver->err_handler->reset_prepare() is protected against
+	 * races with ->remove() by the device lock, which must be held by
+	 * the caller.
 	 */
 	if (err_handler && err_handler->reset_prepare)
 		err_handler->reset_prepare(dev);
@@ -5135,15 +5167,15 @@ static void pci_dev_save_and_disable(struct pci_dev *dev)
 
 static void pci_dev_restore(struct pci_dev *dev)
 {
-	struct pci_driver *drv = to_pci_driver(dev->dev.driver);
 	const struct pci_error_handlers *err_handler =
-			drv ? drv->err_handler : NULL;
+			dev->driver ? dev->driver->err_handler : NULL;
 
 	pci_restore_state(dev);
 
 	/*
-	 * drv->err_handler->reset_done() is protected against races with
-	 * ->remove() by the device lock, which must be held by the caller.
+	 * dev->driver->err_handler->reset_done() is protected against
+	 * races with ->remove() by the device lock, which must be held by
+	 * the caller.
 	 */
 	if (err_handler && err_handler->reset_done)
 		err_handler->reset_done(dev);

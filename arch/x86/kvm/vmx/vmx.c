@@ -769,24 +769,13 @@ void vmx_update_exception_bitmap(struct kvm_vcpu *vcpu)
 /*
  * Check if MSR is intercepted for currently loaded MSR bitmap.
  */
-static bool msr_write_intercepted(struct kvm_vcpu *vcpu, u32 msr)
+static bool msr_write_intercepted(struct vcpu_vmx *vmx, u32 msr)
 {
-	unsigned long *msr_bitmap;
-	int f = sizeof(unsigned long);
-
-	if (!cpu_has_vmx_msr_bitmap())
+	if (!(exec_controls_get(vmx) & CPU_BASED_USE_MSR_BITMAPS))
 		return true;
 
-	msr_bitmap = to_vmx(vcpu)->loaded_vmcs->msr_bitmap;
-
-	if (msr <= 0x1fff) {
-		return !!test_bit(msr, msr_bitmap + 0x800 / f);
-	} else if ((msr >= 0xc0000000) && (msr <= 0xc0001fff)) {
-		msr &= 0x1fff;
-		return !!test_bit(msr, msr_bitmap + 0xc00 / f);
-	}
-
-	return true;
+	return vmx_test_msr_bitmap_write(vmx->loaded_vmcs->msr_bitmap,
+					 MSR_IA32_SPEC_CTRL);
 }
 
 static void clear_atomic_switch_msr_special(struct vcpu_vmx *vmx,
@@ -2657,15 +2646,6 @@ int alloc_loaded_vmcs(struct loaded_vmcs *loaded_vmcs)
 		if (!loaded_vmcs->msr_bitmap)
 			goto out_vmcs;
 		memset(loaded_vmcs->msr_bitmap, 0xff, PAGE_SIZE);
-
-		if (IS_ENABLED(CONFIG_HYPERV) &&
-		    static_branch_unlikely(&enable_evmcs) &&
-		    (ms_hyperv.nested_features & HV_X64_NESTED_MSR_BITMAP)) {
-			struct hv_enlightened_vmcs *evmcs =
-				(struct hv_enlightened_vmcs *)loaded_vmcs->vmcs;
-
-			evmcs->hv_enlightenments_control.msr_bitmap = 1;
-		}
 	}
 
 	memset(&loaded_vmcs->host_state, 0, sizeof(struct vmcs_host_state));
@@ -2929,6 +2909,13 @@ static void vmx_flush_tlb_all(struct kvm_vcpu *vcpu)
 	}
 }
 
+static inline int vmx_get_current_vpid(struct kvm_vcpu *vcpu)
+{
+	if (is_guest_mode(vcpu))
+		return nested_get_vpid02(vcpu);
+	return to_vmx(vcpu)->vpid;
+}
+
 static void vmx_flush_tlb_current(struct kvm_vcpu *vcpu)
 {
 	struct kvm_mmu *mmu = vcpu->arch.mmu;
@@ -2941,31 +2928,29 @@ static void vmx_flush_tlb_current(struct kvm_vcpu *vcpu)
 	if (enable_ept)
 		ept_sync_context(construct_eptp(vcpu, root_hpa,
 						mmu->shadow_root_level));
-	else if (!is_guest_mode(vcpu))
-		vpid_sync_context(to_vmx(vcpu)->vpid);
 	else
-		vpid_sync_context(nested_get_vpid02(vcpu));
+		vpid_sync_context(vmx_get_current_vpid(vcpu));
 }
 
 static void vmx_flush_tlb_gva(struct kvm_vcpu *vcpu, gva_t addr)
 {
 	/*
-	 * vpid_sync_vcpu_addr() is a nop if vmx->vpid==0, see the comment in
+	 * vpid_sync_vcpu_addr() is a nop if vpid==0, see the comment in
 	 * vmx_flush_tlb_guest() for an explanation of why this is ok.
 	 */
-	vpid_sync_vcpu_addr(to_vmx(vcpu)->vpid, addr);
+	vpid_sync_vcpu_addr(vmx_get_current_vpid(vcpu), addr);
 }
 
 static void vmx_flush_tlb_guest(struct kvm_vcpu *vcpu)
 {
 	/*
-	 * vpid_sync_context() is a nop if vmx->vpid==0, e.g. if enable_vpid==0
-	 * or a vpid couldn't be allocated for this vCPU.  VM-Enter and VM-Exit
-	 * are required to flush GVA->{G,H}PA mappings from the TLB if vpid is
+	 * vpid_sync_context() is a nop if vpid==0, e.g. if enable_vpid==0 or a
+	 * vpid couldn't be allocated for this vCPU.  VM-Enter and VM-Exit are
+	 * required to flush GVA->{G,H}PA mappings from the TLB if vpid is
 	 * disabled (VM-Enter with vpid enabled and vpid==0 is disallowed),
 	 * i.e. no explicit INVVPID is necessary.
 	 */
-	vpid_sync_context(to_vmx(vcpu)->vpid);
+	vpid_sync_context(vmx_get_current_vpid(vcpu));
 }
 
 void vmx_ept_load_pdptrs(struct kvm_vcpu *vcpu)
@@ -3695,46 +3680,6 @@ void free_vpid(int vpid)
 	spin_lock(&vmx_vpid_lock);
 	__clear_bit(vpid, vmx_vpid_bitmap);
 	spin_unlock(&vmx_vpid_lock);
-}
-
-static void vmx_clear_msr_bitmap_read(ulong *msr_bitmap, u32 msr)
-{
-	int f = sizeof(unsigned long);
-
-	if (msr <= 0x1fff)
-		__clear_bit(msr, msr_bitmap + 0x000 / f);
-	else if ((msr >= 0xc0000000) && (msr <= 0xc0001fff))
-		__clear_bit(msr & 0x1fff, msr_bitmap + 0x400 / f);
-}
-
-static void vmx_clear_msr_bitmap_write(ulong *msr_bitmap, u32 msr)
-{
-	int f = sizeof(unsigned long);
-
-	if (msr <= 0x1fff)
-		__clear_bit(msr, msr_bitmap + 0x800 / f);
-	else if ((msr >= 0xc0000000) && (msr <= 0xc0001fff))
-		__clear_bit(msr & 0x1fff, msr_bitmap + 0xc00 / f);
-}
-
-static void vmx_set_msr_bitmap_read(ulong *msr_bitmap, u32 msr)
-{
-	int f = sizeof(unsigned long);
-
-	if (msr <= 0x1fff)
-		__set_bit(msr, msr_bitmap + 0x000 / f);
-	else if ((msr >= 0xc0000000) && (msr <= 0xc0001fff))
-		__set_bit(msr & 0x1fff, msr_bitmap + 0x400 / f);
-}
-
-static void vmx_set_msr_bitmap_write(ulong *msr_bitmap, u32 msr)
-{
-	int f = sizeof(unsigned long);
-
-	if (msr <= 0x1fff)
-		__set_bit(msr, msr_bitmap + 0x800 / f);
-	else if ((msr >= 0xc0000000) && (msr <= 0xc0001fff))
-		__set_bit(msr & 0x1fff, msr_bitmap + 0xc00 / f);
 }
 
 void vmx_disable_intercept_for_msr(struct kvm_vcpu *vcpu, u32 msr, int type)
@@ -5494,6 +5439,7 @@ static int handle_invpcid(struct kvm_vcpu *vcpu)
 		u64 pcid;
 		u64 gla;
 	} operand;
+	int gpr_index;
 
 	if (!guest_cpuid_has(vcpu, X86_FEATURE_INVPCID)) {
 		kvm_queue_exception(vcpu, UD_VECTOR);
@@ -5501,12 +5447,8 @@ static int handle_invpcid(struct kvm_vcpu *vcpu)
 	}
 
 	vmx_instruction_info = vmcs_read32(VMX_INSTRUCTION_INFO);
-	type = kvm_register_read(vcpu, (vmx_instruction_info >> 28) & 0xf);
-
-	if (type > 3) {
-		kvm_inject_gp(vcpu, 0);
-		return 1;
-	}
+	gpr_index = vmx_get_instr_info_reg2(vmx_instruction_info);
+	type = kvm_register_read(vcpu, gpr_index);
 
 	/* According to the Intel instruction reference, the memory operand
 	 * is read even if it isn't needed (e.g., for type==all)
@@ -6316,9 +6258,9 @@ static int vmx_sync_pir_to_irr(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	int max_irr;
-	bool max_irr_updated;
+	bool got_posted_interrupt;
 
-	if (KVM_BUG_ON(!vcpu->arch.apicv_active, vcpu->kvm))
+	if (KVM_BUG_ON(!enable_apicv, vcpu->kvm))
 		return -EIO;
 
 	if (pi_test_on(&vmx->pi_desc)) {
@@ -6328,22 +6270,33 @@ static int vmx_sync_pir_to_irr(struct kvm_vcpu *vcpu)
 		 * But on x86 this is just a compiler barrier anyway.
 		 */
 		smp_mb__after_atomic();
-		max_irr_updated =
+		got_posted_interrupt =
 			kvm_apic_update_irr(vcpu, vmx->pi_desc.pir, &max_irr);
-
-		/*
-		 * If we are running L2 and L1 has a new pending interrupt
-		 * which can be injected, this may cause a vmexit or it may
-		 * be injected into L2.  Either way, this interrupt will be
-		 * processed via KVM_REQ_EVENT, not RVI, because we do not use
-		 * virtual interrupt delivery to inject L1 interrupts into L2.
-		 */
-		if (is_guest_mode(vcpu) && max_irr_updated)
-			kvm_make_request(KVM_REQ_EVENT, vcpu);
 	} else {
 		max_irr = kvm_lapic_find_highest_irr(vcpu);
+		got_posted_interrupt = false;
 	}
-	vmx_hwapic_irr_update(vcpu, max_irr);
+
+	/*
+	 * Newly recognized interrupts are injected via either virtual interrupt
+	 * delivery (RVI) or KVM_REQ_EVENT.  Virtual interrupt delivery is
+	 * disabled in two cases:
+	 *
+	 * 1) If L2 is running and the vCPU has a new pending interrupt.  If L1
+	 * wants to exit on interrupts, KVM_REQ_EVENT is needed to synthesize a
+	 * VM-Exit to L1.  If L1 doesn't want to exit, the interrupt is injected
+	 * into L2, but KVM doesn't use virtual interrupt delivery to inject
+	 * interrupts into L2, and so KVM_REQ_EVENT is again needed.
+	 *
+	 * 2) If APICv is disabled for this vCPU, assigned devices may still
+	 * attempt to post interrupts.  The posted interrupt vector will cause
+	 * a VM-Exit and the subsequent entry will call sync_pir_to_irr.
+	 */
+	if (!is_guest_mode(vcpu) && kvm_vcpu_apicv_active(vcpu))
+		vmx_set_rvi(max_irr);
+	else if (got_posted_interrupt)
+		kvm_make_request(KVM_REQ_EVENT, vcpu);
+
 	return max_irr;
 }
 
@@ -6749,7 +6702,7 @@ static fastpath_t vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	 * If the L02 MSR bitmap does not intercept the MSR, then we need to
 	 * save it.
 	 */
-	if (unlikely(!msr_write_intercepted(vcpu, MSR_IA32_SPEC_CTRL)))
+	if (unlikely(!msr_write_intercepted(vmx, MSR_IA32_SPEC_CTRL)))
 		vmx->spec_ctrl = native_read_msr(MSR_IA32_SPEC_CTRL);
 
 	x86_spec_ctrl_restore_host(vmx->spec_ctrl, 0);
@@ -6879,6 +6832,19 @@ static int vmx_create_vcpu(struct kvm_vcpu *vcpu)
 	err = alloc_loaded_vmcs(&vmx->vmcs01);
 	if (err < 0)
 		goto free_pml;
+
+	/*
+	 * Use Hyper-V 'Enlightened MSR Bitmap' feature when KVM runs as a
+	 * nested (L1) hypervisor and Hyper-V in L0 supports it. Enable the
+	 * feature only for vmcs01, KVM currently isn't equipped to realize any
+	 * performance benefits from enabling it for vmcs02.
+	 */
+	if (IS_ENABLED(CONFIG_HYPERV) && static_branch_unlikely(&enable_evmcs) &&
+	    (ms_hyperv.nested_features & HV_X64_NESTED_MSR_BITMAP)) {
+		struct hv_enlightened_vmcs *evmcs = (void *)vmx->vmcs01.vmcs;
+
+		evmcs->hv_enlightenments_control.msr_bitmap = 1;
+	}
 
 	/* The MSR bitmap starts with all ones */
 	bitmap_fill(vmx->shadow_msr_intercept.read, MAX_POSSIBLE_PASSTHROUGH_MSRS);
@@ -7563,7 +7529,9 @@ static void hardware_unsetup(void)
 static bool vmx_check_apicv_inhibit_reasons(ulong bit)
 {
 	ulong supported = BIT(APICV_INHIBIT_REASON_DISABLE) |
-			  BIT(APICV_INHIBIT_REASON_HYPERV);
+			  BIT(APICV_INHIBIT_REASON_ABSENT) |
+			  BIT(APICV_INHIBIT_REASON_HYPERV) |
+			  BIT(APICV_INHIBIT_REASON_BLOCKIRQ);
 
 	return supported & BIT(bit);
 }
@@ -7814,10 +7782,10 @@ static __init int hardware_setup(void)
 		ple_window_shrink = 0;
 	}
 
-	if (!cpu_has_vmx_apicv()) {
+	if (!cpu_has_vmx_apicv())
 		enable_apicv = 0;
+	if (!enable_apicv)
 		vmx_x86_ops.sync_pir_to_irr = NULL;
-	}
 
 	if (cpu_has_vmx_tsc_scaling()) {
 		kvm_has_tsc_control = true;

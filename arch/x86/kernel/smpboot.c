@@ -579,6 +579,17 @@ static struct sched_domain_topology_level x86_numa_in_package_topology[] = {
 	{ NULL, },
 };
 
+static struct sched_domain_topology_level x86_hybrid_topology[] = {
+#ifdef CONFIG_SCHED_SMT
+	{ cpu_smt_mask, x86_smt_flags, SD_INIT_NAME(SMT) },
+#endif
+#ifdef CONFIG_SCHED_MC
+	{ cpu_coregroup_mask, x86_core_flags, SD_INIT_NAME(MC) },
+#endif
+	{ cpu_cpu_mask, SD_INIT_NAME(DIE) },
+	{ NULL, },
+};
+
 static struct sched_domain_topology_level x86_topology[] = {
 #ifdef CONFIG_SCHED_SMT
 	{ cpu_smt_mask, x86_smt_flags, SD_INIT_NAME(SMT) },
@@ -1350,12 +1361,7 @@ static void __init smp_get_logical_apicid(void)
 		cpu0_logical_apicid = GET_APIC_LOGICAL_ID(apic_read(APIC_LDR));
 }
 
-/*
- * Prepare for SMP bootup.
- * @max_cpus: configured maximum number of CPUs, It is a legacy parameter
- *            for common interface support.
- */
-void __init native_smp_prepare_cpus(unsigned int max_cpus)
+void __init smp_prepare_cpus_common(void)
 {
 	unsigned int i;
 
@@ -1386,6 +1392,17 @@ void __init native_smp_prepare_cpus(unsigned int max_cpus)
 	set_sched_topology(x86_topology);
 
 	set_cpu_sibling_map(0);
+}
+
+/*
+ * Prepare for SMP bootup.
+ * @max_cpus: configured maximum number of CPUs, It is a legacy parameter
+ *            for common interface support.
+ */
+void __init native_smp_prepare_cpus(unsigned int max_cpus)
+{
+	smp_prepare_cpus_common();
+
 	init_freq_invariance(false, false);
 	smp_sanity_check();
 
@@ -1463,8 +1480,11 @@ void __init native_smp_cpus_done(unsigned int max_cpus)
 
 	calculate_max_logical_packages();
 
+	/* XXX for now assume numa-in-package and hybrid don't overlap */
 	if (x86_has_numa_in_package)
 		set_sched_topology(x86_numa_in_package_topology);
+	if (cpu_feature_enabled(X86_FEATURE_HYBRID_CPU))
+		set_sched_topology(x86_hybrid_topology);
 
 	nmi_selftest();
 	impress_friends();

@@ -41,7 +41,6 @@ void ipc_imem_sys_wwan_close(struct iosm_imem *ipc_imem, int if_id,
 static int ipc_imem_tq_cdev_write(struct iosm_imem *ipc_imem, int arg,
 				  void *msg, size_t size)
 {
-	ipc_imem->ev_cdev_write_pending = false;
 	ipc_imem_ul_send(ipc_imem);
 
 	return 0;
@@ -50,11 +49,6 @@ static int ipc_imem_tq_cdev_write(struct iosm_imem *ipc_imem, int arg,
 /* Through tasklet to do sio write. */
 static int ipc_imem_call_cdev_write(struct iosm_imem *ipc_imem)
 {
-	if (ipc_imem->ev_cdev_write_pending)
-		return -1;
-
-	ipc_imem->ev_cdev_write_pending = true;
-
 	return ipc_task_queue_send_task(ipc_imem, ipc_imem_tq_cdev_write, 0,
 					NULL, 0, false);
 }
@@ -394,12 +388,10 @@ void ipc_imem_sys_devlink_close(struct iosm_devlink *ipc_devlink)
 	int boot_check_timeout = BOOT_CHECK_DEFAULT_TIMEOUT;
 	enum ipc_mem_exec_stage exec_stage;
 	struct ipc_mem_channel *channel;
-	enum ipc_phase curr_phase;
 	int status = 0;
 	u32 tail = 0;
 
 	channel = ipc_imem->ipc_devlink->devlink_sio.channel;
-	curr_phase = ipc_imem->phase;
 	/* Increase the total wait time to boot_check_timeout */
 	do {
 		exec_stage = ipc_mmio_get_exec_stage(ipc_imem->mmio);
@@ -452,6 +444,7 @@ void ipc_imem_sys_devlink_close(struct iosm_devlink *ipc_devlink)
 	/* Release the pipe resources */
 	ipc_imem_pipe_cleanup(ipc_imem, &channel->ul_pipe);
 	ipc_imem_pipe_cleanup(ipc_imem, &channel->dl_pipe);
+	ipc_imem->nr_of_channels--;
 }
 
 void ipc_imem_sys_devlink_notify_rx(struct iosm_devlink *ipc_devlink,

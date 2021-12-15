@@ -193,7 +193,7 @@ struct bpf_map {
 	atomic64_t usercnt;
 	struct work_struct work;
 	struct mutex freeze_mutex;
-	u64 writecnt; /* writable mmap cnt; protected by freeze_mutex */
+	atomic64_t writecnt;
 };
 
 static inline bool map_value_has_spin_lock(const struct bpf_map *map)
@@ -484,6 +484,12 @@ bpf_ctx_record_field_size(struct bpf_insn_access_aux *aux, u32 size)
 	aux->ctx_field_size = size;
 }
 
+static inline bool bpf_pseudo_func(const struct bpf_insn *insn)
+{
+	return insn->code == (BPF_LD | BPF_IMM | BPF_DW) &&
+	       insn->src_reg == BPF_PSEUDO_FUNC;
+}
+
 struct bpf_prog_ops {
 	int (*test_run)(struct bpf_prog *prog, const union bpf_attr *kattr,
 			union bpf_attr __user *uattr);
@@ -726,6 +732,7 @@ int bpf_trampoline_unlink_prog(struct bpf_prog *prog, struct bpf_trampoline *tr)
 struct bpf_trampoline *bpf_trampoline_get(u64 key,
 					  struct bpf_attach_target_info *tgt_info);
 void bpf_trampoline_put(struct bpf_trampoline *tr);
+int arch_prepare_bpf_dispatcher(void *image, s64 *funcs, int num_funcs);
 #define BPF_DISPATCHER_INIT(_name) {				\
 	.mutex = __MUTEX_INITIALIZER(_name.mutex),		\
 	.func = &_name##_func,					\
@@ -1346,28 +1353,16 @@ extern struct mutex bpf_stats_enabled_mutex;
  * kprobes, tracepoints) to prevent deadlocks on map operations as any of
  * these events can happen inside a region which holds a map bucket lock
  * and can deadlock on it.
- *
- * Use the preemption safe inc/dec variants on RT because migrate disable
- * is preemptible on RT and preemption in the middle of the RMW operation
- * might lead to inconsistent state. Use the raw variants for non RT
- * kernels as migrate_disable() maps to preempt_disable() so the slightly
- * more expensive save operation can be avoided.
  */
 static inline void bpf_disable_instrumentation(void)
 {
 	migrate_disable();
-	if (IS_ENABLED(CONFIG_PREEMPT_RT))
-		this_cpu_inc(bpf_prog_active);
-	else
-		__this_cpu_inc(bpf_prog_active);
+	this_cpu_inc(bpf_prog_active);
 }
 
 static inline void bpf_enable_instrumentation(void)
 {
-	if (IS_ENABLED(CONFIG_PREEMPT_RT))
-		this_cpu_dec(bpf_prog_active);
-	else
-		__this_cpu_dec(bpf_prog_active);
+	this_cpu_dec(bpf_prog_active);
 	migrate_enable();
 }
 
@@ -1413,6 +1408,7 @@ void bpf_map_put(struct bpf_map *map);
 void *bpf_map_area_alloc(u64 size, int numa_node);
 void *bpf_map_area_mmapable_alloc(u64 size, int numa_node);
 void bpf_map_area_free(void *base);
+bool bpf_map_write_active(const struct bpf_map *map);
 void bpf_map_init_from_attr(struct bpf_map *map, union bpf_attr *attr);
 int  generic_map_lookup_batch(struct bpf_map *map,
 			      const union bpf_attr *attr,

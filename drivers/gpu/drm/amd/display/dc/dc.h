@@ -47,7 +47,7 @@ struct aux_payload;
 struct set_config_cmd_payload;
 struct dmub_notification;
 
-#define DC_VER "3.2.159"
+#define DC_VER "3.2.160"
 
 #define MAX_SURFACES 3
 #define MAX_PLANES 6
@@ -508,7 +508,8 @@ union dpia_debug_options {
 		uint32_t disable_dpia:1;
 		uint32_t force_non_lttpr:1;
 		uint32_t extend_aux_rd_interval:1;
-		uint32_t reserved:29;
+		uint32_t disable_mst_dsc_work_around:1;
+		uint32_t reserved:28;
 	} bits;
 	uint32_t raw;
 };
@@ -675,6 +676,7 @@ struct dc_debug_options {
 #endif
 	union mem_low_power_enable_options enable_mem_low_power;
 	union root_clock_optimization_options root_clock_optimization;
+	bool hpo_optimization;
 	bool force_vblank_alignment;
 
 	/* Enable dmub aux for legacy ddc */

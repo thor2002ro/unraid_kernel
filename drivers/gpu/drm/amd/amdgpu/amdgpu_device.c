@@ -2398,10 +2398,6 @@ static int amdgpu_device_ip_init(struct amdgpu_device *adev)
 	if (!adev->gmc.xgmi.pending_reset)
 		amdgpu_amdkfd_device_init(adev);
 
-	r = amdgpu_amdkfd_resume_iommu(adev);
-	if (r)
-		goto init_failed;
-
 	amdgpu_fru_get_product_info(adev);
 
 init_failed:
@@ -3171,11 +3167,21 @@ bool amdgpu_device_asic_has_dc_support(enum amd_asic_type asic_type)
 {
 	switch (asic_type) {
 #if defined(CONFIG_DRM_AMD_DC)
-#if defined(CONFIG_DRM_AMD_DC_SI)
 	case CHIP_TAHITI:
 	case CHIP_PITCAIRN:
 	case CHIP_VERDE:
 	case CHIP_OLAND:
+		/*
+		 * We have systems in the wild with these ASICs that require
+		 * LVDS and VGA support which is not supported with DC.
+		 *
+		 * Fallback to the non-DC driver here by default so as not to
+		 * cause regressions.
+		 */
+#if defined(CONFIG_DRM_AMD_DC_SI)
+		return amdgpu_dc > 0;
+#else
+		return false;
 #endif
 	case CHIP_BONAIRE:
 	case CHIP_KAVERI:
@@ -3503,6 +3509,9 @@ int amdgpu_device_init(struct amdgpu_device *adev,
 		adev->rmmio_size = pci_resource_len(adev->pdev, 2);
 	}
 
+	for (i = 0; i < AMD_IP_BLOCK_TYPE_NUM; i++)
+		atomic_set(&adev->pm.pwr_state[i], POWER_STATE_UNKNOWN);
+
 	adev->rmmio = ioremap(adev->rmmio_base, adev->rmmio_size);
 	if (adev->rmmio == NULL) {
 		return -ENOMEM;
@@ -3824,7 +3833,7 @@ void amdgpu_device_fini_hw(struct amdgpu_device *adev)
 	/* disable all interrupts */
 	amdgpu_irq_disable_all(adev);
 	if (adev->mode_info.mode_config_initialized){
-		if (!amdgpu_device_has_dc_support(adev))
+		if (!drm_drv_uses_atomic_modeset(adev_to_drm(adev)))
 			drm_helper_force_disable_all(adev_to_drm(adev));
 		else
 			drm_atomic_helper_shutdown(adev_to_drm(adev));
@@ -4280,14 +4289,14 @@ static int amdgpu_device_reset_sriov(struct amdgpu_device *adev,
 {
 	int r;
 
+	amdgpu_amdkfd_pre_reset(adev);
+
 	if (from_hypervisor)
 		r = amdgpu_virt_request_full_gpu(adev, true);
 	else
 		r = amdgpu_virt_reset_gpu(adev);
 	if (r)
 		return r;
-
-	amdgpu_amdkfd_pre_reset(adev);
 
 	/* Resume IP prior to SMC */
 	r = amdgpu_device_ip_reinit_early_sriov(adev);
@@ -4850,6 +4859,9 @@ static void amdgpu_device_recheck_guilty_jobs(
 
 		/* clear job's guilty and depend the folowing step to decide the real one */
 		drm_sched_reset_karma(s_job);
+		/* for the real bad job, it will be resubmitted twice, adding a dma_fence_get
+		 * to make sure fence is balanced */
+		dma_fence_get(s_job->s_fence->parent);
 		drm_sched_resubmit_jobs_ext(&ring->sched, 1);
 
 		ret = dma_fence_wait_timeout(s_job->s_fence->parent, false, ring->sched.timeout);
@@ -4885,6 +4897,7 @@ retry:
 
 		/* got the hw fence, signal finished fence */
 		atomic_dec(ring->sched.score);
+		dma_fence_put(s_job->s_fence->parent);
 		dma_fence_get(&s_job->s_fence->finished);
 		dma_fence_signal(&s_job->s_fence->finished);
 		dma_fence_put(&s_job->s_fence->finished);
@@ -5079,7 +5092,7 @@ retry:	/* Rest of adevs pre asic reset from XGMI hive. */
 
 	tmp_vram_lost_counter = atomic_read(&((adev)->vram_lost_counter));
 	/* Actual ASIC resets if needed.*/
-	/* TODO Implement XGMI hive reset logic for SRIOV */
+	/* Host driver will handle XGMI hive reset for SRIOV */
 	if (amdgpu_sriov_vf(adev)) {
 		r = amdgpu_device_reset_sriov(adev, job ? false : true);
 		if (r)
@@ -5120,7 +5133,7 @@ skip_hw_reset:
 			drm_sched_start(&ring->sched, !tmp_adev->asic_reset_res);
 		}
 
-		if (!amdgpu_device_has_dc_support(tmp_adev) && !job_signaled) {
+		if (!drm_drv_uses_atomic_modeset(adev_to_drm(tmp_adev)) && !job_signaled) {
 			drm_helper_resume_force_mode(adev_to_drm(tmp_adev));
 		}
 
@@ -5141,7 +5154,7 @@ skip_sched_resume:
 	list_for_each_entry(tmp_adev, device_list_handle, reset_list) {
 		/* unlock kfd: SRIOV would do it separately */
 		if (!need_emergency_restart && !amdgpu_sriov_vf(tmp_adev))
-	                amdgpu_amdkfd_post_reset(tmp_adev);
+			amdgpu_amdkfd_post_reset(tmp_adev);
 
 		/* kfd_post_reset will do nothing if kfd device is not initialized,
 		 * need to bring up kfd here if it's not be initialized before
