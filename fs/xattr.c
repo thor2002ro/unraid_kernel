@@ -666,19 +666,12 @@ SYSCALL_DEFINE5(fsetxattr, int, fd, const char __user *, name,
 /*
  * Extended attribute GET operations
  */
-static ssize_t
-getxattr(struct user_namespace *mnt_userns, struct dentry *d,
-	 const char __user *name, void __user *value, size_t size)
+ssize_t
+do_getxattr(struct user_namespace *mnt_userns, struct dentry *d,
+	 const char *kname, void __user *value, size_t size)
 {
-	ssize_t error;
 	void *kvalue = NULL;
-	char kname[XATTR_NAME_MAX + 1];
-
-	error = strncpy_from_user(kname, name, sizeof(kname));
-	if (error == 0 || error == sizeof(kname))
-		error = -ERANGE;
-	if (error < 0)
-		return error;
+	ssize_t error;
 
 	if (size) {
 		if (size > XATTR_SIZE_MAX)
@@ -704,6 +697,22 @@ getxattr(struct user_namespace *mnt_userns, struct dentry *d,
 	kvfree(kvalue);
 
 	return error;
+}
+
+static ssize_t
+getxattr(struct user_namespace *mnt_userns, struct dentry *d,
+	 const char __user *name, void __user *value, size_t size)
+{
+	ssize_t error;
+	char kname[XATTR_NAME_MAX + 1];
+
+	error = strncpy_from_user(kname, name, sizeof(kname));
+	if (error == 0 || error == sizeof(kname))
+		error = -ERANGE;
+	if (error < 0)
+		return error;
+
+	return do_getxattr(mnt_userns, d, kname, value, size);
 }
 
 static ssize_t path_getxattr(const char __user *pathname,
