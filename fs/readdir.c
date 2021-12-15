@@ -36,8 +36,15 @@
 	unsafe_copy_to_user(dst, src, len, label);		\
 } while (0)
 
-
-int iterate_dir(struct file *file, struct dir_context *ctx)
+/**
+ * do_iterate_dir - iterate over directory
+ * @file    : pointer to file struct of directory
+ * @ctx     : pointer to directory ctx structure
+ * @use_fpos: true : use file offset
+ *            false: use pos in ctx structure
+ */
+static int do_iterate_dir(struct file *file, struct dir_context *ctx,
+			  bool use_fpos)
 {
 	struct inode *inode = file_inode(file);
 	bool shared = false;
@@ -60,12 +67,17 @@ int iterate_dir(struct file *file, struct dir_context *ctx)
 
 	res = -ENOENT;
 	if (!IS_DEADDIR(inode)) {
-		ctx->pos = file->f_pos;
+		if (use_fpos)
+			ctx->pos = file->f_pos;
+
 		if (shared)
 			res = file->f_op->iterate_shared(file, ctx);
 		else
 			res = file->f_op->iterate(file, ctx);
-		file->f_pos = ctx->pos;
+
+		if (use_fpos)
+			file->f_pos = ctx->pos;
+
 		fsnotify_access(file);
 		file_accessed(file);
 	}
@@ -75,6 +87,11 @@ int iterate_dir(struct file *file, struct dir_context *ctx)
 		inode_unlock(inode);
 out:
 	return res;
+}
+
+int iterate_dir(struct file *file, struct dir_context *ctx)
+{
+	return do_iterate_dir(file, ctx, true);
 }
 EXPORT_SYMBOL(iterate_dir);
 
