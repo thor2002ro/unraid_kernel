@@ -525,7 +525,7 @@ int kasan_module_alloc(void *addr, size_t size, gfp_t gfp_mask)
 		vm->flags |= VM_KASAN;
 		kmemleak_ignore(ret);
 
-		if (vm->flags & VM_DELAY_KMEMLEAK)
+		if (vm->flags & VM_DEFER_KMEMLEAK)
 			kmemleak_vmalloc(vm, size, gfp_mask);
 
 		return 0;
