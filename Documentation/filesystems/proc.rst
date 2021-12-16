@@ -431,6 +431,8 @@ is not associated with a file:
  [stack]                    the stack of the main process
  [vdso]                     the "virtual dynamic shared object",
                             the kernel system call handler
+[anon:<name>]               an anonymous mapping that has been
+                            named by userspace
  =======                    ====================================
 
  or if empty, the mapping is anonymous.
