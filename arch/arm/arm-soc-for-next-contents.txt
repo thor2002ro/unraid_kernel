@@ -33,6 +33,10 @@ arm/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/atorgue/stm32 tags/stm32-dt-for-v5.17-1
 	apple/dt-2
 		https://github.com/AsahiLinux/linux tags/asahi-soc-dt-5.17-v2
+	socfpga/dts
+		git://git.kernel.org/pub/scm/linux/kernel/git/dinguyen/linux tags/socfpga_dts_update_for_v5.17
+	omap/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.17/dt-signed
 
 arm/drivers
 	renesas/drivers
@@ -48,7 +52,9 @@ arm/drivers
 	apple/drivers-2
 		https://github.com/AsahiLinux/linux tags/asahi-soc-pmgr-5.17-v2
 
-arm/defconfigs
+arm/defconfig
+	patch
+		ARM: configs: gemini: Activate crypto driver
 
 arm/newsoc
 
@@ -77,4 +83,6 @@ arm/fixes
 		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.16-rockchip-socfixes1
 	patch
 		firmware: arm_scpi: Fix string overflow in SCPI genpd driver
+	<no branch> (a7083763619f7485ccdade160deb81737cf2732f)
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.16-soc-fixes
 
