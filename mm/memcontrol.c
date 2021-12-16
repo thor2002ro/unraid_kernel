@@ -4390,9 +4390,6 @@ static int mem_cgroup_oom_control_read(struct seq_file *sf, void *v)
 	seq_printf(sf, "under_oom %d\n", (bool)memcg->under_oom);
 	seq_printf(sf, "oom_kill %lu\n",
 		   atomic_long_read(&memcg->memory_events[MEMCG_OOM_KILL]));
-	seq_printf(sf, "oom_group_kill %lu\n",
-		   atomic_long_read(
-			&memcg->memory_events[MEMCG_OOM_GROUP_KILL]));
 	return 0;
 }
 
