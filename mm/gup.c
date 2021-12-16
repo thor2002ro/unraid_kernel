@@ -1694,6 +1694,25 @@ out:
 }
 EXPORT_SYMBOL(fault_in_writeable);
 
+/**
+ * fault_in_exact_writeable - fault in userspace address range for writing,
+ *			      potentially checking for sub-page faults
+ * @uaddr: start of address range
+ * @size: size of address range
+ *
+ * Returns the number of bytes not faulted in (like copy_to_user() and
+ * copy_from_user()).
+ */
+size_t fault_in_exact_writeable(char __user *uaddr, size_t size)
+{
+	size_t accessible = size - fault_in_writeable(uaddr, size);
+
+	if (accessible)
+		accessible -= probe_user_writable(uaddr, accessible);
+	return size - accessible;
+}
+EXPORT_SYMBOL(fault_in_exact_writeable);
+
 /*
  * fault_in_safe_writeable - fault in an address range for writing
  * @uaddr: start of address range
