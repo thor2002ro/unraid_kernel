@@ -122,7 +122,7 @@ static const unsigned long dirty_bytes_min = 2 * PAGE_SIZE;
 
 /* this is needed for the proc_dointvec_minmax for [fs_]overflow UID and GID */
 static const int maxolduid = 65535;
-static const int minolduid;
+/* minolduid is SYSCTL_ZERO */
 
 static const int ngroups_max = NGROUPS_MAX;
 static const int cap_last_cap = CAP_LAST_CAP;
@@ -170,7 +170,7 @@ int sysctl_legacy_va_layout;
 #endif
 
 #ifdef CONFIG_COMPACTION
-static const int min_extfrag_threshold;
+/* min_extfrag_threshold is SYSCTL_ZERO */;
 static const int max_extfrag_threshold = 1000;
 #endif
 
@@ -2175,7 +2175,7 @@ static struct ctl_table kern_table[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= (void *)&minolduid,
+		.extra1		= SYSCTL_ZERO,
 		.extra2		= (void *)&maxolduid,
 	},
 	{
@@ -2184,7 +2184,7 @@ static struct ctl_table kern_table[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= (void *)&minolduid,
+		.extra1		= SYSCTL_ZERO,
 		.extra2		= (void *)&maxolduid,
 	},
 #ifdef CONFIG_S390
@@ -2758,7 +2758,7 @@ static struct ctl_table vm_table[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= (void *)&min_extfrag_threshold,
+		.extra1		= SYSCTL_ZERO,
 		.extra2		= (void *)&max_extfrag_threshold,
 	},
 	{
@@ -3070,7 +3070,7 @@ static struct ctl_table fs_table[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= (void *)&minolduid,
+		.extra1		= SYSCTL_ZERO,
 		.extra2		= (void *)&maxolduid,
 	},
 	{
@@ -3079,7 +3079,7 @@ static struct ctl_table fs_table[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= (void *)&minolduid,
+		.extra1		= SYSCTL_ZERO,
 		.extra2		= (void *)&maxolduid,
 	},
 #ifdef CONFIG_FILE_LOCKING
