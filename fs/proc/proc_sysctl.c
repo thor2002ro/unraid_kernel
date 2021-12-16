@@ -47,6 +47,7 @@ struct ctl_table_header *register_sysctl_mount_point(const char *path)
 {
 	return register_sysctl(path, sysctl_mount_point);
 }
+EXPORT_SYMBOL(register_sysctl_mount_point);
 
 static bool is_empty_dir(struct ctl_table_header *head)
 {
