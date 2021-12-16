@@ -171,7 +171,7 @@ __ref int stack_depot_init(void)
 	static DEFINE_MUTEX(stack_depot_init_mutex);
 
 	mutex_lock(&stack_depot_init_mutex);
-	if (!stack_depot_disable && stack_table == NULL) {
+	if (!stack_depot_disable && !stack_table) {
 		size_t size = (STACK_HASH_SIZE * sizeof(struct stack_record *));
 		int i;
 
