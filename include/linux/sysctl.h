@@ -201,6 +201,7 @@ static struct ctl_table _name##_base_table[] = {			\
 		.mode		= 0555,					\
 		.child		= _table,				\
 	},								\
+	{ },								\
 }
 
 extern int __register_sysctl_base(struct ctl_table *base_table);
