@@ -57,6 +57,8 @@ arm/defconfig
 		ARM: configs: gemini: Activate crypto driver
 
 arm/newsoc
+	starfive/jh7100
+		https://github.com/esmil/linux tags/jh7100-for-5.17
 
 arm/late
 
