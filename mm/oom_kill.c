@@ -44,6 +44,7 @@
 #include <linux/kthread.h>
 #include <linux/init.h>
 #include <linux/mmu_notifier.h>
+#include <linux/futex.h>
 
 #include <asm/tlb.h>
 #include "internal.h"
@@ -886,6 +887,11 @@ static void __oom_kill_process(struct task_struct *victim, const char *message)
 	memcg_memory_event_mm(mm, MEMCG_OOM_KILL);
 
 	/*
+	 * We call futex_exit_release() on the victim task to ensure any waiters on any
+	 * process-shared futexes held by the victim task are woken up.
+	 */
+	futex_exit_release(victim);
+	/*
 	 * We should send SIGKILL before granting access to memory reserves
 	 * in order to prevent the OOM victim from depleting the memory
 	 * reserves from the user space under its control.
@@ -930,6 +936,12 @@ static void __oom_kill_process(struct task_struct *victim, const char *message)
 		 */
 		if (unlikely(p->flags & PF_KTHREAD))
 			continue;
+		/*
+		 * We call futex_exit_release() on any task p sharing the
+		 * victim->mm to ensure any waiters on any
+		 * process-shared futexes held by task p are woken up.
+		 */
+		futex_exit_release(p);
 		do_send_sig_info(SIGKILL, SEND_SIG_PRIV, p, PIDTYPE_TGID);
 	}
 	rcu_read_unlock();
