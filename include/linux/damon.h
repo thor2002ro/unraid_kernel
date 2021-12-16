@@ -461,13 +461,13 @@ int damon_stop(struct damon_ctx **ctxs, int nr_ctxs);
 #endif	/* CONFIG_DAMON */
 
 #ifdef CONFIG_DAMON_VADDR
-void damon_va_set_primitives(struct damon_ctx *ctx);
 bool damon_va_target_valid(void *t);
+void damon_va_set_primitives(struct damon_ctx *ctx);
 #endif	/* CONFIG_DAMON_VADDR */
 
 #ifdef CONFIG_DAMON_PADDR
-void damon_pa_set_primitives(struct damon_ctx *ctx);
 bool damon_pa_target_valid(void *t);
+void damon_pa_set_primitives(struct damon_ctx *ctx);
 #endif	/* CONFIG_DAMON_PADDR */
 
 #endif	/* _DAMON_H */
