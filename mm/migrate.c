@@ -291,7 +291,6 @@ void __migration_entry_wait(struct mm_struct *mm, pte_t *ptep,
 {
 	pte_t pte;
 	swp_entry_t entry;
-	struct page *page;
 
 	spin_lock(ptl);
 	pte = *ptep;
@@ -302,10 +301,7 @@ void __migration_entry_wait(struct mm_struct *mm, pte_t *ptep,
 	if (!is_migration_entry(entry))
 		goto out;
 
-	page = pfn_swap_entry_to_page(entry);
-	page = compound_head(page);
-
-	migration_entry_wait_on_locked(page_folio(page), ptep, ptl);
+	migration_entry_wait_on_locked(entry, ptep, ptl);
 	return;
 out:
 	pte_unmap_unlock(ptep, ptl);
@@ -330,13 +326,11 @@ void migration_entry_wait_huge(struct vm_area_struct *vma,
 void pmd_migration_entry_wait(struct mm_struct *mm, pmd_t *pmd)
 {
 	spinlock_t *ptl;
-	struct page *page;
 
 	ptl = pmd_lock(mm, pmd);
 	if (!is_pmd_migration_entry(*pmd))
 		goto unlock;
-	page = pfn_swap_entry_to_page(pmd_to_swp_entry(*pmd));
-	migration_entry_wait_on_locked(page_folio(page), NULL, ptl);
+	migration_entry_wait_on_locked(pmd_to_swp_entry(*pmd), NULL, ptl);
 	return;
 unlock:
 	spin_unlock(ptl);

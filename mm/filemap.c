@@ -21,6 +21,7 @@
 #include <linux/gfp.h>
 #include <linux/mm.h>
 #include <linux/swap.h>
+#include <linux/swapops.h>
 #include <linux/mman.h>
 #include <linux/pagemap.h>
 #include <linux/file.h>
@@ -1430,8 +1431,9 @@ repeat:
 #ifdef CONFIG_MIGRATION
 /**
  * migration_entry_wait_on_locked - Wait for a migration entry to be removed
- * @folio: folio referenced by the migration entry.
- * @ptep: mapped pte pointer. This function will return with the ptep unmapped.
+ * @entry: migration swap entry.
+ * @ptep: mapped pte pointer. Will return with the ptep unmapped. Only required
+ *        for pte entries, pass NULL for pmd entries.
  * @ptl: already locked ptl. This function will drop the lock.
  *
  * Wait for a migration entry referencing the given page to be removed. This is
@@ -1442,10 +1444,10 @@ repeat:
  *
  * Returns after unmapping and unlocking the pte/ptl with pte_unmap_unlock().
  *
- * This follows the same logic as wait_on_page_bit_common() so see the comments
+ * This follows the same logic as folio_wait_bit_common() so see the comments
  * there.
  */
-void migration_entry_wait_on_locked(struct folio *folio, pte_t *ptep,
+void migration_entry_wait_on_locked(swp_entry_t entry, pte_t *ptep,
 				spinlock_t *ptl)
 {
 	struct wait_page_queue wait_page;
@@ -1454,6 +1456,7 @@ void migration_entry_wait_on_locked(struct folio *folio, pte_t *ptep,
 	bool delayacct = false;
 	unsigned long pflags;
 	wait_queue_head_t *q;
+	struct folio *folio = page_folio(pfn_swap_entry_to_page(entry));
 
 	q = folio_waitqueue(folio);
 	if (!folio_test_uptodate(folio) && folio_test_workingset(folio)) {
