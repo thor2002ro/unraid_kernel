@@ -93,7 +93,7 @@ struct nubus_proc_pde_data {
 static struct nubus_proc_pde_data *
 nubus_proc_alloc_pde_data(unsigned char *ptr, unsigned int size)
 {
-	struct nubus_proc_pded *pded;
+	struct nubus_proc_pde_data *pded;
 
 	pded = kmalloc(sizeof(*pded), GFP_KERNEL);
 	if (!pded)
