@@ -37,6 +37,12 @@ arm/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/dinguyen/linux tags/socfpga_dts_update_for_v5.17
 	omap/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.17/dt-signed
+	sunxi/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-dt-for-5.17-1
+	renesas/dt-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-dt-for-v5.17-tag2
+	renesas/dt-bindings-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-dt-bindings-for-v5.17-tag2
 
 arm/drivers
 	renesas/drivers
@@ -51,10 +57,14 @@ arm/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux-mem-ctrl tags/memory-controller-drv-renesas-5.17
 	apple/drivers-2
 		https://github.com/AsahiLinux/linux tags/asahi-soc-pmgr-5.17-v2
+	renesas/drivers-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-drivers-for-v5.17-tag2
 
 arm/defconfig
 	patch
 		ARM: configs: gemini: Activate crypto driver
+	renesas/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-defconfig-for-v5.17-tag1
 
 arm/newsoc
 	starfive/jh7100
@@ -63,28 +73,10 @@ arm/newsoc
 arm/late
 
 arm/fixes
-	<no branch> (69125b4b9440be015783312e1b8753ec96febde0)
-		git://git.pengutronix.de/pza/linux tags/reset-fixes-for-v5.16
-	<no branch> (c88c5e461939a06ae769a01649d5c6b5a156f883)
-		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-5.16
-	<no branch> (9d7482771fac8d8e38e763263f2ca0ca12dd22c6)
-		git://git.linaro.org/people/jens.wiklander/linux-tee tags/amdtee-fix-for-v5.16
-	<no branch> (5ad77b1272fce36604779efe6e2036c500e6fe7a)
-		git://git.kernel.org/pub/scm/linux/kernel/git/amlogic/linux v5.16/fixes
-	<no branch> (cb25b11943cbcc5a34531129952870420f8be858)
-		git://git.kernel.org/pub/scm/linux/kernel/git/dinguyen/linux tags/socfpga_fix_for_v5.16_part_2
-	<no branch> (0668639eaf14813a39a8d3e0e6597d568581d4ea)
-		https://github.com/AsahiLinux/linux tags/asahi-soc-fixes-5.16
-	<no branch> (711e26c00e4c7b7cef0420c76a61e6d818e12687)
-		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.16-firmware-fixes
-	<no branch> (4ebd29f91629e69da7d57390cdc953772eee03ab)
-		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-5.16-2
-	<no branch> (aef4b9a89a376a9cabe5e744729914e7766c59bb)
-		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.16-rockchip-dtsfixes1
-	<no branch> (423e85e97aaf69e5198bbec6811e3825c8b5019a)
-		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.16-rockchip-socfixes1
-	patch
-		firmware: arm_scpi: Fix string overflow in SCPI genpd driver
-	<no branch> (a7083763619f7485ccdade160deb81737cf2732f)
-		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.16-soc-fixes
+	<no branch> (6add87fdae9bcb1d20b4503df5bd02ce5246cc8b)
+		https://git.linaro.org/people/jens.wiklander/linux-tee tags/fixes-for-v5.16
+	<no branch> (08d2061ff9c5319a07bf9ca6bbf11fdec68f704a)
+		git://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-fixes-for-5.16-1
+	<no branch> (017a716e7b0e9d4ac06a4d7779bd04fca009bbc9)
+		git://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-drivers-for-5.17-1
 
