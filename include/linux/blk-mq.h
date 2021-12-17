@@ -470,8 +470,6 @@ struct blk_mq_queue_data {
 	bool last;
 };
 
-typedef bool (busy_iter_fn)(struct blk_mq_hw_ctx *, struct request *, void *,
-		bool);
 typedef bool (busy_tag_iter_fn)(struct request *, void *, bool);
 
 /**
@@ -493,6 +491,14 @@ struct blk_mq_ops {
 	 * would have done).
 	 */
 	void (*commit_rqs)(struct blk_mq_hw_ctx *);
+
+	/**
+	 * @queue_rqs: Queue a list of new requests. Driver is guaranteed
+	 * that each request belongs to the same queue. If the driver doesn't
+	 * empty the @rqlist completely, then the rest will be queued
+	 * individually by the block layer upon return.
+	 */
+	void (*queue_rqs)(struct request **rqlist);
 
 	/**
 	 * @get_budget: Reserve budget before queue request, once .queue_rq is
