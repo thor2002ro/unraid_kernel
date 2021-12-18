@@ -54,6 +54,7 @@ int mux_control_deselect(struct mux_control *mux);
 int mux_state_deselect(struct mux_state *mstate);
 
 struct mux_control *mux_control_get(struct device *dev, const char *mux_name);
+struct mux_state *mux_state_get(struct device *dev, const char *mux_name);
 void mux_control_put(struct mux_control *mux);
 void mux_state_put(struct mux_state *mstate);
 
