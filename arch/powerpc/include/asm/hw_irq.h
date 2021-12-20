@@ -61,7 +61,7 @@
 
 static inline void __hard_irq_enable(void)
 {
-	if (IS_ENABLED(CONFIG_BOOKE) || IS_ENABLED(CONFIG_40x))
+	if (IS_ENABLED(CONFIG_BOOKE_OR_40x))
 		wrtee(MSR_EE);
 	else if (IS_ENABLED(CONFIG_PPC_8xx))
 		wrtspr(SPRN_EIE);
@@ -73,7 +73,7 @@ static inline void __hard_irq_enable(void)
 
 static inline void __hard_irq_disable(void)
 {
-	if (IS_ENABLED(CONFIG_BOOKE) || IS_ENABLED(CONFIG_40x))
+	if (IS_ENABLED(CONFIG_BOOKE_OR_40x))
 		wrtee(0);
 	else if (IS_ENABLED(CONFIG_PPC_8xx))
 		wrtspr(SPRN_EID);
@@ -85,7 +85,7 @@ static inline void __hard_irq_disable(void)
 
 static inline void __hard_EE_RI_disable(void)
 {
-	if (IS_ENABLED(CONFIG_BOOKE) || IS_ENABLED(CONFIG_40x))
+	if (IS_ENABLED(CONFIG_BOOKE_OR_40x))
 		wrtee(0);
 	else if (IS_ENABLED(CONFIG_PPC_8xx))
 		wrtspr(SPRN_NRI);
@@ -97,7 +97,7 @@ static inline void __hard_EE_RI_disable(void)
 
 static inline void __hard_RI_enable(void)
 {
-	if (IS_ENABLED(CONFIG_BOOKE) || IS_ENABLED(CONFIG_40x))
+	if (IS_ENABLED(CONFIG_BOOKE_OR_40x))
 		return;
 
 	if (IS_ENABLED(CONFIG_PPC_8xx))
@@ -222,6 +222,42 @@ static inline bool arch_irqs_disabled_flags(unsigned long flags)
 static inline bool arch_irqs_disabled(void)
 {
 	return arch_irqs_disabled_flags(arch_local_save_flags());
+}
+
+static inline void set_pmi_irq_pending(void)
+{
+	/*
+	 * Invoked from PMU callback functions to set PMI bit in the paca.
+	 * This has to be called with irq's disabled (via hard_irq_disable()).
+	 */
+	if (IS_ENABLED(CONFIG_PPC_IRQ_SOFT_MASK_DEBUG))
+		WARN_ON_ONCE(mfmsr() & MSR_EE);
+
+	get_paca()->irq_happened |= PACA_IRQ_PMI;
+}
+
+static inline void clear_pmi_irq_pending(void)
+{
+	/*
+	 * Invoked from PMU callback functions to clear the pending PMI bit
+	 * in the paca.
+	 */
+	if (IS_ENABLED(CONFIG_PPC_IRQ_SOFT_MASK_DEBUG))
+		WARN_ON_ONCE(mfmsr() & MSR_EE);
+
+	get_paca()->irq_happened &= ~PACA_IRQ_PMI;
+}
+
+static inline bool pmi_irq_pending(void)
+{
+	/*
+	 * Invoked from PMU callback functions to check if there is a pending
+	 * PMI bit in the paca.
+	 */
+	if (get_paca()->irq_happened & PACA_IRQ_PMI)
+		return true;
+
+	return false;
 }
 
 #ifdef CONFIG_PPC_BOOK3S
@@ -407,6 +443,10 @@ static inline void do_hard_irq_enable(void)
 {
 	BUILD_BUG();
 }
+
+static inline void clear_pmi_irq_pending(void) { }
+static inline void set_pmi_irq_pending(void) { }
+static inline bool pmi_irq_pending(void) { return false; }
 
 static inline void irq_soft_mask_regs_set_state(struct pt_regs *regs, unsigned long val)
 {
