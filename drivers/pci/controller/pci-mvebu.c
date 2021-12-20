@@ -573,6 +573,8 @@ static struct pci_bridge_emul_ops mvebu_pci_bridge_emul_ops = {
 static void mvebu_pci_bridge_emul_init(struct mvebu_pcie_port *port)
 {
 	struct pci_bridge_emul *bridge = &port->bridge;
+	u32 pcie_cap = mvebu_readl(port, PCIE_CAP_PCIEXP);
+	u8 pcie_cap_ver = ((pcie_cap >> 16) & PCI_EXP_FLAGS_VERS);
 
 	bridge->conf.vendor = PCI_VENDOR_ID_MARVELL;
 	bridge->conf.device = mvebu_readl(port, PCIE_DEV_ID_OFF) >> 16;
@@ -584,6 +586,12 @@ static void mvebu_pci_bridge_emul_init(struct mvebu_pcie_port *port)
 		bridge->conf.iobase = PCI_IO_RANGE_TYPE_32;
 		bridge->conf.iolimit = PCI_IO_RANGE_TYPE_32;
 	}
+
+	/*
+	 * Older mvebu hardware provides PCIe Capability structure only in
+	 * version 1. New hardware provides it in version 2.
+	 */
+	bridge->pcie_conf.cap = cpu_to_le16(pcie_cap_ver);
 
 	bridge->has_pcie = true;
 	bridge->data = port;
@@ -653,20 +661,16 @@ static int mvebu_pcie_rd_conf(struct pci_bus *bus, u32 devfn, int where,
 	int ret;
 
 	port = mvebu_pcie_find_port(pcie, bus, devfn);
-	if (!port) {
-		*val = 0xffffffff;
+	if (!port)
 		return PCIBIOS_DEVICE_NOT_FOUND;
-	}
 
 	/* Access the emulated PCI-to-PCI bridge */
 	if (bus->number == 0)
 		return pci_bridge_emul_conf_read(&port->bridge, where,
 						 size, val);
 
-	if (!mvebu_pcie_link_up(port)) {
-		*val = 0xffffffff;
+	if (!mvebu_pcie_link_up(port))
 		return PCIBIOS_DEVICE_NOT_FOUND;
-	}
 
 	/* Access the real PCIe interface */
 	ret = mvebu_pcie_hw_rd_conf(port, bus, devfn,
@@ -992,60 +996,16 @@ static int mvebu_pcie_parse_request_resources(struct mvebu_pcie *pcie)
 					 resource_size(&pcie->io) - 1);
 		pcie->realio.name = "PCI I/O";
 
+		ret = devm_pci_remap_iospace(dev, &pcie->realio, pcie->io.start);
+		if (ret)
+			return ret;
+
 		pci_add_resource(&bridge->windows, &pcie->realio);
 		ret = devm_request_resource(dev, &ioport_resource, &pcie->realio);
 		if (ret)
 			return ret;
 	}
 
-	return 0;
-}
-
-/*
- * This is a copy of pci_host_probe(), except that it does the I/O
- * remap as the last step, once we are sure we won't fail.
- *
- * It should be removed once the I/O remap error handling issue has
- * been sorted out.
- */
-static int mvebu_pci_host_probe(struct pci_host_bridge *bridge)
-{
-	struct mvebu_pcie *pcie;
-	struct pci_bus *bus, *child;
-	int ret;
-
-	ret = pci_scan_root_bus_bridge(bridge);
-	if (ret < 0) {
-		dev_err(bridge->dev.parent, "Scanning root bridge failed");
-		return ret;
-	}
-
-	pcie = pci_host_bridge_priv(bridge);
-	if (resource_size(&pcie->io) != 0) {
-		unsigned int i;
-
-		for (i = 0; i < resource_size(&pcie->realio); i += SZ_64K)
-			pci_ioremap_io(i, pcie->io.start + i);
-	}
-
-	bus = bridge->bus;
-
-	/*
-	 * We insert PCI resources into the iomem_resource and
-	 * ioport_resource trees in either pci_bus_claim_resources()
-	 * or pci_bus_assign_resources().
-	 */
-	if (pci_has_flag(PCI_PROBE_ONLY)) {
-		pci_bus_claim_resources(bus);
-	} else {
-		pci_bus_size_bridges(bus);
-		pci_bus_assign_resources(bus);
-
-		list_for_each_entry(child, &bus->children, node)
-			pcie_bus_configure_settings(child);
-	}
-
-	pci_bus_add_devices(bus);
 	return 0;
 }
 
@@ -1123,7 +1083,7 @@ static int mvebu_pcie_probe(struct platform_device *pdev)
 	bridge->ops = &mvebu_pcie_ops;
 	bridge->align_resource = mvebu_pcie_align_resource;
 
-	return mvebu_pci_host_probe(bridge);
+	return pci_host_probe(bridge);
 }
 
 static const struct of_device_id mvebu_pcie_of_match_table[] = {
