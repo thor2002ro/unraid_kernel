@@ -59,6 +59,16 @@ arm/drivers
 		https://github.com/AsahiLinux/linux tags/asahi-soc-pmgr-5.17-v2
 	renesas/drivers-2
 		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-drivers-for-v5.17-tag2
+	keystone/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/ti/linux tags/ti-driver-soc-fixes-for-v5.17
+	tegra/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.17-drivers
+	tegra/soc-drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.17-soc
+	at91/soc
+		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-soc-5.17
+	imx/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-drivers-5.17
 
 arm/defconfig
 	patch
@@ -69,6 +79,8 @@ arm/defconfig
 arm/newsoc
 	starfive/jh7100
 		https://github.com/esmil/linux tags/jh7100-for-5.17
+	patch
+		reset: starfive-jh7100: Fix 32bit compilation
 
 arm/late
 
@@ -79,4 +91,6 @@ arm/fixes
 		git://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-fixes-for-5.16-1
 	<no branch> (017a716e7b0e9d4ac06a4d7779bd04fca009bbc9)
 		git://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-drivers-for-5.17-1
+	<no branch> (849e087ba68ac6956c11016ce34f9f10a09a4186)
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-5.16-3
 
