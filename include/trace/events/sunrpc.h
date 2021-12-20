@@ -1617,57 +1617,92 @@ TRACE_DEFINE_ENUM(SVC_COMPLETE);
 		{ SVC_PENDING,	"SVC_PENDING" },	\
 		{ SVC_COMPLETE,	"SVC_COMPLETE" })
 
+#define SVC_RQST_ENDPOINT_FIELDS \
+		__array(unsigned char, server, sizeof(struct sockaddr_in6)) \
+		__array(unsigned char, client, sizeof(struct sockaddr_in6)) \
+		__field(unsigned int, netns_ino) \
+		__field(u32, xid)
+
+#define SVC_RQST_ENDPOINT_ASSIGNMENTS(r) \
+		do { \
+			struct svc_xprt *xprt = (r)->rq_xprt; \
+			if (xprt) { \
+				memcpy(__entry->server, &xprt->xpt_local, \
+				       xprt->xpt_locallen); \
+				memcpy(__entry->client, &xprt->xpt_remote, \
+				       xprt->xpt_remotelen); \
+				__entry->netns_ino = xprt->xpt_net->ns.inum; \
+			} else { \
+				memset(__entry->server, 0, sizeof(__entry->server)); \
+				memset(__entry->client, 0, sizeof(__entry->client)); \
+				__entry->netns_ino = (r)->rq_bc_net->ns.inum; \
+			} \
+			__entry->xid = be32_to_cpu((r)->rq_xid); \
+		} while (0)
+
+#define SVC_RQST_ENDPOINT_FORMAT \
+		"xid=0x%08x server=%pISpc client=%pISpc"
+
+#define SVC_RQST_ENDPOINT_VARARGS \
+		__entry->xid, __entry->server, __entry->client
+
 TRACE_EVENT(svc_authenticate,
 	TP_PROTO(const struct svc_rqst *rqst, int auth_res),
 
 	TP_ARGS(rqst, auth_res),
 
 	TP_STRUCT__entry(
-		__field(u32, xid)
+		SVC_RQST_ENDPOINT_FIELDS
+
 		__field(unsigned long, svc_status)
 		__field(unsigned long, auth_stat)
 	),
 
 	TP_fast_assign(
-		__entry->xid = be32_to_cpu(rqst->rq_xid);
+		SVC_RQST_ENDPOINT_ASSIGNMENTS(rqst);
+
 		__entry->svc_status = auth_res;
 		__entry->auth_stat = be32_to_cpu(rqst->rq_auth_stat);
 	),
 
-	TP_printk("xid=0x%08x auth_res=%s auth_stat=%s",
-			__entry->xid, svc_show_status(__entry->svc_status),
-			rpc_show_auth_stat(__entry->auth_stat))
+	TP_printk(SVC_RQST_ENDPOINT_FORMAT
+		" auth_res=%s auth_stat=%s",
+		SVC_RQST_ENDPOINT_VARARGS,
+		svc_show_status(__entry->svc_status),
+		rpc_show_auth_stat(__entry->auth_stat))
 );
 
 TRACE_EVENT(svc_process,
-	TP_PROTO(const struct svc_rqst *rqst, const char *name),
+	TP_PROTO(
+		const struct svc_rqst *rqst,
+		const char *service
+	),
 
-	TP_ARGS(rqst, name),
+	TP_ARGS(rqst, service),
 
 	TP_STRUCT__entry(
-		__field(u32, xid)
+		SVC_RQST_ENDPOINT_FIELDS
+
 		__field(u32, vers)
 		__field(u32, proc)
-		__string(service, name)
+		__string(service, service)
 		__string(procedure, svc_proc_name(rqst))
-		__string(addr, rqst->rq_xprt ?
-			 rqst->rq_xprt->xpt_remotebuf : "(null)")
 	),
 
 	TP_fast_assign(
-		__entry->xid = be32_to_cpu(rqst->rq_xid);
+		SVC_RQST_ENDPOINT_ASSIGNMENTS(rqst);
+
 		__entry->vers = rqst->rq_vers;
 		__entry->proc = rqst->rq_proc;
-		__assign_str(service, name);
+		__assign_str(service, service);
 		__assign_str(procedure, svc_proc_name(rqst));
-		__assign_str(addr, rqst->rq_xprt ?
-			     rqst->rq_xprt->xpt_remotebuf : "(null)");
 	),
 
-	TP_printk("addr=%s xid=0x%08x service=%s vers=%u proc=%s",
-			__get_str(addr), __entry->xid,
-			__get_str(service), __entry->vers,
-			__get_str(procedure)
+	TP_printk(SVC_RQST_ENDPOINT_FORMAT
+		" service=%s vers=%u proc=%s (%u)",
+		SVC_RQST_ENDPOINT_VARARGS,
+		__get_str(service), __entry->vers, __get_str(procedure),
+		__entry->proc
 	)
 );
 
@@ -1680,20 +1715,20 @@ DECLARE_EVENT_CLASS(svc_rqst_event,
 	TP_ARGS(rqst),
 
 	TP_STRUCT__entry(
-		__field(u32, xid)
+		SVC_RQST_ENDPOINT_FIELDS
+
 		__field(unsigned long, flags)
-		__string(addr, rqst->rq_xprt->xpt_remotebuf)
 	),
 
 	TP_fast_assign(
-		__entry->xid = be32_to_cpu(rqst->rq_xid);
+		SVC_RQST_ENDPOINT_ASSIGNMENTS(rqst);
+
 		__entry->flags = rqst->rq_flags;
-		__assign_str(addr, rqst->rq_xprt->xpt_remotebuf);
 	),
 
-	TP_printk("addr=%s xid=0x%08x flags=%s",
-			__get_str(addr), __entry->xid,
-			show_rqstp_flags(__entry->flags))
+	TP_printk(SVC_RQST_ENDPOINT_FORMAT " flags=%s",
+		SVC_RQST_ENDPOINT_VARARGS,
+		show_rqstp_flags(__entry->flags))
 );
 #define DEFINE_SVC_RQST_EVENT(name) \
 	DEFINE_EVENT(svc_rqst_event, svc_##name, \
@@ -1706,33 +1741,62 @@ DEFINE_SVC_RQST_EVENT(defer);
 DEFINE_SVC_RQST_EVENT(drop);
 
 DECLARE_EVENT_CLASS(svc_rqst_status,
-
-	TP_PROTO(struct svc_rqst *rqst, int status),
+	TP_PROTO(
+		const struct svc_rqst *rqst,
+		int status
+	),
 
 	TP_ARGS(rqst, status),
 
 	TP_STRUCT__entry(
-		__field(u32, xid)
+		SVC_RQST_ENDPOINT_FIELDS
+
 		__field(int, status)
 		__field(unsigned long, flags)
-		__string(addr, rqst->rq_xprt->xpt_remotebuf)
 	),
 
 	TP_fast_assign(
-		__entry->xid = be32_to_cpu(rqst->rq_xid);
+		SVC_RQST_ENDPOINT_ASSIGNMENTS(rqst);
+
 		__entry->status = status;
 		__entry->flags = rqst->rq_flags;
-		__assign_str(addr, rqst->rq_xprt->xpt_remotebuf);
 	),
 
-	TP_printk("addr=%s xid=0x%08x status=%d flags=%s",
-		  __get_str(addr), __entry->xid,
-		  __entry->status, show_rqstp_flags(__entry->flags))
+	TP_printk(SVC_RQST_ENDPOINT_FORMAT " status=%d flags=%s",
+		SVC_RQST_ENDPOINT_VARARGS,
+		__entry->status, show_rqstp_flags(__entry->flags))
 );
 
 DEFINE_EVENT(svc_rqst_status, svc_send,
-	TP_PROTO(struct svc_rqst *rqst, int status),
+	TP_PROTO(const struct svc_rqst *rqst, int status),
 	TP_ARGS(rqst, status));
+
+TRACE_EVENT(svc_stats_latency,
+	TP_PROTO(
+		const struct svc_rqst *rqst
+	),
+
+	TP_ARGS(rqst),
+
+	TP_STRUCT__entry(
+		SVC_RQST_ENDPOINT_FIELDS
+
+		__field(unsigned long, execute)
+		__string(procedure, svc_proc_name(rqst))
+	),
+
+	TP_fast_assign(
+		SVC_RQST_ENDPOINT_ASSIGNMENTS(rqst);
+
+		__entry->execute = ktime_to_us(ktime_sub(ktime_get(),
+							 rqst->rq_stime));
+		__assign_str(procedure, svc_proc_name(rqst));
+	),
+
+	TP_printk(SVC_RQST_ENDPOINT_FORMAT " proc=%s execute-us=%lu",
+		SVC_RQST_ENDPOINT_VARARGS,
+		__get_str(procedure), __entry->execute)
+);
 
 #define show_svc_xprt_flags(flags)					\
 	__print_flags(flags, "|",					\
@@ -1780,54 +1844,102 @@ TRACE_EVENT(svc_xprt_create_err,
 		__entry->error)
 );
 
-TRACE_EVENT(svc_xprt_do_enqueue,
-	TP_PROTO(struct svc_xprt *xprt, struct svc_rqst *rqst),
+#define SVC_XPRT_ENDPOINT_FIELDS \
+		__array(unsigned char, server, sizeof(struct sockaddr_in6)) \
+		__array(unsigned char, client, sizeof(struct sockaddr_in6)) \
+		__field(unsigned long, flags) \
+		__field(unsigned int, netns_ino)
+
+#define SVC_XPRT_ENDPOINT_ASSIGNMENTS(x) \
+		do { \
+			memcpy(__entry->server, &(x)->xpt_local, \
+			       (x)->xpt_locallen); \
+			memcpy(__entry->client, &(x)->xpt_remote, \
+			       (x)->xpt_remotelen); \
+			__entry->flags = (x)->xpt_flags; \
+			__entry->netns_ino = (x)->xpt_net->ns.inum; \
+		} while (0)
+
+#define SVC_XPRT_ENDPOINT_FORMAT \
+		"server=%pISpc client=%pISpc flags=%s"
+
+#define SVC_XPRT_ENDPOINT_VARARGS \
+		__entry->server, __entry->client, \
+		show_svc_xprt_flags(__entry->flags)
+
+TRACE_EVENT(svc_xprt_enqueue,
+	TP_PROTO(
+		const struct svc_xprt *xprt,
+		const struct svc_rqst *rqst
+	),
 
 	TP_ARGS(xprt, rqst),
 
 	TP_STRUCT__entry(
+		SVC_XPRT_ENDPOINT_FIELDS
+
 		__field(int, pid)
-		__field(unsigned long, flags)
-		__string(addr, xprt->xpt_remotebuf)
 	),
 
 	TP_fast_assign(
+		SVC_XPRT_ENDPOINT_ASSIGNMENTS(xprt);
+
 		__entry->pid = rqst? rqst->rq_task->pid : 0;
-		__entry->flags = xprt->xpt_flags;
-		__assign_str(addr, xprt->xpt_remotebuf);
 	),
 
-	TP_printk("addr=%s pid=%d flags=%s", __get_str(addr),
-		__entry->pid, show_svc_xprt_flags(__entry->flags))
+	TP_printk(SVC_XPRT_ENDPOINT_FORMAT " pid=%d",
+		SVC_XPRT_ENDPOINT_VARARGS, __entry->pid)
+);
+
+TRACE_EVENT(svc_xprt_dequeue,
+	TP_PROTO(
+		const struct svc_rqst *rqst
+	),
+
+	TP_ARGS(rqst),
+
+	TP_STRUCT__entry(
+		SVC_XPRT_ENDPOINT_FIELDS
+
+		__field(unsigned long, wakeup)
+	),
+
+	TP_fast_assign(
+		SVC_XPRT_ENDPOINT_ASSIGNMENTS(rqst->rq_xprt);
+
+		__entry->wakeup = ktime_to_us(ktime_sub(ktime_get(),
+							rqst->rq_qtime));
+	),
+
+	TP_printk(SVC_XPRT_ENDPOINT_FORMAT " wakeup-us=%lu",
+		SVC_XPRT_ENDPOINT_VARARGS, __entry->wakeup)
 );
 
 DECLARE_EVENT_CLASS(svc_xprt_event,
-	TP_PROTO(struct svc_xprt *xprt),
+	TP_PROTO(
+		const struct svc_xprt *xprt
+	),
 
 	TP_ARGS(xprt),
 
 	TP_STRUCT__entry(
-		__field(unsigned long, flags)
-		__string(addr, xprt->xpt_remotebuf)
+		SVC_XPRT_ENDPOINT_FIELDS
 	),
 
 	TP_fast_assign(
-		__entry->flags = xprt->xpt_flags;
-		__assign_str(addr, xprt->xpt_remotebuf);
+		SVC_XPRT_ENDPOINT_ASSIGNMENTS(xprt);
 	),
 
-	TP_printk("addr=%s flags=%s", __get_str(addr),
-		show_svc_xprt_flags(__entry->flags))
+	TP_printk(SVC_XPRT_ENDPOINT_FORMAT, SVC_XPRT_ENDPOINT_VARARGS)
 );
 
 #define DEFINE_SVC_XPRT_EVENT(name) \
 	DEFINE_EVENT(svc_xprt_event, svc_xprt_##name, \
 			TP_PROTO( \
-				struct svc_xprt *xprt \
+				const struct svc_xprt *xprt \
 			), \
 			TP_ARGS(xprt))
 
-DEFINE_SVC_XPRT_EVENT(received);
 DEFINE_SVC_XPRT_EVENT(no_write_space);
 DEFINE_SVC_XPRT_EVENT(close);
 DEFINE_SVC_XPRT_EVENT(detach);
@@ -1842,42 +1954,23 @@ TRACE_EVENT(svc_xprt_accept,
 	TP_ARGS(xprt, service),
 
 	TP_STRUCT__entry(
-		__string(addr, xprt->xpt_remotebuf)
+		SVC_XPRT_ENDPOINT_FIELDS
+
 		__string(protocol, xprt->xpt_class->xcl_name)
 		__string(service, service)
 	),
 
 	TP_fast_assign(
-		__assign_str(addr, xprt->xpt_remotebuf);
+		SVC_XPRT_ENDPOINT_ASSIGNMENTS(xprt);
+
 		__assign_str(protocol, xprt->xpt_class->xcl_name);
 		__assign_str(service, service);
 	),
 
-	TP_printk("addr=%s protocol=%s service=%s",
-		__get_str(addr), __get_str(protocol), __get_str(service)
+	TP_printk(SVC_XPRT_ENDPOINT_FORMAT " protocol=%s service=%s",
+		SVC_XPRT_ENDPOINT_VARARGS,
+		__get_str(protocol), __get_str(service)
 	)
-);
-
-TRACE_EVENT(svc_xprt_dequeue,
-	TP_PROTO(struct svc_rqst *rqst),
-
-	TP_ARGS(rqst),
-
-	TP_STRUCT__entry(
-		__field(unsigned long, flags)
-		__field(unsigned long, wakeup)
-		__string(addr, rqst->rq_xprt->xpt_remotebuf)
-	),
-
-	TP_fast_assign(
-		__entry->flags = rqst->rq_xprt->xpt_flags;
-		__entry->wakeup = ktime_to_us(ktime_sub(ktime_get(),
-							rqst->rq_qtime));
-		__assign_str(addr, rqst->rq_xprt->xpt_remotebuf);
-	),
-
-	TP_printk("addr=%s flags=%s wakeup-us=%lu", __get_str(addr),
-		show_svc_xprt_flags(__entry->flags), __entry->wakeup)
 );
 
 TRACE_EVENT(svc_wake_up,
@@ -1912,52 +2005,6 @@ TRACE_EVENT(svc_alloc_arg_err,
 	),
 
 	TP_printk("pages=%u", __entry->pages)
-);
-
-TRACE_EVENT(svc_handle_xprt,
-	TP_PROTO(struct svc_xprt *xprt, int len),
-
-	TP_ARGS(xprt, len),
-
-	TP_STRUCT__entry(
-		__field(int, len)
-		__field(unsigned long, flags)
-		__string(addr, xprt->xpt_remotebuf)
-	),
-
-	TP_fast_assign(
-		__entry->len = len;
-		__entry->flags = xprt->xpt_flags;
-		__assign_str(addr, xprt->xpt_remotebuf);
-	),
-
-	TP_printk("addr=%s len=%d flags=%s", __get_str(addr),
-		__entry->len, show_svc_xprt_flags(__entry->flags))
-);
-
-TRACE_EVENT(svc_stats_latency,
-	TP_PROTO(const struct svc_rqst *rqst),
-
-	TP_ARGS(rqst),
-
-	TP_STRUCT__entry(
-		__field(u32, xid)
-		__field(unsigned long, execute)
-		__string(procedure, svc_proc_name(rqst))
-		__string(addr, rqst->rq_xprt->xpt_remotebuf)
-	),
-
-	TP_fast_assign(
-		__entry->xid = be32_to_cpu(rqst->rq_xid);
-		__entry->execute = ktime_to_us(ktime_sub(ktime_get(),
-							 rqst->rq_stime));
-		__assign_str(procedure, svc_proc_name(rqst));
-		__assign_str(addr, rqst->rq_xprt->xpt_remotebuf);
-	),
-
-	TP_printk("addr=%s xid=0x%08x proc=%s execute-us=%lu",
-		__get_str(addr), __entry->xid, __get_str(procedure),
-		__entry->execute)
 );
 
 DECLARE_EVENT_CLASS(svc_deferred_event,

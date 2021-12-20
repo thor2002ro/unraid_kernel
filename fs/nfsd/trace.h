@@ -13,22 +13,6 @@
 #include "export.h"
 #include "nfsfh.h"
 
-#define NFSD_TRACE_PROC_ARG_FIELDS \
-		__field(unsigned int, netns_ino) \
-		__field(u32, xid) \
-		__array(unsigned char, server, sizeof(struct sockaddr_in6)) \
-		__array(unsigned char, client, sizeof(struct sockaddr_in6))
-
-#define NFSD_TRACE_PROC_ARG_ASSIGNMENTS \
-		do { \
-			__entry->netns_ino = SVC_NET(rqstp)->ns.inum; \
-			__entry->xid = be32_to_cpu(rqstp->rq_xid); \
-			memcpy(__entry->server, &rqstp->rq_xprt->xpt_local, \
-			       rqstp->rq_xprt->xpt_locallen); \
-			memcpy(__entry->client, &rqstp->rq_xprt->xpt_remote, \
-			       rqstp->rq_xprt->xpt_remotelen); \
-		} while (0);
-
 #define NFSD_TRACE_PROC_RES_FIELDS \
 		__field(unsigned int, netns_ino) \
 		__field(u32, xid) \
@@ -47,20 +31,26 @@
 			       rqstp->rq_xprt->xpt_remotelen); \
 		} while (0);
 
-TRACE_EVENT(nfsd_garbage_args_err,
+DECLARE_EVENT_CLASS(nfsd_xdr_err_class,
 	TP_PROTO(
 		const struct svc_rqst *rqstp
 	),
 	TP_ARGS(rqstp),
 	TP_STRUCT__entry(
-		NFSD_TRACE_PROC_ARG_FIELDS
-
+		__array(unsigned char, server, sizeof(struct sockaddr_in6))
+		__array(unsigned char, client, sizeof(struct sockaddr_in6))
+		__field(unsigned int, netns_ino)
+		__field(u32, xid)
 		__field(u32, vers)
 		__field(u32, proc)
 	),
 	TP_fast_assign(
-		NFSD_TRACE_PROC_ARG_ASSIGNMENTS
+		const struct svc_xprt *xprt = rqstp->rq_xprt;
 
+		memcpy(__entry->server, &xprt->xpt_local, xprt->xpt_locallen);
+		memcpy(__entry->client, &xprt->xpt_remote, xprt->xpt_remotelen);
+		__entry->netns_ino = xprt->xpt_net->ns.inum;
+		__entry->xid = be32_to_cpu(rqstp->rq_xid);
 		__entry->vers = rqstp->rq_vers;
 		__entry->proc = rqstp->rq_proc;
 	),
@@ -69,27 +59,13 @@ TRACE_EVENT(nfsd_garbage_args_err,
 	)
 );
 
-TRACE_EVENT(nfsd_cant_encode_err,
-	TP_PROTO(
-		const struct svc_rqst *rqstp
-	),
-	TP_ARGS(rqstp),
-	TP_STRUCT__entry(
-		NFSD_TRACE_PROC_ARG_FIELDS
+#define DEFINE_NFSD_XDR_ERR_EVENT(name) \
+DEFINE_EVENT(nfsd_xdr_err_class, nfsd_##name##_err, \
+	TP_PROTO(const struct svc_rqst *rqstp), \
+	TP_ARGS(rqstp))
 
-		__field(u32, vers)
-		__field(u32, proc)
-	),
-	TP_fast_assign(
-		NFSD_TRACE_PROC_ARG_ASSIGNMENTS
-
-		__entry->vers = rqstp->rq_vers;
-		__entry->proc = rqstp->rq_proc;
-	),
-	TP_printk("xid=0x%08x vers=%u proc=%u",
-		__entry->xid, __entry->vers, __entry->proc
-	)
-);
+DEFINE_NFSD_XDR_ERR_EVENT(garbage_args);
+DEFINE_NFSD_XDR_ERR_EVENT(cant_encode);
 
 #define show_nfsd_may_flags(x)						\
 	__print_flags(x, "|",						\
