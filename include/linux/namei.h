@@ -49,6 +49,8 @@ enum {LAST_NORM, LAST_ROOT, LAST_DOT, LAST_DOTDOT};
 
 extern int path_pts(struct path *path);
 
+extern int do_user_path_at_empty(int dfd, struct filename *filename,
+				unsigned int flags, struct path *path);
 extern int user_path_at_empty(int, const char __user *, unsigned, struct path *, int *empty);
 
 static inline int user_path_at(int dfd, const char __user *name, unsigned flags,

@@ -2794,12 +2794,18 @@ int path_pts(struct path *path)
 }
 #endif
 
+int do_user_path_at_empty(int dfd, struct filename *filename, unsigned int flags,
+		       struct path *path)
+{
+	return filename_lookup(dfd, filename, flags, path, NULL);
+}
+
 int user_path_at_empty(int dfd, const char __user *name, unsigned flags,
-		 struct path *path, int *empty)
+		struct path *path, int *empty)
 {
 	struct filename *filename = getname_flags(name, flags, empty);
-	int ret = filename_lookup(dfd, filename, flags, path, NULL);
 
+	int ret = do_user_path_at_empty(dfd, filename, flags, path);
 	putname(filename);
 	return ret;
 }
