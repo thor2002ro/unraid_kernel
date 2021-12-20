@@ -40,7 +40,14 @@
 	((__c)->no_completion_irq || (__i)->desc->force_polling)	\
 
 #define IS_TRANSPORT_POLLING_CAPABLE(__i)				\
-	((__i)->desc->ops->poll_done)
+({									\
+	bool __ret;							\
+	typeof(__i) i_ = __i;						\
+									\
+	__ret = ((i_)->desc->ops->poll_done ||				\
+			(i_)->desc->sync_cmds_completed_on_ret);	\
+	__ret;								\
+})
 
 #define IS_POLLING_ENABLED(__c, __i)					\
 ({									\
@@ -780,10 +787,28 @@ static int scmi_wait_for_message_response(struct scmi_chan_info *cinfo,
 				      xfer->hdr.poll_completion);
 
 	if (xfer->hdr.poll_completion) {
-		ktime_t stop = ktime_add_ms(ktime_get(), timeout_ms);
+		/*
+		 * Real polling is needed only if transport has NOT declared
+		 * itself to support synchronous commands replies.
+		 */
+		if (!info->desc->sync_cmds_completed_on_ret) {
+			/*
+			 * Poll on xfer using transport provided .poll_done();
+			 * assumes no completion interrupt was available.
+			 */
+			ktime_t stop = ktime_add_ms(ktime_get(), timeout_ms);
 
-		spin_until_cond(scmi_xfer_done_no_timeout(cinfo, xfer, stop));
-		if (ktime_before(ktime_get(), stop)) {
+			spin_until_cond(scmi_xfer_done_no_timeout(cinfo,
+								  xfer, stop));
+			if (ktime_after(ktime_get(), stop)) {
+				dev_err(dev,
+					"timed out in resp(caller: %pS) - polling\n",
+					(void *)_RET_IP_);
+				ret = -ETIMEDOUT;
+			}
+		}
+
+		if (!ret) {
 			unsigned long flags;
 
 			/*
@@ -796,11 +821,6 @@ static int scmi_wait_for_message_response(struct scmi_chan_info *cinfo,
 				xfer->state = SCMI_XFER_RESP_OK;
 			}
 			spin_unlock_irqrestore(&xfer->lock, flags);
-		} else {
-			dev_err(dev,
-				"timed out in resp(caller: %pS) - polling\n",
-				(void *)_RET_IP_);
-			ret = -ETIMEDOUT;
 		}
 	} else {
 		/* And we wait for the response. */
@@ -835,7 +855,7 @@ static int do_xfer(const struct scmi_protocol_handle *ph,
 	struct scmi_chan_info *cinfo;
 
 	/* Check for polling request on custom command xfers at first */
-	if (xfer->hdr.poll_completion && !info->desc->ops->poll_done) {
+	if (xfer->hdr.poll_completion && !IS_TRANSPORT_POLLING_CAPABLE(info)) {
 		dev_warn_once(dev,
 			      "Polling mode is not supported by transport.\n");
 		return -EINVAL;
