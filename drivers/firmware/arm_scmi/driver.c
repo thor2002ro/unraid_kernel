@@ -36,6 +36,23 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/scmi.h>
 
+#define IS_POLLING_REQUIRED(__c, __i)					\
+	((__c)->no_completion_irq || (__i)->desc->force_polling)	\
+
+#define IS_TRANSPORT_POLLING_CAPABLE(__i)				\
+	((__i)->desc->ops->poll_done)
+
+#define IS_POLLING_ENABLED(__c, __i)					\
+({									\
+	bool __ret;							\
+	typeof(__c) c_ = __c;						\
+	typeof(__i) i_ = __i;						\
+									\
+	__ret = (IS_POLLING_REQUIRED(c_, i_) &&				\
+			IS_TRANSPORT_POLLING_CAPABLE(i_));		\
+	__ret;								\
+})
+
 enum scmi_error_codes {
 	SCMI_SUCCESS = 0,	/* Success */
 	SCMI_ERR_SUPPORT = -1,	/* Not supported */
@@ -817,6 +834,7 @@ static int do_xfer(const struct scmi_protocol_handle *ph,
 	struct device *dev = info->dev;
 	struct scmi_chan_info *cinfo;
 
+	/* Check for polling request on custom command xfers at first */
 	if (xfer->hdr.poll_completion && !info->desc->ops->poll_done) {
 		dev_warn_once(dev,
 			      "Polling mode is not supported by transport.\n");
@@ -826,6 +844,10 @@ static int do_xfer(const struct scmi_protocol_handle *ph,
 	cinfo = idr_find(&info->tx_idr, pi->proto->id);
 	if (unlikely(!cinfo))
 		return -EINVAL;
+
+	/* True ONLY if also supported by transport. */
+	if (IS_POLLING_ENABLED(cinfo, info))
+		xfer->hdr.poll_completion = true;
 
 	/*
 	 * Initialise protocol id now from protocol handle to avoid it being
@@ -1526,6 +1548,16 @@ static int scmi_chan_setup(struct scmi_info *info, struct device *dev,
 	ret = info->desc->ops->chan_setup(cinfo, info->dev, tx);
 	if (ret)
 		return ret;
+
+	if (tx && IS_POLLING_REQUIRED(cinfo, info)) {
+		if (IS_TRANSPORT_POLLING_CAPABLE(info))
+			dev_info(dev,
+				 "Enabled polling mode TX channel - prot_id:%d\n",
+				 prot_id);
+		else
+			dev_warn(dev,
+				 "Polling mode NOT supported by transport.\n");
+	}
 
 idr_alloc:
 	ret = idr_alloc(idr, cinfo, prot_id, prot_id + 1, GFP_KERNEL);
