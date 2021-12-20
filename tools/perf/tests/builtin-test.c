@@ -107,6 +107,7 @@ static struct test_suite *generic_tests[] = {
 	&suite__expand_cgroup_events,
 	&suite__perf_time_to_tsc,
 	&suite__dlfilter,
+	&suite__sigtrap,
 	NULL,
 };
 
@@ -605,6 +606,9 @@ int cmd_test(int argc, const char **argv)
 
         if (ret < 0)
                 return ret;
+
+	/* Unbuffered output */
+	setvbuf(stdout, NULL, _IONBF, 0);
 
 	argc = parse_options_subcommand(argc, argv, test_options, test_subcommands, test_usage, 0);
 	if (argc >= 1 && !strcmp(argv[0], "list"))
