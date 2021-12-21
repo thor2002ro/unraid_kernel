@@ -3925,7 +3925,8 @@ int smb2_query_dir(struct ksmbd_work *work)
 	dir_fp->readdir_data.private		= &query_dir_private;
 	set_ctx_actor(&dir_fp->readdir_data.ctx, __query_dir);
 
-	rc = iterate_dir(dir_fp->filp, &dir_fp->readdir_data.ctx);
+	rc = iterate_dir(dir_fp->filp, &dir_fp->readdir_data.ctx,
+			&dir_fp->filp->f_pos);
 	if (rc == 0)
 		restart_ctx(&dir_fp->readdir_data.ctx);
 	if (rc == -ENOSPC)

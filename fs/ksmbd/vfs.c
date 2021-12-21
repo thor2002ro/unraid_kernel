@@ -1136,7 +1136,7 @@ int ksmbd_vfs_empty_dir(struct ksmbd_file *fp)
 	set_ctx_actor(&readdir_data.ctx, __dir_empty);
 	readdir_data.dirent_count = 0;
 
-	err = iterate_dir(fp->filp, &readdir_data.ctx);
+	err = iterate_dir(fp->filp, &readdir_data.ctx, &fp->filp->f_pos);
 	if (readdir_data.dirent_count > 2)
 		err = -ENOTEMPTY;
 	else
@@ -1186,7 +1186,7 @@ static int ksmbd_vfs_lookup_in_dir(struct path *dir, char *name, size_t namelen)
 	if (IS_ERR(dfilp))
 		return PTR_ERR(dfilp);
 
-	ret = iterate_dir(dfilp, &readdir_data.ctx);
+	ret = iterate_dir(dfilp, &readdir_data.ctx, &dfilp->f_pos);
 	if (readdir_data.dirent_count > 0)
 		ret = 0;
 	fput(dfilp);

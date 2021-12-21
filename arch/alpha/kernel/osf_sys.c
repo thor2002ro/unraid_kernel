@@ -162,7 +162,7 @@ SYSCALL_DEFINE4(osf_getdirentries, unsigned int, fd,
 	if (!arg.file)
 		return -EBADF;
 
-	error = iterate_dir(arg.file, &buf.ctx);
+	error = iterate_dir(arg.file, &buf.ctx, &arg.file->f_pos);
 	if (error >= 0)
 		error = buf.error;
 	if (count != buf.count)
