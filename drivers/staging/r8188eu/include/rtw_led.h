@@ -7,38 +7,11 @@
 #include "osdep_service.h"
 #include "drv_types.h"
 
-#define MSECS(t)        (HZ * ((t) / 1000) + (HZ * ((t) % 1000)) / 1000)
-
-#define LED_BLINK_NORMAL_INTERVAL		100
-#define LED_BLINK_SLOWLY_INTERVAL		200
-#define LED_BLINK_LONG_INTERVAL			400
-
-#define LED_BLINK_NO_LINK_INTERVAL_ALPHA	1000
-#define LED_BLINK_LINK_INTERVAL_ALPHA		500	/* 500 */
-#define LED_BLINK_SCAN_INTERVAL_ALPHA		180	/* 150 */
-#define LED_BLINK_FASTER_INTERVAL_ALPHA		50
-#define LED_BLINK_WPS_SUCESS_INTERVAL_ALPHA	5000
-
-#define LED_BLINK_NORMAL_INTERVAL_NETTRONIX	100
-#define LED_BLINK_SLOWLY_INTERVAL_NETTRONIX	2000
-
-#define LED_BLINK_SLOWLY_INTERVAL_PORNET	1000
-#define LED_BLINK_NORMAL_INTERVAL_PORNET	100
-
-#define LED_BLINK_FAST_INTERVAL_BITLAND		30
-
-/*  060403, rcnjko: Customized for AzWave. */
-#define LED_CM2_BLINK_ON_INTERVAL		250
-#define LED_CM2_BLINK_OFF_INTERVAL		4750
-
-#define LED_CM8_BLINK_INTERVAL			500	/* for QMI */
-#define LED_CM8_BLINK_OFF_INTERVAL		3750	/* for QMI */
-
-/*  080124, lanhsin: Customized for RunTop */
-#define LED_RunTop_BLINK_INTERVAL		300
-
-/*  060421, rcnjko: Customized for Sercomm Printer Server case. */
-#define LED_CM3_BLINK_INTERVAL			1500
+#define LED_BLINK_NO_LINK_INTVL			msecs_to_jiffies(1000)
+#define LED_BLINK_LINK_INTVL			msecs_to_jiffies(500)
+#define LED_BLINK_SCAN_INTVL			msecs_to_jiffies(180)
+#define LED_BLINK_FASTER_INTVL			msecs_to_jiffies(50)
+#define LED_BLINK_WPS_SUCESS_INTVL		msecs_to_jiffies(5000)
 
 enum LED_CTL_MODE {
 	LED_CTL_POWER_ON = 1,
@@ -53,8 +26,6 @@ enum LED_CTL_MODE {
 	LED_CTL_STOP_WPS = 10,
 	LED_CTL_START_WPS_BOTTON = 11, /* added for runtop */
 	LED_CTL_STOP_WPS_FAIL = 12, /* added for ALPHA */
-	LED_CTL_STOP_WPS_FAIL_OVERLAP = 13, /* added for BELKIN */
-	LED_CTL_CONNECTION_NO_TRANSFER = 14,
 };
 
 enum LED_STATE_871x {
@@ -80,19 +51,9 @@ enum LED_STATE_871x {
 	LED_BLINK_ALWAYS_ON = 16,
 };
 
-enum LED_PIN_871x {
-	LED_PIN_NULL = 0,
-	LED_PIN_LED0 = 1,
-	LED_PIN_LED1 = 2,
-	LED_PIN_LED2 = 3,
-	LED_PIN_GPIO0 = 4,
-};
-
 struct LED_871x {
 	struct adapter *padapter;
 
-	enum LED_PIN_871x	LedPin;	/* Identify how to implement this
-					 * SW led. */
 	enum LED_STATE_871x	CurrLedState; /*  Current LED state. */
 	enum LED_STATE_871x	BlinkingLedState; /*  Next state for blinking,
 				   * either RTW_LED_ON or RTW_LED_OFF are. */
@@ -105,15 +66,12 @@ struct LED_871x {
 
 	u32 BlinkTimes; /*  Number of times to toggle led state for blinking. */
 
-	struct timer_list BlinkTimer; /*  Timer object for led blinking. */
-
 	/*  ALPHA, added by chiyoko, 20090106 */
 	u8 bLedNoLinkBlinkInProgress;
 	u8 bLedLinkBlinkInProgress;
 	u8 bLedStartToLinkBlinkInProgress;
 	u8 bLedScanBlinkInProgress;
-	struct work_struct BlinkWorkItem; /* Workitem used by BlinkTimer to
-					   * manipulate H/W to blink LED. */
+	struct delayed_work blink_work;
 };
 
 #define IS_LED_WPS_BLINKING(_LED_871x)					\
@@ -130,7 +88,6 @@ void LedControl8188eu(struct adapter *padapter, enum LED_CTL_MODE	LedAction);
 struct led_priv{
 	/* add for led control */
 	struct LED_871x			SwLed0;
-	struct LED_871x			SwLed1;
 	u8	bRegUseLed;
 	void (*LedControlHandler)(struct adapter *padapter,
 				  enum LED_CTL_MODE LedAction);
@@ -143,14 +100,11 @@ struct led_priv{
 			(adapt)->ledpriv.LedControlHandler((adapt), (action)); \
 	} while (0)
 
-void BlinkTimerCallback(struct timer_list *t);
 void BlinkWorkItemCallback(struct work_struct *work);
 
 void ResetLedStatus(struct LED_871x * pLed);
 
-void InitLed871x(struct adapter *padapter, struct LED_871x *pLed,
-		 enum LED_PIN_871x LedPin);
-
+void InitLed871x(struct adapter *padapter, struct LED_871x *pLed);
 void DeInitLed871x(struct LED_871x *pLed);
 
 /* hal... */
