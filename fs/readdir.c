@@ -21,6 +21,7 @@
 #include <linux/unistd.h>
 #include <linux/compat.h>
 #include <linux/uaccess.h>
+#include "internal.h"
 
 #include <asm/unaligned.h>
 
@@ -359,22 +360,25 @@ efault:
 	return -EFAULT;
 }
 
-SYSCALL_DEFINE3(getdents64, unsigned int, fd,
-		struct linux_dirent64 __user *, dirent, unsigned int, count)
+/**
+ * vfs_getdents - getdents without fdget
+ * @file    : pointer to file struct of directory
+ * @dirent  : pointer to user directory structure
+ * @count   : size of buffer
+ * @pos     : file pos
+ */
+int vfs_getdents(struct file *file, struct linux_dirent64 __user *dirent,
+		 unsigned int count, loff_t *pos)
 {
-	struct fd f;
 	struct getdents_callback64 buf = {
 		.ctx.actor = filldir64,
+		.ctx.pos = *pos,
 		.count = count,
 		.current_dir = dirent
 	};
 	int error;
 
-	f = fdget_pos(fd);
-	if (!f.file)
-		return -EBADF;
-
-	error = iterate_dir(f.file, &buf.ctx, &f.file->f_pos);
+	error = iterate_dir(file, &buf.ctx, pos);
 	if (error >= 0)
 		error = buf.error;
 	if (buf.prev_reclen) {
@@ -390,6 +394,22 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd,
 
 	return error;
 }
+
+SYSCALL_DEFINE3(getdents64, unsigned int, fd,
+		struct linux_dirent64 __user *, dirent, unsigned int, count)
+{
+	struct fd f;
+	int error;
+
+	f = fdget_pos(fd);
+	if (!f.file)
+		return -EBADF;
+
+	error = vfs_getdents(f.file, dirent, count, &f.file->f_pos);
+
+	fdput_pos(f);
+	return error;
+ }
 
 #ifdef CONFIG_COMPAT
 struct compat_old_linux_dirent {
