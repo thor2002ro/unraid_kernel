@@ -2240,6 +2240,7 @@ static void build_r4000_tlb_load_handler(void)
 			if (cpu_has_mips_r2_exec_hazard) {
 				uasm_i_ehb(&p);
 
+				fallthrough;
 		case CPU_CAVIUM_OCTEON:
 		case CPU_CAVIUM_OCTEON_PLUS:
 		case CPU_CAVIUM_OCTEON2:
