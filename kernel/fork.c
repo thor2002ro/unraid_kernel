@@ -1529,7 +1529,8 @@ static int copy_fs(unsigned long clone_flags, struct task_struct *tsk)
 	return 0;
 }
 
-static int copy_files(unsigned long clone_flags, struct task_struct *tsk)
+static int copy_files(unsigned long clone_flags, struct task_struct *tsk,
+		      int no_files)
 {
 	struct files_struct *oldf, *newf;
 	int error = 0;
@@ -1540,6 +1541,11 @@ static int copy_files(unsigned long clone_flags, struct task_struct *tsk)
 	oldf = current->files;
 	if (!oldf)
 		goto out;
+
+	if (no_files) {
+		tsk->files = NULL;
+		goto out;
+	}
 
 	if (clone_flags & CLONE_FILES) {
 		atomic_inc(&oldf->count);
@@ -1997,7 +2003,7 @@ static __latent_entropy struct task_struct *copy_process(
 	p = dup_task_struct(current, node);
 	if (!p)
 		goto fork_out;
-	if (args->io_thread) {
+	if (args->worker_flags & USER_WORKER_IO) {
 		/*
 		 * Mark us an IO worker, and block any signal that isn't
 		 * fatal or STOP
@@ -2005,6 +2011,9 @@ static __latent_entropy struct task_struct *copy_process(
 		p->flags |= PF_IO_WORKER;
 		siginitsetinv(&p->blocked, sigmask(SIGKILL)|sigmask(SIGSTOP));
 	}
+
+	if (args->worker_flags & USER_WORKER)
+		p->flags |= PF_USER_WORKER;
 
 	/*
 	 * This _must_ happen before we call free_task(), i.e. before we jump
@@ -2150,7 +2159,8 @@ static __latent_entropy struct task_struct *copy_process(
 	retval = copy_semundo(clone_flags, p);
 	if (retval)
 		goto bad_fork_cleanup_security;
-	retval = copy_files(clone_flags, p);
+	retval = copy_files(clone_flags, p,
+			    args->worker_flags & USER_WORKER_NO_FILES);
 	if (retval)
 		goto bad_fork_cleanup_semundo;
 	retval = copy_fs(clone_flags, p);
@@ -2174,6 +2184,9 @@ static __latent_entropy struct task_struct *copy_process(
 	retval = copy_thread(clone_flags, args->stack, args->stack_size, p, args->tls);
 	if (retval)
 		goto bad_fork_cleanup_io;
+
+	if (args->worker_flags & USER_WORKER_SIG_IGN)
+		ignore_signals(p);
 
 	stackleak_task_init(p);
 
@@ -2482,27 +2495,77 @@ struct mm_struct *copy_init_mm(void)
 	return dup_mm(NULL, &init_mm);
 }
 
-/*
- * This is like kernel_clone(), but shaved down and tailored to just
- * creating io_uring workers. It returns a created task, or an error pointer.
- * The returned task is inactive, and the caller must fire it up through
- * wake_up_new_task(p). All signals are blocked in the created task.
- */
-struct task_struct *create_io_thread(int (*fn)(void *), void *arg, int node)
+static bool user_worker_flags_valid(struct kernel_clone_args *kargs)
 {
-	unsigned long flags = CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|
-				CLONE_IO;
+	/* Verify that no unknown flags are passed along. */
+	if (kargs->worker_flags & ~(USER_WORKER_IO | USER_WORKER |
+				    USER_WORKER_NO_FILES | USER_WORKER_SIG_IGN))
+		return false;
+
+	/*
+	 * If we're ignoring all signals don't allow sharing struct sighand and
+	 * don't bother clearing signal handlers.
+	 */
+	if ((kargs->flags & (CLONE_SIGHAND | CLONE_CLEAR_SIGHAND)) &&
+	    (kargs->worker_flags & USER_WORKER_SIG_IGN))
+		return false;
+
+	return true;
+}
+
+/**
+ * user_worker_create - create a copy of a process to be used by the kernel
+ * @fn: thread stack
+ * @arg: data to be passed to fn
+ * @node: numa node to allocate task from
+ * @clone_flags: CLONE flags
+ * @worker_flags: USER_WORKER flags
+ *
+ * This returns a created task, or an error pointer. The returned task is
+ * inactive, and the caller must fire it up through user_worker_start(). If
+ * this is an PF_IO_WORKER all singals but KILL and STOP are blocked.
+ */
+struct task_struct *user_worker_create(int (*fn)(void *), void *arg, int node,
+				       unsigned long clone_flags,
+				       u32 worker_flags)
+{
 	struct kernel_clone_args args = {
-		.flags		= ((lower_32_bits(flags) | CLONE_VM |
-				    CLONE_UNTRACED) & ~CSIGNAL),
-		.exit_signal	= (lower_32_bits(flags) & CSIGNAL),
+		.flags		= ((lower_32_bits(clone_flags) | CLONE_VM |
+				   CLONE_UNTRACED) & ~CSIGNAL),
+		.exit_signal	= (lower_32_bits(clone_flags) & CSIGNAL),
 		.stack		= (unsigned long)fn,
 		.stack_size	= (unsigned long)arg,
-		.io_thread	= 1,
+		.worker_flags	= USER_WORKER | worker_flags,
 	};
+
+	if (!user_worker_flags_valid(&args))
+		return ERR_PTR(-EINVAL);
 
 	return copy_process(NULL, 0, node, &args);
 }
+EXPORT_SYMBOL_GPL(user_worker_create);
+
+/**
+ * user_worker_start - Start a task created with user_worker_create
+ * @tsk: task to wake up
+ * @namefmt: printf-style format string for the thread name
+ * @arg: arguments for @namefmt
+ */
+void user_worker_start(struct task_struct *tsk, const char namefmt[], ...)
+{
+	char name[TASK_COMM_LEN];
+	va_list args;
+
+	WARN_ON(!(tsk->flags & PF_USER_WORKER));
+
+	va_start(args, namefmt);
+	vsnprintf(name, sizeof(name), namefmt, args);
+	set_task_comm(tsk, name);
+	va_end(args);
+
+	wake_up_new_task(tsk);
+}
+EXPORT_SYMBOL_GPL(user_worker_start);
 
 /*
  *  Ok, this is the main fork-routine.
