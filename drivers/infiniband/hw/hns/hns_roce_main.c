@@ -270,6 +270,9 @@ static enum rdma_link_layer hns_roce_get_link_layer(struct ib_device *device,
 static int hns_roce_query_pkey(struct ib_device *ib_dev, u32 port, u16 index,
 			       u16 *pkey)
 {
+	if (index > 0)
+		return -EINVAL;
+
 	*pkey = PKEY_ID;
 
 	return 0;
@@ -307,9 +310,25 @@ hns_roce_user_mmap_entry_insert(struct ib_ucontext *ucontext, u64 address,
 	entry->address = address;
 	entry->mmap_type = mmap_type;
 
-	ret = rdma_user_mmap_entry_insert_exact(
-		ucontext, &entry->rdma_entry, length,
-		mmap_type == HNS_ROCE_MMAP_TYPE_DB ? 0 : 1);
+	switch (mmap_type) {
+	case HNS_ROCE_MMAP_TYPE_DB:
+		ret = rdma_user_mmap_entry_insert_exact(
+				ucontext, &entry->rdma_entry, length, 0);
+		break;
+	case HNS_ROCE_MMAP_TYPE_TPTR:
+		ret = rdma_user_mmap_entry_insert_exact(
+				ucontext, &entry->rdma_entry, length, 1);
+		break;
+	case HNS_ROCE_MMAP_TYPE_DWQE:
+		ret = rdma_user_mmap_entry_insert_range(
+				ucontext, &entry->rdma_entry, length, 2,
+				U32_MAX);
+		break;
+	default:
+		ret = -EINVAL;
+		break;
+	}
+
 	if (ret) {
 		kfree(entry);
 		return NULL;
@@ -436,10 +455,18 @@ static int hns_roce_mmap(struct ib_ucontext *uctx, struct vm_area_struct *vma)
 
 	entry = to_hns_mmap(rdma_entry);
 	pfn = entry->address >> PAGE_SHIFT;
-	prot = vma->vm_page_prot;
 
-	if (entry->mmap_type != HNS_ROCE_MMAP_TYPE_TPTR)
-		prot = pgprot_noncached(prot);
+	switch (entry->mmap_type) {
+	case HNS_ROCE_MMAP_TYPE_DB:
+	case HNS_ROCE_MMAP_TYPE_DWQE:
+		prot = pgprot_device(vma->vm_page_prot);
+		break;
+	case HNS_ROCE_MMAP_TYPE_TPTR:
+		prot = vma->vm_page_prot;
+		break;
+	default:
+		return -EINVAL;
+	}
 
 	ret = rdma_user_mmap_io(uctx, vma, pfn, rdma_entry->npages * PAGE_SIZE,
 				prot, rdma_entry);
