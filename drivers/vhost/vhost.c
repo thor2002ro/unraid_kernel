@@ -374,7 +374,7 @@ static int vhost_worker(void *data)
 	}
 
 	complete(worker->exit_done);
-	do_exit(0);
+	make_task_dead(0);
 }
 
 static void vhost_vq_free_iovecs(struct vhost_virtqueue *vq)
