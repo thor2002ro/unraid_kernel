@@ -71,6 +71,9 @@ extern int sof_core_debug;
 /* So far the primary core on all DSPs has ID 0 */
 #define SOF_DSP_PRIMARY_CORE 0
 
+/* max number of DSP cores */
+#define SOF_MAX_DSP_NUM_CORES 8
+
 /* DSP power state */
 enum sof_dsp_power_states {
 	SOF_DSP_PM_D0,
@@ -127,10 +130,8 @@ struct snd_sof_dsp_ops {
 	int (*run)(struct snd_sof_dev *sof_dev); /* mandatory */
 	int (*stall)(struct snd_sof_dev *sof_dev, unsigned int core_mask); /* optional */
 	int (*reset)(struct snd_sof_dev *sof_dev); /* optional */
-	int (*core_power_up)(struct snd_sof_dev *sof_dev,
-			     unsigned int core_mask); /* optional */
-	int (*core_power_down)(struct snd_sof_dev *sof_dev,
-			       unsigned int core_mask); /* optional */
+	int (*core_get)(struct snd_sof_dev *sof_dev, int core); /* optional */
+	int (*core_put)(struct snd_sof_dev *sof_dev, int core); /* optional */
 
 	/*
 	 * Register IO: only used by respective drivers themselves,
@@ -205,6 +206,9 @@ struct snd_sof_dsp_ops {
 	/* host stream pointer */
 	snd_pcm_uframes_t (*pcm_pointer)(struct snd_sof_dev *sdev,
 					 struct snd_pcm_substream *substream); /* optional */
+
+	/* pcm ack */
+	int (*pcm_ack)(struct snd_sof_dev *sdev, struct snd_pcm_substream *substream); /* optional */
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_PROBES)
 	/* Except for probe_pointer, all probe ops are mandatory */
@@ -325,6 +329,10 @@ struct snd_sof_dfsentry {
 	enum sof_debugfs_access_type access_type;
 #if ENABLE_DEBUGFS_CACHEBUF
 	char *cache_buf; /* buffer to cache the contents of debugfs memory */
+#endif
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_IPC_MSG_INJECTOR)
+	void *msg_inject_tx;
+	void *msg_inject_rx;
 #endif
 	struct snd_sof_dev *sdev;
 	struct list_head list;  /* list in sdev dfsentry list */
@@ -473,6 +481,18 @@ struct snd_sof_dev {
 
 	bool msi_enabled;
 
+	/* DSP core context */
+	u32 num_cores;
+
+	/*
+	 * ref count per core that will be modified during system suspend/resume and during pcm
+	 * hw_params/hw_free. This doesn't need to be protected with a mutex because pcm
+	 * hw_params/hw_free are already protected by the PCM mutex in the ALSA framework in
+	 * sound/core/ when streams are active and during system suspend/resume, streams are
+	 * already suspended.
+	 */
+	int dsp_core_ref_count[SOF_MAX_DSP_NUM_CORES];
+
 	void *private;			/* core does not touch this */
 };
 
@@ -515,6 +535,7 @@ void snd_sof_fw_unload(struct snd_sof_dev *sdev);
  */
 struct snd_sof_ipc *snd_sof_ipc_init(struct snd_sof_dev *sdev);
 void snd_sof_ipc_free(struct snd_sof_dev *sdev);
+void snd_sof_ipc_get_reply(struct snd_sof_dev *sdev);
 void snd_sof_ipc_reply(struct snd_sof_dev *sdev, u32 msg_id);
 void snd_sof_ipc_msgs_rx(struct snd_sof_dev *sdev);
 int snd_sof_ipc_stream_pcm_params(struct snd_sof_dev *sdev,
@@ -527,6 +548,11 @@ int sof_ipc_tx_message_no_pm(struct snd_sof_ipc *ipc, u32 header,
 			     void *msg_data, size_t msg_bytes,
 			     void *reply_data, size_t reply_bytes);
 int sof_ipc_init_msg_memory(struct snd_sof_dev *sdev);
+static inline void snd_sof_ipc_process_reply(struct snd_sof_dev *sdev, u32 msg_id)
+{
+	snd_sof_ipc_get_reply(sdev);
+	snd_sof_ipc_reply(sdev, msg_id);
+}
 
 /*
  * Trace/debug
