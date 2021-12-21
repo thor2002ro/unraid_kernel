@@ -84,15 +84,19 @@ static int pcpu_alloc_pages(struct pcpu_chunk *chunk,
 			    gfp_t gfp)
 {
 	unsigned int cpu, tcpu;
-	int i;
+	int i, nid;
 
 	gfp |= __GFP_HIGHMEM;
 
 	for_each_possible_cpu(cpu) {
+		nid = cpu_to_node(cpu);
+		if (nid == NUMA_NO_NODE || !node_online(nid))
+			nid = numa_mem_id();
+
 		for (i = page_start; i < page_end; i++) {
 			struct page **pagep = &pages[pcpu_page_idx(cpu, i)];
 
-			*pagep = alloc_pages_node(cpu_to_node(cpu), gfp, 0);
+			*pagep = alloc_pages_node(nid, gfp, 0);
 			if (!*pagep)
 				goto err;
 		}
