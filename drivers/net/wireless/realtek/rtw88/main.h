@@ -364,6 +364,7 @@ enum rtw_flags {
 	RTW_FLAG_WOWLAN,
 	RTW_FLAG_RESTARTING,
 	RTW_FLAG_RESTART_TRIGGERING,
+	RTW_FLAG_FORCE_LOWEST_RATE,
 
 	NUM_OF_RTW_FLAGS,
 };
@@ -1630,6 +1631,7 @@ struct rtw_dm_info {
 	u8 cck_gi_u_bnd;
 	u8 cck_gi_l_bnd;
 
+	u8 fix_rate;
 	u8 tx_rate;
 	u32 rrsr_val_init;
 	u32 rrsr_mask_min;

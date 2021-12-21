@@ -59,7 +59,6 @@ static enum cfg_peek cfg_peek = CFG_NONE_PEEK;
 static const char *cfg_host;
 static const char *cfg_port	= "12000";
 static int cfg_sock_proto	= IPPROTO_MPTCP;
-static bool tcpulp_audit;
 static int pf = AF_INET;
 static int cfg_sndbuf;
 static int cfg_rcvbuf;
@@ -73,9 +72,22 @@ static uint32_t cfg_mark;
 struct cfg_cmsg_types {
 	unsigned int cmsg_enabled:1;
 	unsigned int timestampns:1;
+	unsigned int tcp_inq:1;
 };
 
+struct cfg_sockopt_types {
+	unsigned int transparent:1;
+};
+
+struct tcp_inq_state {
+	unsigned int last;
+	bool expect_eof;
+};
+
+static struct tcp_inq_state tcp_inq;
+
 static struct cfg_cmsg_types cfg_cmsg_types;
+static struct cfg_sockopt_types cfg_sockopt_types;
 
 static void die_usage(void)
 {
@@ -90,9 +102,9 @@ static void die_usage(void)
 	fprintf(stderr, "\t-s [MPTCP|TCP] -- use mptcp(default) or tcp sockets\n");
 	fprintf(stderr, "\t-m [poll|mmap|sendfile] -- use poll(default)/mmap+write/sendfile\n");
 	fprintf(stderr, "\t-M mark -- set socket packet mark\n");
-	fprintf(stderr, "\t-u -- check mptcp ulp\n");
 	fprintf(stderr, "\t-w num -- wait num sec before closing the socket\n");
 	fprintf(stderr, "\t-c cmsg -- test cmsg type <cmsg>\n");
+	fprintf(stderr, "\t-o option -- test sockopt <option>\n");
 	fprintf(stderr,
 		"\t-P [saveWithPeek|saveAfterPeek] -- save data with/after MSG_PEEK form tcp socket\n");
 	exit(1);
@@ -185,6 +197,58 @@ static void set_mark(int fd, uint32_t mark)
 	}
 }
 
+static void set_transparent(int fd, int pf)
+{
+	int one = 1;
+
+	switch (pf) {
+	case AF_INET:
+		if (-1 == setsockopt(fd, SOL_IP, IP_TRANSPARENT, &one, sizeof(one)))
+			perror("IP_TRANSPARENT");
+		break;
+	case AF_INET6:
+		if (-1 == setsockopt(fd, IPPROTO_IPV6, IPV6_TRANSPARENT, &one, sizeof(one)))
+			perror("IPV6_TRANSPARENT");
+		break;
+	}
+}
+
+static int do_ulp_so(int sock, const char *name)
+{
+	return setsockopt(sock, IPPROTO_TCP, TCP_ULP, name, strlen(name));
+}
+
+#define X(m)	xerror("%s:%u: %s: failed for proto %d at line %u", __FILE__, __LINE__, (m), proto, line)
+static void sock_test_tcpulp(int sock, int proto, unsigned int line)
+{
+	socklen_t buflen = 8;
+	char buf[8] = "";
+	int ret = getsockopt(sock, IPPROTO_TCP, TCP_ULP, buf, &buflen);
+
+	if (ret != 0)
+		X("getsockopt");
+
+	if (buflen > 0) {
+		if (strcmp(buf, "mptcp") != 0)
+			xerror("unexpected ULP '%s' for proto %d at line %u", buf, proto, line);
+		ret = do_ulp_so(sock, "tls");
+		if (ret == 0)
+			X("setsockopt");
+	} else if (proto == IPPROTO_MPTCP) {
+		ret = do_ulp_so(sock, "tls");
+		if (ret != -1)
+			X("setsockopt");
+	}
+
+	ret = do_ulp_so(sock, "mptcp");
+	if (ret != -1)
+		X("setsockopt");
+
+#undef X
+}
+
+#define SOCK_TEST_TCPULP(s, p) sock_test_tcpulp((s), (p), __LINE__)
+
 static int sock_listen_mptcp(const char * const listenaddr,
 			     const char * const port)
 {
@@ -208,9 +272,14 @@ static int sock_listen_mptcp(const char * const listenaddr,
 		if (sock < 0)
 			continue;
 
+		SOCK_TEST_TCPULP(sock, cfg_sock_proto);
+
 		if (-1 == setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &one,
 				     sizeof(one)))
 			perror("setsockopt");
+
+		if (cfg_sockopt_types.transparent)
+			set_transparent(sock, pf);
 
 		if (bind(sock, a->ai_addr, a->ai_addrlen) == 0)
 			break; /* success */
@@ -227,50 +296,17 @@ static int sock_listen_mptcp(const char * const listenaddr,
 		return sock;
 	}
 
+	SOCK_TEST_TCPULP(sock, cfg_sock_proto);
+
 	if (listen(sock, 20)) {
 		perror("listen");
 		close(sock);
 		return -1;
 	}
 
+	SOCK_TEST_TCPULP(sock, cfg_sock_proto);
+
 	return sock;
-}
-
-static bool sock_test_tcpulp(const char * const remoteaddr,
-			     const char * const port)
-{
-	struct addrinfo hints = {
-		.ai_protocol = IPPROTO_TCP,
-		.ai_socktype = SOCK_STREAM,
-	};
-	struct addrinfo *a, *addr;
-	int sock = -1, ret = 0;
-	bool test_pass = false;
-
-	hints.ai_family = AF_INET;
-
-	xgetaddrinfo(remoteaddr, port, &hints, &addr);
-	for (a = addr; a; a = a->ai_next) {
-		sock = socket(a->ai_family, a->ai_socktype, IPPROTO_TCP);
-		if (sock < 0) {
-			perror("socket");
-			continue;
-		}
-		ret = setsockopt(sock, IPPROTO_TCP, TCP_ULP, "mptcp",
-				 sizeof("mptcp"));
-		if (ret == -1 && errno == EOPNOTSUPP)
-			test_pass = true;
-		close(sock);
-
-		if (test_pass)
-			break;
-		if (!ret)
-			fprintf(stderr,
-				"setsockopt(TCP_ULP) returned 0\n");
-		else
-			perror("setsockopt(TCP_ULP)");
-	}
-	return test_pass;
 }
 
 static int sock_connect_mptcp(const char * const remoteaddr,
@@ -293,6 +329,8 @@ static int sock_connect_mptcp(const char * const remoteaddr,
 			continue;
 		}
 
+		SOCK_TEST_TCPULP(sock, proto);
+
 		if (cfg_mark)
 			set_mark(sock, cfg_mark);
 
@@ -305,6 +343,8 @@ static int sock_connect_mptcp(const char * const remoteaddr,
 	}
 
 	freeaddrinfo(addr);
+	if (sock != -1)
+		SOCK_TEST_TCPULP(sock, proto);
 	return sock;
 }
 
@@ -364,7 +404,9 @@ static size_t do_write(const int fd, char *buf, const size_t len)
 static void process_cmsg(struct msghdr *msgh)
 {
 	struct __kernel_timespec ts;
+	bool inq_found = false;
 	bool ts_found = false;
+	unsigned int inq = 0;
 	struct cmsghdr *cmsg;
 
 	for (cmsg = CMSG_FIRSTHDR(msgh); cmsg ; cmsg = CMSG_NXTHDR(msgh, cmsg)) {
@@ -373,11 +415,26 @@ static void process_cmsg(struct msghdr *msgh)
 			ts_found = true;
 			continue;
 		}
+		if (cmsg->cmsg_level == IPPROTO_TCP && cmsg->cmsg_type == TCP_CM_INQ) {
+			memcpy(&inq, CMSG_DATA(cmsg), sizeof(inq));
+			inq_found = true;
+			continue;
+		}
+
 	}
 
 	if (cfg_cmsg_types.timestampns) {
 		if (!ts_found)
 			xerror("TIMESTAMPNS not present\n");
+	}
+
+	if (cfg_cmsg_types.tcp_inq) {
+		if (!inq_found)
+			xerror("TCP_INQ not present\n");
+
+		if (inq > 1024)
+			xerror("tcp_inq %u is larger than one kbyte\n", inq);
+		tcp_inq.last = inq;
 	}
 }
 
@@ -395,10 +452,23 @@ static ssize_t do_recvmsg_cmsg(const int fd, char *buf, const size_t len)
 		.msg_controllen = sizeof(msg_buf),
 	};
 	int flags = 0;
+	unsigned int last_hint = tcp_inq.last;
 	int ret = recvmsg(fd, &msg, flags);
 
-	if (ret <= 0)
+	if (ret <= 0) {
+		if (ret == 0 && tcp_inq.expect_eof)
+			return ret;
+
+		if (ret == 0 && cfg_cmsg_types.tcp_inq)
+			if (last_hint != 1 && last_hint != 0)
+				xerror("EOF but last tcp_inq hint was %u\n", last_hint);
+
 		return ret;
+	}
+
+	if (tcp_inq.expect_eof)
+		xerror("expected EOF, last_hint %u, now %u\n",
+		       last_hint, tcp_inq.last);
 
 	if (msg.msg_controllen && !cfg_cmsg_types.cmsg_enabled)
 		xerror("got %lu bytes of cmsg data, expected 0\n",
@@ -409,6 +479,19 @@ static ssize_t do_recvmsg_cmsg(const int fd, char *buf, const size_t len)
 
 	if (msg.msg_controllen)
 		process_cmsg(&msg);
+
+	if (cfg_cmsg_types.tcp_inq) {
+		if ((size_t)ret < len && last_hint > (unsigned int)ret) {
+			if (ret + 1 != (int)last_hint) {
+				int next = read(fd, msg_buf, sizeof(msg_buf));
+
+				xerror("read %u of %u, last_hint was %u tcp_inq hint now %u next_read returned %d/%m\n",
+				       ret, (unsigned int)len, last_hint, tcp_inq.last, next);
+			} else {
+				tcp_inq.expect_eof = true;
+			}
+		}
+	}
 
 	return ret;
 }
@@ -878,6 +961,8 @@ int main_loop_s(int listensock)
 		check_sockaddr(pf, &ss, salen);
 		check_getpeername(remotesock, &ss, salen);
 
+		SOCK_TEST_TCPULP(remotesock, 0);
+
 		return copyfd_io(0, remotesock, 1);
 	}
 
@@ -919,6 +1004,8 @@ static void apply_cmsg_types(int fd, const struct cfg_cmsg_types *cmsg)
 
 	if (cmsg->timestampns)
 		xsetsockopt(fd, SOL_SOCKET, SO_TIMESTAMPNS_NEW, &on, sizeof(on));
+	if (cmsg->tcp_inq)
+		xsetsockopt(fd, IPPROTO_TCP, TCP_INQ, &on, sizeof(on));
 }
 
 static void parse_cmsg_types(const char *type)
@@ -940,7 +1027,33 @@ static void parse_cmsg_types(const char *type)
 		return;
 	}
 
+	if (strncmp(type, "TCPINQ", len) == 0) {
+		cfg_cmsg_types.tcp_inq = 1;
+		return;
+	}
+
 	fprintf(stderr, "Unrecognized cmsg option %s\n", type);
+	exit(1);
+}
+
+static void parse_setsock_options(const char *name)
+{
+	char *next = strchr(name, ',');
+	unsigned int len = 0;
+
+	if (next) {
+		parse_setsock_options(next + 1);
+		len = next - name;
+	} else {
+		len = strlen(name);
+	}
+
+	if (strncmp(name, "TRANSPARENT", len) == 0) {
+		cfg_sockopt_types.transparent = 1;
+		return;
+	}
+
+	fprintf(stderr, "Unrecognized setsockopt option %s\n", name);
 	exit(1);
 }
 
@@ -954,6 +1067,8 @@ int main_loop(void)
 		return 2;
 
 	check_getpeername_connect(fd);
+
+	SOCK_TEST_TCPULP(fd, cfg_sock_proto);
 
 	if (cfg_rcvbuf)
 		set_rcvbuf(fd, cfg_rcvbuf);
@@ -1047,7 +1162,7 @@ static void parse_opts(int argc, char **argv)
 {
 	int c;
 
-	while ((c = getopt(argc, argv, "6jr:lp:s:hut:T:m:S:R:w:M:P:c:")) != -1) {
+	while ((c = getopt(argc, argv, "6jr:lp:s:ht:T:m:S:R:w:M:P:c:o:")) != -1) {
 		switch (c) {
 		case 'j':
 			cfg_join = true;
@@ -1072,9 +1187,6 @@ static void parse_opts(int argc, char **argv)
 			break;
 		case 'h':
 			die_usage();
-			break;
-		case 'u':
-			tcpulp_audit = true;
 			break;
 		case '6':
 			pf = AF_INET6;
@@ -1108,6 +1220,9 @@ static void parse_opts(int argc, char **argv)
 		case 'c':
 			parse_cmsg_types(optarg);
 			break;
+		case 'o':
+			parse_setsock_options(optarg);
+			break;
 		}
 	}
 
@@ -1125,9 +1240,6 @@ int main(int argc, char *argv[])
 
 	signal(SIGUSR1, handle_signal);
 	parse_opts(argc, argv);
-
-	if (tcpulp_audit)
-		return sock_test_tcpulp(cfg_host, cfg_port) ? 0 : 1;
 
 	if (listen_mode) {
 		int fd = sock_listen_mptcp(cfg_host, cfg_port);

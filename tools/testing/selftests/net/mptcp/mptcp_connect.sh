@@ -296,24 +296,6 @@ check_mptcp_disabled()
 	return 0
 }
 
-check_mptcp_ulp_setsockopt()
-{
-	local t retval
-	t="ns_ulp-$sech-$(mktemp -u XXXXXX)"
-
-	ip netns add ${t} || exit $ksft_skip
-	if ! ip netns exec ${t} ./mptcp_connect -u -p 10000 -s TCP 127.0.0.1 2>&1; then
-		printf "setsockopt(..., TCP_ULP, \"mptcp\", ...) allowed\t[ FAIL ]\n"
-		retval=1
-		ret=$retval
-	else
-		printf "setsockopt(..., TCP_ULP, \"mptcp\", ...) blocked\t[ OK ]\n"
-		retval=0
-	fi
-	ip netns del ${t}
-	return $retval
-}
-
 # $1: IP address
 is_v6()
 {
@@ -671,6 +653,82 @@ run_tests()
 	run_tests_lo $1 $2 $3 0
 }
 
+run_test_transparent()
+{
+	local connect_addr="$1"
+	local msg="$2"
+
+	local connector_ns="$ns1"
+	local listener_ns="$ns2"
+	local lret=0
+	local r6flag=""
+
+	# skip if we don't want v6
+	if ! $ipv6 && is_v6 "${connect_addr}"; then
+		return 0
+	fi
+
+ip netns exec "$listener_ns" nft -f /dev/stdin <<"EOF"
+flush ruleset
+table inet mangle {
+	chain divert {
+		type filter hook prerouting priority -150;
+
+		meta l4proto tcp socket transparent 1 meta mark set 1 accept
+		tcp dport 20000 tproxy to :20000 meta mark set 1 accept
+	}
+}
+EOF
+	if [ $? -ne 0 ]; then
+		echo "SKIP: $msg, could not load nft ruleset"
+		return
+	fi
+
+	local local_addr
+	if is_v6 "${connect_addr}"; then
+		local_addr="::"
+		r6flag="-6"
+	else
+		local_addr="0.0.0.0"
+	fi
+
+	ip -net "$listener_ns" $r6flag rule add fwmark 1 lookup 100
+	if [ $? -ne 0 ]; then
+		ip netns exec "$listener_ns" nft flush ruleset
+		echo "SKIP: $msg, ip $r6flag rule failed"
+		return
+	fi
+
+	ip -net "$listener_ns" route add local $local_addr/0 dev lo table 100
+	if [ $? -ne 0 ]; then
+		ip netns exec "$listener_ns" nft flush ruleset
+		ip -net "$listener_ns" $r6flag rule del fwmark 1 lookup 100
+		echo "SKIP: $msg, ip route add local $local_addr failed"
+		return
+	fi
+
+	echo "INFO: test $msg"
+
+	TEST_COUNT=10000
+	local extra_args="-o TRANSPARENT"
+	do_transfer ${listener_ns} ${connector_ns} MPTCP MPTCP \
+		    ${connect_addr} ${local_addr} "${extra_args}"
+	lret=$?
+
+	ip netns exec "$listener_ns" nft flush ruleset
+	ip -net "$listener_ns" $r6flag rule del fwmark 1 lookup 100
+	ip -net "$listener_ns" route del local $local_addr/0 dev lo table 100
+
+	if [ $lret -ne 0 ]; then
+		echo "FAIL: $msg, mptcp connection error" 1>&2
+		ret=$lret
+		return 1
+	fi
+
+	echo "PASS: $msg"
+	return 0
+}
+
 run_tests_peekmode()
 {
 	local peekmode="$1"
@@ -703,8 +761,6 @@ make_file "$cin" "client"
 make_file "$sin" "server"
 
 check_mptcp_disabled
-
-check_mptcp_ulp_setsockopt
 
 stop_if_error "The kernel configuration is not valid for MPTCP"
 
@@ -793,6 +849,10 @@ done
 run_tests_peekmode "saveWithPeek"
 run_tests_peekmode "saveAfterPeek"
 stop_if_error "Tests with peek mode have failed"
+
+# connect to ns4 ip address, ns2 should intercept/proxy
+run_test_transparent 10.0.3.1 "tproxy ipv4"
+run_test_transparent dead:beef:3::1 "tproxy ipv6"
 
 display_time
 exit $ret

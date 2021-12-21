@@ -1514,15 +1514,18 @@ static void hclgevf_config_mac_list(struct hclgevf_dev *hdev,
 				    struct list_head *list,
 				    enum HCLGEVF_MAC_ADDR_TYPE mac_type)
 {
+	char format_mac_addr[HNAE3_FORMAT_MAC_ADDR_LEN];
 	struct hclgevf_mac_addr_node *mac_node, *tmp;
 	int ret;
 
 	list_for_each_entry_safe(mac_node, tmp, list, node) {
 		ret = hclgevf_add_del_mac_addr(hdev, mac_node, mac_type);
 		if  (ret) {
+			hnae3_format_mac_addr(format_mac_addr,
+					      mac_node->mac_addr);
 			dev_err(&hdev->pdev->dev,
-				"failed to configure mac %pM, state = %d, ret = %d\n",
-				mac_node->mac_addr, mac_node->state, ret);
+				"failed to configure mac %s, state = %d, ret = %d\n",
+				format_mac_addr, mac_node->state, ret);
 			return;
 		}
 		if (mac_node->state == HCLGEVF_MAC_TO_ADD) {
@@ -2163,24 +2166,20 @@ static void hclgevf_reset_prepare_general(struct hnae3_ae_dev *ae_dev,
 	int retry_cnt = 0;
 	int ret;
 
-retry:
-	down(&hdev->reset_sem);
-	set_bit(HCLGEVF_STATE_RST_HANDLING, &hdev->state);
-	hdev->reset_type = rst_type;
-	ret = hclgevf_reset_prepare(hdev);
-	if (ret) {
-		dev_err(&hdev->pdev->dev, "fail to prepare to reset, ret=%d\n",
-			ret);
-		if (hdev->reset_pending ||
-		    retry_cnt++ < HCLGEVF_RESET_RETRY_CNT) {
-			dev_err(&hdev->pdev->dev,
-				"reset_pending:0x%lx, retry_cnt:%d\n",
-				hdev->reset_pending, retry_cnt);
-			clear_bit(HCLGEVF_STATE_RST_HANDLING, &hdev->state);
-			up(&hdev->reset_sem);
-			msleep(HCLGEVF_RESET_RETRY_WAIT_MS);
-			goto retry;
-		}
+	while (retry_cnt++ < HCLGEVF_RESET_RETRY_CNT) {
+		down(&hdev->reset_sem);
+		set_bit(HCLGEVF_STATE_RST_HANDLING, &hdev->state);
+		hdev->reset_type = rst_type;
+		ret = hclgevf_reset_prepare(hdev);
+		if (!ret && !hdev->reset_pending)
+			break;
+
+		dev_err(&hdev->pdev->dev,
+			"failed to prepare to reset, ret=%d, reset_pending:0x%lx, retry_cnt:%d\n",
+			ret, hdev->reset_pending, retry_cnt);
+		clear_bit(HCLGEVF_STATE_RST_HANDLING, &hdev->state);
+		up(&hdev->reset_sem);
+		msleep(HCLGEVF_RESET_RETRY_WAIT_MS);
 	}
 
 	/* disable misc vector before reset done */

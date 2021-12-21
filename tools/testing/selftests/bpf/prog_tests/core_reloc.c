@@ -433,7 +433,7 @@ static int setup_type_id_case_local(struct core_reloc_test_case *test)
 
 static int setup_type_id_case_success(struct core_reloc_test_case *test) {
 	struct core_reloc_type_id_output *exp = (void *)test->output;
-	struct btf *targ_btf = btf__parse(test->btf_src_file, NULL);
+	struct btf *targ_btf;
 	int err;
 
 	err = setup_type_id_case_local(test);
@@ -881,7 +881,8 @@ void test_core_reloc(void)
 		data = mmap_data;
 
 		memset(mmap_data, 0, sizeof(*data));
-		memcpy(data->in, test_case->input, test_case->input_len);
+		if (test_case->input_len)
+			memcpy(data->in, test_case->input, test_case->input_len);
 		data->my_pid_tgid = my_pid_tgid;
 
 		link = bpf_program__attach_raw_tracepoint(prog, tp_name);

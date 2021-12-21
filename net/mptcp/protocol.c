@@ -22,6 +22,7 @@
 #endif
 #include <net/mptcp.h>
 #include <net/xfrm.h>
+#include <asm/ioctls.h>
 #include "protocol.h"
 #include "mib.h"
 
@@ -46,9 +47,10 @@ struct mptcp_skb_cb {
 
 enum {
 	MPTCP_CMSG_TS = BIT(0),
+	MPTCP_CMSG_INQ = BIT(1),
 };
 
-static struct percpu_counter mptcp_sockets_allocated;
+static struct percpu_counter mptcp_sockets_allocated ____cacheline_aligned_in_smp;
 
 static void __mptcp_destroy_sock(struct sock *sk);
 static void __mptcp_check_send_data_fin(struct sock *sk);
@@ -738,6 +740,7 @@ static bool __mptcp_ofo_queue(struct mptcp_sock *msk)
 				 MPTCP_SKB_CB(skb)->map_seq, msk->ack_seq,
 				 delta);
 			MPTCP_SKB_CB(skb)->offset += delta;
+			MPTCP_SKB_CB(skb)->map_seq += delta;
 			__skb_queue_tail(&sk->sk_receive_queue, skb);
 		}
 		msk->ack_seq = end_seq;
@@ -1369,7 +1372,7 @@ out:
 
 struct subflow_send_info {
 	struct sock *ssk;
-	u64 ratio;
+	u64 linger_time;
 };
 
 void mptcp_subflow_set_active(struct mptcp_subflow_context *subflow)
@@ -1394,20 +1397,24 @@ bool mptcp_subflow_active(struct mptcp_subflow_context *subflow)
 	return __mptcp_subflow_active(subflow);
 }
 
+#define SSK_MODE_ACTIVE	0
+#define SSK_MODE_BACKUP	1
+#define SSK_MODE_MAX	2
+
 /* implement the mptcp packet scheduler;
  * returns the subflow that will transmit the next DSS
  * additionally updates the rtx timeout
  */
 static struct sock *mptcp_subflow_get_send(struct mptcp_sock *msk)
 {
-	struct subflow_send_info send_info[2];
+	struct subflow_send_info send_info[SSK_MODE_MAX];
 	struct mptcp_subflow_context *subflow;
 	struct sock *sk = (struct sock *)msk;
+	u32 pace, burst, wmem;
 	int i, nr_active = 0;
 	struct sock *ssk;
+	u64 linger_time;
 	long tout = 0;
-	u64 ratio;
-	u32 pace;
 
 	sock_owned_by_me(sk);
 
@@ -1426,10 +1433,11 @@ static struct sock *mptcp_subflow_get_send(struct mptcp_sock *msk)
 	}
 
 	/* pick the subflow with the lower wmem/wspace ratio */
-	for (i = 0; i < 2; ++i) {
+	for (i = 0; i < SSK_MODE_MAX; ++i) {
 		send_info[i].ssk = NULL;
-		send_info[i].ratio = -1;
+		send_info[i].linger_time = -1;
 	}
+
 	mptcp_for_each_subflow(msk, subflow) {
 		trace_mptcp_subflow_get_send(subflow);
 		ssk =  mptcp_subflow_tcp_sock(subflow);
@@ -1438,34 +1446,51 @@ static struct sock *mptcp_subflow_get_send(struct mptcp_sock *msk)
 
 		tout = max(tout, mptcp_timeout_from_subflow(subflow));
 		nr_active += !subflow->backup;
-		if (!sk_stream_memory_free(subflow->tcp_sock) || !tcp_sk(ssk)->snd_wnd)
-			continue;
+		pace = subflow->avg_pacing_rate;
+		if (unlikely(!pace)) {
+			/* init pacing rate from socket */
+			subflow->avg_pacing_rate = READ_ONCE(ssk->sk_pacing_rate);
+			pace = subflow->avg_pacing_rate;
+			if (!pace)
+				continue;
+		}
 
-		pace = READ_ONCE(ssk->sk_pacing_rate);
-		if (!pace)
-			continue;
-
-		ratio = div_u64((u64)READ_ONCE(ssk->sk_wmem_queued) << 32,
-				pace);
-		if (ratio < send_info[subflow->backup].ratio) {
+		linger_time = div_u64((u64)READ_ONCE(ssk->sk_wmem_queued) << 32, pace);
+		if (linger_time < send_info[subflow->backup].linger_time) {
 			send_info[subflow->backup].ssk = ssk;
-			send_info[subflow->backup].ratio = ratio;
+			send_info[subflow->backup].linger_time = linger_time;
 		}
 	}
 	__mptcp_set_timeout(sk, tout);
 
 	/* pick the best backup if no other subflow is active */
 	if (!nr_active)
-		send_info[0].ssk = send_info[1].ssk;
+		send_info[SSK_MODE_ACTIVE].ssk = send_info[SSK_MODE_BACKUP].ssk;
 
-	if (send_info[0].ssk) {
-		msk->last_snd = send_info[0].ssk;
-		msk->snd_burst = min_t(int, MPTCP_SEND_BURST_SIZE,
-				       tcp_sk(msk->last_snd)->snd_wnd);
-		return msk->last_snd;
-	}
+	/* According to the blest algorithm, to avoid HoL blocking for the
+	 * faster flow, we need to:
+	 * - estimate the faster flow linger time
+	 * - use the above to estimate the amount of byte transferred
+	 *   by the faster flow
+	 * - check that the amount of queued data is greter than the above,
+	 *   otherwise do not use the picked, slower, subflow
+	 * We select the subflow with the shorter estimated time to flush
+	 * the queued mem, which basically ensure the above. We just need
+	 * to check that subflow has a non empty cwin.
+	 */
+	ssk = send_info[SSK_MODE_ACTIVE].ssk;
+	if (!ssk || !sk_stream_memory_free(ssk) || !tcp_sk(ssk)->snd_wnd)
+		return NULL;
 
-	return NULL;
+	burst = min_t(int, MPTCP_SEND_BURST_SIZE, tcp_sk(ssk)->snd_wnd);
+	wmem = READ_ONCE(ssk->sk_wmem_queued);
+	subflow = mptcp_subflow_ctx(ssk);
+	subflow->avg_pacing_rate = div_u64((u64)subflow->avg_pacing_rate * wmem +
+					   READ_ONCE(ssk->sk_pacing_rate) * burst,
+					   burst + wmem);
+	msk->last_snd = ssk;
+	msk->snd_burst = burst;
+	return ssk;
 }
 
 static void mptcp_push_release(struct sock *ssk, struct mptcp_sendmsg_info *info)
@@ -1499,7 +1524,7 @@ static void mptcp_update_post_push(struct mptcp_sock *msk,
 		msk->snd_nxt = snd_nxt_new;
 }
 
-static void mptcp_check_and_set_pending(struct sock *sk)
+void mptcp_check_and_set_pending(struct sock *sk)
 {
 	if (mptcp_send_head(sk) &&
 	    !test_bit(MPTCP_PUSH_PENDING, &mptcp_sk(sk)->flags))
@@ -1784,8 +1809,10 @@ static int __mptcp_recvmsg_mskq(struct mptcp_sock *msk,
 		copied += count;
 
 		if (count < data_len) {
-			if (!(flags & MSG_PEEK))
+			if (!(flags & MSG_PEEK)) {
 				MPTCP_SKB_CB(skb)->offset += count;
+				MPTCP_SKB_CB(skb)->map_seq += count;
+			}
 			break;
 		}
 
@@ -1965,6 +1992,27 @@ static bool __mptcp_move_skbs(struct mptcp_sock *msk)
 	return !skb_queue_empty(&msk->receive_queue);
 }
 
+static unsigned int mptcp_inq_hint(const struct sock *sk)
+{
+	const struct mptcp_sock *msk = mptcp_sk(sk);
+	const struct sk_buff *skb;
+
+	skb = skb_peek(&msk->receive_queue);
+	if (skb) {
+		u64 hint_val = msk->ack_seq - MPTCP_SKB_CB(skb)->map_seq;
+
+		if (hint_val >= INT_MAX)
+			return INT_MAX;
+
+		return (unsigned int)hint_val;
+	}
+
+	if (sk->sk_state == TCP_CLOSE || (sk->sk_shutdown & RCV_SHUTDOWN))
+		return 1;
+
+	return 0;
+}
+
 static int mptcp_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 			 int nonblock, int flags, int *addr_len)
 {
@@ -1988,6 +2036,9 @@ static int mptcp_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 
 	len = min_t(size_t, len, INT_MAX);
 	target = sock_rcvlowat(sk, flags & MSG_WAITALL, len);
+
+	if (unlikely(msk->recvmsg_inq))
+		cmsg_flags = MPTCP_CMSG_INQ;
 
 	while (copied < len) {
 		int bytes_read;
@@ -2062,6 +2113,12 @@ out_err:
 	if (cmsg_flags && copied >= 0) {
 		if (cmsg_flags & MPTCP_CMSG_TS)
 			tcp_recv_timestamp(msg, sk, &tss);
+
+		if (cmsg_flags & MPTCP_CMSG_INQ) {
+			unsigned int inq = mptcp_inq_hint(sk);
+
+			put_cmsg(msg, SOL_TCP, TCP_CM_INQ, sizeof(inq), &inq);
+		}
 	}
 
 	pr_debug("msk=%p rx queue empty=%d:%d copied=%d",
@@ -3179,6 +3236,57 @@ static int mptcp_forward_alloc_get(const struct sock *sk)
 	return sk->sk_forward_alloc + mptcp_sk(sk)->rmem_fwd_alloc;
 }
 
+static int mptcp_ioctl_outq(const struct mptcp_sock *msk, u64 v)
+{
+	const struct sock *sk = (void *)msk;
+	u64 delta;
+
+	if (sk->sk_state == TCP_LISTEN)
+		return -EINVAL;
+
+	if ((1 << sk->sk_state) & (TCPF_SYN_SENT | TCPF_SYN_RECV))
+		return 0;
+
+	delta = msk->write_seq - v;
+	if (delta > INT_MAX)
+		delta = INT_MAX;
+
+	return (int)delta;
+}
+
+static int mptcp_ioctl(struct sock *sk, int cmd, unsigned long arg)
+{
+	struct mptcp_sock *msk = mptcp_sk(sk);
+	bool slow;
+	int answ;
+
+	switch (cmd) {
+	case SIOCINQ:
+		if (sk->sk_state == TCP_LISTEN)
+			return -EINVAL;
+
+		lock_sock(sk);
+		__mptcp_move_skbs(msk);
+		answ = mptcp_inq_hint(sk);
+		release_sock(sk);
+		break;
+	case SIOCOUTQ:
+		slow = lock_sock_fast(sk);
+		answ = mptcp_ioctl_outq(msk, READ_ONCE(msk->snd_una));
+		unlock_sock_fast(sk, slow);
+		break;
+	case SIOCOUTQNSD:
+		slow = lock_sock_fast(sk);
+		answ = mptcp_ioctl_outq(msk, msk->snd_nxt);
+		unlock_sock_fast(sk, slow);
+		break;
+	default:
+		return -ENOIOCTLCMD;
+	}
+
+	return put_user(answ, (int __user *)arg);
+}
+
 static struct proto mptcp_prot = {
 	.name		= "MPTCP",
 	.owner		= THIS_MODULE,
@@ -3191,6 +3299,7 @@ static struct proto mptcp_prot = {
 	.shutdown	= mptcp_shutdown,
 	.destroy	= mptcp_destroy,
 	.sendmsg	= mptcp_sendmsg,
+	.ioctl		= mptcp_ioctl,
 	.recvmsg	= mptcp_recvmsg,
 	.release_cb	= mptcp_release_cb,
 	.hash		= mptcp_hash,

@@ -20,13 +20,13 @@ static inline bool is_wilc1000(u32 id)
 static inline void acquire_bus(struct wilc *wilc, enum bus_acquire acquire)
 {
 	mutex_lock(&wilc->hif_cs);
-	if (acquire == WILC_BUS_ACQUIRE_AND_WAKEUP)
+	if (acquire == WILC_BUS_ACQUIRE_AND_WAKEUP && wilc->power_save_mode)
 		chip_wakeup(wilc);
 }
 
 static inline void release_bus(struct wilc *wilc, enum bus_release release)
 {
-	if (release == WILC_BUS_RELEASE_ALLOW_SLEEP)
+	if (release == WILC_BUS_RELEASE_ALLOW_SLEEP && wilc->power_save_mode)
 		chip_allow_sleep(wilc);
 	mutex_unlock(&wilc->hif_cs);
 }
@@ -626,7 +626,6 @@ void chip_wakeup(struct wilc *wilc)
 	u32 clk_status_val = 0, trials = 0;
 	u32 wakeup_reg, wakeup_bit;
 	u32 clk_status_reg, clk_status_bit;
-	u32 to_host_from_fw_reg, to_host_from_fw_bit;
 	u32 from_host_to_fw_reg, from_host_to_fw_bit;
 	const struct wilc_hif_func *hif_func = wilc->hif_func;
 
@@ -637,8 +636,6 @@ void chip_wakeup(struct wilc *wilc)
 		clk_status_bit = WILC_SDIO_CLK_STATUS_BIT;
 		from_host_to_fw_reg = WILC_SDIO_HOST_TO_FW_REG;
 		from_host_to_fw_bit = WILC_SDIO_HOST_TO_FW_BIT;
-		to_host_from_fw_reg = WILC_SDIO_FW_TO_HOST_REG;
-		to_host_from_fw_bit = WILC_SDIO_FW_TO_HOST_BIT;
 	} else {
 		wakeup_reg = WILC_SPI_WAKEUP_REG;
 		wakeup_bit = WILC_SPI_WAKEUP_BIT;
@@ -646,8 +643,6 @@ void chip_wakeup(struct wilc *wilc)
 		clk_status_bit = WILC_SPI_CLK_STATUS_BIT;
 		from_host_to_fw_reg = WILC_SPI_HOST_TO_FW_REG;
 		from_host_to_fw_bit = WILC_SPI_HOST_TO_FW_BIT;
-		to_host_from_fw_reg = WILC_SPI_FW_TO_HOST_REG;
-		to_host_from_fw_bit = WILC_SPI_FW_TO_HOST_BIT;
 	}
 
 	/* indicate host wakeup */
@@ -1229,7 +1224,8 @@ int wilc_wlan_stop(struct wilc *wilc, struct wilc_vif *vif)
 
 	ret = 0;
 release:
-	release_bus(wilc, WILC_BUS_RELEASE_ALLOW_SLEEP);
+	/* host comm is disabled - we can't issue sleep command anymore: */
+	release_bus(wilc, WILC_BUS_RELEASE_ONLY);
 
 	return ret;
 }

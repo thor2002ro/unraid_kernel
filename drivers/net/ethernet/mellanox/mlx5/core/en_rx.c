@@ -37,6 +37,7 @@
 #include <net/ip6_checksum.h>
 #include <net/page_pool.h>
 #include <net/inet_ecn.h>
+#include <net/gro.h>
 #include <net/udp.h>
 #include <net/tcp.h>
 #include "en.h"
@@ -618,7 +619,7 @@ static int mlx5e_alloc_rx_hd_mpwqe(struct mlx5e_rq *rq)
 	struct mlx5e_icosq *sq = rq->icosq;
 	int i, err, max_klm_entries, len;
 
-	max_klm_entries = MLX5E_MAX_KLM_PER_WQE(rq->mdev);
+	max_klm_entries = MLX5E_MAX_KLM_PER_WQE;
 	klm_entries = bitmap_find_window(shampo->bitmap,
 					 shampo->hd_per_wqe,
 					 shampo->hd_per_wq, shampo->pi);

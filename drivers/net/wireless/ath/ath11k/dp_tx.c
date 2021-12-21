@@ -9,6 +9,7 @@
 #include "debugfs_sta.h"
 #include "hw.h"
 #include "peer.h"
+#include "mac.h"
 
 static enum hal_tcl_encap_type
 ath11k_dp_tx_get_encap_type(struct ath11k_vif *arvif, struct sk_buff *skb)
@@ -95,11 +96,11 @@ int ath11k_dp_tx(struct ath11k *ar, struct ath11k_vif *arvif,
 	u8 ring_selector = 0, ring_map = 0;
 	bool tcl_ring_retry;
 
-	if (test_bit(ATH11K_FLAG_CRASH_FLUSH, &ar->ab->dev_flags))
+	if (unlikely(test_bit(ATH11K_FLAG_CRASH_FLUSH, &ar->ab->dev_flags)))
 		return -ESHUTDOWN;
 
-	if (!(info->flags & IEEE80211_TX_CTL_HW_80211_ENCAP) &&
-	    !ieee80211_is_data(hdr->frame_control))
+	if (unlikely(!(info->flags & IEEE80211_TX_CTL_HW_80211_ENCAP) &&
+		     !ieee80211_is_data(hdr->frame_control)))
 		return -ENOTSUPP;
 
 	pool_id = skb_get_queue_mapping(skb) & (ATH11K_HW_MAX_QUEUES - 1);
@@ -127,7 +128,7 @@ tcl_ring_sel:
 			DP_TX_IDR_SIZE - 1, GFP_ATOMIC);
 	spin_unlock_bh(&tx_ring->tx_idr_lock);
 
-	if (ret < 0) {
+	if (unlikely(ret < 0)) {
 		if (ring_map == (BIT(ab->hw_params.max_tx_ring) - 1)) {
 			atomic_inc(&ab->soc_stats.tx_err.misc_fail);
 			return -ENOSPC;
@@ -152,7 +153,7 @@ tcl_ring_sel:
 		ti.meta_data_flags = arvif->tcl_metadata;
 	}
 
-	if (ti.encap_type == HAL_TCL_ENCAP_TYPE_RAW) {
+	if (unlikely(ti.encap_type == HAL_TCL_ENCAP_TYPE_RAW)) {
 		if (skb_cb->flags & ATH11K_SKB_CIPHER_SET) {
 			ti.encrypt_type =
 				ath11k_dp_tx_get_encrypt_type(skb_cb->cipher);
@@ -173,8 +174,8 @@ tcl_ring_sel:
 	ti.bss_ast_idx = arvif->ast_idx;
 	ti.dscp_tid_tbl_idx = 0;
 
-	if (skb->ip_summed == CHECKSUM_PARTIAL &&
-	    ti.encap_type != HAL_TCL_ENCAP_TYPE_RAW) {
+	if (likely(skb->ip_summed == CHECKSUM_PARTIAL &&
+		   ti.encap_type != HAL_TCL_ENCAP_TYPE_RAW)) {
 		ti.flags0 |= FIELD_PREP(HAL_TCL_DATA_CMD_INFO1_IP4_CKSUM_EN, 1) |
 			     FIELD_PREP(HAL_TCL_DATA_CMD_INFO1_UDP4_CKSUM_EN, 1) |
 			     FIELD_PREP(HAL_TCL_DATA_CMD_INFO1_UDP6_CKSUM_EN, 1) |
@@ -211,7 +212,7 @@ tcl_ring_sel:
 	}
 
 	ti.paddr = dma_map_single(ab->dev, skb->data, skb->len, DMA_TO_DEVICE);
-	if (dma_mapping_error(ab->dev, ti.paddr)) {
+	if (unlikely(dma_mapping_error(ab->dev, ti.paddr))) {
 		atomic_inc(&ab->soc_stats.tx_err.misc_fail);
 		ath11k_warn(ab, "failed to DMA map data Tx buffer\n");
 		ret = -ENOMEM;
@@ -231,7 +232,7 @@ tcl_ring_sel:
 	ath11k_hal_srng_access_begin(ab, tcl_ring);
 
 	hal_tcl_desc = (void *)ath11k_hal_srng_src_get_next_entry(ab, tcl_ring);
-	if (!hal_tcl_desc) {
+	if (unlikely(!hal_tcl_desc)) {
 		/* NOTE: It is highly unlikely we'll be running out of tcl_ring
 		 * desc because the desc is directly enqueued onto hw queue.
 		 */
@@ -245,7 +246,7 @@ tcl_ring_sel:
 		 * checking this ring earlier for each pkt tx.
 		 * Restart ring selection if some rings are not checked yet.
 		 */
-		if (ring_map != (BIT(ab->hw_params.max_tx_ring) - 1) &&
+		if (unlikely(ring_map != (BIT(ab->hw_params.max_tx_ring)) - 1) &&
 		    ab->hw_params.max_tx_ring > 1) {
 			tcl_ring_retry = true;
 			ring_selector++;
@@ -293,19 +294,17 @@ static void ath11k_dp_tx_free_txbuf(struct ath11k_base *ab, u8 mac_id,
 	struct sk_buff *msdu;
 	struct ath11k_skb_cb *skb_cb;
 
-	spin_lock_bh(&tx_ring->tx_idr_lock);
-	msdu = idr_find(&tx_ring->txbuf_idr, msdu_id);
-	if (!msdu) {
+	spin_lock(&tx_ring->tx_idr_lock);
+	msdu = idr_remove(&tx_ring->txbuf_idr, msdu_id);
+	spin_unlock(&tx_ring->tx_idr_lock);
+
+	if (unlikely(!msdu)) {
 		ath11k_warn(ab, "tx completion for unknown msdu_id %d\n",
 			    msdu_id);
-		spin_unlock_bh(&tx_ring->tx_idr_lock);
 		return;
 	}
 
 	skb_cb = ATH11K_SKB_CB(msdu);
-
-	idr_remove(&tx_ring->txbuf_idr, msdu_id);
-	spin_unlock_bh(&tx_ring->tx_idr_lock);
 
 	dma_unmap_single(ab->dev, skb_cb->paddr, msdu->len, DMA_TO_DEVICE);
 	dev_kfree_skb_any(msdu);
@@ -325,12 +324,13 @@ ath11k_dp_tx_htt_tx_complete_buf(struct ath11k_base *ab,
 	struct ath11k_skb_cb *skb_cb;
 	struct ath11k *ar;
 
-	spin_lock_bh(&tx_ring->tx_idr_lock);
-	msdu = idr_find(&tx_ring->txbuf_idr, ts->msdu_id);
-	if (!msdu) {
+	spin_lock(&tx_ring->tx_idr_lock);
+	msdu = idr_remove(&tx_ring->txbuf_idr, ts->msdu_id);
+	spin_unlock(&tx_ring->tx_idr_lock);
+
+	if (unlikely(!msdu)) {
 		ath11k_warn(ab, "htt tx completion for unknown msdu_id %d\n",
 			    ts->msdu_id);
-		spin_unlock_bh(&tx_ring->tx_idr_lock);
 		return;
 	}
 
@@ -338,9 +338,6 @@ ath11k_dp_tx_htt_tx_complete_buf(struct ath11k_base *ab,
 	info = IEEE80211_SKB_CB(msdu);
 
 	ar = skb_cb->ar;
-
-	idr_remove(&tx_ring->txbuf_idr, ts->msdu_id);
-	spin_unlock_bh(&tx_ring->tx_idr_lock);
 
 	if (atomic_dec_and_test(&ar->dp.num_tx_pending))
 		wake_up(&ar->dp.tx_empty_waitq);
@@ -435,16 +432,14 @@ static void ath11k_dp_tx_complete_msdu(struct ath11k *ar,
 
 	dma_unmap_single(ab->dev, skb_cb->paddr, msdu->len, DMA_TO_DEVICE);
 
-	rcu_read_lock();
-
-	if (!rcu_dereference(ab->pdevs_active[ar->pdev_idx])) {
+	if (unlikely(!rcu_access_pointer(ab->pdevs_active[ar->pdev_idx]))) {
 		dev_kfree_skb_any(msdu);
-		goto exit;
+		return;
 	}
 
-	if (!skb_cb->vif) {
+	if (unlikely(!skb_cb->vif)) {
 		dev_kfree_skb_any(msdu);
-		goto exit;
+		return;
 	}
 
 	info = IEEE80211_SKB_CB(msdu);
@@ -465,7 +460,7 @@ static void ath11k_dp_tx_complete_msdu(struct ath11k *ar,
 	    (info->flags & IEEE80211_TX_CTL_NO_ACK))
 		info->flags |= IEEE80211_TX_STAT_NOACK_TRANSMITTED;
 
-	if (ath11k_debugfs_is_extd_tx_stats_enabled(ar)) {
+	if (unlikely(ath11k_debugfs_is_extd_tx_stats_enabled(ar))) {
 		if (ts->flags & HAL_TX_STATUS_FLAGS_FIRST_MSDU) {
 			if (ar->last_ppdu_id == 0) {
 				ar->last_ppdu_id = ts->ppdu_id;
@@ -494,9 +489,6 @@ static void ath11k_dp_tx_complete_msdu(struct ath11k *ar,
 	 */
 
 	ieee80211_tx_status(ar->hw, msdu);
-
-exit:
-	rcu_read_unlock();
 }
 
 static inline void ath11k_dp_tx_status_parse(struct ath11k_base *ab,
@@ -505,11 +497,11 @@ static inline void ath11k_dp_tx_status_parse(struct ath11k_base *ab,
 {
 	ts->buf_rel_source =
 		FIELD_GET(HAL_WBM_RELEASE_INFO0_REL_SRC_MODULE, desc->info0);
-	if (ts->buf_rel_source != HAL_WBM_REL_SRC_MODULE_FW &&
-	    ts->buf_rel_source != HAL_WBM_REL_SRC_MODULE_TQM)
+	if (unlikely(ts->buf_rel_source != HAL_WBM_REL_SRC_MODULE_FW &&
+		     ts->buf_rel_source != HAL_WBM_REL_SRC_MODULE_TQM))
 		return;
 
-	if (ts->buf_rel_source == HAL_WBM_REL_SRC_MODULE_FW)
+	if (unlikely(ts->buf_rel_source == HAL_WBM_REL_SRC_MODULE_FW))
 		return;
 
 	ts->status = FIELD_GET(HAL_WBM_RELEASE_INFO0_TQM_RELEASE_REASON,
@@ -556,8 +548,9 @@ void ath11k_dp_tx_completion_handler(struct ath11k_base *ab, int ring_id)
 			ATH11K_TX_COMPL_NEXT(tx_ring->tx_status_head);
 	}
 
-	if ((ath11k_hal_srng_dst_peek(ab, status_ring) != NULL) &&
-	    (ATH11K_TX_COMPL_NEXT(tx_ring->tx_status_head) == tx_ring->tx_status_tail)) {
+	if (unlikely((ath11k_hal_srng_dst_peek(ab, status_ring) != NULL) &&
+		     (ATH11K_TX_COMPL_NEXT(tx_ring->tx_status_head) ==
+		      tx_ring->tx_status_tail))) {
 		/* TODO: Process pending tx_status messages when kfifo_is_full() */
 		ath11k_warn(ab, "Unable to process some of the tx_status ring desc because status_fifo is full\n");
 	}
@@ -580,7 +573,7 @@ void ath11k_dp_tx_completion_handler(struct ath11k_base *ab, int ring_id)
 		mac_id = FIELD_GET(DP_TX_DESC_ID_MAC_ID, desc_id);
 		msdu_id = FIELD_GET(DP_TX_DESC_ID_MSDU_ID, desc_id);
 
-		if (ts.buf_rel_source == HAL_WBM_REL_SRC_MODULE_FW) {
+		if (unlikely(ts.buf_rel_source == HAL_WBM_REL_SRC_MODULE_FW)) {
 			ath11k_dp_tx_process_htt_tx_complete(ab,
 							     (void *)tx_status,
 							     mac_id, msdu_id,
@@ -588,16 +581,16 @@ void ath11k_dp_tx_completion_handler(struct ath11k_base *ab, int ring_id)
 			continue;
 		}
 
-		spin_lock_bh(&tx_ring->tx_idr_lock);
-		msdu = idr_find(&tx_ring->txbuf_idr, msdu_id);
-		if (!msdu) {
+		spin_lock(&tx_ring->tx_idr_lock);
+		msdu = idr_remove(&tx_ring->txbuf_idr, msdu_id);
+		if (unlikely(!msdu)) {
 			ath11k_warn(ab, "tx completion for unknown msdu_id %d\n",
 				    msdu_id);
-			spin_unlock_bh(&tx_ring->tx_idr_lock);
+			spin_unlock(&tx_ring->tx_idr_lock);
 			continue;
 		}
-		idr_remove(&tx_ring->txbuf_idr, msdu_id);
-		spin_unlock_bh(&tx_ring->tx_idr_lock);
+
+		spin_unlock(&tx_ring->tx_idr_lock);
 
 		ar = ab->pdevs[mac_id].ar;
 
@@ -903,7 +896,7 @@ int ath11k_dp_tx_htt_h2t_ppdu_stats_req(struct ath11k *ar, u32 mask)
 		cmd->msg = FIELD_PREP(HTT_PPDU_STATS_CFG_MSG_TYPE,
 				      HTT_H2T_MSG_TYPE_PPDU_STATS_CFG);
 
-		pdev_mask = 1 << (i + 1);
+		pdev_mask = 1 << (ar->pdev_idx + i);
 		cmd->msg |= FIELD_PREP(HTT_PPDU_STATS_CFG_PDEV_ID, pdev_mask);
 		cmd->msg |= FIELD_PREP(HTT_PPDU_STATS_CFG_TLV_TYPE_BITMASK, mask);
 
@@ -993,6 +986,7 @@ ath11k_dp_tx_htt_h2t_ext_stats_req(struct ath11k *ar, u8 type,
 	struct ath11k_dp *dp = &ab->dp;
 	struct sk_buff *skb;
 	struct htt_ext_stats_cfg_cmd *cmd;
+	u32 pdev_id;
 	int len = sizeof(*cmd);
 	int ret;
 
@@ -1006,7 +1000,12 @@ ath11k_dp_tx_htt_h2t_ext_stats_req(struct ath11k *ar, u8 type,
 	memset(cmd, 0, sizeof(*cmd));
 	cmd->hdr.msg_type = HTT_H2T_MSG_TYPE_EXT_STATS_CFG;
 
-	cmd->hdr.pdev_mask = 1 << ar->pdev->pdev_id;
+	if (ab->hw_params.single_pdev_only)
+		pdev_id = ath11k_mac_get_target_pdev_id(ar);
+	else
+		pdev_id = ar->pdev->pdev_id;
+
+	cmd->hdr.pdev_mask = 1 << pdev_id;
 
 	cmd->hdr.stats_type = type;
 	cmd->cfg_param0 = cfg_params->cfg0;
@@ -1033,6 +1032,15 @@ int ath11k_dp_tx_htt_monitor_mode_ring_config(struct ath11k *ar, bool reset)
 	struct ath11k_base *ab = ar->ab;
 	struct htt_rx_ring_tlv_filter tlv_filter = {0};
 	int ret = 0, ring_id = 0, i;
+
+	if (ab->hw_params.full_monitor_mode) {
+		ret = ath11k_dp_tx_htt_rx_full_mon_setup(ab,
+							 dp->mac_id, !reset);
+		if (ret < 0) {
+			ath11k_err(ab, "failed to setup full monitor %d\n", ret);
+			return ret;
+		}
+	}
 
 	ring_id = dp->rxdma_mon_buf_ring.refill_buf_ring.ring_id;
 
@@ -1096,6 +1104,45 @@ int ath11k_dp_tx_htt_monitor_mode_ring_config(struct ath11k *ar, bool reset)
 	if (!ar->ab->hw_params.rxdma1_enable)
 		mod_timer(&ar->ab->mon_reap_timer, jiffies +
 			  msecs_to_jiffies(ATH11K_MON_TIMER_INTERVAL));
+
+	return ret;
+}
+
+int ath11k_dp_tx_htt_rx_full_mon_setup(struct ath11k_base *ab, int mac_id,
+				       bool config)
+{
+	struct htt_rx_full_monitor_mode_cfg_cmd *cmd;
+	struct sk_buff *skb;
+	int ret, len = sizeof(*cmd);
+
+	skb = ath11k_htc_alloc_skb(ab, len);
+	if (!skb)
+		return -ENOMEM;
+
+	skb_put(skb, len);
+	cmd = (struct htt_rx_full_monitor_mode_cfg_cmd *)skb->data;
+	memset(cmd, 0, sizeof(*cmd));
+	cmd->info0 = FIELD_PREP(HTT_RX_FULL_MON_MODE_CFG_CMD_INFO0_MSG_TYPE,
+				HTT_H2T_MSG_TYPE_RX_FULL_MONITOR_MODE);
+
+	cmd->info0 |= FIELD_PREP(HTT_RX_FULL_MON_MODE_CFG_CMD_INFO0_PDEV_ID, mac_id);
+
+	cmd->cfg = HTT_RX_FULL_MON_MODE_CFG_CMD_CFG_ENABLE |
+		   FIELD_PREP(HTT_RX_FULL_MON_MODE_CFG_CMD_CFG_RELEASE_RING,
+			      HTT_RX_MON_RING_SW);
+	if (config) {
+		cmd->cfg |= HTT_RX_FULL_MON_MODE_CFG_CMD_CFG_ZERO_MPDUS_END |
+			    HTT_RX_FULL_MON_MODE_CFG_CMD_CFG_NON_ZERO_MPDUS_END;
+	}
+
+	ret = ath11k_htc_send(&ab->htc, ab->dp.eid, skb);
+	if (ret)
+		goto err_free;
+
+	return 0;
+
+err_free:
+	dev_kfree_skb_any(skb);
 
 	return ret;
 }
