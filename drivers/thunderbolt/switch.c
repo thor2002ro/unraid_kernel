@@ -623,6 +623,9 @@ int tb_port_add_nfc_credits(struct tb_port *port, int credits)
 		return 0;
 
 	nfc_credits = port->config.nfc_credits & ADP_CS_4_NFC_BUFFERS_MASK;
+	if (credits < 0)
+		credits = max_t(int, -nfc_credits, credits);
+
 	nfc_credits += credits;
 
 	tb_port_dbg(port, "adding %d NFC credits to %lu", credits,
@@ -1319,13 +1322,18 @@ int tb_dp_port_hpd_clear(struct tb_port *port)
  * @aux_tx: AUX TX Hop ID
  * @aux_rx: AUX RX Hop ID
  *
- * Programs specified Hop IDs for DP IN/OUT port.
+ * Programs specified Hop IDs for DP IN/OUT port. Can be called for USB4
+ * router DP adapters too but does not program the values as the fields
+ * are read-only.
  */
 int tb_dp_port_set_hops(struct tb_port *port, unsigned int video,
 			unsigned int aux_tx, unsigned int aux_rx)
 {
 	u32 data[2];
 	int ret;
+
+	if (tb_switch_is_usb4(port->sw))
+		return 0;
 
 	ret = tb_port_read(port, data, TB_CFG_PORT,
 			   port->cap_adap + ADP_DP_CS_0, ARRAY_SIZE(data));
@@ -3048,9 +3056,20 @@ bool tb_switch_query_dp_resource(struct tb_switch *sw, struct tb_port *in)
  */
 int tb_switch_alloc_dp_resource(struct tb_switch *sw, struct tb_port *in)
 {
+	int ret;
+
 	if (tb_switch_is_usb4(sw))
-		return usb4_switch_alloc_dp_resource(sw, in);
-	return tb_lc_dp_sink_alloc(sw, in);
+		ret = usb4_switch_alloc_dp_resource(sw, in);
+	else
+		ret = tb_lc_dp_sink_alloc(sw, in);
+
+	if (ret)
+		tb_sw_warn(sw, "failed to allocate DP resource for port %d\n",
+			   in->port);
+	else
+		tb_sw_dbg(sw, "allocated DP resource for port %d\n", in->port);
+
+	return ret;
 }
 
 /**
@@ -3073,6 +3092,8 @@ void tb_switch_dealloc_dp_resource(struct tb_switch *sw, struct tb_port *in)
 	if (ret)
 		tb_sw_warn(sw, "failed to de-allocate DP resource for port %d\n",
 			   in->port);
+	else
+		tb_sw_dbg(sw, "released DP resource for port %d\n", in->port);
 }
 
 struct tb_sw_lookup {
