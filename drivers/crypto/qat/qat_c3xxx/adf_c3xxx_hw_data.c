@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: (BSD-3-Clause OR GPL-2.0-only)
-/* Copyright(c) 2014 - 2020 Intel Corporation */
+/* Copyright(c) 2014 - 2021 Intel Corporation */
 #include <adf_accel_devices.h>
 #include <adf_common_drv.h>
-#include <adf_pf2vf_msg.h>
 #include <adf_gen2_hw_data.h>
+#include <adf_gen2_pfvf.h>
 #include "adf_c3xxx_hw_data.h"
 #include "icp_qat_hw.h"
 
@@ -135,14 +135,9 @@ void adf_init_hw_data_c3xxx(struct adf_hw_device_data *hw_data)
 	hw_data->enable_ints = adf_enable_ints;
 	hw_data->reset_device = adf_reset_flr;
 	hw_data->set_ssm_wdtimer = adf_gen2_set_ssm_wdtimer;
-	hw_data->get_pf2vf_offset = adf_gen2_get_pf2vf_offset;
-	hw_data->get_vf2pf_sources = adf_gen2_get_vf2pf_sources;
-	hw_data->enable_vf2pf_interrupts = adf_gen2_enable_vf2pf_interrupts;
-	hw_data->disable_vf2pf_interrupts = adf_gen2_disable_vf2pf_interrupts;
-	hw_data->enable_pfvf_comms = adf_enable_pf2vf_comms;
 	hw_data->disable_iov = adf_disable_sriov;
-	hw_data->min_iov_compat_ver = ADF_PFVF_COMPAT_THIS_VERSION;
 
+	adf_gen2_init_pf_pfvf_ops(&hw_data->pfvf_ops);
 	adf_gen2_init_hw_csr_ops(&hw_data->csr_ops);
 }
 
