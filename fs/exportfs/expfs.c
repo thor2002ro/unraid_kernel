@@ -323,7 +323,7 @@ static int get_name(const struct path *path, char *name, struct dentry *child)
 	while (1) {
 		int old_seq = buffer.sequence;
 
-		error = iterate_dir(file, &buffer.ctx);
+		error = iterate_dir(file, &buffer.ctx, &file->f_pos);
 		if (buffer.found) {
 			error = 0;
 			break;

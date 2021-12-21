@@ -36,8 +36,13 @@
 	unsafe_copy_to_user(dst, src, len, label);		\
 } while (0)
 
-
-int iterate_dir(struct file *file, struct dir_context *ctx)
+/**
+ * iterate_dir - iterate over directory
+ * @file    : pointer to file struct of directory
+ * @ctx     : pointer to directory ctx structure
+ * @pos     : file offset
+ */
+int iterate_dir(struct file *file, struct dir_context *ctx, loff_t *pos)
 {
 	struct inode *inode = file_inode(file);
 	bool shared = false;
@@ -60,12 +65,15 @@ int iterate_dir(struct file *file, struct dir_context *ctx)
 
 	res = -ENOENT;
 	if (!IS_DEADDIR(inode)) {
-		ctx->pos = file->f_pos;
+		ctx->pos = *pos;
+
 		if (shared)
 			res = file->f_op->iterate_shared(file, ctx);
 		else
 			res = file->f_op->iterate(file, ctx);
-		file->f_pos = ctx->pos;
+
+		*pos = ctx->pos;
+
 		fsnotify_access(file);
 		file_accessed(file);
 	}
@@ -190,7 +198,7 @@ SYSCALL_DEFINE3(old_readdir, unsigned int, fd,
 	if (!f.file)
 		return -EBADF;
 
-	error = iterate_dir(f.file, &buf.ctx);
+	error = iterate_dir(f.file, &buf.ctx, &f.file->f_pos);
 	if (buf.result)
 		error = buf.result;
 
@@ -283,7 +291,7 @@ SYSCALL_DEFINE3(getdents, unsigned int, fd,
 	if (!f.file)
 		return -EBADF;
 
-	error = iterate_dir(f.file, &buf.ctx);
+	error = iterate_dir(f.file, &buf.ctx, &f.file->f_pos);
 	if (error >= 0)
 		error = buf.error;
 	if (buf.prev_reclen) {
@@ -366,7 +374,7 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd,
 	if (!f.file)
 		return -EBADF;
 
-	error = iterate_dir(f.file, &buf.ctx);
+	error = iterate_dir(f.file, &buf.ctx, &f.file->f_pos);
 	if (error >= 0)
 		error = buf.error;
 	if (buf.prev_reclen) {
@@ -379,7 +387,7 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd,
 		else
 			error = count - buf.count;
 	}
-	fdput_pos(f);
+
 	return error;
 }
 
@@ -448,7 +456,7 @@ COMPAT_SYSCALL_DEFINE3(old_readdir, unsigned int, fd,
 	if (!f.file)
 		return -EBADF;
 
-	error = iterate_dir(f.file, &buf.ctx);
+	error = iterate_dir(f.file, &buf.ctx, &f.file->f_pos);
 	if (buf.result)
 		error = buf.result;
 
@@ -534,7 +542,7 @@ COMPAT_SYSCALL_DEFINE3(getdents, unsigned int, fd,
 	if (!f.file)
 		return -EBADF;
 
-	error = iterate_dir(f.file, &buf.ctx);
+	error = iterate_dir(f.file, &buf.ctx, &f.file->f_pos);
 	if (error >= 0)
 		error = buf.error;
 	if (buf.prev_reclen) {

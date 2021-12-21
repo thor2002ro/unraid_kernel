@@ -306,7 +306,7 @@ static inline int ovl_dir_read(struct path *realpath,
 	do {
 		rdd->count = 0;
 		rdd->err = 0;
-		err = iterate_dir(realfile, &rdd->ctx);
+		err = iterate_dir(realfile, &rdd->ctx, &realfile->f_pos);
 		if (err >= 0)
 			err = rdd->err;
 	} while (!err && rdd->count);
@@ -722,7 +722,7 @@ static int ovl_iterate_real(struct file *file, struct dir_context *ctx)
 			return PTR_ERR(rdt.cache);
 	}
 
-	err = iterate_dir(od->realfile, &rdt.ctx);
+	err = iterate_dir(od->realfile, &rdt.ctx, &od->realfile->f_pos);
 	ctx->pos = rdt.ctx.pos;
 
 	return err;
@@ -753,7 +753,7 @@ static int ovl_iterate(struct file *file, struct dir_context *ctx)
 		      OVL_TYPE_MERGE(ovl_path_type(dentry->d_parent))))) {
 			err = ovl_iterate_real(file, ctx);
 		} else {
-			err = iterate_dir(od->realfile, ctx);
+			err = iterate_dir(od->realfile, ctx, &od->realfile->f_pos);
 		}
 		goto out;
 	}
