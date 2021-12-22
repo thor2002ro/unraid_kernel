@@ -4087,7 +4087,7 @@ retry:
 			rcu_barrier_trace(TPS("NQ"), cpu, rcu_state.barrier_sequence);
 			continue;
 		}
-		if (!rcu_rdp_cpu_online(rdp) || rcu_segcblist_completely_offloaded(&rdp->cblist)) {
+		if (!rcu_rdp_cpu_online(rdp)) {
 			rcu_barrier_entrain(rdp);
 			WARN_ON_ONCE(READ_ONCE(rdp->barrier_seq_snap) != gseq);
 			raw_spin_unlock_irqrestore(&rdp->barrier_lock, flags);
