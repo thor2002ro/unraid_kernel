@@ -837,6 +837,9 @@ static inline int __do_cpuid_func(struct kvm_cpuid_array *array, u32 function)
 		entry->eax = 0x4; /* allow ARAT */
 		entry->ebx = 0;
 		entry->ecx = 0;
+		/* allow aperf/mperf to report the true vCPU frequency. */
+		if (kvm_cpu_cap_has_amperf())
+			entry->ecx |=  (1 << 0);
 		entry->edx = 0;
 		break;
 	/* function 7 has additional index. */

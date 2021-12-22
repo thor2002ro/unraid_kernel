@@ -1402,6 +1402,7 @@ static const u32 msrs_to_save_all[] = {
 	MSR_F15H_PERF_CTR0, MSR_F15H_PERF_CTR1, MSR_F15H_PERF_CTR2,
 	MSR_F15H_PERF_CTR3, MSR_F15H_PERF_CTR4, MSR_F15H_PERF_CTR5,
 	MSR_IA32_XFD, MSR_IA32_XFD_ERR,
+	MSR_IA32_APERF, MSR_IA32_MPERF,
 };
 
 static u32 msrs_to_save[ARRAY_SIZE(msrs_to_save_all)];
@@ -3735,6 +3736,16 @@ int kvm_set_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 		vcpu->arch.guest_fpu.xfd_err = data;
 		break;
 #endif
+	case MSR_IA32_APERF:
+	case MSR_IA32_MPERF:
+		/* Ignore meaningless value overrides from user space.*/
+		if (msr_info->host_initiated)
+			return 0;
+		if (!guest_support_amperf(vcpu))
+			return 1;
+		vcpu->arch.hwp.msrs[MSR_IA32_APERF - msr] = data;
+		vcpu->arch.hwp.fast_path = false;
+		break;
 	default:
 		if (kvm_pmu_is_valid_msr(vcpu, msr))
 			return kvm_pmu_set_msr(vcpu, msr_info);
@@ -4071,6 +4082,17 @@ int kvm_get_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 		msr_info->data = vcpu->arch.guest_fpu.xfd_err;
 		break;
 #endif
+	case MSR_IA32_APERF:
+	case MSR_IA32_MPERF: {
+		u64 value;
+
+		if (!msr_info->host_initiated && !guest_support_amperf(vcpu))
+			return 1;
+		value = vcpu->arch.hwp.msrs[MSR_IA32_APERF - msr_info->index];
+		msr_info->data = (msr_info->index == MSR_IA32_APERF) ? value :
+			kvm_scale_tsc(vcpu, value, vcpu->arch.tsc_scaling_ratio);
+		break;
+	}
 	default:
 		if (kvm_pmu_is_valid_msr(vcpu, msr_info->index))
 			return kvm_pmu_get_msr(vcpu, msr_info);
@@ -9807,6 +9829,53 @@ void __kvm_request_immediate_exit(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_GPL(__kvm_request_immediate_exit);
 
+static inline void get_host_amperf(u64 msrs[])
+{
+	rdmsrl(MSR_IA32_APERF, msrs[0]);
+	rdmsrl(MSR_IA32_MPERF, msrs[1]);
+}
+
+static inline u64 get_amperf_delta(u64 enter, u64 exit)
+{
+	if (likely(exit >= enter))
+		return exit - enter;
+
+	return ULONG_MAX - enter + exit;
+}
+
+static inline void update_vcpu_amperf(struct kvm_vcpu *vcpu, u64 adelta, u64 mdelta)
+{
+	u64 aperf_left, mperf_left, delta, tmp;
+
+	aperf_left = ULONG_MAX - vcpu->arch.hwp.msrs[0];
+	mperf_left = ULONG_MAX - vcpu->arch.hwp.msrs[1];
+
+	/* Fast path when neither MSR overflows */
+	if (adelta <= aperf_left && mdelta <= mperf_left) {
+		vcpu->arch.hwp.msrs[0] += adelta;
+		vcpu->arch.hwp.msrs[1] += mdelta;
+		return;
+	}
+
+	/* When either MSR overflows, both MSRs are reset to zero and continue to increment. */
+	delta = min(adelta, mdelta);
+	if (delta > aperf_left || delta > mperf_left) {
+		tmp = max(vcpu->arch.hwp.msrs[0], vcpu->arch.hwp.msrs[1]);
+		tmp = delta - (ULONG_MAX - tmp) - 1;
+		vcpu->arch.hwp.msrs[0] = tmp + adelta - delta;
+		vcpu->arch.hwp.msrs[1] = tmp + mdelta - delta;
+		return;
+	}
+
+	if (mdelta > adelta && mdelta > aperf_left) {
+		vcpu->arch.hwp.msrs[0] = 0;
+		vcpu->arch.hwp.msrs[1] = mdelta - mperf_left - 1;
+	} else {
+		vcpu->arch.hwp.msrs[0] = adelta - aperf_left - 1;
+		vcpu->arch.hwp.msrs[1] = 0;
+	}
+}
+
 /*
  * Called within kvm->srcu read side.
  * Returns 1 to let vcpu_run() continue the guest execution loop without
@@ -9820,7 +9889,7 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 		dm_request_for_irq_injection(vcpu) &&
 		kvm_cpu_accept_dm_intr(vcpu);
 	fastpath_t exit_fastpath;
-
+	u64 before[2], after[2];
 	bool req_immediate_exit = false;
 
 	/* Forbid vmenter if vcpu dirty ring is soft-full */
@@ -10070,7 +10139,16 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 		 */
 		WARN_ON_ONCE(kvm_apicv_activated(vcpu->kvm) != kvm_vcpu_apicv_active(vcpu));
 
-		exit_fastpath = static_call(kvm_x86_run)(vcpu);
+		if (likely(vcpu->arch.hwp.fast_path)) {
+			exit_fastpath = static_call(kvm_x86_run)(vcpu);
+		} else {
+			get_host_amperf(before);
+			exit_fastpath = static_call(kvm_x86_run)(vcpu);
+			get_host_amperf(after);
+			update_vcpu_amperf(vcpu, get_amperf_delta(before[0], after[0]),
+					   get_amperf_delta(before[1], after[1]));
+		}
+
 		if (likely(exit_fastpath != EXIT_FASTPATH_REENTER_GUEST))
 			break;
 
@@ -11307,6 +11385,8 @@ void kvm_vcpu_reset(struct kvm_vcpu *vcpu, bool init_event)
 		__kvm_set_xcr(vcpu, 0, XFEATURE_MASK_FP);
 		__kvm_set_msr(vcpu, MSR_IA32_XSS, 0, true);
 	}
+
+	memset(vcpu->arch.hwp.msrs, 0, sizeof(vcpu->arch.hwp.msrs));
 
 	/* All GPRs except RDX (handled below) are zeroed on RESET/INIT. */
 	memset(vcpu->arch.regs, 0, sizeof(vcpu->arch.regs));

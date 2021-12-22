@@ -39,6 +39,8 @@
 
 #define KVM_MAX_VCPUS 1024
 
+#define KVM_MAX_NUM_HWP_MSR 2
+
 /*
  * In x86, the VCPU ID corresponds to the APIC ID, and APIC IDs
  * might be larger than the actual number of VCPUs because the
@@ -562,6 +564,14 @@ struct kvm_vcpu_hv_stimer {
 	bool msg_pending;
 };
 
+/* vCPU thermal and power context */
+struct kvm_vcpu_hwp {
+	bool fast_path;
+	/* [0], APERF msr, increases with the current/actual frequency */
+	/* [1], MPERF msr, increases with a fixed frequency */
+	u64 msrs[KVM_MAX_NUM_HWP_MSR];
+};
+
 /* Hyper-V synthetic interrupt controller (SynIC)*/
 struct kvm_vcpu_hv_synic {
 	u64 version;
@@ -888,6 +898,8 @@ struct kvm_vcpu_arch {
 
 	/* AMD MSRC001_0015 Hardware Configuration */
 	u64 msr_hwcr;
+
+	struct kvm_vcpu_hwp hwp;
 
 	/* pv related cpuid info */
 	struct {

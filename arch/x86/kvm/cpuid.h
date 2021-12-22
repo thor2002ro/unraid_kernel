@@ -156,6 +156,28 @@ static inline int guest_cpuid_stepping(struct kvm_vcpu *vcpu)
 	return x86_stepping(best->eax);
 }
 
+static inline bool kvm_cpu_cap_has_amperf(void)
+{
+	return boot_cpu_has(X86_FEATURE_APERFMPERF) &&
+		boot_cpu_has(X86_FEATURE_CONSTANT_TSC) &&
+		boot_cpu_has(X86_FEATURE_NONSTOP_TSC);
+}
+
+static inline bool guest_support_amperf(struct kvm_vcpu *vcpu)
+{
+	struct kvm_cpuid_entry2 *best;
+
+	if (!kvm_cpu_cap_has_amperf())
+		return false;
+
+	best = kvm_find_cpuid_entry(vcpu, 0x6, 0);
+	if (!best || !(best->ecx & 0x1))
+		return false;
+
+	best = kvm_find_cpuid_entry(vcpu, 0x80000007, 0);
+	return best && (best->edx & (1 << 8));
+}
+
 static inline bool guest_has_spec_ctrl_msr(struct kvm_vcpu *vcpu)
 {
 	return (guest_cpuid_has(vcpu, X86_FEATURE_SPEC_CTRL) ||
