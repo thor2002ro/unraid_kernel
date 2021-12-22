@@ -79,17 +79,18 @@ arm/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-dt64-5.17
 	tegra/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.17-arm-dt
-	<no branch> (ef5ad2608511596b8bd28f1e2b4fa8fadfd2f536)
+	qcom/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-dts-for-5.17
 	qcom/dt64
 		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-for-5.17-1
 	broadcom/dt
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.17/devicetree
-	broadcom/dt32
-broadcom/dt64
+	broadcom/dt64
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.17/devicetree-arm64
 	broadcom/driver
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.17/drivers
+	aspeed/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/joel/bmc tags/aspeed-5.17-devicetree
 
 arm/drivers
 	renesas/drivers
@@ -134,13 +135,12 @@ arm/defconfig
 		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-defconfig-5.17
 	patch
 		arm64: defconfig: Enable Samsung I2C driver
-	<no branch> (28df783bfcbb19ba1df921985aac7fa8b7ee59d0)
+	broadcom/defconfig
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.17/defconfig
 	aspeed/defconfig
-broadcom/defconfig
 broadcom/defconfig64
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.17/defconfig-arm64
-	<no branch> (156f91f1c49a5f2ccae8e4b2d882ca3a28e3f26f)
+	qcom/defconfig
 		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-defconfig-for-5.17
 	patch
 		ARM: multi_v7_defconfig: Enable drivers for DragonBoard 410c
