@@ -94,9 +94,6 @@
 #if defined(CONFIG_PROVE_LOCKING) || defined(CONFIG_LOCK_STAT)
 #include <linux/lockdep.h>
 #endif
-#ifdef CONFIG_CHR_DEV_SG
-#include <scsi/sg.h>
-#endif
 #ifdef CONFIG_STACKLEAK_RUNTIME_DISABLE
 #include <linux/stackleak.h>
 #endif
@@ -2087,15 +2084,6 @@ static struct ctl_table kern_table[] = {
 		.maxlen		= UEVENT_HELPER_PATH_LEN,
 		.mode		= 0644,
 		.proc_handler	= proc_dostring,
-	},
-#endif
-#ifdef CONFIG_CHR_DEV_SG
-	{
-		.procname	= "sg-big-buff",
-		.data		= &sg_big_buff,
-		.maxlen		= sizeof (int),
-		.mode		= 0444,
-		.proc_handler	= proc_dointvec,
 	},
 #endif
 #ifdef CONFIG_BSD_PROCESS_ACCT
