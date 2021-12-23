@@ -640,10 +640,11 @@ drop:
 		goto put;
 move_back:
 		/*
-		* Make sure the inode is either on the global list or deleted from
-		* any local list before iput() since it could be deleted in another
-		* thread once we put the inode (then the local list is corrupted).
-		*/
+		 * Make sure the inode is either on the global list or deleted
+		 * from any local list before iput() since it could be deleted
+		 * in another thread once we put the inode (then the local list
+		 * is corrupted).
+		 */
 		spin_lock(&sbinfo->shrinklist_lock);
 		list_move(&info->shrinklist, &sbinfo->shrinklist);
 		sbinfo->shrinklist_len++;
