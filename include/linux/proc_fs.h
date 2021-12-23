@@ -178,8 +178,14 @@ static inline struct proc_dir_entry *proc_mkdir_mode(const char *name,
 #define proc_create_seq(name, mode, parent, ops) ({NULL;})
 #define proc_create_single(name, mode, parent, show) ({NULL;})
 #define proc_create_single_data(name, mode, parent, show, data) ({NULL;})
-#define proc_create(name, mode, parent, proc_ops) ({NULL;})
-#define proc_create_data(name, mode, parent, proc_ops, data) ({NULL;})
+
+static inline struct proc_dir_entry *proc_create(
+	const char *, umode_t, struct proc_dir_entry *, const struct proc_ops *)
+{ return NULL; }
+
+static inline struct proc_dir_entry *proc_create_data(
+	const char *, umode_t, struct proc_dir_entry *, const struct proc_ops *, void *)
+{ return NULL; }
 
 static inline void proc_set_size(struct proc_dir_entry *de, loff_t size) {}
 static inline void proc_set_user(struct proc_dir_entry *de, kuid_t uid, kgid_t gid) {}
