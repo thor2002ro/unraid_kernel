@@ -73,6 +73,8 @@
 	BTF_TYPE_ENC(name, BTF_INFO_ENC(BTF_KIND_FLOAT, 0, 0), sz)
 #define BTF_TYPE_DECL_TAG_ENC(value, type, component_idx) \
 	BTF_TYPE_ENC(value, BTF_INFO_ENC(BTF_KIND_DECL_TAG, 0, 0), type), (component_idx)
+#define BTF_TYPE_TYPE_TAG_ENC(value, type) \
+	BTF_TYPE_ENC(value, BTF_INFO_ENC(BTF_KIND_TYPE_TAG, 0, 0), type)
 
 #ifndef likely
 #define likely(x) __builtin_expect(!!(x), 1)
@@ -170,7 +172,7 @@ static inline void *libbpf_reallocarray(void *ptr, size_t nmemb, size_t size)
 struct btf;
 struct btf_type;
 
-struct btf_type *btf_type_by_id(struct btf *btf, __u32 type_id);
+struct btf_type *btf_type_by_id(const struct btf *btf, __u32 type_id);
 const char *btf_kind_str(const struct btf_type *t);
 const struct btf_type *skip_mods_and_typedefs(const struct btf *btf, __u32 id, __u32 *res_id);
 
@@ -275,58 +277,7 @@ int parse_cpu_mask_str(const char *s, bool **mask, int *mask_sz);
 int parse_cpu_mask_file(const char *fcpu, bool **mask, int *mask_sz);
 int libbpf__load_raw_btf(const char *raw_types, size_t types_len,
 			 const char *str_sec, size_t str_len);
-
-struct bpf_prog_load_params {
-	enum bpf_prog_type prog_type;
-	enum bpf_attach_type expected_attach_type;
-	const char *name;
-	const struct bpf_insn *insns;
-	size_t insn_cnt;
-	const char *license;
-	__u32 kern_version;
-	__u32 attach_prog_fd;
-	__u32 attach_btf_obj_fd;
-	__u32 attach_btf_id;
-	__u32 prog_ifindex;
-	__u32 prog_btf_fd;
-	__u32 prog_flags;
-
-	__u32 func_info_rec_size;
-	const void *func_info;
-	__u32 func_info_cnt;
-
-	__u32 line_info_rec_size;
-	const void *line_info;
-	__u32 line_info_cnt;
-
-	__u32 log_level;
-	char *log_buf;
-	size_t log_buf_sz;
-	int *fd_array;
-};
-
-int libbpf__bpf_prog_load(const struct bpf_prog_load_params *load_attr);
-
-struct bpf_create_map_params {
-	const char *name;
-	enum bpf_map_type map_type;
-	__u32 map_flags;
-	__u32 key_size;
-	__u32 value_size;
-	__u32 max_entries;
-	__u32 numa_node;
-	__u32 btf_fd;
-	__u32 btf_key_type_id;
-	__u32 btf_value_type_id;
-	__u32 map_ifindex;
-	union {
-		__u32 inner_map_fd;
-		__u32 btf_vmlinux_value_type_id;
-	};
-	__u64 map_extra;
-};
-
-int libbpf__bpf_create_map_xattr(const struct bpf_create_map_params *create_attr);
+int btf_load_into_kernel(struct btf *btf, char *log_buf, size_t log_sz, __u32 log_level);
 
 struct btf *btf_get_from_fd(int btf_fd, struct btf *base_btf);
 void btf_get_kernel_prefix_kind(enum bpf_attach_type attach_type,
