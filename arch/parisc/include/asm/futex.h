@@ -8,39 +8,75 @@
 #include <asm/errno.h>
 
 /* The following has to match the LWS code in syscall.S.  We have
-   sixteen four-word locks. */
+ * 256 four-word locks. We use bits 20-27 of the futex virtual
+ * address for the hash index.
+ */
+
+static inline unsigned long _futex_hash_index(unsigned long ua)
+{
+	return (ua >> 2) & 0x3fc;
+}
+
+/* Force store interruptions without writing anything. Return true
+ * if load and store fault.
+ */
+
+static inline unsigned long _futex_force_interruptions(unsigned long ua)
+{
+	ASM_EXCEPTIONTABLE_VAR(error);
+	unsigned long temp;
+
+	__asm__ __volatile__(
+		"1:\tldw 0(%2), %0\n"
+		"2:\tstbys,e %%r0, 0(%2)\n"
+		"3:\n"
+		ASM_EXCEPTIONTABLE_ENTRY_EFAULT(1b, 3b)
+		ASM_EXCEPTIONTABLE_ENTRY_EFAULT(2b, 3b)
+		: "=r" (temp), "=r" (error)
+		: "r" (ua), "1" (error) : "memory"
+	);
+	return error;
+}
 
 static inline void
-_futex_spin_lock(u32 __user *uaddr)
+_futex_spin_lock_irqsave(arch_spinlock_t *s, unsigned long *flags)
 {
-	extern u32 lws_lock_start[];
-	long index = ((long)uaddr & 0x7f8) >> 1;
-	arch_spinlock_t *s = (arch_spinlock_t *)&lws_lock_start[index];
-	preempt_disable();
+	local_irq_save(*flags);
 	arch_spin_lock(s);
 }
 
 static inline void
-_futex_spin_unlock(u32 __user *uaddr)
+_futex_spin_unlock_irqrestore(arch_spinlock_t *s, unsigned long *flags)
 {
-	extern u32 lws_lock_start[];
-	long index = ((long)uaddr & 0x7f8) >> 1;
-	arch_spinlock_t *s = (arch_spinlock_t *)&lws_lock_start[index];
 	arch_spin_unlock(s);
-	preempt_enable();
+	local_irq_restore(*flags);
 }
 
 static inline int
-arch_futex_atomic_op_inuser(int op, int oparg, int *oval, u32 __user *uaddr)
+_arch_futex_atomic_op_inuser(int op, int oparg, int *oval, u32 __user *uaddr)
 {
+	extern u32 lws_lock_start[];
+	unsigned long ua = (unsigned long)uaddr;
+	arch_spinlock_t *s;
+	unsigned long flags;
 	int oldval, ret;
 	u32 tmp;
 
-	ret = -EFAULT;
+	/* Force interruptions and page faults */
+	if (_futex_force_interruptions(ua))
+		return -EFAULT;
 
-	_futex_spin_lock(uaddr);
-	if (unlikely(get_user(oldval, uaddr) != 0))
+	s = (arch_spinlock_t *)&lws_lock_start[_futex_hash_index(ua)];
+
+	/* Don't sleep */
+	pagefault_disable();
+	_futex_spin_lock_irqsave(s, &flags);
+
+	/* Return -EAGAIN if we encounter page fault contention */
+	if (unlikely(get_user(oldval, uaddr) != 0)) {
+		ret = -EAGAIN;
 		goto out_pagefault_enable;
+	}
 
 	ret = 0;
 	tmp = oldval;
@@ -63,13 +99,15 @@ arch_futex_atomic_op_inuser(int op, int oparg, int *oval, u32 __user *uaddr)
 		break;
 	default:
 		ret = -ENOSYS;
+		goto out_pagefault_enable;
 	}
 
-	if (ret == 0 && unlikely(put_user(tmp, uaddr) != 0))
-		ret = -EFAULT;
+	if (unlikely(put_user(tmp, uaddr) != 0))
+		ret = -EAGAIN;
 
 out_pagefault_enable:
-	_futex_spin_unlock(uaddr);
+	_futex_spin_unlock_irqrestore(s, &flags);
+	pagefault_enable();
 
 	if (!ret)
 		*oval = oldval;
@@ -78,10 +116,26 @@ out_pagefault_enable:
 }
 
 static inline int
+arch_futex_atomic_op_inuser(int op, int oparg, int *oval, u32 __user *uaddr)
+{
+	int ret, cnt = 0;
+
+	/* Avoid returning -EAGAIN */
+	do {
+		ret = _arch_futex_atomic_op_inuser(op, oparg, oval, uaddr);
+	} while (ret == -EAGAIN && cnt++ < 4);
+	return ret == -EAGAIN ? -EFAULT : ret;
+}
+
+static inline int
 futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 			      u32 oldval, u32 newval)
 {
+	extern u32 lws_lock_start[];
+	unsigned long ua = (unsigned long)uaddr;
+	arch_spinlock_t *s;
 	u32 val;
+	unsigned long flags;
 
 	/* futex.c wants to do a cmpxchg_inatomic on kernel NULL, which is
 	 * our gateway page, and causes no end of trouble...
@@ -94,23 +148,25 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 
 	/* HPPA has no cmpxchg in hardware and therefore the
 	 * best we can do here is use an array of locks. The
-	 * lock selected is based on a hash of the userspace
-	 * address. This should scale to a couple of CPUs.
+	 * lock selected is based on a hash of the virtual
+	 * address of the futex. This should scale to a couple
+	 * of CPUs.
 	 */
 
-	_futex_spin_lock(uaddr);
+	s = (arch_spinlock_t *)&lws_lock_start[_futex_hash_index(ua)];
+	_futex_spin_lock_irqsave(s, &flags);
 	if (unlikely(get_user(val, uaddr) != 0)) {
-		_futex_spin_unlock(uaddr);
+		_futex_spin_unlock_irqrestore(s, &flags);
 		return -EFAULT;
 	}
 
 	if (val == oldval && unlikely(put_user(newval, uaddr) != 0)) {
-		_futex_spin_unlock(uaddr);
+		_futex_spin_unlock_irqrestore(s, &flags);
 		return -EFAULT;
 	}
 
 	*uval = val;
-	_futex_spin_unlock(uaddr);
+	_futex_spin_unlock_irqrestore(s, &flags);
 
 	return 0;
 }
