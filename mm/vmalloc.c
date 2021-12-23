@@ -31,6 +31,7 @@
 #include <linux/kmemleak.h>
 #include <linux/atomic.h>
 #include <linux/compiler.h>
+#include <linux/memcontrol.h>
 #include <linux/llist.h>
 #include <linux/bitops.h>
 #include <linux/rbtree_augmented.h>
@@ -2625,6 +2626,9 @@ static void __vunmap(const void *addr, int deallocate_pages)
 		unsigned int page_order = vm_area_page_order(area);
 		int i;
 
+		mod_memcg_page_state(area->pages[0], MEMCG_VMALLOC,
+				     -(int)area->nr_pages);
+
 		for (i = 0; i < area->nr_pages; i += 1U << page_order) {
 			struct page *page = area->pages[i];
 
@@ -2955,6 +2959,7 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 		page_order, nr_small_pages, area->pages);
 
 	atomic_long_add(area->nr_pages, &nr_vmalloc_pages);
+	mod_memcg_page_state(area->pages[0], MEMCG_VMALLOC, area->nr_pages);
 
 	/*
 	 * If not enough pages were obtained to accomplish an
