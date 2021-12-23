@@ -1478,9 +1478,11 @@ static int memory_failure_hugetlb(unsigned long pfn, int flags)
 				return 0;
 			}
 			unlock_page(head);
-			res = MF_RECOVERED;
-			if (!page_handle_poison(p, true, false))
-				res = MF_FAILED;
+			res = MF_FAILED;
+			if (__page_handle_poison(p)) {
+				page_ref_inc(p);
+				res = MF_RECOVERED;
+			}
 			action_result(pfn, MF_MSG_FREE_HUGE, res);
 			return res == MF_RECOVERED ? 0 : -EBUSY;
 		} else if (res < 0) {
