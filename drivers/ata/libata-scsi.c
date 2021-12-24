@@ -121,7 +121,7 @@ static ssize_t ata_scsi_park_show(struct device *device,
 unlock:
 	spin_unlock_irq(ap->lock);
 
-	return rc ? rc : snprintf(buf, 20, "%u\n", msecs);
+	return rc ? rc : sysfs_emit(buf, "%u\n", msecs);
 }
 
 static ssize_t ata_scsi_park_store(struct device *device,
@@ -3591,10 +3591,7 @@ static int ata_mselect_caching(struct ata_queued_cmd *qc,
 	 */
 
 	if (len != CACHE_MPAGE_LEN - 2) {
-		if (len < CACHE_MPAGE_LEN - 2)
-			*fp = len;
-		else
-			*fp = CACHE_MPAGE_LEN - 2;
+		*fp = min(len, CACHE_MPAGE_LEN - 2);
 		return -EINVAL;
 	}
 
@@ -3647,10 +3644,7 @@ static int ata_mselect_control(struct ata_queued_cmd *qc,
 	 */
 
 	if (len != CONTROL_MPAGE_LEN - 2) {
-		if (len < CONTROL_MPAGE_LEN - 2)
-			*fp = len;
-		else
-			*fp = CONTROL_MPAGE_LEN - 2;
+		*fp = min(len, CONTROL_MPAGE_LEN - 2);
 		return -EINVAL;
 	}
 
