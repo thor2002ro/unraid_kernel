@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: (BSD-3-Clause OR GPL-2.0-only) */
-/* Copyright(c) 2015 - 2020 Intel Corporation */
-#ifndef ADF_PF2VF_MSG_H
-#define ADF_PF2VF_MSG_H
+/* Copyright(c) 2015 - 2021 Intel Corporation */
+#ifndef ADF_PFVF_MSG_H
+#define ADF_PFVF_MSG_H
 
 /*
  * PF<->VF Messaging
@@ -49,45 +49,59 @@
  *
  * When a PF or VF attempts to send a message in the lower or upper 16 bits,
  * respectively, the other 16 bits are written to first with a defined
- * IN_USE_BY pattern as part of a collision control scheme (see adf_iov_putmsg).
+ * IN_USE_BY pattern as part of a collision control scheme (see function
+ * adf_gen2_pfvf_send() in adf_pf2vf_msg.c).
  */
-
-#define ADF_PFVF_COMPAT_THIS_VERSION		0x1	/* PF<->VF compat */
 
 /* PF->VF messages */
 #define ADF_PF2VF_INT				BIT(0)
 #define ADF_PF2VF_MSGORIGIN_SYSTEM		BIT(1)
-#define ADF_PF2VF_MSGTYPE_MASK			0x0000003C
-#define ADF_PF2VF_MSGTYPE_SHIFT			2
-#define ADF_PF2VF_MSGTYPE_RESTARTING		0x01
-#define ADF_PF2VF_MSGTYPE_VERSION_RESP		0x02
 #define ADF_PF2VF_IN_USE_BY_PF			0x6AC20000
 #define ADF_PF2VF_IN_USE_BY_PF_MASK		0xFFFE0000
+#define ADF_PF2VF_MSGTYPE_MASK			0x0000003C
+#define ADF_PF2VF_MSGTYPE_SHIFT			2
+
+enum pf2vf_msgtype {
+	ADF_PF2VF_MSGTYPE_RESTARTING		= 0x01,
+	ADF_PF2VF_MSGTYPE_VERSION_RESP		= 0x02,
+};
+
+/* VF->PF messages */
+#define ADF_VF2PF_INT				BIT(16)
+#define ADF_VF2PF_MSGORIGIN_SYSTEM		BIT(17)
+#define ADF_VF2PF_IN_USE_BY_VF			0x00006AC2
+#define ADF_VF2PF_IN_USE_BY_VF_MASK		0x0000FFFE
+#define ADF_VF2PF_MSGTYPE_MASK			0x003C0000
+#define ADF_VF2PF_MSGTYPE_SHIFT			18
+
+enum vf2pf_msgtype {
+	ADF_VF2PF_MSGTYPE_INIT			= 0x03,
+	ADF_VF2PF_MSGTYPE_SHUTDOWN		= 0x04,
+	ADF_VF2PF_MSGTYPE_VERSION_REQ		= 0x05,
+	ADF_VF2PF_MSGTYPE_COMPAT_VER_REQ	= 0x06,
+};
+
+/* VF/PF compatibility version. */
+enum pfvf_compatibility_version {
+	/* Reference to the current version */
+	ADF_PFVF_COMPAT_THIS_VERSION		= 0x01,
+};
 
 /* PF->VF Version Response */
+#define ADF_PF2VF_MINORVERSION_SHIFT		6
+#define ADF_PF2VF_MAJORVERSION_SHIFT		10
 #define ADF_PF2VF_VERSION_RESP_VERS_MASK	0x00003FC0
 #define ADF_PF2VF_VERSION_RESP_VERS_SHIFT	6
 #define ADF_PF2VF_VERSION_RESP_RESULT_MASK	0x0000C000
 #define ADF_PF2VF_VERSION_RESP_RESULT_SHIFT	14
-#define ADF_PF2VF_MINORVERSION_SHIFT		6
-#define ADF_PF2VF_MAJORVERSION_SHIFT		10
-#define ADF_PF2VF_VF_COMPATIBLE			1
-#define ADF_PF2VF_VF_INCOMPATIBLE		2
-#define ADF_PF2VF_VF_COMPAT_UNKNOWN		3
 
-/* VF->PF messages */
-#define ADF_VF2PF_IN_USE_BY_VF			0x00006AC2
-#define ADF_VF2PF_IN_USE_BY_VF_MASK		0x0000FFFE
-#define ADF_VF2PF_INT				BIT(16)
-#define ADF_VF2PF_MSGORIGIN_SYSTEM		BIT(17)
-#define ADF_VF2PF_MSGTYPE_MASK			0x003C0000
-#define ADF_VF2PF_MSGTYPE_SHIFT			18
-#define ADF_VF2PF_MSGTYPE_INIT			0x3
-#define ADF_VF2PF_MSGTYPE_SHUTDOWN		0x4
-#define ADF_VF2PF_MSGTYPE_VERSION_REQ		0x5
-#define ADF_VF2PF_MSGTYPE_COMPAT_VER_REQ	0x6
+enum pf2vf_compat_response {
+	ADF_PF2VF_VF_COMPATIBLE			= 0x01,
+	ADF_PF2VF_VF_INCOMPATIBLE		= 0x02,
+	ADF_PF2VF_VF_COMPAT_UNKNOWN		= 0x03,
+};
 
 /* VF->PF Compatible Version Request */
 #define ADF_VF2PF_COMPAT_VER_REQ_SHIFT		22
 
-#endif /* ADF_IOV_MSG_H */
+#endif /* ADF_PFVF_MSG_H */
