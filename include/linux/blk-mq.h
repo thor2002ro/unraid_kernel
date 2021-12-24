@@ -4,7 +4,6 @@
 
 #include <linux/blkdev.h>
 #include <linux/sbitmap.h>
-#include <linux/srcu.h>
 #include <linux/lockdep.h>
 #include <linux/scatterlist.h>
 #include <linux/prefetch.h>
@@ -100,7 +99,6 @@ struct request {
 		struct request *rq_next;
 	};
 
-	struct gendisk *rq_disk;
 	struct block_device *part;
 #ifdef CONFIG_BLK_RQ_ALLOC_TIME
 	/* Time that the first bio started allocating this request. */
@@ -140,7 +138,7 @@ struct request {
 	unsigned short ioprio;
 
 	enum mq_rq_state state;
-	refcount_t ref;
+	atomic_t ref;
 
 	unsigned long deadline;
 
@@ -376,13 +374,6 @@ struct blk_mq_hw_ctx {
 	 * q->unused_hctx_list.
 	 */
 	struct list_head	hctx_list;
-
-	/**
-	 * @srcu: Sleepable RCU. Use as lock when type of the hardware queue is
-	 * blocking (BLK_MQ_F_BLOCKING). Must be the last member - see also
-	 * blk_mq_hw_ctx_size().
-	 */
-	struct srcu_struct	srcu[];
 };
 
 /**
@@ -479,8 +470,6 @@ struct blk_mq_queue_data {
 	bool last;
 };
 
-typedef bool (busy_iter_fn)(struct blk_mq_hw_ctx *, struct request *, void *,
-		bool);
 typedef bool (busy_tag_iter_fn)(struct request *, void *, bool);
 
 /**
@@ -502,6 +491,14 @@ struct blk_mq_ops {
 	 * would have done).
 	 */
 	void (*commit_rqs)(struct blk_mq_hw_ctx *);
+
+	/**
+	 * @queue_rqs: Queue a list of new requests. Driver is guaranteed
+	 * that each request belongs to the same queue. If the driver doesn't
+	 * empty the @rqlist completely, then the rest will be queued
+	 * individually by the block layer upon return.
+	 */
+	void (*queue_rqs)(struct request **rqlist);
 
 	/**
 	 * @get_budget: Reserve budget before queue request, once .queue_rq is
@@ -752,6 +749,17 @@ static inline void blk_mq_set_request_complete(struct request *rq)
 	WRITE_ONCE(rq->state, MQ_RQ_COMPLETE);
 }
 
+/*
+ * Complete the request directly instead of deferring it to softirq or
+ * completing it another CPU. Useful in preemptible instead of an interrupt.
+ */
+static inline void blk_mq_complete_request_direct(struct request *rq,
+		   void (*complete)(struct request *rq))
+{
+	WRITE_ONCE(rq->state, MQ_RQ_COMPLETE);
+	complete(rq);
+}
+
 void blk_mq_start_request(struct request *rq);
 void blk_mq_end_request(struct request *rq, blk_status_t error);
 void __blk_mq_end_request(struct request *rq, blk_status_t error);
@@ -879,9 +887,6 @@ static inline void blk_rq_bio_prep(struct request *rq, struct bio *bio,
 	rq->__data_len = bio->bi_iter.bi_size;
 	rq->bio = rq->biotail = bio;
 	rq->ioprio = bio_prio(bio);
-
-	if (bio->bi_bdev)
-		rq->rq_disk = bio->bi_bdev->bd_disk;
 }
 
 void blk_mq_hctx_set_fq_lock_class(struct blk_mq_hw_ctx *hctx,
@@ -917,10 +922,9 @@ int blk_rq_unmap_user(struct bio *);
 int blk_rq_map_kern(struct request_queue *, struct request *, void *,
 		unsigned int, gfp_t);
 int blk_rq_append_bio(struct request *rq, struct bio *bio);
-void blk_execute_rq_nowait(struct gendisk *, struct request *, int,
-		rq_end_io_fn *);
-blk_status_t blk_execute_rq(struct gendisk *bd_disk, struct request *rq,
-		int at_head);
+void blk_execute_rq_nowait(struct request *rq, bool at_head,
+		rq_end_io_fn *end_io);
+blk_status_t blk_execute_rq(struct request *rq, bool at_head);
 
 struct req_iterator {
 	struct bvec_iter iter;
@@ -947,7 +951,6 @@ struct req_iterator {
  * blk_rq_pos()			: the current sector
  * blk_rq_bytes()		: bytes left in the entire request
  * blk_rq_cur_bytes()		: bytes left in the current segment
- * blk_rq_err_bytes()		: bytes left till the next error boundary
  * blk_rq_sectors()		: sectors left in the entire request
  * blk_rq_cur_sectors()		: sectors left in the current segment
  * blk_rq_stats_sectors()	: sectors of the entire request used for stats
@@ -970,8 +973,6 @@ static inline int blk_rq_cur_bytes(const struct request *rq)
 		return rq->bio->bi_iter.bi_size;
 	return bio_iovec(rq->bio).bv_len;
 }
-
-unsigned int blk_rq_err_bytes(const struct request *rq);
 
 static inline unsigned int blk_rq_sectors(const struct request *rq)
 {
@@ -1135,14 +1136,4 @@ static inline bool blk_req_can_dispatch_to_zone(struct request *rq)
 }
 #endif /* CONFIG_BLK_DEV_ZONED */
 
-#ifndef ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE
-# error	"You should define ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE for your platform"
-#endif
-#if ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE
-void rq_flush_dcache_pages(struct request *rq);
-#else
-static inline void rq_flush_dcache_pages(struct request *rq)
-{
-}
-#endif /* ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE */
 #endif /* BLK_MQ_H */

@@ -2790,8 +2790,6 @@ static inline int filemap_fdatawait(struct address_space *mapping)
 
 extern bool filemap_range_has_page(struct address_space *, loff_t lstart,
 				  loff_t lend);
-extern bool filemap_range_needs_writeback(struct address_space *,
-					  loff_t lstart, loff_t lend);
 extern int filemap_write_and_wait_range(struct address_space *mapping,
 				        loff_t lstart, loff_t lend);
 extern int __filemap_fdatawrite_range(struct address_space *mapping,
@@ -3285,7 +3283,7 @@ const char *simple_get_link(struct dentry *, struct inode *,
 			    struct delayed_call *);
 extern const struct inode_operations simple_symlink_inode_operations;
 
-extern int iterate_dir(struct file *, struct dir_context *);
+extern int iterate_dir(struct file *, struct dir_context *, loff_t *pos);
 
 int vfs_fstatat(int dfd, const char __user *filename, struct kstat *stat,
 		int flags);

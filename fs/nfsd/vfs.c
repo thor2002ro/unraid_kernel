@@ -1992,7 +1992,7 @@ static __be32 nfsd_buffered_readdir(struct file *file, struct svc_fh *fhp,
 		buf.used = 0;
 		buf.full = 0;
 
-		host_err = iterate_dir(file, &buf.ctx);
+		host_err = iterate_dir(file, &buf.ctx, &file->f_pos);
 		if (buf.full)
 			host_err = 0;
 

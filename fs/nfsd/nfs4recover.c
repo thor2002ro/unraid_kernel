@@ -307,7 +307,7 @@ nfsd4_list_rec_dir(recdir_func *f, struct nfsd_net *nn)
 		return status;
 	}
 
-	status = iterate_dir(nn->rec_file, &ctx.ctx);
+	status = iterate_dir(nn->rec_file, &ctx.ctx, &nn->rec_file->f_pos);
 	inode_lock_nested(d_inode(dir), I_MUTEX_PARENT);
 
 	list_for_each_entry_safe(entry, tmp, &ctx.names, list) {

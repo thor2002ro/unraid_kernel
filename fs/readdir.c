@@ -21,6 +21,7 @@
 #include <linux/unistd.h>
 #include <linux/compat.h>
 #include <linux/uaccess.h>
+#include "internal.h"
 
 #include <asm/unaligned.h>
 
@@ -36,8 +37,13 @@
 	unsafe_copy_to_user(dst, src, len, label);		\
 } while (0)
 
-
-int iterate_dir(struct file *file, struct dir_context *ctx)
+/**
+ * iterate_dir - iterate over directory
+ * @file    : pointer to file struct of directory
+ * @ctx     : pointer to directory ctx structure
+ * @pos     : file offset
+ */
+int iterate_dir(struct file *file, struct dir_context *ctx, loff_t *pos)
 {
 	struct inode *inode = file_inode(file);
 	bool shared = false;
@@ -60,12 +66,15 @@ int iterate_dir(struct file *file, struct dir_context *ctx)
 
 	res = -ENOENT;
 	if (!IS_DEADDIR(inode)) {
-		ctx->pos = file->f_pos;
+		ctx->pos = *pos;
+
 		if (shared)
 			res = file->f_op->iterate_shared(file, ctx);
 		else
 			res = file->f_op->iterate(file, ctx);
-		file->f_pos = ctx->pos;
+
+		*pos = ctx->pos;
+
 		fsnotify_access(file);
 		file_accessed(file);
 	}
@@ -190,7 +199,7 @@ SYSCALL_DEFINE3(old_readdir, unsigned int, fd,
 	if (!f.file)
 		return -EBADF;
 
-	error = iterate_dir(f.file, &buf.ctx);
+	error = iterate_dir(f.file, &buf.ctx, &f.file->f_pos);
 	if (buf.result)
 		error = buf.result;
 
@@ -283,7 +292,7 @@ SYSCALL_DEFINE3(getdents, unsigned int, fd,
 	if (!f.file)
 		return -EBADF;
 
-	error = iterate_dir(f.file, &buf.ctx);
+	error = iterate_dir(f.file, &buf.ctx, &f.file->f_pos);
 	if (error >= 0)
 		error = buf.error;
 	if (buf.prev_reclen) {
@@ -351,22 +360,25 @@ efault:
 	return -EFAULT;
 }
 
-SYSCALL_DEFINE3(getdents64, unsigned int, fd,
-		struct linux_dirent64 __user *, dirent, unsigned int, count)
+/**
+ * vfs_getdents - getdents without fdget
+ * @file    : pointer to file struct of directory
+ * @dirent  : pointer to user directory structure
+ * @count   : size of buffer
+ * @pos     : file pos
+ */
+int vfs_getdents(struct file *file, struct linux_dirent64 __user *dirent,
+		 unsigned int count, loff_t *pos)
 {
-	struct fd f;
 	struct getdents_callback64 buf = {
 		.ctx.actor = filldir64,
+		.ctx.pos = *pos,
 		.count = count,
 		.current_dir = dirent
 	};
 	int error;
 
-	f = fdget_pos(fd);
-	if (!f.file)
-		return -EBADF;
-
-	error = iterate_dir(f.file, &buf.ctx);
+	error = iterate_dir(file, &buf.ctx, pos);
 	if (error >= 0)
 		error = buf.error;
 	if (buf.prev_reclen) {
@@ -379,9 +391,25 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd,
 		else
 			error = count - buf.count;
 	}
-	fdput_pos(f);
+
 	return error;
 }
+
+SYSCALL_DEFINE3(getdents64, unsigned int, fd,
+		struct linux_dirent64 __user *, dirent, unsigned int, count)
+{
+	struct fd f;
+	int error;
+
+	f = fdget_pos(fd);
+	if (!f.file)
+		return -EBADF;
+
+	error = vfs_getdents(f.file, dirent, count, &f.file->f_pos);
+
+	fdput_pos(f);
+	return error;
+ }
 
 #ifdef CONFIG_COMPAT
 struct compat_old_linux_dirent {
@@ -448,7 +476,7 @@ COMPAT_SYSCALL_DEFINE3(old_readdir, unsigned int, fd,
 	if (!f.file)
 		return -EBADF;
 
-	error = iterate_dir(f.file, &buf.ctx);
+	error = iterate_dir(f.file, &buf.ctx, &f.file->f_pos);
 	if (buf.result)
 		error = buf.result;
 
@@ -534,7 +562,7 @@ COMPAT_SYSCALL_DEFINE3(getdents, unsigned int, fd,
 	if (!f.file)
 		return -EBADF;
 
-	error = iterate_dir(f.file, &buf.ctx);
+	error = iterate_dir(f.file, &buf.ctx, &f.file->f_pos);
 	if (error >= 0)
 		error = buf.error;
 	if (buf.prev_reclen) {

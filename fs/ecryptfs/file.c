@@ -109,7 +109,7 @@ static int ecryptfs_readdir(struct file *file, struct dir_context *ctx)
 		.sb = inode->i_sb,
 	};
 	lower_file = ecryptfs_file_to_lower(file);
-	rc = iterate_dir(lower_file, &buf.ctx);
+	rc = iterate_dir(lower_file, &buf.ctx, &lower_file->f_pos);
 	ctx->pos = buf.ctx.pos;
 	if (rc < 0)
 		goto out;
