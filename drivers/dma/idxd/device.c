@@ -387,9 +387,12 @@ static void idxd_wq_disable_cleanup(struct idxd_wq *wq)
 	wq->threshold = 0;
 	wq->priority = 0;
 	wq->ats_dis = 0;
+	wq->enqcmds_retries = IDXD_ENQCMDS_RETRIES;
 	clear_bit(WQ_FLAG_DEDICATED, &wq->flags);
 	clear_bit(WQ_FLAG_BLOCK_ON_FAULT, &wq->flags);
 	memset(wq->name, 0, WQ_NAME_SIZE);
+	wq->max_xfer_bytes = WQ_DEFAULT_MAX_XFER;
+	wq->max_batch_size = WQ_DEFAULT_MAX_BATCH;
 }
 
 static void idxd_wq_ref_release(struct percpu_ref *ref)
@@ -404,17 +407,29 @@ int idxd_wq_init_percpu_ref(struct idxd_wq *wq)
 	int rc;
 
 	memset(&wq->wq_active, 0, sizeof(wq->wq_active));
-	rc = percpu_ref_init(&wq->wq_active, idxd_wq_ref_release, 0, GFP_KERNEL);
+	rc = percpu_ref_init(&wq->wq_active, idxd_wq_ref_release,
+			     PERCPU_REF_ALLOW_REINIT, GFP_KERNEL);
 	if (rc < 0)
 		return rc;
 	reinit_completion(&wq->wq_dead);
+	reinit_completion(&wq->wq_resurrect);
 	return 0;
+}
+
+void __idxd_wq_quiesce(struct idxd_wq *wq)
+{
+	lockdep_assert_held(&wq->wq_lock);
+	reinit_completion(&wq->wq_resurrect);
+	percpu_ref_kill(&wq->wq_active);
+	complete_all(&wq->wq_resurrect);
+	wait_for_completion(&wq->wq_dead);
 }
 
 void idxd_wq_quiesce(struct idxd_wq *wq)
 {
-	percpu_ref_kill(&wq->wq_active);
-	wait_for_completion(&wq->wq_dead);
+	mutex_lock(&wq->wq_lock);
+	__idxd_wq_quiesce(wq);
+	mutex_unlock(&wq->wq_lock);
 }
 
 /* Device control bits */
@@ -827,14 +842,11 @@ static int idxd_wq_config_write(struct idxd_wq *wq)
 		wq->wqcfg->bits[i] = ioread32(idxd->reg_base + wq_offset);
 	}
 
+	if (wq->size == 0 && wq->type != IDXD_WQT_NONE)
+		wq->size = WQ_DEFAULT_QUEUE_DEPTH;
+
 	/* byte 0-3 */
 	wq->wqcfg->wq_size = wq->size;
-
-	if (wq->size == 0) {
-		idxd->cmd_status = IDXD_SCMD_WQ_NO_SIZE;
-		dev_warn(dev, "Incorrect work queue size: 0\n");
-		return -EINVAL;
-	}
 
 	/* bytes 4-7 */
 	wq->wqcfg->wq_thresh = wq->threshold;
@@ -980,8 +992,6 @@ static int idxd_wqs_setup(struct idxd_device *idxd)
 		group = wq->group;
 
 		if (!wq->group)
-			continue;
-		if (!wq->size)
 			continue;
 
 		if (wq_shared(wq) && !device_swq_supported(idxd)) {
@@ -1206,6 +1216,13 @@ int __drv_enable_wq(struct idxd_wq *wq)
 		goto err;
 	}
 
+	/*
+	 * Device has 1 misc interrupt and N interrupts for descriptor completion. To
+	 * assign WQ to interrupt, we will take the N+1 interrupt since vector 0 is
+	 * for the misc interrupt.
+	 */
+	wq->ie = &idxd->irq_entries[wq->id + 1];
+
 	rc = idxd_wq_enable(wq);
 	if (rc < 0) {
 		dev_dbg(dev, "wq %d enabling failed: %d\n", wq->id, rc);
@@ -1256,6 +1273,7 @@ void __drv_disable_wq(struct idxd_wq *wq)
 	idxd_wq_drain(wq);
 	idxd_wq_reset(wq);
 
+	wq->ie = NULL;
 	wq->client_count = 0;
 }
 
