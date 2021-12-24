@@ -2317,6 +2317,10 @@ static int amdgpu_device_ip_init(struct amdgpu_device *adev)
 
 		/* need to do gmc hw init early so we can allocate gpu mem */
 		if (adev->ip_blocks[i].version->type == AMD_IP_BLOCK_TYPE_GMC) {
+			/* Try to reserve bad pages early */
+			if (amdgpu_sriov_vf(adev))
+				amdgpu_virt_exchange_data(adev);
+
 			r = amdgpu_device_vram_scratch_init(adev);
 			if (r) {
 				DRM_ERROR("amdgpu_vram_scratch_init failed %d\n", r);
@@ -2348,7 +2352,7 @@ static int amdgpu_device_ip_init(struct amdgpu_device *adev)
 	}
 
 	if (amdgpu_sriov_vf(adev))
-		amdgpu_virt_init_data_exchange(adev);
+		amdgpu_virt_exchange_data(adev);
 
 	r = amdgpu_ib_pool_init(adev);
 	if (r) {
@@ -3486,6 +3490,7 @@ int amdgpu_device_init(struct amdgpu_device *adev,
 	init_rwsem(&adev->reset_sem);
 	mutex_init(&adev->psp.mutex);
 	mutex_init(&adev->notifier_lock);
+	mutex_init(&adev->pm.stable_pstate_ctx_lock);
 
 	r = amdgpu_device_init_apu_flags(adev);
 	if (r)
@@ -4507,7 +4512,7 @@ int amdgpu_device_mode1_reset(struct amdgpu_device *adev)
 int amdgpu_device_pre_asic_reset(struct amdgpu_device *adev,
 				 struct amdgpu_reset_context *reset_context)
 {
-	int i, j, r = 0;
+	int i, r = 0;
 	struct amdgpu_job *job = NULL;
 	bool need_full_reset =
 		test_bit(AMDGPU_NEED_FULL_RESET, &reset_context->flags);
@@ -4529,15 +4534,8 @@ int amdgpu_device_pre_asic_reset(struct amdgpu_device *adev,
 
 		/*clear job fence from fence drv to avoid force_completion
 		 *leave NULL and vm flush fence in fence drv */
-		for (j = 0; j <= ring->fence_drv.num_fences_mask; j++) {
-			struct dma_fence *old, **ptr;
+		amdgpu_fence_driver_clear_job_fences(ring);
 
-			ptr = &ring->fence_drv.fences[j];
-			old = rcu_dereference_protected(*ptr, 1);
-			if (old && test_bit(AMDGPU_FENCE_FLAG_EMBED_IN_JOB_BIT, &old->flags)) {
-				RCU_INIT_POINTER(*ptr, NULL);
-			}
-		}
 		/* after all hw jobs are reset, hw fence is meaningless, so force_completion */
 		amdgpu_fence_driver_force_completion(ring);
 	}
