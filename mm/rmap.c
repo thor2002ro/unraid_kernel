@@ -622,8 +622,8 @@ void try_to_unmap_flush_dirty(void)
 }
 
 /*
- * The 0-14 bit of mm->tlb_flush_batched records pending generations,
- * and the 16-30 bit records flushed generations.
+ * Bits 0-14 of mm->tlb_flush_batched record pending generations.
+ * Bits 16-30 of mm->tlb_flush_batched bit record flushed generations.
  */
 #define TLB_FLUSH_BATCH_FLUSHED_SHIFT	16
 #define TLB_FLUSH_BATCH_PENDING_MASK			\
@@ -648,9 +648,9 @@ static void set_tlb_ubc_flush_pending(struct mm_struct *mm, bool writable)
 retry:
 	if ((batch & TLB_FLUSH_BATCH_PENDING_MASK) > TLB_FLUSH_BATCH_PENDING_LARGE) {
 		/*
-		 * To avoid ""pending"" to catch up with ""flushed""
-		 * because of overflow.  Reset "pending" and "flushed"
-		 * to be "1" and "0" if "pending" becomes large.
+		 * Prevent `pending' from catching up with `flushed' because of
+		 * overflow.  Reset `pending' and `flushed' to be 1 and 0 if
+		 * `pending' becomes large.
 		 */
 		nbatch = atomic_cmpxchg(&mm->tlb_flush_batched, batch, 1);
 		if (nbatch != batch) {
@@ -713,9 +713,8 @@ void flush_tlb_batched_pending(struct mm_struct *mm)
 	if (pending != flushed) {
 		flush_tlb_mm(mm);
 		/*
-		 * If the new TLB flushing is pended during flushing,
-		 * leave mm->tlb_flush_batched as is, to avoid to lose
-		 * flushing.
+		 * If the new TLB flushing is pending during flushing, leave
+		 * mm->tlb_flush_batched as is, to avoid losing flushing.
 		 */
 		atomic_cmpxchg(&mm->tlb_flush_batched, batch,
 			       pending | (pending << TLB_FLUSH_BATCH_FLUSHED_SHIFT));
