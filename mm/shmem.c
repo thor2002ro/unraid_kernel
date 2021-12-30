@@ -3127,7 +3127,7 @@ static const char *shmem_get_link(struct dentry *dentry,
 		if (error)
 			return ERR_PTR(error);
 		if (!page)
-		       return ERR_PTR(-ECHILD);
+			return ERR_PTR(-ECHILD);
 		if (PageHWPoison(page)) {
 			unlock_page(page);
 			put_page(page);
