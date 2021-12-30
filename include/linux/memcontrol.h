@@ -996,10 +996,16 @@ static inline void mod_memcg_state(struct mem_cgroup *memcg,
 static inline void mod_memcg_page_state(struct page *page,
 					int idx, int val)
 {
-	struct mem_cgroup *memcg = page_memcg(page);
+	struct mem_cgroup *memcg;
 
-	if (!mem_cgroup_disabled() && memcg)
+	if (mem_cgroup_disabled())
+		return;
+
+	rcu_read_lock();
+	memcg = page_memcg(page);
+	if (memcg)
 		mod_memcg_state(memcg, idx, val);
+	rcu_read_unlock();
 }
 
 static inline unsigned long memcg_page_state(struct mem_cgroup *memcg, int idx)
