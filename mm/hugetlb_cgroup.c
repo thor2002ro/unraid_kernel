@@ -495,11 +495,11 @@ static int hugetlb_cgroup_read_numa_stat(struct seq_file *seq, void *dummy)
 	 * The hierarchical total is pretty much the value recorded by the
 	 * counter, so use that.
 	 */
-	seq_printf(seq, "%stotal=%lu", legacy ? "hierarichal_" : "",
+	seq_printf(seq, "%stotal=%lu", legacy ? "hierarchical_" : "",
 		   page_counter_read(&h_cg->hugepage[idx]) * PAGE_SIZE);
 
 	/*
-	 * For each node, transverse the css tree to obtain the hierarichal
+	 * For each node, transverse the css tree to obtain the hierarchical
 	 * node usage.
 	 */
 	for_each_node_state(nid, N_MEMORY) {
