@@ -2930,11 +2930,13 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 	unsigned long addr = (unsigned long)area->addr;
 	unsigned long size = get_vm_area_size(area);
 	unsigned long array_size;
-	unsigned int nr_small_pages = size >> PAGE_SHIFT;
-	unsigned int max_small_pages = ALIGN(size, 1UL << page_shift) >> PAGE_SHIFT;
+	unsigned int nr_small_pages, max_small_pages;
 	unsigned int page_order;
 	unsigned int flags;
 	int ret;
+
+	nr_small_pages = size >> PAGE_SHIFT;
+	max_small_pages = ALIGN(size, 1UL << page_shift) >> PAGE_SHIFT;
 
 	array_size = (unsigned long)max_small_pages * sizeof(struct page *);
 	gfp_mask |= __GFP_NOWARN;
