@@ -2627,7 +2627,7 @@ static void __vunmap(const void *addr, int deallocate_pages)
 		int i;
 
 		mod_memcg_page_state(area->pages[0], MEMCG_VMALLOC,
-				     -(int)area->nr_pages);
+				     -area->nr_pages);
 
 		for (i = 0; i < area->nr_pages; i += 1U << page_order) {
 			struct page *page = area->pages[i];
