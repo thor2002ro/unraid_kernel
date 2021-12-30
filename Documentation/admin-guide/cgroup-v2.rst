@@ -1269,8 +1269,7 @@ PAGE_SIZE multiple when read back.
 		killed by any kind of OOM killer.
 
           oom_group_kill
-                The number of times all tasks in the cgroup were killed
-                due to memory.oom.group.
+                The number of times a group OOM has occurred.
 
   memory.events.local
 	Similar to memory.events but the fields in the file are local
