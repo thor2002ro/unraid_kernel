@@ -4,6 +4,7 @@
 #include <linux/kconfig.h>
 #include <linux/list.h>
 #include <linux/slab.h>
+#include <linux/module.h>
 #include <linux/security.h>
 #include <linux/highmem.h>
 #include <linux/umh.h>
@@ -56,10 +57,13 @@ int register_firmware_config_sysctl(void)
 		return -ENOMEM;
 	return 0;
 }
+EXPORT_SYMBOL(register_firmware_config_sysctl);
 
 void unregister_firmware_config_sysctl(void)
 {
 	unregister_sysctl_table(firmware_config_sysct_table_header);
 	firmware_config_sysct_table_header = NULL;
 }
+EXPORT_SYMBOL(unregister_firmware_config_sysctl);
+
 #endif /* CONFIG_SYSCTL */
