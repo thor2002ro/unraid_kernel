@@ -242,7 +242,7 @@ EXPORT_SYMBOL(rt_write_lock);
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 void __sched rt_write_lock_nested(rwlock_t *rwlock, int subclass)
 {
-	___might_sleep(__FILE__, __LINE__, 0);
+	rtlock_might_resched();
 	rwlock_acquire(&rwlock->dep_map, subclass, 0, _RET_IP_);
 	rwbase_write_lock(&rwlock->rwbase, TASK_RTLOCK_WAIT);
 	rcu_read_lock();
