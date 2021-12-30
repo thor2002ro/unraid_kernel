@@ -157,6 +157,8 @@ extern void *__vmalloc_node_range(unsigned long size, unsigned long align,
 			const void *caller) __alloc_size(1);
 void *__vmalloc_node(unsigned long size, unsigned long align, gfp_t gfp_mask,
 		int node, const void *caller) __alloc_size(1);
+void *__vmalloc_node_no_huge(unsigned long size, unsigned long align,
+		gfp_t gfp_mask, int node, const void *caller) __alloc_size(1);
 void *vmalloc_no_huge(unsigned long size) __alloc_size(1);
 
 extern void vfree(const void *addr);
