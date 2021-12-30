@@ -124,16 +124,15 @@ struct dentry_stat_t {
 	long dummy;		/* Reserved for future use */
 };
 
-/* Statistics gathering. */
-static struct dentry_stat_t dentry_stat = {
-	.age_limit = 45,
-};
-
 static DEFINE_PER_CPU(long, nr_dentry);
 static DEFINE_PER_CPU(long, nr_dentry_unused);
 static DEFINE_PER_CPU(long, nr_dentry_negative);
 
 #if defined(CONFIG_SYSCTL) && defined(CONFIG_PROC_FS)
+/* Statistics gathering. */
+static struct dentry_stat_t dentry_stat = {
+	.age_limit = 45,
+};
 
 /*
  * Here we resort to our own counters instead of using generic per-cpu counters
