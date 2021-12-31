@@ -409,7 +409,8 @@ static void damon_hugetlb_mkold(pte_t *pte, struct mm_struct *mm,
 	}
 
 #ifdef CONFIG_MMU_NOTIFIER
-	if (mmu_notifier_clear_young(mm, addr, addr + huge_page_size(hstate_vma(vma))))
+	if (mmu_notifier_clear_young(mm, addr,
+				     addr + huge_page_size(hstate_vma(vma))))
 		referenced = true;
 #endif /* CONFIG_MMU_NOTIFIER */
 
@@ -441,7 +442,7 @@ out:
 }
 #else
 #define damon_mkold_hugetlb_entry NULL
-#endif
+#endif /* CONFIG_HUGETLB_PAGE */
 
 static const struct mm_walk_ops damon_mkold_ops = {
 	.pmd_entry = damon_mkold_pmd_entry,
@@ -576,7 +577,7 @@ out:
 }
 #else
 #define damon_young_hugetlb_entry NULL
-#endif
+#endif /* CONFIG_HUGETLB_PAGE */
 
 static const struct mm_walk_ops damon_young_ops = {
 	.pmd_entry = damon_young_pmd_entry,
