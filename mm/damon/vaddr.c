@@ -393,7 +393,6 @@ static void damon_hugetlb_mkold(pte_t *pte, struct mm_struct *mm,
 				struct vm_area_struct *vma, unsigned long addr)
 {
 	bool referenced = false;
-	struct hstate *h = hstate_vma(vma);
 	pte_t entry = huge_ptep_get(pte);
 	struct page *page = pte_page(entry);
 
@@ -410,7 +409,7 @@ static void damon_hugetlb_mkold(pte_t *pte, struct mm_struct *mm,
 	}
 
 #ifdef CONFIG_MMU_NOTIFIER
-	if (mmu_notifier_clear_young(mm, addr, addr + huge_page_size(h)))
+	if (mmu_notifier_clear_young(mm, addr, addr + huge_page_size(hstate_vma(vma))))
 		referenced = true;
 #endif /* CONFIG_MMU_NOTIFIER */
 
