@@ -156,7 +156,10 @@ cifs_dump_iface(struct seq_file *m, struct cifs_server_iface *iface)
 		seq_puts(m, "rdma ");
 	if (iface->rss_capable)
 		seq_puts(m, "rss ");
-	seq_putc(m, '\n');
+	if (iface->is_active)
+		seq_putc(m, '\n');
+	else
+		seq_puts(m, "[for-cleanup]\n");
 	if (iface->sockaddr.ss_family == AF_INET)
 		seq_printf(m, "\t\tIPv4: %pI4\n", &ipv4->sin_addr);
 	else if (iface->sockaddr.ss_family == AF_INET6)
@@ -220,6 +223,7 @@ static int cifs_debug_data_proc_show(struct seq_file *m, void *v)
 	struct TCP_Server_Info *server;
 	struct cifs_ses *ses;
 	struct cifs_tcon *tcon;
+	struct cifs_server_iface *iface;
 	int c, i, j;
 
 	seq_puts(m,
@@ -451,11 +455,10 @@ skip_rdma:
 			if (ses->iface_count)
 				seq_printf(m, "\n\n\tServer interfaces: %zu",
 					   ses->iface_count);
-			for (j = 0; j < ses->iface_count; j++) {
-				struct cifs_server_iface *iface;
-
-				iface = &ses->iface_list[j];
-				seq_printf(m, "\n\t%d)", j+1);
+			j = 0;
+			list_for_each_entry(iface, &ses->iface_list,
+						 iface_head) {
+				seq_printf(m, "\n\t%d)", ++j);
 				cifs_dump_iface(m, iface);
 				if (is_ses_using_iface(ses, iface))
 					seq_puts(m, "\t\t[CONNECTED]\n");
