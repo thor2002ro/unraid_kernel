@@ -237,6 +237,10 @@ cifs_mark_tcp_ses_conns_for_reconnect(struct TCP_Server_Info *server,
 		else
 			cifs_chan_set_need_reconnect(ses, server);
 
+		/* check if iface is still active */
+		if (!cifs_chan_is_iface_active(ses, server))
+			cifs_chan_update_iface(ses, server);
+
 		/* If all channels need reconnect, then tcon needs reconnect */
 		if (!mark_smb_session && !CIFS_ALL_CHANS_NEED_RECONNECT(ses))
 			goto next_session;
