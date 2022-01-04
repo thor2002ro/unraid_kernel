@@ -1120,7 +1120,7 @@ config PATA_OF_PLATFORM
 
 config PATA_QDI
 	tristate "QDI VLB PATA support"
-	depends on ISA
+	depends on ISA || COMPILE_TEST
 	select PATA_LEGACY
 	help
 	  Support for QDI 6500 and 6580 PATA controllers on VESA local bus.
@@ -1155,7 +1155,7 @@ config PATA_SAMSUNG_CF
 
 config PATA_WINBOND_VLB
 	tristate "Winbond W83759A VLB PATA support (Experimental)"
-	depends on ISA
+	depends on ISA || COMPILE_TEST
 	select PATA_LEGACY
 	help
 	  Support for the Winbond W83759A controller on Vesa Local Bus
