@@ -16,6 +16,7 @@
 #include "volumes.h"
 #include "qgroup.h"
 #include "tree-mod-log.h"
+#include "tree-log.h"
 
 static int split_node(struct btrfs_trans_handle *trans, struct btrfs_root
 		      *root, struct btrfs_path *path, int level);
@@ -110,6 +111,30 @@ noinline void btrfs_release_path(struct btrfs_path *p)
 		free_extent_buffer(p->nodes[i]);
 		p->nodes[i] = NULL;
 	}
+}
+
+static void delete_tree_block(struct btrfs_trans_handle *trans,
+			      struct btrfs_root *root,
+			      struct extent_buffer *eb,
+			      u64 parent,
+			      bool is_last_ref)
+{
+	const u64 root_id = btrfs_root_id(root);
+
+	btrfs_free_tree_block(trans, root_id, eb, parent, is_last_ref);
+	/*
+	 * If we are deleting a block from a log tree, then delete its range from
+	 * the io tree that tracks the blocks. This is only to ensure that if a
+	 * transaction abort happens, we are able to do proper cleanup of space
+	 * reservations, because we may not be able to iterate over the log tree
+	 * in case he had a writeback failure for a log tree node - so we rely on
+	 * the io tree to figure out the range of each log tree block. We ignore
+	 * any error from clear_extent_bits() because it's not common and it's
+	 * not critical either.
+	 */
+	if (root_id == BTRFS_TREE_LOG_OBJECTID)
+		clear_extent_bits(&root->dirty_log_pages, eb->start,
+				  eb->start + eb->len - 1, BTRFS_LOG_PAGES_BITS);
 }
 
 /*
@@ -463,8 +488,7 @@ static noinline int __btrfs_cow_block(struct btrfs_trans_handle *trans,
 		BUG_ON(ret < 0);
 		rcu_assign_pointer(root->node, cow);
 
-		btrfs_free_tree_block(trans, btrfs_root_id(root), buf,
-				      parent_start, last_ref);
+		delete_tree_block(trans, root, buf, parent_start, last_ref);
 		free_extent_buffer(buf);
 		add_root_to_dirty_list(root);
 	} else {
@@ -485,8 +509,7 @@ static noinline int __btrfs_cow_block(struct btrfs_trans_handle *trans,
 				return ret;
 			}
 		}
-		btrfs_free_tree_block(trans, btrfs_root_id(root), buf,
-				      parent_start, last_ref);
+		delete_tree_block(trans, root, buf, parent_start, last_ref);
 	}
 	if (unlock_orig)
 		btrfs_tree_unlock(buf);
@@ -930,7 +953,7 @@ static noinline int balance_level(struct btrfs_trans_handle *trans,
 		free_extent_buffer(mid);
 
 		root_sub_used(root, mid->len);
-		btrfs_free_tree_block(trans, btrfs_root_id(root), mid, 0, 1);
+		delete_tree_block(trans, root, mid, 0, true);
 		/* once for the root ptr */
 		free_extent_buffer_stale(mid);
 		return 0;
@@ -989,8 +1012,7 @@ static noinline int balance_level(struct btrfs_trans_handle *trans,
 			btrfs_tree_unlock(right);
 			del_ptr(root, path, level + 1, pslot + 1);
 			root_sub_used(root, right->len);
-			btrfs_free_tree_block(trans, btrfs_root_id(root), right,
-					      0, 1);
+			delete_tree_block(trans, root, right, 0, true);
 			free_extent_buffer_stale(right);
 			right = NULL;
 		} else {
@@ -1035,7 +1057,7 @@ static noinline int balance_level(struct btrfs_trans_handle *trans,
 		btrfs_tree_unlock(mid);
 		del_ptr(root, path, level + 1, pslot);
 		root_sub_used(root, mid->len);
-		btrfs_free_tree_block(trans, btrfs_root_id(root), mid, 0, 1);
+		delete_tree_block(trans, root, mid, 0, true);
 		free_extent_buffer_stale(mid);
 		mid = NULL;
 	} else {
@@ -4158,7 +4180,7 @@ static noinline void btrfs_del_leaf(struct btrfs_trans_handle *trans,
 	root_sub_used(root, leaf->len);
 
 	atomic_inc(&leaf->refs);
-	btrfs_free_tree_block(trans, btrfs_root_id(root), leaf, 0, 1);
+	delete_tree_block(trans, root, leaf, 0, true);
 	free_extent_buffer_stale(leaf);
 }
 /*

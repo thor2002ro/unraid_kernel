@@ -2742,6 +2742,28 @@ static void unaccount_log_buffer(struct btrfs_fs_info *fs_info, u64 start)
 	btrfs_put_block_group(cache);
 }
 
+static int release_tree_block(struct btrfs_trans_handle *trans,
+			      struct btrfs_root *log,
+			      struct extent_buffer *eb)
+{
+	btrfs_tree_lock(eb);
+	btrfs_clean_tree_block(eb);
+	btrfs_wait_tree_block_writeback(eb);
+	btrfs_tree_unlock(eb);
+
+	/*
+	 * We ignore errors here on purpose. They should be rare and if they
+	 * happen then nothing really serious happens, we just trigger some
+	 * warnings on unmount due to releasing reserved space twice for an
+	 * extent buffer - plus only in the transaction abort case, so it's
+	 * very rare for this to happen.
+	 */
+	clear_extent_bits(&log->dirty_log_pages, eb->start,
+			  eb->start + eb->len - 1, BTRFS_LOG_PAGES_BITS);
+
+	return btrfs_pin_reserved_extent(trans, eb->start, eb->len);
+}
+
 static noinline int walk_down_log_tree(struct btrfs_trans_handle *trans,
 				   struct btrfs_root *root,
 				   struct btrfs_path *path, int *level,
@@ -2752,7 +2774,6 @@ static noinline int walk_down_log_tree(struct btrfs_trans_handle *trans,
 	u64 ptr_gen;
 	struct extent_buffer *next;
 	struct extent_buffer *cur;
-	u32 blocksize;
 	int ret = 0;
 
 	while (*level > 0) {
@@ -2769,7 +2790,6 @@ static noinline int walk_down_log_tree(struct btrfs_trans_handle *trans,
 		bytenr = btrfs_node_blockptr(cur, path->slots[*level]);
 		ptr_gen = btrfs_node_ptr_generation(cur, path->slots[*level]);
 		btrfs_node_key_to_cpu(cur, &first_key, path->slots[*level]);
-		blocksize = fs_info->nodesize;
 
 		next = btrfs_find_create_tree_block(fs_info, bytenr,
 						    btrfs_header_owner(cur),
@@ -2794,24 +2814,12 @@ static noinline int walk_down_log_tree(struct btrfs_trans_handle *trans,
 					return ret;
 				}
 
-				if (trans) {
-					btrfs_tree_lock(next);
-					btrfs_clean_tree_block(next);
-					btrfs_wait_tree_block_writeback(next);
-					btrfs_tree_unlock(next);
-					ret = btrfs_pin_reserved_extent(trans,
-							bytenr, blocksize);
-					if (ret) {
-						free_extent_buffer(next);
-						return ret;
-					}
-					btrfs_redirty_list_add(
-						trans->transaction, next);
-				} else {
-					if (test_and_clear_bit(EXTENT_BUFFER_DIRTY, &next->bflags))
-						clear_extent_buffer_dirty(next);
-					unaccount_log_buffer(fs_info, bytenr);
+				ret = release_tree_block(trans, root, next);
+				if (ret) {
+					free_extent_buffer(next);
+					return ret;
 				}
+				btrfs_redirty_list_add(trans->transaction, next);
 			}
 			free_extent_buffer(next);
 			continue;
@@ -2840,7 +2848,6 @@ static noinline int walk_up_log_tree(struct btrfs_trans_handle *trans,
 				 struct btrfs_path *path, int *level,
 				 struct walk_control *wc)
 {
-	struct btrfs_fs_info *fs_info = root->fs_info;
 	int i;
 	int slot;
 	int ret;
@@ -2863,26 +2870,10 @@ static noinline int walk_up_log_tree(struct btrfs_trans_handle *trans,
 				struct extent_buffer *next;
 
 				next = path->nodes[*level];
-
-				if (trans) {
-					btrfs_tree_lock(next);
-					btrfs_clean_tree_block(next);
-					btrfs_wait_tree_block_writeback(next);
-					btrfs_tree_unlock(next);
-					ret = btrfs_pin_reserved_extent(trans,
-						     path->nodes[*level]->start,
-						     path->nodes[*level]->len);
-					if (ret)
-						return ret;
-					btrfs_redirty_list_add(trans->transaction,
-							       next);
-				} else {
-					if (test_and_clear_bit(EXTENT_BUFFER_DIRTY, &next->bflags))
-						clear_extent_buffer_dirty(next);
-
-					unaccount_log_buffer(fs_info,
-						path->nodes[*level]->start);
-				}
+				ret = release_tree_block(trans, root, next);
+				if (ret)
+					return ret;
+				btrfs_redirty_list_add(trans->transaction, next);
 			}
 			free_extent_buffer(path->nodes[*level]);
 			path->nodes[*level] = NULL;
@@ -2900,12 +2891,13 @@ static noinline int walk_up_log_tree(struct btrfs_trans_handle *trans,
 static int walk_log_tree(struct btrfs_trans_handle *trans,
 			 struct btrfs_root *log, struct walk_control *wc)
 {
-	struct btrfs_fs_info *fs_info = log->fs_info;
 	int ret = 0;
 	int wret;
 	int level;
 	struct btrfs_path *path;
 	int orig_level;
+
+	ASSERT(trans != NULL);
 
 	path = btrfs_alloc_path();
 	if (!path)
@@ -2946,22 +2938,10 @@ static int walk_log_tree(struct btrfs_trans_handle *trans,
 			struct extent_buffer *next;
 
 			next = path->nodes[orig_level];
-
-			if (trans) {
-				btrfs_tree_lock(next);
-				btrfs_clean_tree_block(next);
-				btrfs_wait_tree_block_writeback(next);
-				btrfs_tree_unlock(next);
-				ret = btrfs_pin_reserved_extent(trans,
-						next->start, next->len);
-				if (ret)
-					goto out;
-				btrfs_redirty_list_add(trans->transaction, next);
-			} else {
-				if (test_and_clear_bit(EXTENT_BUFFER_DIRTY, &next->bflags))
-					clear_extent_buffer_dirty(next);
-				unaccount_log_buffer(fs_info, next->start);
-			}
+			ret = release_tree_block(trans, log, next);
+			if (ret)
+				goto out;
+			btrfs_redirty_list_add(trans->transaction, next);
 		}
 	}
 
@@ -3384,35 +3364,93 @@ out:
 	return ret;
 }
 
+/*
+ * When cleaning up an aborted transaction we can't iterate the log tree because
+ * in case writeback failed for one of its extent buffers, we won't be able to
+ * read it, we'll get -EIO from btrfs_read_buffer(). So we instead iterate over
+ * the log tree's ->dirty_log_pages io tree.
+ */
+static void unaccount_all_log_buffers(struct btrfs_root *log)
+{
+	u64 start = 0;
+	u64 end;
+
+	while (!find_first_extent_bit(&log->dirty_log_pages, start, &start, &end,
+				      BTRFS_LOG_PAGES_BITS, NULL)) {
+		struct btrfs_fs_info *fs_info = log->fs_info;
+
+		for (; start < end; start += fs_info->nodesize) {
+			struct extent_buffer *eb;
+
+			cond_resched();
+
+			unaccount_log_buffer(fs_info, start);
+			eb = find_extent_buffer(fs_info, start);
+			/*
+			 * eb can be NULL in case it was already written and
+			 * evicted from memory.
+			 */
+			if (!eb)
+				continue;
+
+			wait_on_extent_buffer_writeback(eb);
+			if (test_and_clear_bit(EXTENT_BUFFER_DIRTY, &eb->bflags))
+				clear_extent_buffer_dirty(eb);
+			free_extent_buffer(eb);
+		}
+
+		start = end + 1;
+	}
+}
+
 static void free_log_tree(struct btrfs_trans_handle *trans,
 			  struct btrfs_root *log)
 {
-	int ret;
-	struct walk_control wc = {
-		.free = 1,
-		.process_func = process_one_buffer
-	};
+	if (trans && log->node) {
+		int ret;
+		struct walk_control wc = {
+			  .free = 1,
+			  .process_func = process_one_buffer
+		};
 
-	if (log->node) {
 		ret = walk_log_tree(trans, log, &wc);
 		if (ret) {
-			if (trans)
-				btrfs_abort_transaction(trans, ret);
-			else
-				btrfs_handle_fs_error(log->fs_info, ret, NULL);
+			btrfs_abort_transaction(trans, ret);
+			/*
+			 * We may have failed iterating the whole tree, so we
+			 * fallback to the transaction abort cleanup path.
+			 */
+			unaccount_all_log_buffers(log);
 		}
+	} else if (!trans) {
+		unaccount_all_log_buffers(log);
 	}
 
-	clear_extent_bits(&log->dirty_log_pages, 0, (u64)-1,
-			  EXTENT_DIRTY | EXTENT_NEW | EXTENT_NEED_WAIT);
+	/*
+	 * Cleanup every state record. When walking the log tree we clean the
+	 * range for each extent buffer as we clean it up, but that might fail
+	 * with -ENOMEM due to extent state record splits and we ignore such
+	 * errors during the walk - it's rare but it could happen. By clearing
+	 * the whole range here we don't need to have such state splits and
+	 * allocations, so this way it's guaranteed to always succeed. So we
+	 * almosts always end up here with an empty io tree, except for the
+	 * transaction abort case (when @trans is NULL).
+	 */
+	clear_extent_bits(&log->dirty_log_pages, 0, (u64)-1, BTRFS_LOG_PAGES_BITS);
 	extent_io_tree_release(&log->log_csum_range);
 
 	btrfs_put_root(log);
 }
 
 /*
- * free all the extents used by the tree log.  This should be called
- * at commit time of the full transaction
+ * Free all the extents used by a log tree.
+ *
+ * @trans:	A transaction handle or NULL.
+ * @root:	The parent root of a log tree.
+ *
+ * This should be called either at commit time of the full transaction, or when
+ * cleaning up a transaction that was aborted. In the former case @trans is not
+ * NULL, while in the second case @trans must be NULL.
  */
 int btrfs_free_log(struct btrfs_trans_handle *trans, struct btrfs_root *root)
 {
