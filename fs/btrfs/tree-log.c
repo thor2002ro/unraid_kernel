@@ -3702,7 +3702,8 @@ static int process_dir_items_leaf(struct btrfs_trans_handle *trans,
 				  struct btrfs_inode *inode,
 				  struct btrfs_path *path,
 				  struct btrfs_path *dst_path,
-				  struct btrfs_log_ctx *ctx)
+				  struct btrfs_log_ctx *ctx,
+				  u64 *last_old_dentry_offset)
 {
 	struct btrfs_root *log = inode->root->log_root;
 	struct extent_buffer *src = path->nodes[0];
@@ -3715,6 +3716,7 @@ static int process_dir_items_leaf(struct btrfs_trans_handle *trans,
 	int i;
 
 	for (i = path->slots[0]; i < nritems; i++) {
+		struct btrfs_dir_item *di;
 		struct btrfs_key key;
 		int ret;
 
@@ -3725,7 +3727,34 @@ static int process_dir_items_leaf(struct btrfs_trans_handle *trans,
 			break;
 		}
 
+		di = btrfs_item_ptr(src, i, struct btrfs_dir_item);
 		ctx->last_dir_item_offset = key.offset;
+
+		/*
+		 * Skip ranges of items that consist only of dir item keys created
+		 * in past transactions. However if we find a gap, we must log a
+		 * dir index range item for that gap, so that index keys in that
+		 * gap are deleted during log replay.
+		 */
+		if (btrfs_dir_transid(src, di) < trans->transid) {
+			if (key.offset > *last_old_dentry_offset + 1) {
+				ret = insert_dir_log_key(trans, log, dst_path,
+						 ino, *last_old_dentry_offset + 1,
+						 key.offset - 1);
+				/*
+				 * -EEXIST should never happen because when we
+				 * log a directory in full mode (LOG_INODE_ALL)
+				 * we drop all BTRFS_DIR_LOG_INDEX_KEY keys from
+				 * the log tree.
+				 */
+				ASSERT(ret != -EEXIST);
+				if (ret < 0)
+					return ret;
+			}
+
+			*last_old_dentry_offset = key.offset;
+			continue;
+		}
 		/*
 		 * We must make sure that when we log a directory entry, the
 		 * corresponding inode, after log replay, has a matching link
@@ -3749,14 +3778,10 @@ static int process_dir_items_leaf(struct btrfs_trans_handle *trans,
 		 * resulting in -ENOTEMPTY errors.
 		 */
 		if (!ctx->log_new_dentries) {
-			struct btrfs_dir_item *di;
 			struct btrfs_key di_key;
 
-			di = btrfs_item_ptr(src, i, struct btrfs_dir_item);
 			btrfs_dir_item_key_to_cpu(src, di, &di_key);
-			if ((btrfs_dir_transid(src, di) == trans->transid ||
-			     btrfs_dir_type(src, di) == BTRFS_FT_DIR) &&
-			    di_key.type != BTRFS_ROOT_ITEM_KEY)
+			if (di_key.type != BTRFS_ROOT_ITEM_KEY)
 				ctx->log_new_dentries = true;
 		}
 
@@ -3837,7 +3862,7 @@ static noinline int log_dir_items(struct btrfs_trans_handle *trans,
 	struct btrfs_root *log = root->log_root;
 	int err = 0;
 	int ret;
-	u64 first_offset = min_offset;
+	u64 last_old_dentry_offset = min_offset - 1;
 	u64 last_offset = (u64)-1;
 	u64 ino = btrfs_ino(inode);
 
@@ -3871,10 +3896,11 @@ static noinline int log_dir_items(struct btrfs_trans_handle *trans,
 		 */
 		if (ret == 0) {
 			struct btrfs_key tmp;
+
 			btrfs_item_key_to_cpu(path->nodes[0], &tmp,
 					      path->slots[0]);
 			if (tmp.type == BTRFS_DIR_INDEX_KEY)
-				first_offset = max(min_offset, tmp.offset) + 1;
+				last_old_dentry_offset = tmp.offset;
 		}
 		goto done;
 	}
@@ -3883,17 +3909,18 @@ static noinline int log_dir_items(struct btrfs_trans_handle *trans,
 	ret = btrfs_previous_item(root, path, ino, BTRFS_DIR_INDEX_KEY);
 	if (ret == 0) {
 		struct btrfs_key tmp;
+
 		btrfs_item_key_to_cpu(path->nodes[0], &tmp, path->slots[0]);
-		if (tmp.type == BTRFS_DIR_INDEX_KEY) {
-			first_offset = tmp.offset;
-			ret = overwrite_item(trans, log, dst_path,
-					     path->nodes[0], path->slots[0],
-					     &tmp);
-			if (ret) {
-				err = ret;
-				goto done;
-			}
-		}
+		/*
+		 * The dir index key before the first one we found that needs to
+		 * be logged might be in a previous leaf, and there might be a
+		 * gap between these keys, meaning that we had deletions that
+		 * happened. So the key range item we log (key type
+		 * BTRFS_DIR_LOG_INDEX_KEY) must cover a range that starts at the
+		 * previous key's offset plus 1, so that those deletes are replayed.
+		 */
+		if (tmp.type == BTRFS_DIR_INDEX_KEY)
+			last_old_dentry_offset = tmp.offset;
 	}
 	btrfs_release_path(path);
 
@@ -3915,7 +3942,8 @@ search:
 	 * from our directory
 	 */
 	while (1) {
-		ret = process_dir_items_leaf(trans, inode, path, dst_path, ctx);
+		ret = process_dir_items_leaf(trans, inode, path, dst_path, ctx,
+					     &last_old_dentry_offset);
 		if (ret != 0) {
 			if (ret < 0)
 				err = ret;
@@ -3941,14 +3969,16 @@ search:
 			goto done;
 		}
 		if (btrfs_header_generation(path->nodes[0]) != trans->transid) {
-			ctx->last_dir_item_offset = min_key.offset;
-			ret = overwrite_item(trans, log, dst_path,
-					     path->nodes[0], path->slots[0],
-					     &min_key);
-			if (ret)
-				err = ret;
-			else
-				last_offset = min_key.offset;
+			/*
+			 * The next leaf was not changed in the current transaction
+			 * and has at least one dir index key.
+			 * We check for the next key because there might have been
+			 * one or more deletions between the last key we logged and
+			 * that next key. So the key range item we log (key type
+			 * BTRFS_DIR_LOG_INDEX_KEY) must end at the next key's
+			 * offset minus 1, so that those deletes are replayed.
+			 */
+			last_offset = min_key.offset - 1;
 			goto done;
 		}
 		if (need_resched()) {
@@ -3964,13 +3994,21 @@ done:
 	if (err == 0) {
 		*last_offset_ret = last_offset;
 		/*
-		 * insert the log range keys to indicate where the log
-		 * is valid
+		 * In case the leaf was changed in the current transaction but
+		 * all its dir items are from a past transaction, the last item
+		 * in the leaf is a dir item and there's no gap between that last
+		 * dir item and the first one on the next leaf (which did not
+		 * change in the current transaction), then we don't need to log
+		 * a range, last_old_dentry_offset is == to last_offset.
 		 */
-		ret = insert_dir_log_key(trans, log, path, ino, first_offset,
-					 last_offset);
-		if (ret)
-			err = ret;
+		ASSERT(last_old_dentry_offset <= last_offset);
+		if (last_old_dentry_offset < last_offset) {
+			ret = insert_dir_log_key(trans, log, path, ino,
+						 last_old_dentry_offset + 1,
+						 last_offset);
+			if (ret)
+				err = ret;
+		}
 	}
 	return err;
 }
@@ -4012,7 +4050,7 @@ static noinline int log_directory_changes(struct btrfs_trans_handle *trans,
 	if (inode->logged_trans != trans->transid)
 		inode->last_dir_index_offset = (u64)-1;
 
-	min_key = 0;
+	min_key = BTRFS_DIR_START_INDEX;
 	max_key = 0;
 	ctx->last_dir_item_offset = inode->last_dir_index_offset;
 
@@ -5866,7 +5904,6 @@ static int log_new_dir_dentries(struct btrfs_trans_handle *trans,
 				struct btrfs_log_ctx *ctx)
 {
 	struct btrfs_fs_info *fs_info = root->fs_info;
-	struct btrfs_root *log = root->log_root;
 	struct btrfs_path *path;
 	LIST_HEAD(dir_list);
 	struct btrfs_dir_list *dir_elem;
@@ -5908,7 +5945,7 @@ static int log_new_dir_dentries(struct btrfs_trans_handle *trans,
 		min_key.offset = 0;
 again:
 		btrfs_release_path(path);
-		ret = btrfs_search_forward(log, &min_key, path, trans->transid);
+		ret = btrfs_search_forward(root, &min_key, path, trans->transid);
 		if (ret < 0) {
 			goto next_dir_inode;
 		} else if (ret > 0) {
@@ -5916,7 +5953,6 @@ again:
 			goto next_dir_inode;
 		}
 
-process_leaf:
 		leaf = path->nodes[0];
 		nritems = btrfs_header_nritems(leaf);
 		for (i = path->slots[0]; i < nritems; i++) {
@@ -5934,8 +5970,7 @@ process_leaf:
 
 			di = btrfs_item_ptr(leaf, i, struct btrfs_dir_item);
 			type = btrfs_dir_type(leaf, di);
-			if (btrfs_dir_transid(leaf, di) < trans->transid &&
-			    type != BTRFS_FT_DIR)
+			if (btrfs_dir_transid(leaf, di) < trans->transid)
 				continue;
 			btrfs_dir_item_key_to_cpu(leaf, di, &di_key);
 			if (di_key.type == BTRFS_ROOT_ITEM_KEY)
@@ -5972,16 +6007,6 @@ process_leaf:
 				list_add_tail(&new_dir_elem->list, &dir_list);
 			}
 			break;
-		}
-		if (i == nritems) {
-			ret = btrfs_next_leaf(log, path);
-			if (ret < 0) {
-				goto next_dir_inode;
-			} else if (ret > 0) {
-				ret = 0;
-				goto next_dir_inode;
-			}
-			goto process_leaf;
 		}
 		if (min_key.offset < (u64)-1) {
 			min_key.offset++;
