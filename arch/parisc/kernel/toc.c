@@ -109,3 +109,30 @@ static __init int setup_toc(void)
 	return 0;
 }
 early_initcall(setup_toc);
+
+
+#ifdef CONFIG_KGDB_KDB
+/* read a character, return -1 if no char can be polled. */
+static int kgdbpdc_read_char(void)
+{
+	return pdc_iodc_getc();
+}
+
+static void kgdbpdc_write_char(u8 chr)
+{
+	/* no need to print char. kdb will do it. */
+}
+
+static struct kgdb_io kgdbpdc_io_ops = {
+	.name		= "kgdb_pdc",
+	.read_char	= kgdbpdc_read_char,
+	.write_char	= kgdbpdc_write_char,
+};
+
+static int __init kgdbpdc_init(void)
+{
+	kgdb_register_io_module(&kgdbpdc_io_ops);
+	return 0;
+}
+early_initcall(kgdbpdc_init);
+#endif
