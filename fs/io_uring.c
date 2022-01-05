@@ -2830,7 +2830,7 @@ static inline void io_req_task_complete(struct io_kiocb *req, bool *locked)
 	}
 }
 
-static void __io_complete_rw(struct io_kiocb *req, long res, long res2,
+static void __io_complete_rw(struct io_kiocb *req, long res,
 			     unsigned int issue_flags)
 {
 	if (__io_complete_rw_common(req, res))
@@ -3076,7 +3076,7 @@ static void kiocb_done(struct io_kiocb *req, ssize_t ret,
 	if (req->flags & REQ_F_CUR_POS)
 		req->file->f_pos = req->rw.kiocb.ki_pos;
 	if (ret >= 0 && (req->rw.kiocb.ki_complete == io_complete_rw))
-		__io_complete_rw(req, ret, 0, issue_flags);
+		__io_complete_rw(req, ret, issue_flags);
 	else
 		io_rw_done(&req->rw.kiocb, ret);
 
@@ -10182,7 +10182,7 @@ static __cold void __io_uring_show_fdinfo(struct io_ring_ctx *ctx,
 	 * and sq_tail and cq_head are changed by userspace. But it's ok since
 	 * we usually use these info when it is stuck.
 	 */
-	seq_printf(m, "SqMask:\t\t0x%x\n", sq_mask);
+	seq_printf(m, "SqMask:\t0x%x\n", sq_mask);
 	seq_printf(m, "SqHead:\t%u\n", sq_head);
 	seq_printf(m, "SqTail:\t%u\n", sq_tail);
 	seq_printf(m, "CachedSqHead:\t%u\n", ctx->cached_sq_head);
