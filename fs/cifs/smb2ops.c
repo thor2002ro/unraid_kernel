@@ -121,9 +121,13 @@ smb2_add_credits(struct TCP_Server_Info *server,
 			 optype, scredits, add);
 	}
 
+	spin_lock(&cifs_tcp_ses_lock);
 	if (server->tcpStatus == CifsNeedReconnect
-	    || server->tcpStatus == CifsExiting)
+	    || server->tcpStatus == CifsExiting) {
+		spin_unlock(&cifs_tcp_ses_lock);
 		return;
+	}
+	spin_unlock(&cifs_tcp_ses_lock);
 
 	switch (rc) {
 	case -1:
@@ -208,11 +212,15 @@ smb2_wait_mtu_credits(struct TCP_Server_Info *server, unsigned int size,
 				return rc;
 			spin_lock(&server->req_lock);
 		} else {
+			spin_unlock(&server->req_lock);
+			spin_lock(&cifs_tcp_ses_lock);
 			if (server->tcpStatus == CifsExiting) {
-				spin_unlock(&server->req_lock);
+				spin_unlock(&cifs_tcp_ses_lock);
 				return -ENOENT;
 			}
+			spin_unlock(&cifs_tcp_ses_lock);
 
+			spin_lock(&server->req_lock);
 			scredits = server->credits;
 			/* can deadlock with reopen */
 			if (scredits <= 8) {
@@ -384,14 +392,16 @@ smb2_need_neg(struct TCP_Server_Info *server)
 }
 
 static int
-smb2_negotiate(const unsigned int xid, struct cifs_ses *ses)
+smb2_negotiate(const unsigned int xid,
+	       struct cifs_ses *ses,
+	       struct TCP_Server_Info *server)
 {
 	int rc;
 
 	spin_lock(&GlobalMid_Lock);
-	cifs_ses_server(ses)->CurrentMid = 0;
+	server->CurrentMid = 0;
 	spin_unlock(&GlobalMid_Lock);
-	rc = SMB2_negotiate(xid, ses);
+	rc = SMB2_negotiate(xid, ses, server);
 	/* BB we probably don't need to retry with modern servers */
 	if (rc == -EAGAIN)
 		rc = -EHOSTDOWN;
@@ -4808,7 +4818,7 @@ handle_read_data(struct TCP_Server_Info *server, struct mid_q_entry *mid,
 	if (server->ops->is_session_expired &&
 	    server->ops->is_session_expired(buf)) {
 		if (!is_offloaded)
-			cifs_reconnect(server);
+			cifs_reconnect(server, true);
 		return -1;
 	}
 
@@ -4981,10 +4991,12 @@ static void smb2_decrypt_offload(struct work_struct *work)
 
 			mid->callback(mid);
 		} else {
+			spin_lock(&cifs_tcp_ses_lock);
 			spin_lock(&GlobalMid_Lock);
 			if (dw->server->tcpStatus == CifsNeedReconnect) {
 				mid->mid_state = MID_RETRY_NEEDED;
 				spin_unlock(&GlobalMid_Lock);
+				spin_unlock(&cifs_tcp_ses_lock);
 				mid->callback(mid);
 			} else {
 				mid->mid_state = MID_REQUEST_SUBMITTED;
@@ -4992,6 +5004,7 @@ static void smb2_decrypt_offload(struct work_struct *work)
 				list_add_tail(&mid->qhead,
 					&dw->server->pending_mid_q);
 				spin_unlock(&GlobalMid_Lock);
+				spin_unlock(&cifs_tcp_ses_lock);
 			}
 		}
 		cifs_mid_q_entry_release(mid);
@@ -5221,13 +5234,13 @@ smb3_receive_transform(struct TCP_Server_Info *server,
 						sizeof(struct smb2_hdr)) {
 		cifs_server_dbg(VFS, "Transform message is too small (%u)\n",
 			 pdu_length);
-		cifs_reconnect(server);
+		cifs_reconnect(server, true);
 		return -ECONNABORTED;
 	}
 
 	if (pdu_length < orig_len + sizeof(struct smb2_transform_hdr)) {
 		cifs_server_dbg(VFS, "Transform message is broken\n");
-		cifs_reconnect(server);
+		cifs_reconnect(server, true);
 		return -ECONNABORTED;
 	}
 
