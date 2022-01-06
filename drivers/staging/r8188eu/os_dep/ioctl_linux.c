@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /* Copyright(c) 2007 - 2012 Realtek Corporation. */
 
-#define _IOCTL_LINUX_C_
-
 #include "../include/osdep_service.h"
 #include "../include/drv_types.h"
 #include "../include/wlan_bssdef.h"
@@ -14,7 +12,7 @@
 #include "../include/rtw_ioctl_set.h"
 #include "../include/usb_ops.h"
 #include "../include/rtl8188e_hal.h"
-#include "../include/rtl8188e_led.h"
+#include "../include/rtw_led.h"
 
 #include "../include/rtw_iol.h"
 
@@ -60,7 +58,7 @@ void rtw_indicate_wx_assoc_event(struct adapter *padapter)
 
 	memcpy(wrqu.ap_addr.sa_data, pmlmepriv->cur_network.network.MacAddress, ETH_ALEN);
 
-	DBG_88E_LEVEL(_drv_always_, "assoc success\n");
+	netdev_dbg(padapter->pnetdev, "assoc success\n");
 	wireless_send_event(padapter->pnetdev, SIOCGIWAP, &wrqu, NULL);
 }
 
@@ -73,7 +71,7 @@ void rtw_indicate_wx_disassoc_event(struct adapter *padapter)
 	wrqu.ap_addr.sa_family = ARPHRD_ETHER;
 	memset(wrqu.ap_addr.sa_data, 0, ETH_ALEN);
 
-	DBG_88E_LEVEL(_drv_always_, "indicate disassoc\n");
+	netdev_dbg(padapter->pnetdev, "indicate disassoc\n");
 	wireless_send_event(padapter->pnetdev, SIOCGIWAP, &wrqu, NULL);
 }
 
@@ -2092,18 +2090,6 @@ static int rtw_wx_write_rf(struct net_device *dev,
 	return 0;
 }
 
-static int rtw_wx_priv_null(struct net_device *dev, struct iw_request_info *a,
-		 union iwreq_data *wrqu, char *b)
-{
-	return -1;
-}
-
-static int dummy(struct net_device *dev, struct iw_request_info *a,
-		 union iwreq_data *wrqu, char *b)
-{
-	return -1;
-}
-
 static int rtw_wx_set_channel_plan(struct net_device *dev,
 			       struct iw_request_info *info,
 			       union iwreq_data *wrqu, char *extra)
@@ -2117,37 +2103,6 @@ static int rtw_wx_set_channel_plan(struct net_device *dev,
 	else
 		return -EPERM;
 
-	return 0;
-}
-
-static int rtw_wx_set_mtk_wps_probe_ie(struct net_device *dev,
-		struct iw_request_info *a,
-		union iwreq_data *wrqu, char *b)
-{
-	return 0;
-}
-
-static int rtw_wx_get_sensitivity(struct net_device *dev,
-				struct iw_request_info *info,
-				union iwreq_data *wrqu, char *buf)
-{
-	return 0;
-}
-
-static int rtw_wx_set_mtk_wps_ie(struct net_device *dev,
-				struct iw_request_info *info,
-				union iwreq_data *wrqu, char *extra)
-{
-	return 0;
-}
-
-/*
- *	For all data larger than 16 octets, we need to use a
- *	pointer to memory allocated in user space.
- */
-static  int rtw_drvext_hdl(struct net_device *dev, struct iw_request_info *info,
-						union iwreq_data *wrqu, char *extra)
-{
 	return 0;
 }
 
@@ -3617,27 +3572,18 @@ static void bb_reg_dump(struct adapter *padapter)
 
 static void rf_reg_dump(struct adapter *padapter)
 {
-	int i, j = 1, path;
+	int i, j = 1, path = 0;
 	u32 value;
-	u8 rf_type, path_nums = 0;
-	GetHwReg8188EU(padapter, HW_VAR_RF_TYPE, (u8 *)(&rf_type));
 
 	pr_info("\n ======= RF REG =======\n");
-	if ((RF_1T2R == rf_type) || (RF_1T1R == rf_type))
-		path_nums = 1;
-	else
-		path_nums = 2;
-
-	for (path = 0; path < path_nums; path++) {
-		pr_info("\nRF_Path(%x)\n", path);
-		for (i = 0; i < 0x100; i++) {
-			value = rtl8188e_PHY_QueryRFReg(padapter, path, i, 0xffffffff);
-			if (j % 4 == 1)
-				pr_info("0x%02x ", i);
-			pr_info(" 0x%08x ", value);
-			if ((j++) % 4 == 0)
-				pr_info("\n");
-		}
+	pr_info("\nRF_Path(%x)\n", path);
+	for (i = 0; i < 0x100; i++) {
+		value = rtl8188e_PHY_QueryRFReg(padapter, path, i, 0xffffffff);
+		if (j % 4 == 1)
+			pr_info("0x%02x ", i);
+		pr_info(" 0x%08x ", value);
+		if ((j++) % 4 == 0)
+			pr_info("\n");
 	}
 }
 
@@ -4058,12 +4004,6 @@ static int rtw_dbg_port(struct net_device *dev,
 			DBG_88E("turn %s the bShowGetP2PState Variable\n", (extra_arg == 1) ? "on" : "off");
 			padapter->bShowGetP2PState = extra_arg;
 			break;
-		case 0xaa:
-			if (extra_arg > 0x13)
-				extra_arg = 0xFF;
-			DBG_88E("chang data rate to :0x%02x\n", extra_arg);
-			padapter->fix_rate = extra_arg;
-			break;
 		case 0xdd:/* registers dump, 0 for mac reg, 1 for bb reg, 2 for rf reg */
 			if (extra_arg == 0)
 				mac_reg_dump(padapter);
@@ -4230,81 +4170,21 @@ static int rtw_pm_set(struct net_device *dev,
 	return ret;
 }
 
-extern int wifirate2_ratetbl_inx(unsigned char rate);
-
-static int rtw_tdls(struct net_device *dev,
-		    struct iw_request_info *info,
-		    union iwreq_data *wrqu, char *extra)
-{
-	return 0;
-}
-
-static int rtw_tdls_get(struct net_device *dev,
-				struct iw_request_info *info,
-				union iwreq_data *wrqu, char *extra)
-{
-	return 0;
-}
-
-static int rtw_test(
-	struct net_device *dev,
-	struct iw_request_info *info,
-	union iwreq_data *wrqu, char *extra)
-{
-	u32 len;
-	u8 *pbuf, *pch;
-	char *ptmp;
-	u8 *delim = ",";
-
-	DBG_88E("+%s\n", __func__);
-	len = wrqu->data.length;
-
-	pbuf = kzalloc(len, GFP_KERNEL);
-	if (!pbuf) {
-		DBG_88E("%s: no memory!\n", __func__);
-		return -ENOMEM;
-	}
-
-	if (copy_from_user(pbuf, wrqu->data.pointer, len)) {
-		kfree(pbuf);
-		DBG_88E("%s: copy from user fail!\n", __func__);
-		return -EFAULT;
-	}
-	DBG_88E("%s: string =\"%s\"\n", __func__, pbuf);
-
-	ptmp = (char *)pbuf;
-	pch = strsep(&ptmp, delim);
-	if (!pch || strlen(pch) == 0) {
-		kfree(pbuf);
-		DBG_88E("%s: parameter error(level 1)!\n", __func__);
-		return -EFAULT;
-	}
-	kfree(pbuf);
-	return 0;
-}
-
 static iw_handler rtw_handlers[] = {
 	IW_HANDLER(SIOCGIWNAME, rtw_wx_get_name),
-	IW_HANDLER(SIOCSIWNWID, dummy),
-	IW_HANDLER(SIOCGIWNWID, dummy),
 	IW_HANDLER(SIOCGIWFREQ, rtw_wx_get_freq),
 	IW_HANDLER(SIOCSIWMODE, rtw_wx_set_mode),
 	IW_HANDLER(SIOCGIWMODE, rtw_wx_get_mode),
-	IW_HANDLER(SIOCSIWSENS, dummy),
 	IW_HANDLER(SIOCGIWSENS, rtw_wx_get_sens),
 	IW_HANDLER(SIOCGIWRANGE, rtw_wx_get_range),
 	IW_HANDLER(SIOCSIWPRIV, rtw_wx_set_priv),
-	IW_HANDLER(SIOCSIWSPY, dummy),
-	IW_HANDLER(SIOCGIWSPY, dummy),
 	IW_HANDLER(SIOCSIWAP, rtw_wx_set_wap),
 	IW_HANDLER(SIOCGIWAP, rtw_wx_get_wap),
 	IW_HANDLER(SIOCSIWMLME, rtw_wx_set_mlme),
-	IW_HANDLER(SIOCGIWAPLIST, dummy),
 	IW_HANDLER(SIOCSIWSCAN, rtw_wx_set_scan),
 	IW_HANDLER(SIOCGIWSCAN, rtw_wx_get_scan),
 	IW_HANDLER(SIOCSIWESSID, rtw_wx_set_essid),
 	IW_HANDLER(SIOCGIWESSID, rtw_wx_get_essid),
-	IW_HANDLER(SIOCSIWNICKN, dummy),
 	IW_HANDLER(SIOCGIWNICKN, rtw_wx_get_nick),
 	IW_HANDLER(SIOCSIWRATE, rtw_wx_set_rate),
 	IW_HANDLER(SIOCGIWRATE, rtw_wx_get_rate),
@@ -4312,13 +4192,9 @@ static iw_handler rtw_handlers[] = {
 	IW_HANDLER(SIOCGIWRTS, rtw_wx_get_rts),
 	IW_HANDLER(SIOCSIWFRAG, rtw_wx_set_frag),
 	IW_HANDLER(SIOCGIWFRAG, rtw_wx_get_frag),
-	IW_HANDLER(SIOCSIWTXPOW, dummy),
-	IW_HANDLER(SIOCGIWTXPOW, dummy),
-	IW_HANDLER(SIOCSIWRETRY, dummy),
 	IW_HANDLER(SIOCGIWRETRY, rtw_wx_get_retry),
 	IW_HANDLER(SIOCSIWENCODE, rtw_wx_set_enc),
 	IW_HANDLER(SIOCGIWENCODE, rtw_wx_get_enc),
-	IW_HANDLER(SIOCSIWPOWER, dummy),
 	IW_HANDLER(SIOCGIWPOWER, rtw_wx_get_power),
 	IW_HANDLER(SIOCSIWGENIE, rtw_wx_set_gen_ie),
 	IW_HANDLER(SIOCSIWAUTH, rtw_wx_set_auth),
@@ -4340,9 +4216,6 @@ static const struct iw_priv_args rtw_private_args[] = {
 		SIOCIWFIRSTPRIV + 0x2, 0, 0, "driver_ext"
 	},
 	{
-		SIOCIWFIRSTPRIV + 0x3, 0, 0, "mp_ioctl"
-	},
-	{
 		SIOCIWFIRSTPRIV + 0x4,
 		IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, 0, "apinfo"
 	},
@@ -4354,19 +4227,6 @@ static const struct iw_priv_args rtw_private_args[] = {
 		SIOCIWFIRSTPRIV + 0x6,
 		IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, 0, "wps_start"
 	},
-	{
-		SIOCIWFIRSTPRIV + 0x7,
-		IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, 0, "get_sensitivity"
-	},
-	{
-		SIOCIWFIRSTPRIV + 0x8,
-		IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, 0, "wps_prob_req_ie"
-	},
-	{
-		SIOCIWFIRSTPRIV + 0x9,
-		IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, 0, "wps_assoc_req_ie"
-	},
-
 	{
 		SIOCIWFIRSTPRIV + 0xA,
 		IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1, 0, "channel_plan"
@@ -4396,33 +4256,18 @@ static const struct iw_priv_args rtw_private_args[] = {
 		SIOCIWFIRSTPRIV + 0x12,
 		IW_PRIV_TYPE_CHAR | P2P_PRIVATE_IOCTL_SET_LEN, IW_PRIV_TYPE_CHAR | IFNAMSIZ, "p2p_get2"
 	},
-	{SIOCIWFIRSTPRIV + 0x13, IW_PRIV_TYPE_CHAR | 128, 0, "NULL"},
-	{
-		SIOCIWFIRSTPRIV + 0x14,
-		IW_PRIV_TYPE_CHAR  | 64, 0, "tdls"
-	},
-	{
-		SIOCIWFIRSTPRIV + 0x15,
-		IW_PRIV_TYPE_CHAR | P2P_PRIVATE_IOCTL_SET_LEN, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_FIXED | P2P_PRIVATE_IOCTL_SET_LEN, "tdls_get"
-	},
 	{
 		SIOCIWFIRSTPRIV + 0x16,
 		IW_PRIV_TYPE_CHAR | 64, 0, "pm_set"
 	},
 
 	{SIOCIWFIRSTPRIV + 0x18, IW_PRIV_TYPE_CHAR | IFNAMSIZ, 0, "rereg_nd_name"},
-
-	{SIOCIWFIRSTPRIV + 0x1D, IW_PRIV_TYPE_CHAR | 40, IW_PRIV_TYPE_CHAR | 0x7FF, "test"
-	},
-
-	{SIOCIWFIRSTPRIV + 0x0E, IW_PRIV_TYPE_CHAR | 1024, 0, ""},  /* set */
-	{SIOCIWFIRSTPRIV + 0x0F, IW_PRIV_TYPE_CHAR | 1024, IW_PRIV_TYPE_CHAR | IW_PRIV_SIZE_MASK, ""},/* get */
 };
 
 static iw_handler rtw_private_handler[] = {
 rtw_wx_write32,				/* 0x00 */
 rtw_wx_read32,				/* 0x01 */
-rtw_drvext_hdl,				/* 0x02 */
+	NULL,				/* 0x02 */
 NULL,					/* 0x03 */
 /*  for MM DTV platform */
 	rtw_get_ap_info,		/* 0x04 */
@@ -4430,9 +4275,9 @@ NULL,					/* 0x03 */
 	rtw_set_pid,			/* 0x05 */
 	rtw_wps_start,			/* 0x06 */
 
-	rtw_wx_get_sensitivity,		/* 0x07 */
-	rtw_wx_set_mtk_wps_probe_ie,	/* 0x08 */
-	rtw_wx_set_mtk_wps_ie,		/* 0x09 */
+	NULL,				/* 0x07 */
+	NULL,				/* 0x08 */
+	NULL,				/* 0x09 */
 
 /*  Set Channel depend on the country code */
 	rtw_wx_set_channel_plan,	/* 0x0A */
@@ -4448,18 +4293,12 @@ NULL,					/* 0x03 */
 	rtw_p2p_get2,			/* 0x12 */
 
 	NULL,				/* 0x13 */
-	rtw_tdls,			/* 0x14 */
-	rtw_tdls_get,			/* 0x15 */
+	NULL,				/* 0x14 */
+	NULL,				/* 0x15 */
 
 	rtw_pm_set,			/* 0x16 */
-	rtw_wx_priv_null,		/* 0x17 */
+	NULL,				/* 0x17 */
 	rtw_rereg_nd_name,		/* 0x18 */
-	rtw_wx_priv_null,		/* 0x19 */
-
-	NULL,				/* 0x1A */
-	NULL,				/* 0x1B */
-	NULL,				/*  0x1C is reserved for hostapd */
-	rtw_test,			/*  0x1D */
 };
 
 static struct iw_statistics *rtw_get_wireless_stats(struct net_device *dev)
