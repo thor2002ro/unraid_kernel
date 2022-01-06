@@ -1662,11 +1662,11 @@ static int steal_guc_id(struct intel_guc *guc, struct intel_context *ce)
 		GEM_BUG_ON(intel_context_is_parent(cn));
 
 		list_del_init(&cn->guc_id.link);
-		ce->guc_id = cn->guc_id;
+		ce->guc_id.id = cn->guc_id.id;
 
-		spin_lock(&ce->guc_state.lock);
+		spin_lock(&cn->guc_state.lock);
 		clr_context_registered(cn);
-		spin_unlock(&ce->guc_state.lock);
+		spin_unlock(&cn->guc_state.lock);
 
 		set_context_guc_id_invalid(cn);
 
@@ -3080,8 +3080,8 @@ guc_create_parallel(struct intel_engine_cs **engines,
 
 		ce = intel_engine_create_virtual(siblings, num_siblings,
 						 FORCE_VIRTUAL);
-		if (!ce) {
-			err = ERR_PTR(-ENOMEM);
+		if (IS_ERR(ce)) {
+			err = ERR_CAST(ce);
 			goto unwind;
 		}
 
