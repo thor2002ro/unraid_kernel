@@ -76,7 +76,7 @@ static inline struct irq_routing_table *pirq_check_routing_table(u8 *addr)
 	int i;
 	u8 sum;
 
-	rt = (struct irq_routing_table *) addr;
+	rt = (struct irq_routing_table *)addr;
 	if (rt->signature != PIRQ_SIGNATURE ||
 	    rt->version != PIRQ_VERSION ||
 	    rt->size % 16 ||
@@ -160,19 +160,19 @@ static inline struct irq_routing_table *pirq_convert_irt_table(u8 *addr)
 /*
  *  Search 0xf0000 -- 0xfffff for the PCI IRQ Routing Table.
  */
-
 static struct irq_routing_table * __init pirq_find_routing_table(void)
 {
 	u8 *addr;
 	struct irq_routing_table *rt;
 
 	if (pirq_table_addr) {
-		rt = pirq_check_routing_table((u8 *) __va(pirq_table_addr));
+		rt = pirq_check_routing_table((u8 *)__va(pirq_table_addr));
 		if (rt)
 			return rt;
 		printk(KERN_WARNING "PCI: PIRQ table NOT found at pirqaddr\n");
 	}
-	for (addr = (u8 *) __va(0xf0000); addr < (u8 *) __va(0x100000); addr += 16) {
+
+	for (addr = (u8 *)__va(0xf0000); addr < (u8 *)__va(0x100000); addr += 16) {
 		rt = pirq_check_routing_table(addr);
 		if (rt)
 			return rt;
@@ -191,7 +191,6 @@ static struct irq_routing_table * __init pirq_find_routing_table(void)
  *  bridges.  It's a gross hack, but since there are no other known
  *  ways how to get a list of buses, we have to go this way.
  */
-
 static void __init pirq_peer_trick(void)
 {
 	struct irq_routing_table *rt = pirq_table;
@@ -226,7 +225,6 @@ static void __init pirq_peer_trick(void)
  *  Code for querying and setting of IRQ routes on various interrupt routers.
  *  PIC Edge/Level Control Registers (ELCR) 0x4d0 & 0x4d1.
  */
-
 void elcr_set_level_irq(unsigned int irq)
 {
 	unsigned char mask = 1 << (irq & 7);
