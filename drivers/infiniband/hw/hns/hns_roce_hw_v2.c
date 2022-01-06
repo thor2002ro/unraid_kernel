@@ -678,6 +678,7 @@ static void hns_roce_write512(struct hns_roce_dev *hr_dev, u64 *val,
 static void write_dwqe(struct hns_roce_dev *hr_dev, struct hns_roce_qp *qp,
 		       void *wqe)
 {
+#define HNS_ROCE_SL_SHIFT 2
 	struct hns_roce_v2_rc_send_wqe *rc_sq_wqe = wqe;
 
 	/* All kinds of DirectWQE have the same header field layout */
@@ -685,7 +686,8 @@ static void write_dwqe(struct hns_roce_dev *hr_dev, struct hns_roce_qp *qp,
 	roce_set_field(rc_sq_wqe->byte_4, V2_RC_SEND_WQE_BYTE_4_DB_SL_L_M,
 		       V2_RC_SEND_WQE_BYTE_4_DB_SL_L_S, qp->sl);
 	roce_set_field(rc_sq_wqe->byte_4, V2_RC_SEND_WQE_BYTE_4_DB_SL_H_M,
-		       V2_RC_SEND_WQE_BYTE_4_DB_SL_H_S, qp->sl >> 2);
+		       V2_RC_SEND_WQE_BYTE_4_DB_SL_H_S,
+		       qp->sl >> HNS_ROCE_SL_SHIFT);
 	roce_set_field(rc_sq_wqe->byte_4, V2_RC_SEND_WQE_BYTE_4_WQE_INDEX_M,
 		       V2_RC_SEND_WQE_BYTE_4_WQE_INDEX_S, qp->sq.head);
 
@@ -1305,14 +1307,14 @@ static int __hns_roce_cmq_send(struct hns_roce_dev *hr_dev,
 				continue;
 
 			dev_err_ratelimited(hr_dev->dev,
-					    "Cmdq IO error, opcode = %x, return = %x\n",
+					    "Cmdq IO error, opcode = 0x%x, return = 0x%x.\n",
 					    desc->opcode, desc_ret);
 			ret = -EIO;
 		}
 	} else {
 		/* FW/HW reset or incorrect number of desc */
 		tail = roce_read(hr_dev, ROCEE_TX_CMQ_CI_REG);
-		dev_warn(hr_dev->dev, "CMDQ move tail from %d to %d\n",
+		dev_warn(hr_dev->dev, "CMDQ move tail from %u to %u.\n",
 			 csq->head, tail);
 		csq->head = tail;
 
@@ -2003,7 +2005,8 @@ static void set_default_caps(struct hns_roce_dev *hr_dev)
 	caps->gid_table_len[0] = HNS_ROCE_V2_GID_INDEX_NUM;
 
 	if (hr_dev->pci_dev->revision >= PCI_REVISION_ID_HIP09) {
-		caps->flags |= HNS_ROCE_CAP_FLAG_STASH;
+		caps->flags |= HNS_ROCE_CAP_FLAG_STASH |
+			       HNS_ROCE_CAP_FLAG_DIRECT_WQE;
 		caps->max_sq_inline = HNS_ROCE_V3_MAX_SQ_INLINE;
 	} else {
 		caps->max_sq_inline = HNS_ROCE_V2_MAX_SQ_INLINE;
@@ -4739,7 +4742,7 @@ static int hns_roce_v2_set_path(struct ib_qp *ibqp,
 	hr_qp->sl = rdma_ah_get_sl(&attr->ah_attr);
 	if (unlikely(hr_qp->sl > MAX_SERVICE_LEVEL)) {
 		ibdev_err(ibdev,
-			  "failed to fill QPC, sl (%d) shouldn't be larger than %d.\n",
+			  "failed to fill QPC, sl (%u) shouldn't be larger than %d.\n",
 			  hr_qp->sl, MAX_SERVICE_LEVEL);
 		return -EINVAL;
 	}
@@ -4768,7 +4771,8 @@ static bool check_qp_state(enum ib_qp_state cur_state,
 				 [IB_QPS_ERR] = true },
 		[IB_QPS_SQD] = {},
 		[IB_QPS_SQE] = {},
-		[IB_QPS_ERR] = { [IB_QPS_RESET] = true, [IB_QPS_ERR] = true }
+		[IB_QPS_ERR] = { [IB_QPS_RESET] = true,
+				 [IB_QPS_ERR] = true }
 	};
 
 	return sm[cur_state][new_state];
@@ -5868,7 +5872,7 @@ static void hns_roce_v2_int_mask_enable(struct hns_roce_dev *hr_dev,
 	roce_write(hr_dev, ROCEE_VF_ABN_INT_CFG_REG, enable_flag);
 }
 
-static void hns_roce_v2_destroy_eqc(struct hns_roce_dev *hr_dev, int eqn)
+static void hns_roce_v2_destroy_eqc(struct hns_roce_dev *hr_dev, u32 eqn)
 {
 	struct device *dev = hr_dev->dev;
 	int ret;
@@ -5882,7 +5886,7 @@ static void hns_roce_v2_destroy_eqc(struct hns_roce_dev *hr_dev, int eqn)
 					0, HNS_ROCE_CMD_DESTROY_AEQC,
 					HNS_ROCE_CMD_TIMEOUT_MSECS);
 	if (ret)
-		dev_err(dev, "[mailbox cmd] destroy eqc(%d) failed.\n", eqn);
+		dev_err(dev, "[mailbox cmd] destroy eqc(%u) failed.\n", eqn);
 }
 
 static void free_eq_buf(struct hns_roce_dev *hr_dev, struct hns_roce_eq *eq)
