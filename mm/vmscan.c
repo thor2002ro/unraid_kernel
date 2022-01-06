@@ -951,7 +951,7 @@ out:
 	return freed;
 }
 
-void drop_slab_node(int nid)
+static void drop_slab_node(int nid)
 {
 	unsigned long freed;
 	int shift = 0;
@@ -1729,7 +1729,7 @@ retry:
 				mapping = page_mapping(page);
 			}
 		} else if (unlikely(PageTransHuge(page))) {
-			/* Split file THP */
+			/* Split file/lazyfree THP */
 			if (split_huge_page_to_list(page, page_list))
 				goto keep_locked;
 		}
