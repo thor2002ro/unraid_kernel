@@ -8,7 +8,6 @@
 #define _HISI_SAS_H_
 
 #include <linux/acpi.h>
-#include <linux/async.h>
 #include <linux/blk-mq.h>
 #include <linux/blk-mq-pci.h>
 #include <linux/clk.h>
@@ -132,6 +131,11 @@ struct hisi_sas_rst {
 	struct completion *completion;
 	struct work_struct work;
 	bool done;
+};
+
+struct hisi_sas_internal_abort {
+	unsigned int flag;
+	unsigned int tag;
 };
 
 #define HISI_SAS_RST_WORK_INIT(r, c) \
