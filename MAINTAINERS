@@ -993,6 +993,13 @@ S:	Supported
 T:	git https://gitlab.freedesktop.org/agd5f/linux.git
 F:	drivers/gpu/drm/amd/pm/
 
+AMD PSTATE DRIVER
+M:	Huang Rui <ray.huang@amd.com>
+L:	linux-pm@vger.kernel.org
+S:	Supported
+F:	Documentation/admin-guide/pm/amd-pstate.rst
+F:	drivers/cpufreq/amd-pstate*
+
 AMD PTDMA DRIVER
 M:	Sanjay R Mehta <sanju.mehta@amd.com>
 L:	dmaengine@vger.kernel.org
@@ -17746,12 +17753,17 @@ F:	drivers/firmware/arm_sdei.c
 F:	include/linux/arm_sdei.h
 F:	include/uapi/linux/arm_sdei.h
 
-SOFTWARE NODES
+SOFTWARE NODES AND DEVICE PROPERTIES
 R:	Andy Shevchenko <andriy.shevchenko@linux.intel.com>
+R:	Daniel Scally <djrscally@gmail.com>
 R:	Heikki Krogerus <heikki.krogerus@linux.intel.com>
+R:	Sakari Ailus <sakari.ailus@linux.intel.com>
 L:	linux-acpi@vger.kernel.org
 S:	Maintained
+F:	drivers/base/property.c
 F:	drivers/base/swnode.c
+F:	include/linux/fwnode.h
+F:	include/linux/property.h
 
 SOFTWARE RAID (Multiple Disks) SUPPORT
 M:	Song Liu <song@kernel.org>
