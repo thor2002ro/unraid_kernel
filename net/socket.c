@@ -52,6 +52,7 @@
  *	Based upon Swansea University Computer Society NET3.039
  */
 
+#include <linux/bpf-cgroup.h>
 #include <linux/ethtool.h>
 #include <linux/mm.h>
 #include <linux/socket.h>
@@ -1946,7 +1947,7 @@ int __sys_getsockname(int fd, struct sockaddr __user *usockaddr,
 	err = sock->ops->getname(sock, (struct sockaddr *)&address, 0);
 	if (err < 0)
 		goto out_put;
-        /* "err" is actually length in this case */
+	/* "err" is actually length in this case */
 	err = move_addr_to_user(&address, err, usockaddr, usockaddr_len);
 
 out_put:
@@ -3233,21 +3234,6 @@ static int compat_ifr_data_ioctl(struct net *net, unsigned int cmd,
 	return dev_ioctl(net, cmd, &ifreq, data, NULL);
 }
 
-/* Since old style bridge ioctl's endup using SIOCDEVPRIVATE
- * for some operations; this forces use of the newer bridge-utils that
- * use compatible ioctls
- */
-static int old_bridge_ioctl(compat_ulong_t __user *argp)
-{
-	compat_ulong_t tmp;
-
-	if (get_user(tmp, argp))
-		return -EFAULT;
-	if (tmp == BRCTL_GET_VERSION)
-		return BRCTL_VERSION + 1;
-	return -EINVAL;
-}
-
 static int compat_sock_ioctl_trans(struct file *file, struct socket *sock,
 			 unsigned int cmd, unsigned long arg)
 {
@@ -3259,9 +3245,6 @@ static int compat_sock_ioctl_trans(struct file *file, struct socket *sock,
 		return sock_ioctl(file, cmd, (unsigned long)argp);
 
 	switch (cmd) {
-	case SIOCSIFBR:
-	case SIOCGIFBR:
-		return old_bridge_ioctl(argp);
 	case SIOCWANDEV:
 		return compat_siocwandev(net, argp);
 	case SIOCGSTAMP_OLD:
@@ -3290,6 +3273,8 @@ static int compat_sock_ioctl_trans(struct file *file, struct socket *sock,
 	case SIOCGSTAMP_NEW:
 	case SIOCGSTAMPNS_NEW:
 	case SIOCGIFCONF:
+	case SIOCSIFBR:
+	case SIOCGIFBR:
 		return sock_ioctl(file, cmd, arg);
 
 	case SIOCGIFFLAGS:
