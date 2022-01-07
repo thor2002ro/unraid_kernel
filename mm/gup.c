@@ -258,7 +258,7 @@ static inline struct page *compound_range_next(struct page *start,
 	struct page *next, *page;
 	unsigned int nr = 1;
 
-	next = start + i;
+	next = nth_page(start, i);
 	page = compound_head(next);
 	if (PageHead(page))
 		nr = min_t(unsigned int,
@@ -2478,8 +2478,8 @@ static int record_subpages(struct page *page, unsigned long addr,
 {
 	int nr;
 
-	for (nr = 0; addr != end; addr += PAGE_SIZE)
-		pages[nr++] = page++;
+	for (nr = 0; addr != end; nr++, addr += PAGE_SIZE)
+		pages[nr] = nth_page(page, nr);
 
 	return nr;
 }
@@ -2514,7 +2514,7 @@ static int gup_hugepte(pte_t *ptep, unsigned long sz, unsigned long addr,
 	VM_BUG_ON(!pfn_valid(pte_pfn(pte)));
 
 	head = pte_page(pte);
-	page = head + ((addr & (sz-1)) >> PAGE_SHIFT);
+	page = nth_page(head, (addr & (sz - 1)) >> PAGE_SHIFT);
 	refs = record_subpages(page, addr, end, pages + *nr);
 
 	head = try_grab_compound_head(head, refs, flags);
@@ -2574,7 +2574,7 @@ static int gup_huge_pmd(pmd_t orig, pmd_t *pmdp, unsigned long addr,
 					     pages, nr);
 	}
 
-	page = pmd_page(orig) + ((addr & ~PMD_MASK) >> PAGE_SHIFT);
+	page = nth_page(pmd_page(orig), (addr & ~PMD_MASK) >> PAGE_SHIFT);
 	refs = record_subpages(page, addr, end, pages + *nr);
 
 	head = try_grab_compound_head(pmd_page(orig), refs, flags);
@@ -2608,7 +2608,7 @@ static int gup_huge_pud(pud_t orig, pud_t *pudp, unsigned long addr,
 					     pages, nr);
 	}
 
-	page = pud_page(orig) + ((addr & ~PUD_MASK) >> PAGE_SHIFT);
+	page = nth_page(pud_page(orig), (addr & ~PUD_MASK) >> PAGE_SHIFT);
 	refs = record_subpages(page, addr, end, pages + *nr);
 
 	head = try_grab_compound_head(pud_page(orig), refs, flags);
@@ -2637,7 +2637,7 @@ static int gup_huge_pgd(pgd_t orig, pgd_t *pgdp, unsigned long addr,
 
 	BUILD_BUG_ON(pgd_devmap(orig));
 
-	page = pgd_page(orig) + ((addr & ~PGDIR_MASK) >> PAGE_SHIFT);
+	page = nth_page(pgd_page(orig), (addr & ~PGDIR_MASK) >> PAGE_SHIFT);
 	refs = record_subpages(page, addr, end, pages + *nr);
 
 	head = try_grab_compound_head(pgd_page(orig), refs, flags);
