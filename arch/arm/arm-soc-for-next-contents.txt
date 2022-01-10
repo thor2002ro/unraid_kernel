@@ -1,143 +1,10 @@
 arm/soc
-	renesas/soc [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-soc-for-v5.17-tag1
-	ixp4xx/soc [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/linusw/linux-nomadik tags/ixp4xx-arm-soc-v5.17
-	imx/soc [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-soc-5.17
-	samsung/soc [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-soc-5.17
-	patch
-		arm64: exynos: Enable Exynos Multi-Core Timer driver [sign: N ]
-	broadcom/maintainer [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.17/maintainers
 
 arm/dt
-	patch
-		ARM: dts: milbeaut: add a clock node for M10V [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		ARM: dts: milbeaut: set clock phandle to timer node [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		ARM: dts: milbeaut: set clock phandle to uart node [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		ARM: dts: spear3xx: Use plgpio regmap in SPEAr310 and SPEAr320 [sign: N ]
-		ARM: dts: spear3xx: Add spear320s dtsi [sign: N ]
-	renesas/dt [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-dt-for-v5.17-tag1
-	renesas/dt-bindings [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-dt-bindings-for-v5.17-tag1
-	ux500/dt [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/linusw/linux-nomadik tags/ux500-dts-v5.17-1
-	patch
-		ARM: dts: gemini: NAS4220-B: fis-index-block with 128 KiB sectors [sign: Y Arnd Bergmann <arnd@arndb.de>]
-	apple/dt [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		https://github.com/AsahiLinux/linux tags/asahi-soc-dt-5.17
-	rockchip/dt [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.17-rockchip-dts64-1
-	amlogic/dt [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/amlogic/linux tags/amlogic-arm64-dt-for-v5.17
-	at91/dt [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-dt-5.17
-	ixp4xx/dt [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/linusw/linux-nomadik tags/ixp4xx-dtx-v5.17
-	stm32/dt [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/atorgue/stm32 tags/stm32-dt-for-v5.17-1
-	apple/dt-2 [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		https://github.com/AsahiLinux/linux tags/asahi-soc-dt-5.17-v2
-	socfpga/dts [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/dinguyen/linux tags/socfpga_dts_update_for_v5.17
-	omap/dt [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.17/dt-signed
-	sunxi/dt [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-dt-for-5.17-1
-	renesas/dt-2 [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-dt-for-v5.17-tag2
-	renesas/dt-bindings-2 [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-dt-bindings-for-v5.17-tag2
-	tegra/dt-bindings [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.17-dt-bindings
-	tegra/dt64 [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.17-arm64-dt
-	k3/dt [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/ti/linux tags/ti-k3-dt-for-v5.17
-	mvebu/dt64 [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/gclement/mvebu tags/mvebu-dt64-5.17-1
-	mvebu/dt [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/gclement/mvebu tags/mvebu-dt-5.17-1
-	patch
-		ARM: dts: Remove "spidev" nodes [sign: Y Arnd Bergmann <arnd@arndb.de>]
-	imx/dt-bindings [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-bindings-5.17
-	imx/dt [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-dt-5.17
-	imx/dt64 [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-dt64-5.17
-	mediatek/dt64 [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.16-next-dts64
-	mediatek/dt [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.16-next-dts32
-	samsung/dt [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-dt-5.17
-	samsung/dt64 [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-dt64-5.17
-	tegra/dt [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.17-arm-dt
-	qcom/dt [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-dts-for-5.17
-	qcom/dt64 [sign: N ]
-		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-for-5.17-1
-	broadcom/dt [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.17/devicetree
-	broadcom/dt64 [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.17/devicetree-arm64
-	broadcom/driver [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.17/drivers
-	aspeed/dt [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/joel/bmc tags/aspeed-5.17-devicetree
-	patch
-		Revert "ARM: dts: BCM5301X: define RTL8365MB switch on Asus RT-AC88U" [sign: N ]
 
 arm/drivers
-	renesas/drivers [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-drivers-for-v5.17-tag1
-	apple/pmgr [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		https://github.com/AsahiLinux/linux tags/asahi-soc-pmgr-5.17
-	zynq/driver [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		https://github.com/Xilinx/linux-xlnx tags/zynqmp-soc-for-v5.17
-	optee-asyncnotif [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		https://git.linaro.org/people/jens.wiklander/linux-tee tags/optee-async-notif-for-v5.17
-	memory/renesas [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux-mem-ctrl tags/memory-controller-drv-renesas-5.17
-	apple/drivers-2 [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		https://github.com/AsahiLinux/linux tags/asahi-soc-pmgr-5.17-v2
-	renesas/drivers-2 [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-drivers-for-v5.17-tag2
-	keystone/drivers [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/ti/linux tags/ti-driver-soc-fixes-for-v5.17
-	tegra/drivers [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.17-drivers
-	tegra/soc-driver-2
-tegra/soc-drivers [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.17-soc
-	at91/soc [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-soc-5.17
-	imx/drivers [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-drivers-5.17
-	samsung/soc-driver [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-drivers-5.17
-	qcom/drivers [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-drivers-for-5.17
 
 arm/defconfig
-	patch
-		ARM: configs: gemini: Activate crypto driver [sign: Y Arnd Bergmann <arnd@arndb.de>]
-	renesas/defconfig [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-defconfig-for-v5.17-tag1
-	tegra/defconfig [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.17-arm-defconfig
-	at91/defconfig [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-defconfig-5.17
-	imx/defconfig [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-defconfig-5.17
-	patch
-		arm64: defconfig: Enable Samsung I2C driver [sign: Y Arnd Bergmann <arnd@arndb.de>]
 	broadcom/defconfig [sign: Y Arnd Bergmann <arnd@arndb.de>]
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.17/defconfig
 	aspeed/defconfig
@@ -149,16 +16,8 @@ broadcom/defconfig64 [sign: Y Arnd Bergmann <arnd@arndb.de>]
 		ARM: multi_v7_defconfig: Enable drivers for DragonBoard 410c [sign: N ]
 
 arm/newsoc
-	starfive/jh7100 [sign: Y Arnd Bergmann <arnd@arndb.de>]
-		https://github.com/esmil/linux tags/jh7100-for-5.17
-	patch
-		reset: starfive-jh7100: Fix 32bit compilation [sign: Y Arnd Bergmann <arnd@arndb.de>]
 
 arm/late
-	<no branch> (92c959bae2e54ba1e2540ba5f813f7752bd76be1) [sign: G Olof Johansson <olof@lixom.net>]
-		git://git.pengutronix.de/pza/linux tags/reset-fixes-for-v5.16-2
-	<no branch> (36de991e93908f7ad5c2a0eac9c4ecf8b723fa4a) [sign: G Olof Johansson <olof@lixom.net>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/dinguyen/linux tags/socfpga_fix_for_v5.16_part_3
 	patch
 		ARM: configs: aspeed: Add support for USB flash drives [sign: G Olof Johansson <olof@lixom.net>]
 	<no branch> (94d0cd1da14af0042c8ee7c2cf401dfc321c575c) [sign: G Olof Johansson <olof@lixom.net>]
@@ -181,12 +40,10 @@ arm/late
 		git://git.kernel.org/pub/scm/linux/kernel/git/dinguyen/linux tags/socfpga_dts_update_for_v5.17_part2
 	<no branch> (1ce93cb102e7fcf5d1849044d23ce92b5a71040a) [sign: G Olof Johansson <olof@lixom.net>]
 		git://git.kernel.org/pub/scm/linux/kernel/git/leo/linux tags/soc-fsl-next-v5.17
+	<no branch> (31aa7056bbec0259e2ec91db7d3571f66b14f93f) [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.17/fixes-for-merge-window-signed
+	<no branch> (3375aa77135f6aeb1107ed839a2050a4118444bc) [sign: G Olof Johansson <olof@lixom.net>]
+		https://git.kernel.org/pub/scm/linux/kernel/git/amlogic/linux tags/amlogic-fixes-v5.17-rc-v2
 
 arm/fixes
-	<no branch> (92c959bae2e54ba1e2540ba5f813f7752bd76be1) [sign: G Olof Johansson <olof@lixom.net>]
-		git://git.pengutronix.de/pza/linux tags/reset-fixes-for-v5.16-2
-	<no branch> (36de991e93908f7ad5c2a0eac9c4ecf8b723fa4a) [sign: G Olof Johansson <olof@lixom.net>]
-		git://git.kernel.org/pub/scm/linux/kernel/git/dinguyen/linux tags/socfpga_fix_for_v5.16_part_3
-	patch
-		ARM: dts: gpio-ranges property is now required [sign: G Olof Johansson <olof@lixom.net>]
 
