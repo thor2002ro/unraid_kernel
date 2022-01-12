@@ -372,7 +372,7 @@ int
 xfs_ioc_attr_list(
 	struct xfs_inode		*dp,
 	void __user			*ubuf,
-	int				bufsize,
+	size_t				bufsize,
 	int				flags,
 	struct xfs_attrlist_cursor __user *ucursor)
 {
@@ -687,7 +687,8 @@ xfs_ioc_space(
 
 	if (bf->l_start > XFS_ISIZE(ip)) {
 		error = xfs_alloc_file_space(ip, XFS_ISIZE(ip),
-				bf->l_start - XFS_ISIZE(ip), 0);
+				bf->l_start - XFS_ISIZE(ip),
+				XFS_BMAPI_PREALLOC);
 		if (error)
 			goto out_unlock;
 	}
