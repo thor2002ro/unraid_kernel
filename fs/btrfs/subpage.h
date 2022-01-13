@@ -4,6 +4,7 @@
 #define BTRFS_SUBPAGE_H
 
 #include <linux/spinlock.h>
+#include "btrfs_inode.h"
 
 /*
  * Extra info for subpapge bitmap.
@@ -73,6 +74,30 @@ enum btrfs_subpage_type {
 	BTRFS_SUBPAGE_METADATA,
 	BTRFS_SUBPAGE_DATA,
 };
+
+static inline bool btrfs_is_subpage(const struct btrfs_fs_info *fs_info,
+				    struct page *page)
+{
+	if (fs_info->sectorsize >= PAGE_SIZE)
+		return false;
+
+	/*
+	 * Only data pages (either through DIO or compression) can have no
+	 * mapping. And if page->mapping->host is data inode, it's subpage.
+	 * As we have ruled our sectorsize >= PAGE_SIZE case already.
+	 */
+	if (!page->mapping || !page->mapping->host ||
+	    is_data_inode(page->mapping->host))
+		return true;
+
+	/*
+	 * Now the only remaining case is metadata, which we only go subpage
+	 * routine if nodesize < PAGE_SIZE.
+	 */
+	if (fs_info->nodesize < PAGE_SIZE)
+		return true;
+	return false;
+}
 
 void btrfs_init_subpage_info(struct btrfs_subpage_info *subpage_info, u32 sectorsize);
 int btrfs_attach_subpage(const struct btrfs_fs_info *fs_info,
