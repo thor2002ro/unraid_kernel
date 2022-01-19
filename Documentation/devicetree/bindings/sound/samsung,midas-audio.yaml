@@ -21,8 +21,7 @@ properties:
     type: object
     properties:
       sound-dai:
-        $ref: /schemas/types.yaml#/definitions/phandle-array
-        maxItems: 1
+        $ref: /schemas/types.yaml#/definitions/phandle
         description: phandle to the I2S controller
     required:
       - sound-dai
