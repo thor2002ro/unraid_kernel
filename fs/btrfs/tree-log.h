@@ -12,11 +12,20 @@
 /* return value for btrfs_log_dentry_safe that means we don't need to log it at all */
 #define BTRFS_NO_LOG_SYNC 256
 
+/*
+ * All the bits we can set for an extent buffer's range in a log root's
+ * ->dirty_log_pages io tree.
+ */
+#define BTRFS_LOG_PAGES_BITS (EXTENT_DIRTY | EXTENT_NEW | EXTENT_NEED_WAIT | \
+			      EXTENT_UPTODATE)
+
 struct btrfs_log_ctx {
 	int log_ret;
 	int log_transid;
 	bool log_new_dentries;
 	bool logging_new_name;
+	/* Indicate if the inode being logged was logged before. */
+	bool logged_before;
 	/* Tracks the last logged dir item/index key offset. */
 	u64 last_dir_item_offset;
 	struct inode *inode;
@@ -32,6 +41,7 @@ static inline void btrfs_init_log_ctx(struct btrfs_log_ctx *ctx,
 	ctx->log_transid = 0;
 	ctx->log_new_dentries = false;
 	ctx->logging_new_name = false;
+	ctx->logged_before = false;
 	ctx->inode = inode;
 	INIT_LIST_HEAD(&ctx->list);
 	INIT_LIST_HEAD(&ctx->ordered_extents);
@@ -86,7 +96,7 @@ void btrfs_record_unlink_dir(struct btrfs_trans_handle *trans,
 void btrfs_record_snapshot_destroy(struct btrfs_trans_handle *trans,
 				   struct btrfs_inode *dir);
 void btrfs_log_new_name(struct btrfs_trans_handle *trans,
-			struct btrfs_inode *inode, struct btrfs_inode *old_dir,
-			struct dentry *parent);
+			struct dentry *old_dentry, struct btrfs_inode *old_dir,
+			u64 old_dir_index, struct dentry *parent);
 
 #endif
