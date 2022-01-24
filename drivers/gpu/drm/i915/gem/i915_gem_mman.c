@@ -21,6 +21,7 @@
 #include "i915_trace.h"
 #include "i915_user_extensions.h"
 #include "i915_gem_ttm.h"
+#include "i915_gem_evict.h"
 #include "i915_vma.h"
 
 static inline bool
