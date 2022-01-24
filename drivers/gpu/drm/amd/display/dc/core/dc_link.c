@@ -862,7 +862,8 @@ static bool dc_link_detect_helper(struct dc_link *link,
 		(!link->dc->config.allow_edp_hotplug_detection)) &&
 		link->local_sink) {
 		// need to re-write OUI and brightness in resume case
-		if (link->connector_signal == SIGNAL_TYPE_EDP) {
+		if (link->connector_signal == SIGNAL_TYPE_EDP &&
+			(link->dpcd_sink_ext_caps.bits.oled == 1)) {
 			dpcd_set_source_specific_data(link);
 			msleep(post_oui_delay);
 			dc_link_set_default_brightness_aux(link);
@@ -1018,18 +1019,6 @@ static bool dc_link_detect_helper(struct dc_link *link,
 			if (pre_connection_type == dc_connection_mst_branch &&
 					link->type != dc_connection_mst_branch)
 				dm_helpers_dp_mst_stop_top_mgr(link->ctx, link);
-
-
-			// For seamless boot, to skip verify link cap, we read UEFI settings and set them as verified.
-			if (reason == DETECT_REASON_BOOT &&
-					!dc_ctx->dc->config.power_down_display_on_boot &&
-					link->link_status.link_active)
-				perform_dp_seamless_boot = true;
-
-			if (perform_dp_seamless_boot) {
-				read_current_link_settings_on_detect(link);
-				link->verified_link_cap = link->reported_link_cap;
-			}
 
 			break;
 		}

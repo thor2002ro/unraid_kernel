@@ -46,6 +46,7 @@
 #include "mp/mp_11_0_sh_mask.h"
 
 #include "asic_reg/mp/mp_11_0_sh_mask.h"
+#include "amdgpu_ras.h"
 #include "smu_cmn.h"
 
 /*
@@ -82,6 +83,12 @@
 
 /* STB FIFO depth is in 64bit units */
 #define SIENNA_CICHLID_STB_DEPTH_UNIT_BYTES 8
+
+/*
+ * SMU support ECCTABLE since version 58.70.0,
+ * use this to check whether ECCTABLE feature is supported.
+ */
+#define SUPPORT_ECCTABLE_SMU_VERSION 0x003a4600
 
 static int get_table_size(struct smu_context *smu)
 {
@@ -134,7 +141,7 @@ static struct cmn2asic_msg_mapping sienna_cichlid_message_map[SMU_MSG_MAX_COUNT]
 	MSG_MAP(PrepareMp1ForUnload,		PPSMC_MSG_PrepareMp1ForUnload,         1),
 	MSG_MAP(AllowGfxOff,			PPSMC_MSG_AllowGfxOff,                 0),
 	MSG_MAP(DisallowGfxOff,			PPSMC_MSG_DisallowGfxOff,              0),
-	MSG_MAP(GetPptLimit,			PPSMC_MSG_GetPptLimit,                 0),
+	MSG_MAP(GetPptLimit,			PPSMC_MSG_GetPptLimit,                 1),
 	MSG_MAP(GetDcModeMaxDpmFreq,		PPSMC_MSG_GetDcModeMaxDpmFreq,         1),
 	MSG_MAP(ExitBaco,			PPSMC_MSG_ExitBaco,                    0),
 	MSG_MAP(PowerUpVcn,			PPSMC_MSG_PowerUpVcn,                  0),
@@ -225,6 +232,7 @@ static struct cmn2asic_mapping sienna_cichlid_table_map[SMU_TABLE_COUNT] = {
 	TAB_MAP(OVERDRIVE),
 	TAB_MAP(I2C_COMMANDS),
 	TAB_MAP(PACE),
+	TAB_MAP(ECCINFO),
 };
 
 static struct cmn2asic_mapping sienna_cichlid_pwr_src_map[SMU_POWER_SOURCE_COUNT] = {
@@ -466,6 +474,8 @@ static int sienna_cichlid_tables_init(struct smu_context *smu)
 	SMU_TABLE_INIT(tables, SMU_TABLE_ACTIVITY_MONITOR_COEFF,
 		       sizeof(DpmActivityMonitorCoeffIntExternal_t), PAGE_SIZE,
 	               AMDGPU_GEM_DOMAIN_VRAM);
+	SMU_TABLE_INIT(tables, SMU_TABLE_ECCINFO, sizeof(EccInfoTable_t),
+			PAGE_SIZE, AMDGPU_GEM_DOMAIN_VRAM);
 
 	smu_table->metrics_table = kzalloc(sizeof(SmuMetricsExternal_t), GFP_KERNEL);
 	if (!smu_table->metrics_table)
@@ -480,6 +490,10 @@ static int sienna_cichlid_tables_init(struct smu_context *smu)
 	smu_table->watermarks_table = kzalloc(sizeof(Watermarks_t), GFP_KERNEL);
 	if (!smu_table->watermarks_table)
 		goto err2_out;
+
+	smu_table->ecc_table = kzalloc(tables[SMU_TABLE_ECCINFO].size, GFP_KERNEL);
+	if (!smu_table->ecc_table)
+		return -ENOMEM;
 
 	return 0;
 
@@ -525,15 +539,11 @@ static int sienna_cichlid_get_smu_metrics_data(struct smu_context *smu,
 	uint16_t average_gfx_activity;
 	int ret = 0;
 
-	mutex_lock(&smu->metrics_lock);
-
-	ret = smu_cmn_get_metrics_table_locked(smu,
-					       NULL,
-					       false);
-	if (ret) {
-		mutex_unlock(&smu->metrics_lock);
+	ret = smu_cmn_get_metrics_table(smu,
+					NULL,
+					false);
+	if (ret)
 		return ret;
-	}
 
 	switch (member) {
 	case METRICS_CURR_GFXCLK:
@@ -632,8 +642,6 @@ static int sienna_cichlid_get_smu_metrics_data(struct smu_context *smu,
 		*value = UINT_MAX;
 		break;
 	}
-
-	mutex_unlock(&smu->metrics_lock);
 
 	return ret;
 
@@ -1036,10 +1044,6 @@ static int sienna_cichlid_print_clk_levels(struct smu_context *smu,
 		if (ret)
 			goto print_clk_out;
 
-		/* no need to disable gfxoff when retrieving the current gfxclk */
-		if ((clk_type == SMU_GFXCLK) || (clk_type == SMU_SCLK))
-			amdgpu_gfx_off_ctrl(adev, false);
-
 		ret = smu_v11_0_get_dpm_level_count(smu, clk_type, &count);
 		if (ret)
 			goto print_clk_out;
@@ -1168,24 +1172,17 @@ static int sienna_cichlid_print_clk_levels(struct smu_context *smu,
 	}
 
 print_clk_out:
-	if ((clk_type == SMU_GFXCLK) || (clk_type == SMU_SCLK))
-		amdgpu_gfx_off_ctrl(adev, true);
-
 	return size;
 }
 
 static int sienna_cichlid_force_clk_levels(struct smu_context *smu,
 				   enum smu_clk_type clk_type, uint32_t mask)
 {
-	struct amdgpu_device *adev = smu->adev;
 	int ret = 0;
 	uint32_t soft_min_level = 0, soft_max_level = 0, min_freq = 0, max_freq = 0;
 
 	soft_min_level = mask ? (ffs(mask) - 1) : 0;
 	soft_max_level = mask ? (fls(mask) - 1) : 0;
-
-	if ((clk_type == SMU_GFXCLK) || (clk_type == SMU_SCLK))
-		amdgpu_gfx_off_ctrl(adev, false);
 
 	switch (clk_type) {
 	case SMU_GFXCLK:
@@ -1220,9 +1217,6 @@ static int sienna_cichlid_force_clk_levels(struct smu_context *smu,
 	}
 
 forec_level_out:
-	if ((clk_type == SMU_GFXCLK) || (clk_type == SMU_SCLK))
-		amdgpu_gfx_off_ctrl(adev, true);
-
 	return 0;
 }
 
@@ -1625,7 +1619,6 @@ static int sienna_cichlid_read_sensor(struct smu_context *smu,
 	if(!data || !size)
 		return -EINVAL;
 
-	mutex_lock(&smu->sensor_lock);
 	switch (sensor) {
 	case AMDGPU_PP_SENSOR_MAX_FAN_RPM:
 		GET_PPTABLE_MEMBER(FanMaximumRpm, &temp);
@@ -1686,7 +1679,6 @@ static int sienna_cichlid_read_sensor(struct smu_context *smu,
 		ret = -EOPNOTSUPP;
 		break;
 	}
-	mutex_unlock(&smu->sensor_lock);
 
 	return ret;
 }
@@ -1865,16 +1857,7 @@ static int sienna_cichlid_get_dpm_ultimate_freq(struct smu_context *smu,
 				enum smu_clk_type clk_type,
 				uint32_t *min, uint32_t *max)
 {
-	struct amdgpu_device *adev = smu->adev;
-	int ret;
-
-	if (clk_type == SMU_GFXCLK)
-		amdgpu_gfx_off_ctrl(adev, false);
-	ret = smu_v11_0_get_dpm_ultimate_freq(smu, clk_type, min, max);
-	if (clk_type == SMU_GFXCLK)
-		amdgpu_gfx_off_ctrl(adev, true);
-
-	return ret;
+	return smu_v11_0_get_dpm_ultimate_freq(smu, clk_type, min, max);
 }
 
 static void sienna_cichlid_dump_od_table(struct smu_context *smu,
@@ -3459,7 +3442,8 @@ static int sienna_cichlid_i2c_xfer(struct i2c_adapter *i2c_adap,
 				   struct i2c_msg *msg, int num_msgs)
 {
 	struct amdgpu_device *adev = to_amdgpu_device(i2c_adap);
-	struct smu_table_context *smu_table = &adev->smu.smu_table;
+	struct smu_context *smu = adev->powerplay.pp_handle;
+	struct smu_table_context *smu_table = &smu->smu_table;
 	struct smu_table *table = &smu_table->driver_table;
 	SwI2cRequest_t *req, *res = (SwI2cRequest_t *)table->cpu_addr;
 	int i, j, r, c;
@@ -3505,9 +3489,9 @@ static int sienna_cichlid_i2c_xfer(struct i2c_adapter *i2c_adap,
 			}
 		}
 	}
-	mutex_lock(&adev->smu.mutex);
-	r = smu_cmn_update_table(&adev->smu, SMU_TABLE_I2C_COMMANDS, 0, req, true);
-	mutex_unlock(&adev->smu.mutex);
+	mutex_lock(&adev->pm.mutex);
+	r = smu_cmn_update_table(smu, SMU_TABLE_I2C_COMMANDS, 0, req, true);
+	mutex_unlock(&adev->pm.mutex);
 	if (r)
 		goto fail;
 
@@ -3588,14 +3572,11 @@ static ssize_t sienna_cichlid_get_gpu_metrics(struct smu_context *smu,
 	uint16_t average_gfx_activity;
 	int ret = 0;
 
-	mutex_lock(&smu->metrics_lock);
-	ret = smu_cmn_get_metrics_table_locked(smu,
-					       &metrics_external,
-					       true);
-	if (ret) {
-		mutex_unlock(&smu->metrics_lock);
+	ret = smu_cmn_get_metrics_table(smu,
+					&metrics_external,
+					true);
+	if (ret)
 		return ret;
-	}
 
 	smu_cmn_init_soft_gpu_metrics(gpu_metrics, 1, 3);
 
@@ -3685,8 +3666,6 @@ static ssize_t sienna_cichlid_get_gpu_metrics(struct smu_context *smu,
 				smu_v11_0_get_current_pcie_link_speed(smu);
 	}
 
-	mutex_unlock(&smu->metrics_lock);
-
 	gpu_metrics->system_clock_counter = ktime_get_boottime_ns();
 
 	*table = (void *)gpu_metrics;
@@ -3694,6 +3673,60 @@ static ssize_t sienna_cichlid_get_gpu_metrics(struct smu_context *smu,
 	return sizeof(struct gpu_metrics_v1_3);
 }
 
+static int sienna_cichlid_check_ecc_table_support(struct smu_context *smu)
+{
+	uint32_t if_version = 0xff, smu_version = 0xff;
+	int ret = 0;
+
+	ret = smu_cmn_get_smc_version(smu, &if_version, &smu_version);
+	if (ret)
+		return -EOPNOTSUPP;
+
+	if (smu_version < SUPPORT_ECCTABLE_SMU_VERSION)
+		ret = -EOPNOTSUPP;
+
+	return ret;
+}
+
+static ssize_t sienna_cichlid_get_ecc_info(struct smu_context *smu,
+					void *table)
+{
+	struct smu_table_context *smu_table = &smu->smu_table;
+	EccInfoTable_t *ecc_table = NULL;
+	struct ecc_info_per_ch *ecc_info_per_channel = NULL;
+	int i, ret = 0;
+	struct umc_ecc_info *eccinfo = (struct umc_ecc_info *)table;
+
+	ret = sienna_cichlid_check_ecc_table_support(smu);
+	if (ret)
+		return ret;
+
+	ret = smu_cmn_update_table(smu,
+				SMU_TABLE_ECCINFO,
+				0,
+				smu_table->ecc_table,
+				false);
+	if (ret) {
+		dev_info(smu->adev->dev, "Failed to export SMU ecc table!\n");
+		return ret;
+	}
+
+	ecc_table = (EccInfoTable_t *)smu_table->ecc_table;
+
+	for (i = 0; i < SIENNA_CICHLID_UMC_CHANNEL_NUM; i++) {
+		ecc_info_per_channel = &(eccinfo->ecc[i]);
+		ecc_info_per_channel->ce_count_lo_chip =
+			ecc_table->EccInfo[i].ce_count_lo_chip;
+		ecc_info_per_channel->ce_count_hi_chip =
+			ecc_table->EccInfo[i].ce_count_hi_chip;
+		ecc_info_per_channel->mca_umc_status =
+			ecc_table->EccInfo[i].mca_umc_status;
+		ecc_info_per_channel->mca_umc_addr =
+			ecc_table->EccInfo[i].mca_umc_addr;
+	}
+
+	return ret;
+}
 static int sienna_cichlid_enable_mgpu_fan_boost(struct smu_context *smu)
 {
 	struct smu_table_context *table_context = &smu->smu_table;
@@ -3832,9 +3865,9 @@ static void sienna_cichlid_stb_init(struct smu_context *smu)
 
 }
 
-int sienna_cichlid_stb_get_data_direct(struct smu_context *smu,
-				       void *buf,
-				       uint32_t size)
+static int sienna_cichlid_stb_get_data_direct(struct smu_context *smu,
+					      void *buf,
+					      uint32_t size)
 {
 	uint32_t *p = buf;
 	struct amdgpu_device *adev = smu->adev;
@@ -3945,6 +3978,7 @@ static const struct pptable_funcs sienna_cichlid_ppt_funcs = {
 	.gpo_control = sienna_cichlid_gpo_control,
 	.set_mp1_state = sienna_cichlid_set_mp1_state,
 	.stb_collect_info = sienna_cichlid_stb_get_data_direct,
+	.get_ecc_info = sienna_cichlid_get_ecc_info,
 };
 
 void sienna_cichlid_set_ppt_funcs(struct smu_context *smu)

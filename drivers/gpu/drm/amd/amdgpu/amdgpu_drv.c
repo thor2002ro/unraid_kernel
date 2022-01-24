@@ -99,9 +99,10 @@
  * - 3.42.0 - Add 16bpc fixed point display support
  * - 3.43.0 - Add device hot plug/unplug support
  * - 3.44.0 - DCN3 supports DCC independent block settings: !64B && 128B, 64B && 128B
+ * - 3.45.0 - Add context ioctl stable pstate interface
  */
 #define KMS_DRIVER_MAJOR	3
-#define KMS_DRIVER_MINOR	44
+#define KMS_DRIVER_MINOR	45
 #define KMS_DRIVER_PATCHLEVEL	0
 
 int amdgpu_vram_limit;
@@ -174,7 +175,6 @@ int amdgpu_mes;
 int amdgpu_noretry = -1;
 int amdgpu_force_asic_type = -1;
 int amdgpu_tmz = -1; /* auto */
-uint amdgpu_freesync_vid_mode;
 int amdgpu_reset_method = -1; /* auto */
 int amdgpu_num_kcq = -1;
 int amdgpu_smartshift_bias;
@@ -844,32 +844,6 @@ MODULE_PARM_DESC(tmz, "Enable TMZ feature (-1 = auto (default), 0 = off, 1 = on)
 module_param_named(tmz, amdgpu_tmz, int, 0444);
 
 /**
- * DOC: freesync_video (uint)
- * Enable the optimization to adjust front porch timing to achieve seamless
- * mode change experience when setting a freesync supported mode for which full
- * modeset is not needed.
- *
- * The Display Core will add a set of modes derived from the base FreeSync
- * video mode into the corresponding connector's mode list based on commonly
- * used refresh rates and VRR range of the connected display, when users enable
- * this feature. From the userspace perspective, they can see a seamless mode
- * change experience when the change between different refresh rates under the
- * same resolution. Additionally, userspace applications such as Video playback
- * can read this modeset list and change the refresh rate based on the video
- * frame rate. Finally, the userspace can also derive an appropriate mode for a
- * particular refresh rate based on the FreeSync Mode and add it to the
- * connector's mode list.
- *
- * Note: This is an experimental feature.
- *
- * The default value: 0 (off).
- */
-MODULE_PARM_DESC(
-	freesync_video,
-	"Enable freesync modesetting optimization feature (0 = off (default), 1 = on)");
-module_param_named(freesync_video, amdgpu_freesync_vid_mode, uint, 0444);
-
-/**
  * DOC: reset_method (int)
  * GPU reset method (-1 = auto (default), 0 = legacy, 1 = mode0, 2 = mode1, 3 = mode2, 4 = baco, 5 = pci)
  */
@@ -1525,6 +1499,87 @@ static const u16 amdgpu_unsupported_pciidlist[] = {
 	0x99A0,
 	0x99A2,
 	0x99A4,
+	/* radeon secondary ids */
+	0x3171,
+	0x3e70,
+	0x4164,
+	0x4165,
+	0x4166,
+	0x4168,
+	0x4170,
+	0x4171,
+	0x4172,
+	0x4173,
+	0x496e,
+	0x4a69,
+	0x4a6a,
+	0x4a6b,
+	0x4a70,
+	0x4a74,
+	0x4b69,
+	0x4b6b,
+	0x4b6c,
+	0x4c6e,
+	0x4e64,
+	0x4e65,
+	0x4e66,
+	0x4e67,
+	0x4e68,
+	0x4e69,
+	0x4e6a,
+	0x4e71,
+	0x4f73,
+	0x5569,
+	0x556b,
+	0x556d,
+	0x556f,
+	0x5571,
+	0x5854,
+	0x5874,
+	0x5940,
+	0x5941,
+	0x5b72,
+	0x5b73,
+	0x5b74,
+	0x5b75,
+	0x5d44,
+	0x5d45,
+	0x5d6d,
+	0x5d6f,
+	0x5d72,
+	0x5d77,
+	0x5e6b,
+	0x5e6d,
+	0x7120,
+	0x7124,
+	0x7129,
+	0x712e,
+	0x712f,
+	0x7162,
+	0x7163,
+	0x7166,
+	0x7167,
+	0x7172,
+	0x7173,
+	0x71a0,
+	0x71a1,
+	0x71a3,
+	0x71a7,
+	0x71bb,
+	0x71e0,
+	0x71e1,
+	0x71e2,
+	0x71e6,
+	0x71e7,
+	0x71f2,
+	0x7269,
+	0x726b,
+	0x726e,
+	0x72a0,
+	0x72a8,
+	0x72b1,
+	0x72b3,
+	0x793f,
 };
 
 static const struct pci_device_id pciidlist[] = {
