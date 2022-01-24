@@ -502,7 +502,8 @@ static void synchronize_rcu_expedited_wait(void)
 		if (synchronize_rcu_expedited_wait_once(1))
 			return;
 		rcu_for_each_leaf_node(rnp) {
-			for_each_leaf_node_cpu_mask(rnp, cpu, rnp->expmask) {
+			mask = READ_ONCE(rnp->expmask);
+			for_each_leaf_node_cpu_mask(rnp, cpu, mask) {
 				rdp = per_cpu_ptr(&rcu_data, cpu);
 				if (rdp->rcu_forced_tick_exp)
 					continue;
@@ -656,7 +657,7 @@ static void rcu_exp_handler(void *unused)
 	 */
 	if (!depth) {
 		if (!(preempt_count() & (PREEMPT_MASK | SOFTIRQ_MASK)) ||
-		    rcu_dynticks_curr_cpu_in_eqs()) {
+		    rcu_is_cpu_rrupt_from_idle()) {
 			rcu_report_exp_rdp(rdp);
 		} else {
 			WRITE_ONCE(rdp->cpu_no_qs.b.exp, true);
@@ -815,7 +816,7 @@ static int rcu_print_task_exp_stall(struct rcu_node *rnp)
  */
 void synchronize_rcu_expedited(void)
 {
-	bool boottime = (rcu_scheduler_active == RCU_SCHEDULER_INIT);
+	bool no_wq;
 	struct rcu_exp_work rew;
 	struct rcu_node *rnp;
 	unsigned long s;
@@ -840,9 +841,15 @@ void synchronize_rcu_expedited(void)
 	if (exp_funnel_lock(s))
 		return;  /* Someone else did our work for us. */
 
+	/* Don't use workqueue during boot or from an incoming CPU. */
+	preempt_disable();
+	no_wq = rcu_scheduler_active == RCU_SCHEDULER_INIT ||
+		!cpumask_test_cpu(smp_processor_id(), cpu_active_mask);
+	preempt_enable();
+
 	/* Ensure that load happens before action based on it. */
-	if (unlikely(boottime)) {
-		/* Direct call during scheduler init and early_initcalls(). */
+	if (unlikely(no_wq)) {
+		/* Direct call for scheduler init, early_initcall()s, and incoming CPUs. */
 		rcu_exp_sel_wait_wake(s);
 	} else {
 		/* Marshall arguments & schedule the expedited grace period. */
@@ -860,7 +867,7 @@ void synchronize_rcu_expedited(void)
 	/* Let the next expedited grace period start. */
 	mutex_unlock(&rcu_state.exp_mutex);
 
-	if (likely(!boottime))
+	if (likely(!no_wq))
 		destroy_work_on_stack(&rew.rew_work);
 }
 EXPORT_SYMBOL_GPL(synchronize_rcu_expedited);

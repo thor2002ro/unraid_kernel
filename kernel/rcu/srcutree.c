@@ -24,6 +24,7 @@
 #include <linux/smp.h>
 #include <linux/delay.h>
 #include <linux/module.h>
+#include <linux/slab.h>
 #include <linux/srcu.h>
 
 #include "rcu.h"
@@ -75,12 +76,44 @@ do {									\
 	spin_unlock_irqrestore(&ACCESS_PRIVATE(p, lock), flags)	\
 
 /*
- * Initialize SRCU combining tree.  Note that statically allocated
+ * Initialize SRCU per-CPU data.  Note that statically allocated
  * srcu_struct structures might already have srcu_read_lock() and
  * srcu_read_unlock() running against them.  So if the is_static parameter
  * is set, don't initialize ->srcu_lock_count[] and ->srcu_unlock_count[].
+ *
+ * Returns @true if allocation succeeded and @false otherwise.
  */
-static void init_srcu_struct_nodes(struct srcu_struct *ssp)
+static void init_srcu_struct_data(struct srcu_struct *ssp)
+{
+	int cpu;
+	struct srcu_data *sdp;
+
+	/*
+	 * Initialize the per-CPU srcu_data array, which feeds into the
+	 * leaves of the srcu_node tree.
+	 */
+	WARN_ON_ONCE(ARRAY_SIZE(sdp->srcu_lock_count) !=
+		     ARRAY_SIZE(sdp->srcu_unlock_count));
+	for_each_possible_cpu(cpu) {
+		sdp = per_cpu_ptr(ssp->sda, cpu);
+		spin_lock_init(&ACCESS_PRIVATE(sdp, lock));
+		rcu_segcblist_init(&sdp->srcu_cblist);
+		sdp->srcu_cblist_invoking = false;
+		sdp->srcu_gp_seq_needed = ssp->srcu_gp_seq;
+		sdp->srcu_gp_seq_needed_exp = ssp->srcu_gp_seq;
+		sdp->mynode = NULL;
+		sdp->cpu = cpu;
+		INIT_WORK(&sdp->work, srcu_invoke_callbacks);
+		timer_setup(&sdp->delay_work, srcu_delay_timer, 0);
+		sdp->ssp = ssp;
+	}
+}
+
+/*
+ * Allocated and initialize SRCU combining tree.  Returns @true if
+ * allocation succeeded and @false otherwise.
+ */
+static bool init_srcu_struct_nodes(struct srcu_struct *ssp)
 {
 	int cpu;
 	int i;
@@ -92,6 +125,9 @@ static void init_srcu_struct_nodes(struct srcu_struct *ssp)
 
 	/* Initialize geometry if it has not already been initialized. */
 	rcu_init_geometry();
+	ssp->node = kcalloc(rcu_num_nodes, sizeof(*ssp->node), GFP_ATOMIC);
+	if (!ssp->node)
+		return false;
 
 	/* Work out the overall tree geometry. */
 	ssp->level[0] = &ssp->node[0];
@@ -129,29 +165,19 @@ static void init_srcu_struct_nodes(struct srcu_struct *ssp)
 	 * Initialize the per-CPU srcu_data array, which feeds into the
 	 * leaves of the srcu_node tree.
 	 */
-	WARN_ON_ONCE(ARRAY_SIZE(sdp->srcu_lock_count) !=
-		     ARRAY_SIZE(sdp->srcu_unlock_count));
 	level = rcu_num_lvls - 1;
 	snp_first = ssp->level[level];
 	for_each_possible_cpu(cpu) {
 		sdp = per_cpu_ptr(ssp->sda, cpu);
-		spin_lock_init(&ACCESS_PRIVATE(sdp, lock));
-		rcu_segcblist_init(&sdp->srcu_cblist);
-		sdp->srcu_cblist_invoking = false;
-		sdp->srcu_gp_seq_needed = ssp->srcu_gp_seq;
-		sdp->srcu_gp_seq_needed_exp = ssp->srcu_gp_seq;
 		sdp->mynode = &snp_first[cpu / levelspread[level]];
 		for (snp = sdp->mynode; snp != NULL; snp = snp->srcu_parent) {
 			if (snp->grplo < 0)
 				snp->grplo = cpu;
 			snp->grphi = cpu;
 		}
-		sdp->cpu = cpu;
-		INIT_WORK(&sdp->work, srcu_invoke_callbacks);
-		timer_setup(&sdp->delay_work, srcu_delay_timer, 0);
-		sdp->ssp = ssp;
 		sdp->grpmask = 1 << (cpu - sdp->mynode->grplo);
 	}
+	return true;
 }
 
 /*
@@ -162,6 +188,7 @@ static void init_srcu_struct_nodes(struct srcu_struct *ssp)
  */
 static int init_srcu_struct_fields(struct srcu_struct *ssp, bool is_static)
 {
+	ssp->node = NULL;
 	mutex_init(&ssp->srcu_cb_mutex);
 	mutex_init(&ssp->srcu_gp_mutex);
 	ssp->srcu_idx = 0;
@@ -174,7 +201,8 @@ static int init_srcu_struct_fields(struct srcu_struct *ssp, bool is_static)
 		ssp->sda = alloc_percpu(struct srcu_data);
 	if (!ssp->sda)
 		return -ENOMEM;
-	init_srcu_struct_nodes(ssp);
+	init_srcu_struct_data(ssp);
+	WARN_ON_ONCE(!init_srcu_struct_nodes(ssp));
 	ssp->srcu_gp_seq_needed_exp = 0;
 	ssp->srcu_last_gp_end = ktime_get_mono_fast_ns();
 	smp_store_release(&ssp->srcu_gp_seq_needed, 0); /* Init done. */
@@ -382,9 +410,11 @@ void cleanup_srcu_struct(struct srcu_struct *ssp)
 			return; /* Forgot srcu_barrier(), so just leak it! */
 	}
 	if (WARN_ON(rcu_seq_state(READ_ONCE(ssp->srcu_gp_seq)) != SRCU_STATE_IDLE) ||
+	    WARN_ON(rcu_seq_current(&ssp->srcu_gp_seq) != ssp->srcu_gp_seq_needed) ||
 	    WARN_ON(srcu_readers_active(ssp))) {
-		pr_info("%s: Active srcu_struct %p state: %d\n",
-			__func__, ssp, rcu_seq_state(READ_ONCE(ssp->srcu_gp_seq)));
+		pr_info("%s: Active srcu_struct %p read state: %d gp state: %lu/%lu\n",
+			__func__, ssp, rcu_seq_state(READ_ONCE(ssp->srcu_gp_seq)),
+			rcu_seq_current(&ssp->srcu_gp_seq), ssp->srcu_gp_seq_needed);
 		return; /* Caller forgot to stop doing call_srcu()? */
 	}
 	free_percpu(ssp->sda);
@@ -630,20 +660,21 @@ static void srcu_funnel_gp_start(struct srcu_struct *ssp, struct srcu_data *sdp,
 {
 	unsigned long flags;
 	int idx = rcu_seq_ctr(s) % ARRAY_SIZE(sdp->mynode->srcu_have_cbs);
-	struct srcu_node *snp = sdp->mynode;
+	struct srcu_node *snp;
+	struct srcu_node *snp_leaf = sdp->mynode;
 	unsigned long snp_seq;
 
 	/* Each pass through the loop does one level of the srcu_node tree. */
-	for (; snp != NULL; snp = snp->srcu_parent) {
-		if (rcu_seq_done(&ssp->srcu_gp_seq, s) && snp != sdp->mynode)
+	for (snp = snp_leaf; snp != NULL; snp = snp->srcu_parent) {
+		if (rcu_seq_done(&ssp->srcu_gp_seq, s) && snp != snp_leaf)
 			return; /* GP already done and CBs recorded. */
 		spin_lock_irqsave_rcu_node(snp, flags);
 		if (ULONG_CMP_GE(snp->srcu_have_cbs[idx], s)) {
 			snp_seq = snp->srcu_have_cbs[idx];
-			if (snp == sdp->mynode && snp_seq == s)
+			if (snp == snp_leaf && snp_seq == s)
 				snp->srcu_data_have_cbs[idx] |= sdp->grpmask;
 			spin_unlock_irqrestore_rcu_node(snp, flags);
-			if (snp == sdp->mynode && snp_seq != s) {
+			if (snp == snp_leaf && snp_seq != s) {
 				srcu_schedule_cbs_sdp(sdp, do_norm
 							   ? SRCU_INTERVAL
 							   : 0);
@@ -654,7 +685,7 @@ static void srcu_funnel_gp_start(struct srcu_struct *ssp, struct srcu_data *sdp,
 			return;
 		}
 		snp->srcu_have_cbs[idx] = s;
-		if (snp == sdp->mynode)
+		if (snp == snp_leaf)
 			snp->srcu_data_have_cbs[idx] |= sdp->grpmask;
 		if (!do_norm && ULONG_CMP_LT(snp->srcu_gp_seq_needed_exp, s))
 			WRITE_ONCE(snp->srcu_gp_seq_needed_exp, s);

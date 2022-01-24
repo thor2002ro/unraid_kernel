@@ -47,11 +47,9 @@ struct srcu_data {
  */
 struct srcu_node {
 	spinlock_t __private lock;
-	unsigned long srcu_have_cbs[4];		/* GP seq for children */
-						/*  having CBs, but only */
-						/*  is > ->srcu_gq_seq. */
-	unsigned long srcu_data_have_cbs[4];	/* Which srcu_data structs */
-						/*  have CBs for given GP? */
+	unsigned long srcu_have_cbs[4];		/* GP seq for children having CBs, but only */
+						/*  if greater than ->srcu_gq_seq. */
+	unsigned long srcu_data_have_cbs[4];	/* Which srcu_data structs have CBs for given GP? */
 	unsigned long srcu_gp_seq_needed_exp;	/* Furthest future exp GP. */
 	struct srcu_node *srcu_parent;		/* Next up in tree. */
 	int grplo;				/* Least CPU for node. */
@@ -62,7 +60,7 @@ struct srcu_node {
  * Per-SRCU-domain structure, similar in function to rcu_state.
  */
 struct srcu_struct {
-	struct srcu_node node[NUM_RCU_NODES];	/* Combining tree. */
+	struct srcu_node *node;			/* Combining tree. */
 	struct srcu_node *level[RCU_NUM_LVLS + 1];
 						/* First node at each level. */
 	struct mutex srcu_cb_mutex;		/* Serialize CB preparation. */
