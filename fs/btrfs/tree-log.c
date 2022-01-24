@@ -3474,35 +3474,154 @@ int btrfs_free_log_root_tree(struct btrfs_trans_handle *trans,
 }
 
 /*
- * Check if an inode was logged in the current transaction. This may often
- * return some false positives, because logged_trans is an in memory only field,
- * not persisted anywhere. This is meant to be used in contexts where a false
- * positive has no functional consequences.
+ * Check if an inode was logged in the current transaction. This correctly deals
+ * with the case where the inode was logged but has a logged_trans of 0, which
+ * happens if the inode is evicted and loaded again, as logged_trans is an in
+ * memory only field (not persisted).
+ *
+ * Returns 1 if the inode was logged before in the transaction, 0 if it was not,
+ * and < 0 on error.
  */
-static bool inode_logged(struct btrfs_trans_handle *trans,
-			 struct btrfs_inode *inode)
+static int inode_logged(struct btrfs_trans_handle *trans,
+			struct btrfs_inode *inode,
+			struct btrfs_path *path_in)
 {
-	if (inode->logged_trans == trans->transid)
-		return true;
+	struct btrfs_path *path = path_in;
+	struct btrfs_key key;
+	int ret;
 
-	if (!test_bit(BTRFS_ROOT_HAS_LOG_TREE, &inode->root->state))
-		return false;
+	if (inode->logged_trans == trans->transid)
+		return 1;
 
 	/*
-	 * The inode's logged_trans is always 0 when we load it (because it is
-	 * not persisted in the inode item or elsewhere). So if it is 0, the
-	 * inode was last modified in the current transaction then the inode may
-	 * have been logged before in the current transaction, then evicted and
-	 * loaded again in the current transaction - or may have never been logged
-	 * in the current transaction, but since we can not be sure, we have to
-	 * assume it was, otherwise our callers can leave an inconsistent log.
+	 * If logged_trans is not 0, then we know the inode logged was not logged
+	 * in this transaction, so we can return false right away.
 	 */
-	if (inode->logged_trans == 0 &&
-	    inode->last_trans == trans->transid &&
-	    !test_bit(BTRFS_FS_LOG_RECOVERING, &trans->fs_info->flags))
-		return true;
+	if (inode->logged_trans > 0)
+		return 0;
 
-	return false;
+	/*
+	 * If no log tree was created for this root in this transaction, then
+	 * the inode can not have been logged in this transaction. In that case
+	 * set logged_trans to anything greater than 0 and less than the current
+	 * transaction's ID, to avoid the search below in a future call in case
+	 * a log tree gets created after this.
+	 */
+	if (!test_bit(BTRFS_ROOT_HAS_LOG_TREE, &inode->root->state)) {
+		inode->logged_trans = trans->transid - 1;
+		return 0;
+	}
+
+	/*
+	 * We have a log tree and the inode's logged_trans is 0. We can't tell
+	 * for sure if the inode was logged before in this transaction by looking
+	 * only at logged_trans. We could be pessimistic and assume it was, but
+	 * that can lead to unnecessarily logging an inode during rename and link
+	 * operations, and then further updating the log in followup rename and
+	 * link operations, specially if it's a directory, which adds latency
+	 * visible to applications doing a series of rename or link operations.
+	 *
+	 * A logged_trans of 0 here can mean several things:
+	 *
+	 * 1) The inode was never logged since the filesystem was mounted, and may
+	 *    or may have not been evicted and loaded again;
+	 *
+	 * 2) The inode was logged in a previous transaction, then evicted and
+	 *    then loaded again;
+	 *
+	 * 3) The inode was logged in the current transaction, then evicted and
+	 *    then loaded again.
+	 *
+	 * For cases 1) and 2) we don't want to return true, but we need to detect
+	 * case 3) and return true. So we do a search in the log root for the inode
+	 * item.
+	 */
+	key.objectid = btrfs_ino(inode);
+	key.type = BTRFS_INODE_ITEM_KEY;
+	key.offset = 0;
+
+	if (!path) {
+		path = btrfs_alloc_path();
+		if (!path)
+			return -ENOMEM;
+	}
+
+	ret = btrfs_search_slot(NULL, inode->root->log_root, &key, path, 0, 0);
+
+	if (path_in)
+		btrfs_release_path(path);
+	else
+		btrfs_free_path(path);
+
+	/*
+	 * Logging an inode always results in logging its inode item. So if we
+	 * did not find the item we know the inode was not logged for sure.
+	 */
+	if (ret < 0) {
+		return ret;
+	} else if (ret > 0) {
+		/*
+		 * Set logged_trans to a value greater than 0 and less then the
+		 * current transaction to avoid doing the search in future calls.
+		 */
+		inode->logged_trans = trans->transid - 1;
+		return 0;
+	}
+
+	/*
+	 * The inode was previously logged and then evicted, set logged_trans to
+	 * the current transacion's ID, to avoid future tree searches as long as
+	 * the inode is not evicted again.
+	 */
+	inode->logged_trans = trans->transid;
+
+	/*
+	 * If it's a directory, then we must set last_dir_index_offset to the
+	 * maximum possible value, so that the next attempt to log the inode does
+	 * not skip checking if dir index keys found in modified subvolume tree
+	 * leaves have been logged before, otherwise it would result in attempts
+	 * to insert duplicate dir index keys in the log tree. This must be done
+	 * because last_dir_index_offset is an in-memory only field, not persisted
+	 * in the inode item or any other on-disk structure, so its value is lost
+	 * once the inode is evicted.
+	 */
+	if (S_ISDIR(inode->vfs_inode.i_mode))
+		inode->last_dir_index_offset = (u64)-1;
+
+	return 1;
+}
+
+/*
+ * Delete a directory entry from the log if it exists.
+ * Returns < 0 on error, 1 if the entry does not exists and 0 if the entry
+ * existed and was successfully deleted.
+ */
+static int del_logged_dentry(struct btrfs_trans_handle *trans,
+			     struct btrfs_root *log,
+			     struct btrfs_path *path,
+			     u64 dir_ino,
+			     const char *name, int name_len,
+			     u64 index)
+{
+	struct btrfs_dir_item *di;
+
+	/*
+	 * We only log dir index items of a directory, so we don't need to look
+	 * for dir item keys.
+	 */
+	di = btrfs_lookup_dir_index_item(trans, log, path, dir_ino,
+					 index, name, name_len, -1);
+	if (IS_ERR(di))
+		return PTR_ERR(di);
+	else if (!di)
+		return 1;
+
+	/*
+	 * We do not need to update the size field of the directory's
+	 * inode item because on log replay we update the field to reflect
+	 * all existing entries in the directory (see overwrite_item()).
+	 */
+	return btrfs_delete_one_dir_name(trans, log, path, di);
 }
 
 /*
@@ -3531,15 +3650,16 @@ void btrfs_del_dir_entries_in_log(struct btrfs_trans_handle *trans,
 				  const char *name, int name_len,
 				  struct btrfs_inode *dir, u64 index)
 {
-	struct btrfs_root *log;
-	struct btrfs_dir_item *di;
 	struct btrfs_path *path;
 	int ret;
-	int err = 0;
-	u64 dir_ino = btrfs_ino(dir);
 
-	if (!inode_logged(trans, dir))
+	ret = inode_logged(trans, dir, NULL);
+	if (ret == 0)
 		return;
+	else if (ret < 0) {
+		btrfs_set_log_full_commit(trans);
+		return;
+	}
 
 	ret = join_running_log_trans(root);
 	if (ret)
@@ -3547,41 +3667,18 @@ void btrfs_del_dir_entries_in_log(struct btrfs_trans_handle *trans,
 
 	mutex_lock(&dir->log_mutex);
 
-	log = root->log_root;
 	path = btrfs_alloc_path();
 	if (!path) {
-		err = -ENOMEM;
+		ret = -ENOMEM;
 		goto out_unlock;
 	}
 
-	/*
-	 * We only log dir index items of a directory, so we don't need to look
-	 * for dir item keys.
-	 */
-	di = btrfs_lookup_dir_index_item(trans, log, path, dir_ino,
-					 index, name, name_len, -1);
-	if (IS_ERR(di)) {
-		err = PTR_ERR(di);
-		goto fail;
-	}
-	if (di) {
-		ret = btrfs_delete_one_dir_name(trans, log, path, di);
-		if (ret) {
-			err = ret;
-			goto fail;
-		}
-	}
-
-	/*
-	 * We do not need to update the size field of the directory's inode item
-	 * because on log replay we update the field to reflect all existing
-	 * entries in the directory (see overwrite_item()).
-	 */
-fail:
+	ret = del_logged_dentry(trans, root->log_root, path, btrfs_ino(dir),
+				name, name_len, index);
 	btrfs_free_path(path);
 out_unlock:
 	mutex_unlock(&dir->log_mutex);
-	if (err < 0)
+	if (ret < 0)
 		btrfs_set_log_full_commit(trans);
 	btrfs_end_log_trans(root);
 }
@@ -3596,8 +3693,13 @@ void btrfs_del_inode_ref_in_log(struct btrfs_trans_handle *trans,
 	u64 index;
 	int ret;
 
-	if (!inode_logged(trans, inode))
+	ret = inode_logged(trans, inode, NULL);
+	if (ret == 0)
 		return;
+	else if (ret < 0) {
+		btrfs_set_log_full_commit(trans);
+		return;
+	}
 
 	ret = join_running_log_trans(root);
 	if (ret)
@@ -3729,7 +3831,6 @@ static int process_dir_items_leaf(struct btrfs_trans_handle *trans,
 	struct extent_buffer *src = path->nodes[0];
 	const int nritems = btrfs_header_nritems(src);
 	const u64 ino = btrfs_ino(inode);
-	const bool inode_logged_before = inode_logged(trans, inode);
 	bool last_found = false;
 	int batch_start = 0;
 	int batch_size = 0;
@@ -3805,14 +3906,16 @@ static int process_dir_items_leaf(struct btrfs_trans_handle *trans,
 				ctx->log_new_dentries = true;
 		}
 
-		if (!inode_logged_before)
+		if (!ctx->logged_before)
 			goto add_to_batch;
 
 		/*
 		 * If we were logged before and have logged dir items, we can skip
 		 * checking if any item with a key offset larger than the last one
 		 * we logged is in the log tree, saving time and avoiding adding
-		 * contention on the log tree.
+		 * contention on the log tree. We can only rely on the value of
+		 * last_dir_index_offset when we know for sure that the inode was
+		 * previously logged in the current transaction.
 		 */
 		if (key.offset > inode->last_dir_index_offset)
 			goto add_to_batch;
@@ -4055,21 +4158,6 @@ static noinline int log_directory_changes(struct btrfs_trans_handle *trans,
 	u64 max_key;
 	int ret;
 
-	/*
-	 * If this is the first time we are being logged in the current
-	 * transaction, or we were logged before but the inode was evicted and
-	 * reloaded later, in which case its logged_trans is 0, reset the value
-	 * of the last logged key offset. Note that we don't use the helper
-	 * function inode_logged() here - that is because the function returns
-	 * true after an inode eviction, assuming the worst case as it can not
-	 * know for sure if the inode was logged before. So we can not skip key
-	 * searches in the case the inode was evicted, because it may not have
-	 * been logged in this transaction and may have been logged in a past
-	 * transaction, so we need to reset the last dir index offset to (u64)-1.
-	 */
-	if (inode->logged_trans != trans->transid)
-		inode->last_dir_index_offset = (u64)-1;
-
 	min_key = BTRFS_DIR_START_INDEX;
 	max_key = 0;
 	ctx->last_dir_item_offset = inode->last_dir_index_offset;
@@ -4105,9 +4193,6 @@ static int drop_inode_items(struct btrfs_trans_handle *trans,
 	struct btrfs_key key;
 	struct btrfs_key found_key;
 	int start_slot;
-
-	if (!inode_logged(trans, inode))
-		return 0;
 
 	key.objectid = btrfs_ino(inode);
 	key.type = max_key_type;
@@ -4606,7 +4691,7 @@ static int log_one_extent(struct btrfs_trans_handle *trans,
 	 * are small, with a root at level 2 or 3 at most, due to their short
 	 * life span.
 	 */
-	if (inode_logged(trans, inode)) {
+	if (ctx->logged_before) {
 		drop_args.path = path;
 		drop_args.start = em->start;
 		drop_args.end = em->start + em->len;
@@ -5593,8 +5678,7 @@ static int btrfs_log_inode(struct btrfs_trans_handle *trans,
 	struct btrfs_key min_key;
 	struct btrfs_key max_key;
 	struct btrfs_root *log = inode->root->log_root;
-	int err = 0;
-	int ret = 0;
+	int ret;
 	bool fast_search = false;
 	u64 ino = btrfs_ino(inode);
 	struct extent_map_tree *em_tree = &inode->extent_tree;
@@ -5603,6 +5687,7 @@ static int btrfs_log_inode(struct btrfs_trans_handle *trans,
 	bool xattrs_logged = false;
 	bool recursive_logging = false;
 	bool inode_item_dropped = true;
+	const bool orig_logged_before = ctx->logged_before;
 
 	path = btrfs_alloc_path();
 	if (!path)
@@ -5636,8 +5721,8 @@ static int btrfs_log_inode(struct btrfs_trans_handle *trans,
 	 * and figure out which index ranges have to be logged.
 	 */
 	if (S_ISDIR(inode->vfs_inode.i_mode)) {
-		err = btrfs_commit_inode_delayed_items(trans, inode);
-		if (err)
+		ret = btrfs_commit_inode_delayed_items(trans, inode);
+		if (ret)
 			goto out;
 	}
 
@@ -5653,6 +5738,17 @@ static int btrfs_log_inode(struct btrfs_trans_handle *trans,
 	}
 
 	/*
+	 * Before logging the inode item, cache the value returned by
+	 * inode_logged(), because after that we have the need to figure out if
+	 * the inode was previously logged in this transaction.
+	 */
+	ret = inode_logged(trans, inode, path);
+	if (ret < 0)
+		goto out;
+	ctx->logged_before = (ret == 1);
+	ret = 0;
+
+	/*
 	 * This is for cases where logging a directory could result in losing a
 	 * a file after replaying the log. For example, if we move a file from a
 	 * directory A to a directory B, then fsync directory A, we have no way
@@ -5663,7 +5759,7 @@ static int btrfs_log_inode(struct btrfs_trans_handle *trans,
 	    inode_only == LOG_INODE_ALL &&
 	    inode->last_unlink_trans >= trans->transid) {
 		btrfs_set_log_full_commit(trans);
-		err = 1;
+		ret = 1;
 		goto out_unlock;
 	}
 
@@ -5677,9 +5773,11 @@ static int btrfs_log_inode(struct btrfs_trans_handle *trans,
 		clear_bit(BTRFS_INODE_COPY_EVERYTHING, &inode->runtime_flags);
 		if (inode_only == LOG_INODE_EXISTS)
 			max_key_type = BTRFS_XATTR_ITEM_KEY;
-		ret = drop_inode_items(trans, log, path, inode, max_key_type);
+		if (ctx->logged_before)
+			ret = drop_inode_items(trans, log, path, inode,
+					       max_key_type);
 	} else {
-		if (inode_only == LOG_INODE_EXISTS && inode_logged(trans, inode)) {
+		if (inode_only == LOG_INODE_EXISTS && ctx->logged_before) {
 			/*
 			 * Make sure the new inode item we write to the log has
 			 * the same isize as the current one (if it exists).
@@ -5693,22 +5791,23 @@ static int btrfs_log_inode(struct btrfs_trans_handle *trans,
 			 * (zeroes), as if an expanding truncate happened,
 			 * instead of getting a file of 4Kb only.
 			 */
-			err = logged_inode_size(log, inode, path, &logged_isize);
-			if (err)
+			ret = logged_inode_size(log, inode, path, &logged_isize);
+			if (ret)
 				goto out_unlock;
 		}
 		if (test_bit(BTRFS_INODE_NEEDS_FULL_SYNC,
 			     &inode->runtime_flags)) {
 			if (inode_only == LOG_INODE_EXISTS) {
 				max_key.type = BTRFS_XATTR_ITEM_KEY;
-				ret = drop_inode_items(trans, log, path, inode,
-						       max_key.type);
+				if (ctx->logged_before)
+					ret = drop_inode_items(trans, log, path,
+							       inode, max_key.type);
 			} else {
 				clear_bit(BTRFS_INODE_NEEDS_FULL_SYNC,
 					  &inode->runtime_flags);
 				clear_bit(BTRFS_INODE_COPY_EVERYTHING,
 					  &inode->runtime_flags);
-				if (inode_logged(trans, inode))
+				if (ctx->logged_before)
 					ret = truncate_inode_items(trans, log,
 								   inode, 0, 0);
 			}
@@ -5718,8 +5817,9 @@ static int btrfs_log_inode(struct btrfs_trans_handle *trans,
 			if (inode_only == LOG_INODE_ALL)
 				fast_search = true;
 			max_key.type = BTRFS_XATTR_ITEM_KEY;
-			ret = drop_inode_items(trans, log, path, inode,
-					       max_key.type);
+			if (ctx->logged_before)
+				ret = drop_inode_items(trans, log, path, inode,
+						       max_key.type);
 		} else {
 			if (inode_only == LOG_INODE_ALL)
 				fast_search = true;
@@ -5728,37 +5828,35 @@ static int btrfs_log_inode(struct btrfs_trans_handle *trans,
 		}
 
 	}
-	if (ret) {
-		err = ret;
+	if (ret)
 		goto out_unlock;
-	}
 
-	err = copy_inode_items_to_log(trans, inode, &min_key, &max_key,
+	ret = copy_inode_items_to_log(trans, inode, &min_key, &max_key,
 				      path, dst_path, logged_isize,
 				      recursive_logging, inode_only, ctx,
 				      &need_log_inode_item);
-	if (err)
+	if (ret)
 		goto out_unlock;
 
 	btrfs_release_path(path);
 	btrfs_release_path(dst_path);
-	err = btrfs_log_all_xattrs(trans, inode, path, dst_path);
-	if (err)
+	ret = btrfs_log_all_xattrs(trans, inode, path, dst_path);
+	if (ret)
 		goto out_unlock;
 	xattrs_logged = true;
 	if (max_key.type >= BTRFS_EXTENT_DATA_KEY && !fast_search) {
 		btrfs_release_path(path);
 		btrfs_release_path(dst_path);
-		err = btrfs_log_holes(trans, inode, path);
-		if (err)
+		ret = btrfs_log_holes(trans, inode, path);
+		if (ret)
 			goto out_unlock;
 	}
 log_extents:
 	btrfs_release_path(path);
 	btrfs_release_path(dst_path);
 	if (need_log_inode_item) {
-		err = log_inode_item(trans, log, dst_path, inode, inode_item_dropped);
-		if (err)
+		ret = log_inode_item(trans, log, dst_path, inode, inode_item_dropped);
+		if (ret)
 			goto out_unlock;
 		/*
 		 * If we are doing a fast fsync and the inode was logged before
@@ -5769,18 +5867,16 @@ log_extents:
 		 * BTRFS_INODE_COPY_EVERYTHING set.
 		 */
 		if (!xattrs_logged && inode->logged_trans < trans->transid) {
-			err = btrfs_log_all_xattrs(trans, inode, path, dst_path);
-			if (err)
+			ret = btrfs_log_all_xattrs(trans, inode, path, dst_path);
+			if (ret)
 				goto out_unlock;
 			btrfs_release_path(path);
 		}
 	}
 	if (fast_search) {
 		ret = btrfs_log_changed_extents(trans, inode, dst_path, ctx);
-		if (ret) {
-			err = ret;
+		if (ret)
 			goto out_unlock;
-		}
 	} else if (inode_only == LOG_INODE_ALL) {
 		struct extent_map *em, *n;
 
@@ -5792,10 +5888,8 @@ log_extents:
 
 	if (inode_only == LOG_INODE_ALL && S_ISDIR(inode->vfs_inode.i_mode)) {
 		ret = log_directory_changes(trans, inode, path, dst_path, ctx);
-		if (ret) {
-			err = ret;
+		if (ret)
 			goto out_unlock;
-		}
 	}
 
 	spin_lock(&inode->lock);
@@ -5839,7 +5933,11 @@ out_unlock:
 out:
 	btrfs_free_path(path);
 	btrfs_free_path(dst_path);
-	return err;
+
+	if (recursive_logging)
+		ctx->logged_before = orig_logged_before;
+
+	return ret;
 }
 
 /*
@@ -6759,14 +6857,31 @@ void btrfs_record_snapshot_destroy(struct btrfs_trans_handle *trans,
 }
 
 /*
- * Call this after adding a new name for a file and it will properly
- * update the log to reflect the new name.
+ * Update the log after adding a new name for an inode.
+ *
+ * @trans:              Transaction handle.
+ * @old_dentry:         The dentry associated with the old name and the old
+ *                      parent directory.
+ * @old_dir:            The inode of the previous parent directory for the case
+ *                      of a rename. For a link operation, it must be NULL.
+ * @old_dir_index:      The index number associated with the old name, meaningful
+ *                      only for rename operations (when @old_dir is not NULL).
+ *                      Ignored for link operations.
+ * @parent:             The dentry associated to the directory under which the
+ *                      new name is located.
+ *
+ * Call this after adding a new name for an inode, as a result of a link or
+ * rename operation, and it will properly update the log to reflect the new name.
  */
 void btrfs_log_new_name(struct btrfs_trans_handle *trans,
-			struct btrfs_inode *inode, struct btrfs_inode *old_dir,
-			struct dentry *parent)
+			struct dentry *old_dentry, struct btrfs_inode *old_dir,
+			u64 old_dir_index, struct dentry *parent)
 {
+	struct btrfs_inode *inode = BTRFS_I(d_inode(old_dentry));
+	struct btrfs_root *root = inode->root;
 	struct btrfs_log_ctx ctx;
+	bool log_pinned = false;
+	int ret;
 
 	/*
 	 * this will force the logging code to walk the dentry chain
@@ -6779,26 +6894,71 @@ void btrfs_log_new_name(struct btrfs_trans_handle *trans,
 	 * if this inode hasn't been logged and directory we're renaming it
 	 * from hasn't been logged, we don't need to log it
 	 */
-	if (!inode_logged(trans, inode) &&
-	    (!old_dir || !inode_logged(trans, old_dir)))
-		return;
+	ret = inode_logged(trans, inode, NULL);
+	if (ret < 0) {
+		goto out;
+	} else if (ret == 0) {
+		if (!old_dir)
+			return;
+		/*
+		 * If the inode was not logged and we are doing a rename (old_dir is not
+		 * NULL), check if old_dir was logged - if it was not we can return and
+		 * do nothing.
+		 */
+		ret = inode_logged(trans, old_dir, NULL);
+		if (ret < 0)
+			goto out;
+		else if (ret == 0)
+			return;
+	}
+	ret = 0;
 
 	/*
 	 * If we are doing a rename (old_dir is not NULL) from a directory that
-	 * was previously logged, make sure the next log attempt on the directory
-	 * is not skipped and logs the inode again. This is because the log may
-	 * not currently be authoritative for a range including the old
-	 * BTRFS_DIR_INDEX_KEY key, so we want to make sure after a log replay we
-	 * do not end up with both the new and old dentries around (in case the
-	 * inode is a directory we would have a directory with two hard links and
-	 * 2 inode references for different parents). The next log attempt of
-	 * old_dir will happen at btrfs_log_all_parents(), called through
-	 * btrfs_log_inode_parent() below, because we have previously set
-	 * inode->last_unlink_trans to the current transaction ID, either here or
-	 * at btrfs_record_unlink_dir() in case the inode is a directory.
+	 * was previously logged, make sure that on log replay we get the old
+	 * dir entry deleted. This is needed because we will also log the new
+	 * name of the renamed inode, so we need to make sure that after log
+	 * replay we don't end up with both the new and old dir entries existing.
 	 */
-	if (old_dir)
-		old_dir->logged_trans = 0;
+	if (old_dir && old_dir->logged_trans == trans->transid) {
+		struct btrfs_root *log = old_dir->root->log_root;
+		struct btrfs_path *path;
+
+		ASSERT(old_dir_index >= BTRFS_DIR_START_INDEX);
+
+		/*
+		 * We have two inodes to update in the log, the old directory and
+		 * the inode that got renamed, so we must pin the log to prevent
+		 * anyone from syncing the log until we have updated both inodes
+		 * in the log.
+		 */
+		log_pinned = true;
+		btrfs_pin_log_trans(root);
+
+		path = btrfs_alloc_path();
+		if (!path) {
+			ret = -ENOMEM;
+			goto out;
+		}
+
+		ret = del_logged_dentry(trans, log, path, btrfs_ino(old_dir),
+					old_dentry->d_name.name,
+					old_dentry->d_name.len, old_dir_index);
+		if (ret > 0) {
+			/*
+			 * The dentry does not exist in the log, so record its
+			 * deletion.
+			 */
+			btrfs_release_path(path);
+			ret = insert_dir_log_key(trans, log, path,
+						 btrfs_ino(old_dir),
+						 old_dir_index, old_dir_index);
+		}
+
+		btrfs_free_path(path);
+		if (ret < 0)
+			goto out;
+	}
 
 	btrfs_init_log_ctx(&ctx, &inode->vfs_inode);
 	ctx.logging_new_name = true;
@@ -6810,5 +6970,16 @@ void btrfs_log_new_name(struct btrfs_trans_handle *trans,
 	 * inconsistent state after a rename operation.
 	 */
 	btrfs_log_inode_parent(trans, inode, parent, LOG_INODE_EXISTS, &ctx);
+out:
+	/*
+	 * If an error happened mark the log for a full commit because it's not
+	 * consistent and up to date or we couldn't find out if one of the
+	 * inodes was logged before in this transaction. Do it before unpinning
+	 * the log, to avoid any races with someone else trying to commit it.
+	 */
+	if (ret < 0)
+		btrfs_set_log_full_commit(trans);
+	if (log_pinned)
+		btrfs_end_log_trans(root);
 }
 
