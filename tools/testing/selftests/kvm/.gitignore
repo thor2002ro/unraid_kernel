@@ -4,6 +4,7 @@
 /aarch64/get-reg-list
 /aarch64/psci_cpu_on_test
 /aarch64/vgic_init
+/aarch64/vgic_irq
 /s390x/memop
 /s390x/resets
 /s390x/sync_regs_test
@@ -35,6 +36,7 @@
 /x86_64/vmx_apic_access_test
 /x86_64/vmx_close_while_nested_test
 /x86_64/vmx_dirty_log_test
+/x86_64/vmx_invalid_nested_guest_state
 /x86_64/vmx_preemption_timer_test
 /x86_64/vmx_set_nested_state_test
 /x86_64/vmx_tsc_adjust_test
