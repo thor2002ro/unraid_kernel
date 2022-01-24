@@ -12,6 +12,13 @@
 /* return value for btrfs_log_dentry_safe that means we don't need to log it at all */
 #define BTRFS_NO_LOG_SYNC 256
 
+/*
+ * All the bits we can set for an extent buffer's range in a log root's
+ * ->dirty_log_pages io tree.
+ */
+#define BTRFS_LOG_PAGES_BITS (EXTENT_DIRTY | EXTENT_NEW | EXTENT_NEED_WAIT | \
+			      EXTENT_UPTODATE)
+
 struct btrfs_log_ctx {
 	int log_ret;
 	int log_transid;

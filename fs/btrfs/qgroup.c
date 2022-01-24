@@ -1185,9 +1185,24 @@ int btrfs_quota_disable(struct btrfs_fs_info *fs_info)
 	struct btrfs_trans_handle *trans = NULL;
 	int ret = 0;
 
+	/*
+	 * We need to have subvol_sem write locked, to prevent races between
+	 * concurrent tasks trying to disable quotas, because we will unlock
+	 * and relock qgroup_ioctl_lock across BTRFS_FS_QUOTA_ENABLED changes.
+	 */
+	lockdep_assert_held_write(&fs_info->subvol_sem);
+
 	mutex_lock(&fs_info->qgroup_ioctl_lock);
 	if (!fs_info->quota_root)
 		goto out;
+
+	/*
+	 * Request qgroup rescan worker to complete and wait for it. This wait
+	 * must be done before transaction start for quota disable since it may
+	 * deadlock with transaction by the qgroup rescan worker.
+	 */
+	clear_bit(BTRFS_FS_QUOTA_ENABLED, &fs_info->flags);
+	btrfs_qgroup_wait_for_completion(fs_info, false);
 	mutex_unlock(&fs_info->qgroup_ioctl_lock);
 
 	/*
@@ -1205,14 +1220,13 @@ int btrfs_quota_disable(struct btrfs_fs_info *fs_info)
 	if (IS_ERR(trans)) {
 		ret = PTR_ERR(trans);
 		trans = NULL;
+		set_bit(BTRFS_FS_QUOTA_ENABLED, &fs_info->flags);
 		goto out;
 	}
 
 	if (!fs_info->quota_root)
 		goto out;
 
-	clear_bit(BTRFS_FS_QUOTA_ENABLED, &fs_info->flags);
-	btrfs_qgroup_wait_for_completion(fs_info, false);
 	spin_lock(&fs_info->qgroup_lock);
 	quota_root = fs_info->quota_root;
 	fs_info->quota_root = NULL;
@@ -3247,7 +3261,8 @@ out:
 static bool rescan_should_stop(struct btrfs_fs_info *fs_info)
 {
 	return btrfs_fs_closing(fs_info) ||
-		test_bit(BTRFS_FS_STATE_REMOUNTING, &fs_info->fs_state);
+		test_bit(BTRFS_FS_STATE_REMOUNTING, &fs_info->fs_state) ||
+		!test_bit(BTRFS_FS_QUOTA_ENABLED, &fs_info->flags);
 }
 
 static void btrfs_qgroup_rescan_worker(struct btrfs_work *work)
@@ -3277,11 +3292,9 @@ static void btrfs_qgroup_rescan_worker(struct btrfs_work *work)
 			err = PTR_ERR(trans);
 			break;
 		}
-		if (!test_bit(BTRFS_FS_QUOTA_ENABLED, &fs_info->flags)) {
-			err = -EINTR;
-		} else {
-			err = qgroup_rescan_leaf(trans, path);
-		}
+
+		err = qgroup_rescan_leaf(trans, path);
+
 		if (err > 0)
 			btrfs_commit_transaction(trans);
 		else
@@ -3295,7 +3308,7 @@ out:
 	if (err > 0 &&
 	    fs_info->qgroup_flags & BTRFS_QGROUP_STATUS_FLAG_INCONSISTENT) {
 		fs_info->qgroup_flags &= ~BTRFS_QGROUP_STATUS_FLAG_INCONSISTENT;
-	} else if (err < 0) {
+	} else if (err < 0 || stopped) {
 		fs_info->qgroup_flags |= BTRFS_QGROUP_STATUS_FLAG_INCONSISTENT;
 	}
 	mutex_unlock(&fs_info->qgroup_rescan_lock);
@@ -3383,6 +3396,9 @@ qgroup_rescan_init(struct btrfs_fs_info *fs_info, u64 progress_objectid,
 			btrfs_warn(fs_info,
 			"qgroup rescan init failed, qgroup is not enabled");
 			ret = -EINVAL;
+		} else if (!test_bit(BTRFS_FS_QUOTA_ENABLED, &fs_info->flags)) {
+			/* Quota disable is in progress */
+			ret = -EBUSY;
 		}
 
 		if (ret) {
