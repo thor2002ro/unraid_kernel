@@ -1,0 +1,49 @@
+arm/soc
+
+arm/dt
+
+arm/drivers
+
+arm/defconfig
+	broadcom/defconfig [sign: Y Arnd Bergmann <arnd@arndb.de>]
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.17/defconfig
+	aspeed/defconfig
+broadcom/defconfig64 [sign: Y Arnd Bergmann <arnd@arndb.de>]
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.17/defconfig-arm64
+	qcom/defconfig [sign: N ]
+		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-defconfig-for-5.17
+	patch
+		ARM: multi_v7_defconfig: Enable drivers for DragonBoard 410c [sign: N ]
+
+arm/newsoc
+
+arm/late
+	patch
+		ARM: configs: aspeed: Add support for USB flash drives [sign: G Olof Johansson <olof@lixom.net>]
+	<no branch> (94d0cd1da14af0042c8ee7c2cf401dfc321c575c) [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/scmi-updates-5.17
+	qcom/dt64 [sign: G Olof Johansson <olof@lixom.net>]
+		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-for-5.17-1
+	qcom/defconfig [sign: G Olof Johansson <olof@lixom.net>]
+		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-defconfig-for-5.17
+	<no branch> (414174b6bb6569c07d8557c4475e43b1e18b4fea) [sign: G Olof Johansson <olof@lixom.net>]
+		https://git.kernel.org/pub/scm/linux/kernel/git/ti/linux tags/ti-k3-config-for-v5.17-v2
+	<no branch> (de369801658a9a54759ac011af770e8c01d9db7f) [sign: G Olof Johansson <olof@lixom.net>]
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux-mem-ctrl tags/memory-controller-drv-5.17
+	<no branch> (dbcb124acebd8148e9e858a231f1798956dd3ca6) [sign: G Olof Johansson <olof@lixom.net>]
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux-mem-ctrl tags/memory-controller-drv-omap-5.17
+	<no branch> (a1828d772e0738c30a383a7d335aded2f2baf908) [sign: G Olof Johansson <olof@lixom.net>]
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-dt64-5.17-2
+	<no branch> (89e7a6698fdd6d0cccf5bab11abc51f813944cd8) [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.pengutronix.de/pza/linux tags/reset-for-v5.17
+	<no branch> (0020e9e1f8d3348dd5c9a37612b1089c1a47553d) [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.kernel.org/pub/scm/linux/kernel/git/dinguyen/linux tags/socfpga_dts_update_for_v5.17_part2
+	<no branch> (1ce93cb102e7fcf5d1849044d23ce92b5a71040a) [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.kernel.org/pub/scm/linux/kernel/git/leo/linux tags/soc-fsl-next-v5.17
+	<no branch> (31aa7056bbec0259e2ec91db7d3571f66b14f93f) [sign: G Olof Johansson <olof@lixom.net>]
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-v5.17/fixes-for-merge-window-signed
+	<no branch> (3375aa77135f6aeb1107ed839a2050a4118444bc) [sign: G Olof Johansson <olof@lixom.net>]
+		https://git.kernel.org/pub/scm/linux/kernel/git/amlogic/linux tags/amlogic-fixes-v5.17-rc-v2
+
+arm/fixes
+
