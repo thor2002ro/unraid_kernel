@@ -241,7 +241,7 @@ static inline const struct raid6_calls *raid6_choose_xor(
 	const struct raid6_calls *best;
 
 	for (bestxorperf = 0, best = NULL, algo = raid6_algos; *algo; algo++) {
-		if (!best || (*algo)->prefer >= best->prefer) {
+		if (!best || (*algo)->priority >= best->priority) {
 			if ((*algo)->valid && !(*algo)->valid())
 				continue;
 
