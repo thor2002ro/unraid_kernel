@@ -158,12 +158,14 @@ static void kmb_plane_atomic_disable(struct drm_plane *plane,
 	case LAYER_1:
 		kmb->plane_status[plane_id].ctrl = LCD_CTRL_VL2_ENABLE;
 		break;
+#if 0
 	case LAYER_2:
 		kmb->plane_status[plane_id].ctrl = LCD_CTRL_GL1_ENABLE;
 		break;
 	case LAYER_3:
 		kmb->plane_status[plane_id].ctrl = LCD_CTRL_GL2_ENABLE;
 		break;
+#endif
 	}
 
 	kmb->plane_status[plane_id].disable = true;
