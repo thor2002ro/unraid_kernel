@@ -5110,9 +5110,14 @@ static int btrfs_ioctl_encoded_write(struct file *file, void __user *argp,
 		}
 		args.iov = compat_ptr(args32.iov);
 		args.iovcnt = args32.iovcnt;
-		memcpy(&args.offset, &args32.offset,
-		       sizeof(args) -
-		       offsetof(struct btrfs_ioctl_encoded_io_args, offset));
+		args.offset = args32.offset;
+		args.flags = args32.flags;
+		args.len = args32.len;
+		args.unencoded_len = args32.unencoded_len;
+		args.unencoded_offset = args32.unencoded_offset;
+		args.compression = args32.compression;
+		args.encryption = args32.encryption;
+		memcpy(args.reserved, args32.reserved, sizeof(args.reserved));
 #else
 		return -ENOTTY;
 #endif
