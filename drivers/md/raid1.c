@@ -1126,7 +1126,8 @@ static void alloc_behind_master_bio(struct r1bio *r1_bio,
 	int i = 0;
 	struct bio *behind_bio = NULL;
 
-	behind_bio = bio_alloc_bioset(GFP_NOIO, vcnt, &r1_bio->mddev->bio_set);
+	behind_bio = bio_alloc_bioset(NULL, vcnt, 0, GFP_NOIO,
+				      &r1_bio->mddev->bio_set);
 	if (!behind_bio)
 		return;
 
@@ -2165,11 +2166,10 @@ static void process_checks(struct r1bio *r1_bio)
 			continue;
 		/* fixup the bio for reuse, but preserve errno */
 		status = b->bi_status;
-		bio_reset(b);
+		bio_reset(b, conf->mirrors[i].rdev->bdev, REQ_OP_READ);
 		b->bi_status = status;
 		b->bi_iter.bi_sector = r1_bio->sector +
 			conf->mirrors[i].rdev->data_offset;
-		bio_set_dev(b, conf->mirrors[i].rdev->bdev);
 		b->bi_end_io = end_sync_read;
 		rp->raid_bio = r1_bio;
 		b->bi_private = rp;
@@ -2650,7 +2650,7 @@ static struct r1bio *raid1_alloc_init_r1buf(struct r1conf *conf)
 	for (i = conf->poolinfo->raid_disks; i--; ) {
 		bio = r1bio->bios[i];
 		rps = bio->bi_private;
-		bio_reset(bio);
+		bio_reset(bio, NULL, 0);
 		bio->bi_private = rps;
 	}
 	r1bio->master_bio = NULL;
