@@ -557,6 +557,7 @@ struct skb_shared_info {
 	 * Warning : all fields before dataref are cleared in __alloc_skb()
 	 */
 	atomic_t	dataref;
+	unsigned int	xdp_frags_size;
 
 	/* Intermediate layers must ensure that destructor_arg
 	 * remains valid until skb destructor */
@@ -3896,11 +3897,6 @@ static inline void __net_timestamp(struct sk_buff *skb)
 static inline ktime_t net_timedelta(ktime_t t)
 {
 	return ktime_sub(ktime_get_real(), t);
-}
-
-static inline ktime_t net_invalid_timestamp(void)
-{
-	return 0;
 }
 
 static inline u8 skb_metadata_len(const struct sk_buff *skb)
