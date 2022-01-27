@@ -150,10 +150,10 @@ static bool init_srcu_struct_nodes(struct srcu_struct *ssp, gfp_t gfp_flags)
 		WARN_ON_ONCE(ARRAY_SIZE(snp->srcu_have_cbs) !=
 			     ARRAY_SIZE(snp->srcu_data_have_cbs));
 		for (i = 0; i < ARRAY_SIZE(snp->srcu_have_cbs); i++) {
-			snp->srcu_have_cbs[i] = 0;
+			snp->srcu_have_cbs[i] = 0x1;
 			snp->srcu_data_have_cbs[i] = 0;
 		}
-		snp->srcu_gp_seq_needed_exp = 0;
+		snp->srcu_gp_seq_needed_exp = 0x1;
 		snp->grplo = -1;
 		snp->grphi = -1;
 		if (snp == &ssp->node[0]) {
@@ -397,8 +397,7 @@ static bool srcu_readers_active(struct srcu_struct *ssp)
  */
 static unsigned long srcu_get_delay(struct srcu_struct *ssp)
 {
-	if (ULONG_CMP_LT(READ_ONCE(ssp->srcu_gp_seq),
-			 READ_ONCE(ssp->srcu_gp_seq_needed_exp)))
+	if (ULONG_CMP_LT(READ_ONCE(ssp->srcu_gp_seq), READ_ONCE(ssp->srcu_gp_seq_needed_exp)))
 		return 0;
 	return SRCU_INTERVAL;
 }
@@ -572,6 +571,7 @@ static void srcu_gp_end(struct srcu_struct *ssp)
 	int idx;
 	unsigned long mask;
 	struct srcu_data *sdp;
+	unsigned long sgsne;
 	struct srcu_node *snp;
 	int ss_state;
 
@@ -605,7 +605,8 @@ static void srcu_gp_end(struct srcu_struct *ssp)
 				cbs = snp->srcu_have_cbs[idx] == gpseq;
 			snp->srcu_have_cbs[idx] = gpseq;
 			rcu_seq_set_state(&snp->srcu_have_cbs[idx], 1);
-			if (ULONG_CMP_LT(snp->srcu_gp_seq_needed_exp, gpseq))
+			sgsne = snp->srcu_gp_seq_needed_exp;
+			if (rcu_seq_state(sgsne) || ULONG_CMP_LT(sgsne, gpseq))
 				WRITE_ONCE(snp->srcu_gp_seq_needed_exp, gpseq);
 			mask = snp->srcu_data_have_cbs[idx];
 			snp->srcu_data_have_cbs[idx] = 0;
@@ -663,14 +664,17 @@ static void srcu_funnel_exp_start(struct srcu_struct *ssp, struct srcu_node *snp
 				  unsigned long s)
 {
 	unsigned long flags;
+	unsigned long sgsne;
 
 	if (snp)
 		for (; snp != NULL; snp = snp->srcu_parent) {
+			sgsne = READ_ONCE(snp->srcu_gp_seq_needed_exp);
 			if (rcu_seq_done(&ssp->srcu_gp_seq, s) ||
-			    ULONG_CMP_GE(READ_ONCE(snp->srcu_gp_seq_needed_exp), s))
+			    (!rcu_seq_state(sgsne) && ULONG_CMP_GE(sgsne, s)))
 				return;
 			spin_lock_irqsave_rcu_node(snp, flags);
-			if (ULONG_CMP_GE(snp->srcu_gp_seq_needed_exp, s)) {
+			sgsne = snp->srcu_gp_seq_needed_exp;
+			if (!rcu_seq_state(sgsne) && ULONG_CMP_GE(sgsne, s)) {
 				spin_unlock_irqrestore_rcu_node(snp, flags);
 				return;
 			}
@@ -698,6 +702,7 @@ static void srcu_funnel_gp_start(struct srcu_struct *ssp, struct srcu_data *sdp,
 {
 	unsigned long flags;
 	int idx = rcu_seq_ctr(s) % ARRAY_SIZE(sdp->mynode->srcu_have_cbs);
+	unsigned long sgsne;
 	struct srcu_node *snp;
 	struct srcu_node *snp_leaf = smp_load_acquire(&sdp->mynode);
 	unsigned long snp_seq;
@@ -724,7 +729,8 @@ static void srcu_funnel_gp_start(struct srcu_struct *ssp, struct srcu_data *sdp,
 			snp->srcu_have_cbs[idx] = s;
 			if (snp == snp_leaf)
 				snp->srcu_data_have_cbs[idx] |= sdp->grpmask;
-			if (!do_norm && ULONG_CMP_LT(snp->srcu_gp_seq_needed_exp, s))
+			sgsne = snp->srcu_gp_seq_needed_exp;
+			if (!do_norm && (rcu_seq_state(sgsne) || ULONG_CMP_LT(sgsne, s)))
 				WRITE_ONCE(snp->srcu_gp_seq_needed_exp, s);
 			spin_unlock_irqrestore_rcu_node(snp, flags);
 		}
