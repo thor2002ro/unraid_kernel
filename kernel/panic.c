@@ -245,6 +245,13 @@ void panic(const char *fmt, ...)
 	kgdb_panic(buf);
 
 	/*
+	 * If we have a kdump kernel loaded, give a chance to panic_print
+	 * show some extra information on kernel log if it was set...
+	 */
+	if (kexec_crash_loaded())
+		panic_print_sys_info();
+
+	/*
 	 * If we have crashed and we have a crash kernel loaded let it handle
 	 * everything else.
 	 * If we want to run this after calling panic_notifiers, pass
