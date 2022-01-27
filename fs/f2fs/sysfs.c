@@ -363,7 +363,7 @@ static ssize_t __sbi_store(struct f2fs_attr *a,
 		if (!strlen(name) || strlen(name) >= F2FS_EXTENSION_LEN)
 			return -EINVAL;
 
-		down_write(&sbi->sb_lock);
+		f2fs_down_write(&sbi->sb_lock);
 
 		ret = f2fs_update_extension_list(sbi, name, hot, set);
 		if (ret)
@@ -373,7 +373,7 @@ static ssize_t __sbi_store(struct f2fs_attr *a,
 		if (ret)
 			f2fs_update_extension_list(sbi, name, hot, !set);
 out:
-		up_write(&sbi->sb_lock);
+		f2fs_up_write(&sbi->sb_lock);
 		return ret ? ret : count;
 	}
 
@@ -481,7 +481,7 @@ out:
 		} else if (t == GC_IDLE_AT) {
 			if (!sbi->am.atgc_enabled)
 				return -EINVAL;
-			sbi->gc_mode = GC_AT;
+			sbi->gc_mode = GC_IDLE_AT;
 		} else {
 			sbi->gc_mode = GC_NORMAL;
 		}
