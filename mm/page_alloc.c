@@ -6334,8 +6334,9 @@ static void build_zonelists(pg_data_t *pgdat)
 		 * So adding penalty to the first node in same
 		 * distance group to make it round-robin.
 		 */
-		if (node_distance(local_node, node) !=
-		    node_distance(local_node, prev_node))
+		if ((node_distance(local_node, node) !=
+		    node_distance(local_node, prev_node)) ||
+		    node == local_node)
 			node_load[node] += nr_online_nodes;
 
 		node_order[nr_nodes++] = node;
