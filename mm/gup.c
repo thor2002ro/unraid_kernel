@@ -440,7 +440,7 @@ static int follow_pfn_pte(struct vm_area_struct *vma, unsigned long address,
 		pte_t *pte, unsigned int flags)
 {
 	/* No page to get reference */
-	if (flags & FOLL_GET)
+	if (flags & (FOLL_GET | FOLL_PIN))
 		return -EFAULT;
 
 	if (flags & FOLL_TOUCH) {
@@ -1181,7 +1181,13 @@ retry:
 			/*
 			 * Proper page table entry exists, but no corresponding
 			 * struct page.
+			 *
+			 * Warn if we jumped over even with a valid **pages.
+			 * It shouldn't trigger in practise, but when there's
+			 * buggy returns on -EEXIST we'll warn before returning
+			 * an invalid page pointer in the array.
 			 */
+			WARN_ON_ONCE(pages);
 			goto next_page;
 		} else if (IS_ERR(page)) {
 			ret = PTR_ERR(page);
