@@ -10,13 +10,11 @@
 
 enum hw_variables {
 	HW_VAR_MEDIA_STATUS,
-	HW_VAR_MEDIA_STATUS1,
 	HW_VAR_SET_OPMODE,
 	HW_VAR_MAC_ADDR,
 	HW_VAR_BSSID,
 	HW_VAR_INIT_RTS_RATE,
 	HW_VAR_BASIC_RATE,
-	HW_VAR_TXPAUSE,
 	HW_VAR_BCN_FUNC,
 	HW_VAR_CORRECT_TSF,
 	HW_VAR_CHECK_BSSID,
@@ -56,17 +54,13 @@ enum hw_variables {
 	HW_VAR_INITIAL_GAIN,
 	HW_VAR_BT_SET_COEXIST,
 	HW_VAR_BT_ISSUE_DELBA,
-	HW_VAR_CURRENT_ANTENNA,
 	HW_VAR_ANTENNA_DIVERSITY_LINK,
 	HW_VAR_ANTENNA_DIVERSITY_SELECT,
 	HW_VAR_SWITCH_EPHY_WoWLAN,
 	HW_VAR_EFUSE_USAGE,
-	HW_VAR_EFUSE_BYTES,
 	HW_VAR_EFUSE_BT_USAGE,
 	HW_VAR_EFUSE_BT_BYTES,
 	HW_VAR_FIFO_CLEARN_UP,
-	HW_VAR_APFM_ON_MAC, /* Auto FSM to Turn On, include clock, isolation,
-			     * power control for MAC only */
 	/*  The valid upper nav range for the HW updating, if the true value is
 	 *  larger than the upper range, the HW won't update it. */
 	/*  Unit in microsecond. 0 means disable this function. */

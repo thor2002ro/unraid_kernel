@@ -169,9 +169,6 @@ static void odm_DIG(struct odm_dm_struct *pDM_Odm)
 	u8 dm_dig_max, dm_dig_min;
 	u8 CurrentIGI = pDM_DigTable->CurIGValue;
 
-	if (!(pDM_Odm->SupportAbility & ODM_BB_FA_CNT))
-		return;
-
 	if (*pDM_Odm->pbScanInProcess)
 		return;
 
@@ -367,9 +364,6 @@ static void odm_FalseAlarmCounterStatistics(struct odm_dm_struct *pDM_Odm)
 	struct false_alarm_stats *FalseAlmCnt = &pDM_Odm->FalseAlmCnt;
 	struct adapter *adapter = pDM_Odm->Adapter;
 
-	if (!(pDM_Odm->SupportAbility & ODM_BB_FA_CNT))
-		return;
-
 	/* hold ofdm counter */
 	rtl8188e_PHY_SetBBReg(adapter, ODM_REG_OFDM_FA_HOLDC_11N, BIT(31), 1); /* hold page C counter */
 	rtl8188e_PHY_SetBBReg(adapter, ODM_REG_OFDM_FA_RSTD_11N, BIT(31), 1); /* hold page D counter */
@@ -422,8 +416,6 @@ static void odm_CCKPacketDetectionThresh(struct odm_dm_struct *pDM_Odm)
 	u8 CurCCK_CCAThres;
 	struct false_alarm_stats *FalseAlmCnt = &pDM_Odm->FalseAlmCnt;
 
-	if (!(pDM_Odm->SupportAbility & (ODM_BB_CCK_PD | ODM_BB_FA_CNT)))
-		return;
 	if (pDM_Odm->bLinked) {
 		if (pDM_Odm->RSSI_Min > 25) {
 			CurCCK_CCAThres = 0xcd;
@@ -502,11 +494,6 @@ static void odm_RSSIMonitorCheck(struct odm_dm_struct *pDM_Odm)
 		}
 	}
 
-	if (tmpEntryMaxPWDB != 0)	/*  If associated entry is found */
-		pdmpriv->EntryMaxUndecoratedSmoothedPWDB = tmpEntryMaxPWDB;
-	else
-		pdmpriv->EntryMaxUndecoratedSmoothedPWDB = 0;
-
 	if (tmpEntryMinPWDB != 0xff) /*  If associated entry is found */
 		pdmpriv->EntryMinUndecoratedSmoothedPWDB = tmpEntryMinPWDB;
 	else
@@ -562,9 +549,6 @@ static void odm_EdcaTurboCheck(struct odm_dm_struct *pDM_Odm)
 	struct registry_priv	*pregpriv = &Adapter->registrypriv;
 	struct mlme_ext_priv	*pmlmeext = &Adapter->mlmeextpriv;
 	struct mlme_ext_info	*pmlmeinfo = &pmlmeext->mlmext_info;
-
-	if (!(pDM_Odm->SupportAbility & ODM_MAC_EDCA_TURBO))
-		return;
 
 	if (pregpriv->wifi_spec == 1)
 		goto dm_CheckEdcaTurbo_EXIT;
@@ -913,9 +897,6 @@ bool ODM_RAStateCheck(struct odm_dm_struct *pDM_Odm, s32 RSSI, bool bForceUpdate
 void ODM_TXPowerTrackingCheck(struct odm_dm_struct *pDM_Odm)
 {
 	struct adapter *Adapter = pDM_Odm->Adapter;
-
-	if (!(pDM_Odm->SupportAbility & ODM_RF_TX_PWR_TRACK))
-		return;
 
 	if (!pDM_Odm->RFCalibrateInfo.TM_Trigger) {		/* at least delay 1 sec */
 		rtl8188e_PHY_SetRFReg(Adapter, RF_PATH_A, RF_T_METER_88E, BIT(17) | BIT(16), 0x03);

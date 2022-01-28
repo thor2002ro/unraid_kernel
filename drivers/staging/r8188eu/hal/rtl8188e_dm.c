@@ -22,27 +22,6 @@ static void dm_InitGPIOSetting(struct adapter *Adapter)
 /*  */
 /*  functions */
 /*  */
-static void Init_ODM_ComInfo_88E(struct adapter *Adapter)
-{
-	struct hal_data_8188e *hal_data = &Adapter->haldata;
-	struct dm_priv	*pdmpriv = &hal_data->dmpriv;
-	struct odm_dm_struct *dm_odm = &hal_data->odmpriv;
-
-	/*  Init Value */
-	memset(dm_odm, 0, sizeof(*dm_odm));
-
-	dm_odm->Adapter = Adapter;
-
-	ODM_CmnInfoInit(dm_odm, ODM_CMNINFO_MP_TEST_CHIP, IS_NORMAL_CHIP(hal_data->VersionID));
-
-	ODM_CmnInfoInit(dm_odm, ODM_CMNINFO_RF_ANTENNA_TYPE, hal_data->TRxAntDivType);
-
-	pdmpriv->InitODMFlag =	ODM_RF_CALIBRATION |
-				ODM_RF_TX_PWR_TRACK;
-
-	ODM_CmnInfoUpdate(dm_odm, ODM_CMNINFO_ABILITY, pdmpriv->InitODMFlag);
-}
-
 static void Update_ODM_ComInfo_88E(struct adapter *Adapter)
 {
 	struct mlme_ext_priv	*pmlmeext = &Adapter->mlmeextpriv;
@@ -53,12 +32,7 @@ static void Update_ODM_ComInfo_88E(struct adapter *Adapter)
 	struct dm_priv	*pdmpriv = &hal_data->dmpriv;
 	int i;
 
-	pdmpriv->InitODMFlag = ODM_BB_FA_CNT |
-				ODM_BB_RSSI_MONITOR |
-				ODM_BB_CCK_PD |
-				ODM_MAC_EDCA_TURBO |
-				ODM_RF_CALIBRATION |
-				ODM_RF_TX_PWR_TRACK;
+	pdmpriv->InitODMFlag = ODM_BB_RSSI_MONITOR;
 	if (hal_data->AntDivCfg)
 		pdmpriv->InitODMFlag |= ODM_BB_ANT_DIV;
 
@@ -113,9 +87,14 @@ void rtl8188e_init_dm_priv(struct adapter *Adapter)
 {
 	struct hal_data_8188e *hal_data = &Adapter->haldata;
 	struct dm_priv	*pdmpriv = &hal_data->dmpriv;
+	struct odm_dm_struct *dm_odm = &hal_data->odmpriv;
 
 	memset(pdmpriv, 0, sizeof(struct dm_priv));
-	Init_ODM_ComInfo_88E(Adapter);
+	memset(dm_odm, 0, sizeof(*dm_odm));
+
+	dm_odm->Adapter = Adapter;
+	ODM_CmnInfoInit(dm_odm, ODM_CMNINFO_MP_TEST_CHIP, IS_NORMAL_CHIP(hal_data->VersionID));
+	ODM_CmnInfoInit(dm_odm, ODM_CMNINFO_RF_ANTENNA_TYPE, hal_data->TRxAntDivType);
 }
 
 /*  Add new function to reset the state of antenna diversity before link. */

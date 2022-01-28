@@ -6,16 +6,12 @@
 #include "../include/osdep_service.h"
 #include "../include/drv_types.h"
 #include "../include/rtw_efuse.h"
-
+#include "../include/rtw_fw.h"
 #include "../include/rtl8188e_hal.h"
 #include "../include/rtw_iol.h"
 #include "../include/usb_ops.h"
 #include "../include/usb_osintf.h"
 #include "../include/Hal8188EPwrSeq.h"
-
-#define		HAL_MAC_ENABLE	1
-#define		HAL_BB_ENABLE		1
-#define		HAL_RF_ENABLE		1
 
 static void _ConfigNormalChipOutEP_8188E(struct adapter *adapt, u8 NumOutPipe)
 {
@@ -625,7 +621,7 @@ u32 rtl8188eu_hal_init(struct adapter *Adapter)
 
 	_InitTxBufferBoundary(Adapter, 0);
 
-	status = rtl8188e_FirmwareDownload(Adapter);
+	status = rtl8188e_firmware_download(Adapter);
 
 	if (status != _SUCCESS) {
 		DBG_88E("%s: Download Firmware failed!!\n", __func__);
@@ -636,34 +632,30 @@ u32 rtl8188eu_hal_init(struct adapter *Adapter)
 		Adapter->bFWReady = true;
 		haldata->fw_ractrl = false;
 	}
-	rtl8188e_InitializeFirmwareVars(Adapter);
+	/* Initialize firmware vars */
+	Adapter->pwrctrlpriv.bFwCurrentInPSMode = false;
+	haldata->LastHMEBoxNum = 0;
 
-#if (HAL_MAC_ENABLE == 1)
 	status = PHY_MACConfig8188E(Adapter);
 	if (status == _FAIL) {
 		DBG_88E(" ### Failed to init MAC ......\n ");
 		goto exit;
 	}
-#endif
 
 	/*  */
 	/* d. Initialize BB related configurations. */
 	/*  */
-#if (HAL_BB_ENABLE == 1)
 	status = PHY_BBConfig8188E(Adapter);
 	if (status == _FAIL) {
 		DBG_88E(" ### Failed to init BB ......\n ");
 		goto exit;
 	}
-#endif
 
-#if (HAL_RF_ENABLE == 1)
 	status = PHY_RFConfig8188E(Adapter);
 	if (status == _FAIL) {
 		DBG_88E(" ### Failed to init RF ......\n ");
 		goto exit;
 	}
-#endif
 
 	status = rtl8188e_iol_efuse_patch(Adapter);
 	if (status == _FAIL) {
@@ -1085,15 +1077,6 @@ void SetHwReg8188EU(struct adapter *Adapter, u8 variable, u8 *val)
 			rtw_write8(Adapter, MSR, val8);
 		}
 		break;
-	case HW_VAR_MEDIA_STATUS1:
-		{
-			u8 val8;
-
-			val8 = rtw_read8(Adapter, MSR) & 0x03;
-			val8 |= *((u8 *)val) << 2;
-			rtw_write8(Adapter, MSR, val8);
-		}
-		break;
 	case HW_VAR_SET_OPMODE:
 		hw_var_set_opmode(Adapter, variable, val);
 		break;
@@ -1137,9 +1120,6 @@ void SetHwReg8188EU(struct adapter *Adapter, u8 variable, u8 *val)
 			/*  Ziv - Check */
 			rtw_write8(Adapter, REG_INIRTS_RATE_SEL, RateIndex);
 		}
-		break;
-	case HW_VAR_TXPAUSE:
-		rtw_write8(Adapter, REG_TXPAUSE, *((u8 *)val));
 		break;
 	case HW_VAR_BCN_FUNC:
 		hw_var_set_bcn_func(Adapter, variable, val);
@@ -1531,9 +1511,6 @@ void SetHwReg8188EU(struct adapter *Adapter, u8 variable, u8 *val)
 			}
 		}
 		break;
-	case HW_VAR_EFUSE_BYTES: /*  To set EFUE total used bytes, added by Roger, 2008.12.22. */
-		haldata->EfuseUsedBytes = *((u16 *)val);
-		break;
 	case HW_VAR_FIFO_CLEARN_UP:
 		{
 			struct pwrctrl_priv *pwrpriv = &Adapter->pwrctrlpriv;
@@ -1562,10 +1539,6 @@ void SetHwReg8188EU(struct adapter *Adapter, u8 variable, u8 *val)
 			}
 		}
 		break;
-	case HW_VAR_APFM_ON_MAC:
-		haldata->bMacPwrCtrlOn = *val;
-		DBG_88E("%s: bMacPwrCtrlOn=%d\n", __func__, haldata->bMacPwrCtrlOn);
-		break;
 	case HW_VAR_TX_RPT_MAX_MACID:
 		{
 			u8 maxMacid = *val;
@@ -1592,12 +1565,6 @@ void GetHwReg8188EU(struct adapter *Adapter, u8 variable, u8 *val)
 	struct odm_dm_struct *podmpriv = &haldata->odmpriv;
 
 	switch (variable) {
-	case HW_VAR_BASIC_RATE:
-		*((u16 *)(val)) = haldata->BasicRateSet;
-		fallthrough;
-	case HW_VAR_TXPAUSE:
-		val[0] = rtw_read8(Adapter, REG_TXPAUSE);
-		break;
 	case HW_VAR_BCN_VALID:
 		/* BCN_VALID, BIT(16) of REG_TDECTRL = BIT(0) of REG_TDECTRL+2 */
 		val[0] = (BIT(0) & rtw_read8(Adapter, REG_TDECTRL + 2)) ? true : false;
@@ -1622,15 +1589,6 @@ void GetHwReg8188EU(struct adapter *Adapter, u8 variable, u8 *val)
 					val[0] = true;
 			}
 		}
-		break;
-	case HW_VAR_CURRENT_ANTENNA:
-		val[0] = haldata->CurAntenna;
-		break;
-	case HW_VAR_EFUSE_BYTES: /*  To get EFUE total used bytes, added by Roger, 2008.12.22. */
-		*((u16 *)(val)) = haldata->EfuseUsedBytes;
-		break;
-	case HW_VAR_APFM_ON_MAC:
-		*val = haldata->bMacPwrCtrlOn;
 		break;
 	case HW_VAR_CHK_HI_QUEUE_EMPTY:
 		*val = ((rtw_read32(Adapter, REG_HGQ_INFORMATION) & 0x0000ff00) == 0) ? true : false;

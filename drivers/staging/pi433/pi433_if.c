@@ -108,6 +108,9 @@ struct pi433_device {
 struct pi433_instance {
 	struct pi433_device	*device;
 	struct pi433_tx_cfg	tx_cfg;
+
+	/* control flags */
+	bool			tx_cfg_initialized;
 };
 
 /*-------------------------------------------------------------------------*/
@@ -164,10 +167,10 @@ rf69_set_rx_cfg(struct pi433_device *dev, struct pi433_rx_cfg *rx_cfg)
 	ret = rf69_set_frequency(dev->spi, rx_cfg->frequency);
 	if (ret < 0)
 		return ret;
-	ret = rf69_set_bit_rate(dev->spi, rx_cfg->bit_rate);
+	ret = rf69_set_modulation(dev->spi, rx_cfg->modulation);
 	if (ret < 0)
 		return ret;
-	ret = rf69_set_modulation(dev->spi, rx_cfg->modulation);
+	ret = rf69_set_bit_rate(dev->spi, rx_cfg->bit_rate);
 	if (ret < 0)
 		return ret;
 	ret = rf69_set_antenna_impedance(dev->spi, rx_cfg->antenna_impedance);
@@ -287,10 +290,10 @@ rf69_set_tx_cfg(struct pi433_device *dev, struct pi433_tx_cfg *tx_cfg)
 	ret = rf69_set_frequency(dev->spi, tx_cfg->frequency);
 	if (ret < 0)
 		return ret;
-	ret = rf69_set_bit_rate(dev->spi, tx_cfg->bit_rate);
+	ret = rf69_set_modulation(dev->spi, tx_cfg->modulation);
 	if (ret < 0)
 		return ret;
-	ret = rf69_set_modulation(dev->spi, tx_cfg->modulation);
+	ret = rf69_set_bit_rate(dev->spi, tx_cfg->bit_rate);
 	if (ret < 0)
 		return ret;
 	ret = rf69_set_deviation(dev->spi, tx_cfg->dev_frequency);
@@ -824,6 +827,16 @@ pi433_write(struct file *filp, const char __user *buf,
 		return -EMSGSIZE;
 
 	/*
+	 * check if tx_cfg has been initialized otherwise we won't be able to
+	 * config the RF trasmitter correctly due to invalid settings
+	 */
+	if (!instance->tx_cfg_initialized) {
+		dev_notice_once(device->dev,
+				"write: failed due to unconfigured tx_cfg (see PI433_IOC_WR_TX_CFG)");
+		return -EINVAL;
+	}
+
+	/*
 	 * write the following sequence into fifo:
 	 * - tx_cfg
 	 * - size of message
@@ -897,6 +910,7 @@ pi433_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			return -EFAULT;
 		mutex_lock(&device->tx_fifo_lock);
 		memcpy(&instance->tx_cfg, &tx_cfg, sizeof(struct pi433_tx_cfg));
+		instance->tx_cfg_initialized = true;
 		mutex_unlock(&device->tx_fifo_lock);
 		break;
 	case PI433_IOC_RD_RX_CFG:
@@ -949,8 +963,6 @@ static int pi433_open(struct inode *inode, struct file *filp)
 
 	/* setup instance data*/
 	instance->device = device;
-	instance->tx_cfg.bit_rate = 4711;
-	// TODO: fill instance->tx_cfg;
 
 	/* instance data as context */
 	filp->private_data = instance;
@@ -1115,8 +1127,8 @@ static int pi433_probe(struct spi_device *spi)
 		"spi interface setup: mode 0x%2x, %d bits per word, %dhz max speed",
 		spi->mode, spi->bits_per_word, spi->max_speed_hz);
 
-	/* Ping the chip by reading the version register */
-	retval = spi_w8r8(spi, 0x10);
+	/* read chip version */
+	retval = rf69_get_version(spi);
 	if (retval < 0)
 		return retval;
 

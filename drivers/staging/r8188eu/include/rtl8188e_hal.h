@@ -34,18 +34,6 @@
 #define DRVINFO_SZ	4 /*  unit is 8bytes */
 #define PageNum_128(_Len)	(u32)(((_Len)>>7) + ((_Len) & 0x7F ? 1 : 0))
 
-/*  download firmware related data structure */
-#define FW_8188E_SIZE			0x4000 /* 16384,16k */
-#define FW_8188E_START_ADDRESS		0x1000
-
-#define MAX_PAGE_SIZE			4096	/*  @ page : 4k bytes */
-
-#define IS_FW_HEADER_EXIST(_pFwHdr)				\
-	((le16_to_cpu(_pFwHdr->Signature)&0xFFF0) == 0x92C0 ||	\
-	(le16_to_cpu(_pFwHdr->Signature)&0xFFF0) == 0x88C0 ||	\
-	(le16_to_cpu(_pFwHdr->Signature)&0xFFF0) == 0x2300 ||	\
-	(le16_to_cpu(_pFwHdr->Signature)&0xFFF0) == 0x88E0)
-
 /*  This structure must be careful with byte-ordering */
 
 struct rt_firmware_hdr {
@@ -162,10 +150,6 @@ struct txpowerinfo24g {
 
 struct hal_data_8188e {
 	struct HAL_VERSION	VersionID;
-	u16	FirmwareVersion;
-	u16	FirmwareVersionRev;
-	u16	FirmwareSubVersion;
-	u16	FirmwareSignature;
 	u8	PGMaxGroup;
 	/* current WIFI_PHY values */
 	u32	ReceiveConfig;
@@ -191,12 +175,6 @@ struct hal_data_8188e {
 	/*  For power group */
 	u8	PwrGroupHT20[RF_PATH_MAX][CHANNEL_MAX_NUMBER];
 	u8	PwrGroupHT40[RF_PATH_MAX][CHANNEL_MAX_NUMBER];
-
-	/*  The current Tx Power Level */
-	u8	CurrentCckTxPwrIdx;
-	u8	CurrentOfdm24GTxPwrIdx;
-	u8	CurrentBW2024GTxPwrIdx;
-	u8	CurrentBW4024GTxPwrIdx;
 
 	/*  Read/write are allow for following hardware information variables */
 	u8	pwrGroupCnt;
@@ -232,8 +210,6 @@ struct hal_data_8188e {
 	u8	OutEpQueueSel;
 	u8	OutEpNumber;
 
-	u16	EfuseUsedBytes;
-
 	struct P2P_PS_Offload_t	p2p_ps_offload;
 
 	/*  Auto FSM to Turn On, include clock, isolation, power control
@@ -253,11 +229,6 @@ struct hal_data_8188e {
 	u8	UsbRxAggPageCount;	/*  8192C DMA page count */
 	u8	UsbRxAggPageTimeout;
 };
-
-/*  rtl8188e_hal_init.c */
-s32 rtl8188e_FirmwareDownload(struct adapter *padapter);
-void _8051Reset88E(struct adapter *padapter);
-void rtl8188e_InitializeFirmwareVars(struct adapter *padapter);
 
 s32 InitLLTTable(struct adapter *padapter, u8 txpktbuf_bndy);
 
