@@ -1897,6 +1897,10 @@ static int do_execveat_common(int fd, struct filename *filename,
 	}
 
 	retval = count(argv, MAX_ARG_STRINGS);
+	if (retval == 0) {
+		pr_warn_once("Attempted to run process '%s' with NULL argv\n", bprm->filename);
+		retval = -EINVAL;
+	}
 	if (retval < 0)
 		goto out_free;
 	bprm->argc = retval;
