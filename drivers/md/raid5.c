@@ -2310,8 +2310,8 @@ static struct stripe_head *alloc_stripe(struct kmem_cache *sc, gfp_t gfp,
 		for (i = 0; i < disks; i++) {
 			struct r5dev *dev = &sh->dev[i];
 
-			bio_init(&dev->req, &dev->vec, 1);
-			bio_init(&dev->rreq, &dev->rvec, 1);
+			bio_init(&dev->req, NULL, &dev->vec, 1, 0);
+			bio_init(&dev->rreq, NULL, &dev->rvec, 1, 0);
 		}
 
 		if (raid5_has_ppl(conf)) {
@@ -2677,7 +2677,7 @@ static void raid5_end_read_request(struct bio * bi)
 		(unsigned long long)sh->sector, i, atomic_read(&sh->count),
 		bi->bi_status);
 	if (i == disks) {
-		bio_reset(bi);
+		bio_reset(bi, NULL, 0);
 		BUG();
 		return;
 	}
@@ -2785,7 +2785,7 @@ static void raid5_end_read_request(struct bio * bi)
 		}
 	}
 	rdev_dec_pending(rdev, conf->mddev);
-	bio_reset(bi);
+	bio_reset(bi, NULL, 0);
 	clear_bit(R5_LOCKED, &sh->dev[i].flags);
 	set_bit(STRIPE_HANDLE, &sh->state);
 	raid5_release_stripe(sh);
@@ -2823,7 +2823,7 @@ static void raid5_end_write_request(struct bio *bi)
 		(unsigned long long)sh->sector, i, atomic_read(&sh->count),
 		bi->bi_status);
 	if (i == disks) {
-		bio_reset(bi);
+		bio_reset(bi, NULL, 0);
 		BUG();
 		return;
 	}
@@ -2860,7 +2860,7 @@ static void raid5_end_write_request(struct bio *bi)
 	if (sh->batch_head && bi->bi_status && !replacement)
 		set_bit(STRIPE_BATCH_ERR, &sh->batch_head->state);
 
-	bio_reset(bi);
+	bio_reset(bi, NULL, 0);
 	if (!test_and_clear_bit(R5_DOUBLE_LOCKED, &sh->dev[i].flags))
 		clear_bit(R5_LOCKED, &sh->dev[i].flags);
 	set_bit(STRIPE_HANDLE, &sh->state);
