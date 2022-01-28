@@ -29,11 +29,19 @@ enum kunit_assert_type {
 };
 
 /**
+ * struct kunit_loc - Identifies the source location of a line of code.
+ * @line: the line number in the file.
+ * @file: the file name.
+ */
+struct kunit_loc {
+	int line;
+	const char *file;
+};
+
+#define KUNIT_CURRENT_LOC { .file = __FILE__, .line = __LINE__ }
+
+/**
  * struct kunit_assert - Data for printing a failed assertion or expectation.
- * @test: the test case this expectation/assertion is associated with.
- * @type: the type (either an expectation or an assertion) of this kunit_assert.
- * @line: the source code line number that the expectation/assertion is at.
- * @file: the file path of the source file that the expectation/assertion is in.
  * @message: an optional message to provide additional context.
  * @format: a function which formats the data in this kunit_assert to a string.
  *
@@ -41,10 +49,6 @@ enum kunit_assert_type {
  * format a string to a user reporting the failure.
  */
 struct kunit_assert {
-	struct kunit *test;
-	enum kunit_assert_type type;
-	int line;
-	const char *file;
 	struct va_format message;
 	void (*format)(const struct kunit_assert *assert,
 		       struct string_stream *stream);
@@ -60,23 +64,18 @@ struct kunit_assert {
 
 /**
  * KUNIT_INIT_ASSERT_STRUCT() - Initializer for a &struct kunit_assert.
- * @kunit: The test case that this expectation/assertion is associated with.
- * @assert_type: The type (assertion or expectation) of this kunit_assert.
  * @fmt: The formatting function which builds a string out of this kunit_assert.
  *
  * The base initializer for a &struct kunit_assert.
  */
-#define KUNIT_INIT_ASSERT_STRUCT(kunit, assert_type, fmt) {		       \
-	.test = kunit,							       \
-	.type = assert_type,						       \
-	.file = __FILE__,						       \
-	.line = __LINE__,						       \
+#define KUNIT_INIT_ASSERT_STRUCT(fmt) {					       \
 	.message = KUNIT_INIT_VA_FMT_NULL,				       \
 	.format = fmt							       \
 }
 
-void kunit_base_assert_format(const struct kunit_assert *assert,
-			      struct string_stream *stream);
+void kunit_assert_prologue(const struct kunit_loc *loc,
+			   enum kunit_assert_type type,
+			   struct string_stream *stream);
 
 void kunit_assert_print_msg(const struct kunit_assert *assert,
 			    struct string_stream *stream);
@@ -95,17 +94,13 @@ void kunit_fail_assert_format(const struct kunit_assert *assert,
 			      struct string_stream *stream);
 
 /**
- * KUNIT_INIT_FAIL_ASSERT_STRUCT() - Initializer for &struct kunit_fail_assert.
- * @test: The test case that this expectation/assertion is associated with.
- * @type: The type (assertion or expectation) of this kunit_assert.
+ * KUNIT_INIT_FAIL_ASSERT_STRUCT - Initializer for &struct kunit_fail_assert.
  *
  * Initializes a &struct kunit_fail_assert. Intended to be used in
  * KUNIT_EXPECT_* and KUNIT_ASSERT_* macros.
  */
-#define KUNIT_INIT_FAIL_ASSERT_STRUCT(test, type) {			       \
-	.assert = KUNIT_INIT_ASSERT_STRUCT(test,			       \
-					   type,			       \
-					   kunit_fail_assert_format)	       \
+#define KUNIT_INIT_FAIL_ASSERT_STRUCT {					\
+	.assert = KUNIT_INIT_ASSERT_STRUCT(kunit_fail_assert_format)	\
 }
 
 /**
@@ -129,18 +124,14 @@ void kunit_unary_assert_format(const struct kunit_assert *assert,
 
 /**
  * KUNIT_INIT_UNARY_ASSERT_STRUCT() - Initializes &struct kunit_unary_assert.
- * @test: The test case that this expectation/assertion is associated with.
- * @type: The type (assertion or expectation) of this kunit_assert.
  * @cond: A string representation of the expression asserted true or false.
  * @expect_true: True if of type KUNIT_{EXPECT|ASSERT}_TRUE, false otherwise.
  *
  * Initializes a &struct kunit_unary_assert. Intended to be used in
  * KUNIT_EXPECT_* and KUNIT_ASSERT_* macros.
  */
-#define KUNIT_INIT_UNARY_ASSERT_STRUCT(test, type, cond, expect_true) {	       \
-	.assert = KUNIT_INIT_ASSERT_STRUCT(test,			       \
-					   type,			       \
-					   kunit_unary_assert_format),	       \
+#define KUNIT_INIT_UNARY_ASSERT_STRUCT(cond, expect_true) {		       \
+	.assert = KUNIT_INIT_ASSERT_STRUCT(kunit_unary_assert_format),	       \
 	.condition = cond,						       \
 	.expected_true = expect_true					       \
 }
@@ -167,18 +158,14 @@ void kunit_ptr_not_err_assert_format(const struct kunit_assert *assert,
 /**
  * KUNIT_INIT_PTR_NOT_ERR_ASSERT_STRUCT() - Initializes a
  *	&struct kunit_ptr_not_err_assert.
- * @test: The test case that this expectation/assertion is associated with.
- * @type: The type (assertion or expectation) of this kunit_assert.
  * @txt: A string representation of the expression passed to the expectation.
  * @val: The actual evaluated pointer value of the expression.
  *
  * Initializes a &struct kunit_ptr_not_err_assert. Intended to be used in
  * KUNIT_EXPECT_* and KUNIT_ASSERT_* macros.
  */
-#define KUNIT_INIT_PTR_NOT_ERR_STRUCT(test, type, txt, val) {		       \
-	.assert = KUNIT_INIT_ASSERT_STRUCT(test,			       \
-					   type,			       \
-					   kunit_ptr_not_err_assert_format),   \
+#define KUNIT_INIT_PTR_NOT_ERR_STRUCT(txt, val) {			       \
+	.assert = KUNIT_INIT_ASSERT_STRUCT(kunit_ptr_not_err_assert_format),   \
 	.text = txt,							       \
 	.value = val							       \
 }
@@ -212,8 +199,6 @@ void kunit_binary_assert_format(const struct kunit_assert *assert,
 /**
  * KUNIT_INIT_BINARY_ASSERT_STRUCT() - Initializes a
  *	&struct kunit_binary_assert.
- * @test: The test case that this expectation/assertion is associated with.
- * @type: The type (assertion or expectation) of this kunit_assert.
  * @op_str: A string representation of the comparison operator (e.g. "==").
  * @left_str: A string representation of the expression in the left slot.
  * @left_val: The actual evaluated value of the expression in the left slot.
@@ -223,16 +208,12 @@ void kunit_binary_assert_format(const struct kunit_assert *assert,
  * Initializes a &struct kunit_binary_assert. Intended to be used in
  * KUNIT_EXPECT_* and KUNIT_ASSERT_* macros.
  */
-#define KUNIT_INIT_BINARY_ASSERT_STRUCT(test,				       \
-					type,				       \
-					op_str,				       \
+#define KUNIT_INIT_BINARY_ASSERT_STRUCT(op_str,				       \
 					left_str,			       \
 					left_val,			       \
 					right_str,			       \
 					right_val) {			       \
-	.assert = KUNIT_INIT_ASSERT_STRUCT(test,			       \
-					   type,			       \
-					   kunit_binary_assert_format),	       \
+	.assert = KUNIT_INIT_ASSERT_STRUCT(kunit_binary_assert_format),	       \
 	.operation = op_str,						       \
 	.left_text = left_str,						       \
 	.left_value = left_val,						       \
@@ -269,7 +250,6 @@ void kunit_binary_ptr_assert_format(const struct kunit_assert *assert,
 /**
  * KUNIT_INIT_BINARY_PTR_ASSERT_STRUCT() - Initializes a
  *	&struct kunit_binary_ptr_assert.
- * @test: The test case that this expectation/assertion is associated with.
  * @type: The type (assertion or expectation) of this kunit_assert.
  * @op_str: A string representation of the comparison operator (e.g. "==").
  * @left_str: A string representation of the expression in the left slot.
@@ -280,16 +260,12 @@ void kunit_binary_ptr_assert_format(const struct kunit_assert *assert,
  * Initializes a &struct kunit_binary_ptr_assert. Intended to be used in
  * KUNIT_EXPECT_* and KUNIT_ASSERT_* macros.
  */
-#define KUNIT_INIT_BINARY_PTR_ASSERT_STRUCT(test,			       \
-					    type,			       \
-					    op_str,			       \
+#define KUNIT_INIT_BINARY_PTR_ASSERT_STRUCT(op_str,			       \
 					    left_str,			       \
 					    left_val,			       \
 					    right_str,			       \
 					    right_val) {		       \
-	.assert = KUNIT_INIT_ASSERT_STRUCT(test,			       \
-					   type,			       \
-					   kunit_binary_ptr_assert_format),    \
+	.assert = KUNIT_INIT_ASSERT_STRUCT(kunit_binary_ptr_assert_format),    \
 	.operation = op_str,						       \
 	.left_text = left_str,						       \
 	.left_value = left_val,						       \
@@ -326,8 +302,6 @@ void kunit_binary_str_assert_format(const struct kunit_assert *assert,
 /**
  * KUNIT_INIT_BINARY_STR_ASSERT_STRUCT() - Initializes a
  *	&struct kunit_binary_str_assert.
- * @test: The test case that this expectation/assertion is associated with.
- * @type: The type (assertion or expectation) of this kunit_assert.
  * @op_str: A string representation of the comparison operator (e.g. "==").
  * @left_str: A string representation of the expression in the left slot.
  * @left_val: The actual evaluated value of the expression in the left slot.
@@ -337,16 +311,12 @@ void kunit_binary_str_assert_format(const struct kunit_assert *assert,
  * Initializes a &struct kunit_binary_str_assert. Intended to be used in
  * KUNIT_EXPECT_* and KUNIT_ASSERT_* macros.
  */
-#define KUNIT_INIT_BINARY_STR_ASSERT_STRUCT(test,			       \
-					    type,			       \
-					    op_str,			       \
+#define KUNIT_INIT_BINARY_STR_ASSERT_STRUCT(op_str,			       \
 					    left_str,			       \
 					    left_val,			       \
 					    right_str,			       \
 					    right_val) {		       \
-	.assert = KUNIT_INIT_ASSERT_STRUCT(test,			       \
-					   type,			       \
-					   kunit_binary_str_assert_format),    \
+	.assert = KUNIT_INIT_ASSERT_STRUCT(kunit_binary_str_assert_format),    \
 	.operation = op_str,						       \
 	.left_text = left_str,						       \
 	.left_value = left_val,						       \
