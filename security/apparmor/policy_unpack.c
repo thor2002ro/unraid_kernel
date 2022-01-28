@@ -125,15 +125,16 @@ void __aa_loaddata_update(struct aa_loaddata *data, long revision)
 {
 	AA_BUG(!data);
 	AA_BUG(!data->ns);
-	AA_BUG(!data->dents[AAFS_LOADDATA_REVISION]);
 	AA_BUG(!mutex_is_locked(&data->ns->lock));
 	AA_BUG(data->revision > revision);
 
 	data->revision = revision;
-	d_inode(data->dents[AAFS_LOADDATA_DIR])->i_mtime =
-		current_time(d_inode(data->dents[AAFS_LOADDATA_DIR]));
-	d_inode(data->dents[AAFS_LOADDATA_REVISION])->i_mtime =
-		current_time(d_inode(data->dents[AAFS_LOADDATA_REVISION]));
+	if ((data->dents[AAFS_LOADDATA_REVISION])) {
+		d_inode(data->dents[AAFS_LOADDATA_DIR])->i_mtime =
+			current_time(d_inode(data->dents[AAFS_LOADDATA_DIR]));
+		d_inode(data->dents[AAFS_LOADDATA_REVISION])->i_mtime =
+			current_time(d_inode(data->dents[AAFS_LOADDATA_REVISION]));
+	}
 }
 
 bool aa_rawdata_eq(struct aa_loaddata *l, struct aa_loaddata *r)
@@ -456,7 +457,9 @@ static struct aa_dfa *unpack_dfa(struct aa_ext *e)
 			((e->pos - e->start) & 7);
 		size_t pad = ALIGN(sz, 8) - sz;
 		int flags = TO_ACCEPT1_FLAG(YYTD_DATA32) |
-			TO_ACCEPT2_FLAG(YYTD_DATA32) | DFA_FLAG_VERIFY_STATES;
+			TO_ACCEPT2_FLAG(YYTD_DATA32);
+		if (aa_g_paranoid_load)
+			flags |= DFA_FLAG_VERIFY_STATES;
 		dfa = aa_dfa_unpack(blob + pad, size - pad, flags);
 
 		if (IS_ERR(dfa))
@@ -1216,9 +1219,12 @@ int aa_unpack(struct aa_loaddata *udata, struct list_head *lh,
 			goto fail;
 		}
 	}
-	error = compress_loaddata(udata);
-	if (error)
-		goto fail;
+
+	if (aa_g_export_binary) {
+		error = compress_loaddata(udata);
+		if (error)
+			goto fail;
+	}
 	return 0;
 
 fail_profile:
