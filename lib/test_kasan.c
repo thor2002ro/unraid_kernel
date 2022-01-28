@@ -1096,6 +1096,8 @@ static void vmalloc_oob(struct kunit *test)
 	v_ptr = vmalloc(size);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, v_ptr);
 
+	OPTIMIZER_HIDE_VAR(v_ptr);
+
 	/*
 	 * We have to be careful not to hit the guard page in vmalloc tests.
 	 * The MMU will catch that and crash us.
