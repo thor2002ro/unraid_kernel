@@ -339,6 +339,10 @@
 #define   TAG_BLOCK_CLKGATE_DIS		REG_BIT(7)
 
 #define GEN12_MERT_MOD_CTRL		_MMIO(0xcf28)
+#define RENDER_MOD_CTRL			_MMIO(0xcf2c)
+#define COMP_MOD_CTRL			_MMIO(0xcf30)
+#define VDBX_MOD_CTRL			_MMIO(0xcf34)
+#define VEBX_MOD_CTRL			_MMIO(0xcf38)
 #define   FORCE_MISS_FTLB		REG_BIT(3)
 
 #define GAB_CTL				_MMIO(0x24000)
@@ -1844,7 +1848,8 @@
 #define BLT_HWS_PGA_GEN7	_MMIO(0x04280)
 #define VEBOX_HWS_PGA_GEN7	_MMIO(0x04380)
 
-#define GUCPMTIMESTAMP          _MMIO(0xC3E8)
+#define MISC_STATUS0		_MMIO(0xA500)
+#define MISC_STATUS1		_MMIO(0xA504)
 
 #define GEN7_TLB_RD_ADDR	_MMIO(0x4700)
 
