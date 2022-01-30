@@ -1634,6 +1634,7 @@ int btrfs_defrag_file(struct inode *inode, struct file_ra_state *ra,
 			ret = 0;
 			break;
 		}
+		cond_resched();
 	}
 
 	if (ra_allocated)
