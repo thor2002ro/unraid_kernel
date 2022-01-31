@@ -4,7 +4,7 @@
  *         Copyright (C) 2016, Eric Schultz <erics@lime-technology.com>
  *
  * Greatly revised to support UnRaid in a particular manner.
- * 
+ *
  * Derived from:
 
    md.c : Multiple Devices driver for Linux
@@ -35,7 +35,7 @@
    (for example /usr/src/linux/COPYING); if not, write to the Free
    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
-#include "md_private.h"
+#include "md_unraid.h"
 #include <linux/seq_file.h>
 #include <linux/sched/signal.h>
 
@@ -55,6 +55,18 @@ int md_trace              = MD_TRACE;          /* command/debug tracing */
 
 /****************************************************************************/
 /* Module parameters, and other global data */
+
+/*
+	overwrite unraid driver patch level
+	  13 for unraid 6.8.3, 
+	  17 for unraid 6.9.2, 
+	  18 for unraid 6.10rc1,
+	  19 for unraid 6.10rc2,
+	  21 for unraid 6.10rc3,
+	  22 for unraid 6.10rc4.
+*/
+module_param_named(unraid_patch, MD_PATCHLEVEL_VERSION, int, 0);
+
 
 static char *super;                            /* superblock file */
 module_param(super, charp, 0);
@@ -109,13 +121,13 @@ static int md_thread(void * arg)
 			flush_signals(current);
 
 		wait_event_interruptible(thread->wqueue,
-                                         test_bit(THREAD_WAKEUP, &thread->flags) ||
-                                         kthread_should_park() ||
-                                         kthread_should_stop());
+		                         test_bit(THREAD_WAKEUP, &thread->flags) ||
+		                         kthread_should_park() ||
+		                         kthread_should_stop());
 
-                if (kthread_should_park())
-                        kthread_parkme();
-                if (test_and_clear_bit(THREAD_WAKEUP, &thread->flags))
+		if (kthread_should_park())
+			kthread_parkme();
+		if (test_and_clear_bit(THREAD_WAKEUP, &thread->flags))
 			thread->run(thread->mddev, thread->arg);
 	}
 
@@ -181,7 +193,7 @@ void md_interrupt_thread(mdk_thread_t *thread)
 /* more: should merge ctime/utime in superblock and keep a single 64-bit utime */
 static inline unsigned long get_seconds(void)
 {
-        return ktime_get_real_seconds();
+	return ktime_get_real_seconds();
 }
 
 /* Open the indicated file and read size bytes into the buffer; then close the file.
@@ -196,10 +208,10 @@ int read_file(char *filename, void *buffer, int size)
 		if (IS_ERR(fp))
 			printk("read_file: error %ld opening %s\n", -PTR_ERR(fp), filename);
 		else {
-                        loff_t offset = 0;
-                        retval = kernel_read(fp, buffer, size, &offset);
-                        if (retval < 0)
-                                printk("read_file: read error %d\n", -retval);
+			loff_t offset = 0;
+			retval = kernel_read(fp, buffer, size, &offset);
+			if (retval < 0)
+				printk("read_file: read error %d\n", -retval);
 			if (filp_close(fp, NULL))
 				printk("read_file: error closing %s\n", filename);
 		}
@@ -216,20 +228,20 @@ int write_file(char *filename, void *buffer, int size)
 	int retval = 0;
 
 	if (filename && *filename) {
-		struct file *fp = filp_open(filename, O_SYNC|O_WRONLY|O_CREAT, 0644);
+		struct file *fp = filp_open(filename, O_SYNC | O_WRONLY | O_CREAT, 0644);
 		if (IS_ERR(fp)) {
 			printk("write_file: error %ld opening %s\n", -PTR_ERR(fp), filename);
 		}
 		else {
-                        loff_t offset = 0;
-                        retval = kernel_write(fp, buffer, size, &offset);
-                        if (retval < 0)
-                                printk("write_file: write error %d\n", -retval);
+			loff_t offset = 0;
+			retval = kernel_write(fp, buffer, size, &offset);
+			if (retval < 0)
+				printk("write_file: write error %d\n", -retval);
 			if (filp_close(fp, NULL))
 				printk("write_file: error closing %s\n", filename);
 		}
 	}
-	
+
 	return retval;
 }
 
@@ -245,7 +257,7 @@ static void init_sb(mdp_super_t *sb)
 
 	sb->ctime = get_seconds();
 }
-	
+
 /* calculate the superblock checksum */
 static unsigned int calc_sb_csum(mdp_super_t * sb)
 {
@@ -307,10 +319,10 @@ static int convert_sb(mdp_super_t * sb)
 	sb->events = sb_old->events;
 	sb->md_minor = sb_old->md_minor;
 	sb->state = sb_old->state;
-        sb->num_disks = sb_old->num_disks;
+	sb->num_disks = sb_old->num_disks;
 	sb->stime = sb_old->stime;
 	sb->sync_errs = sb_old->sync_errs;
-	
+
 	for (i = 0; i < MD_SB_DISKS; i++) {
 		/* same */
 		sb->disks[i].major = sb_old->disks[i].major;
@@ -320,7 +332,7 @@ static int convert_sb(mdp_super_t * sb)
 
 		/* new size is u64, old size is u32 */
 		sb->disks[i].size = sb_old->disks[i].size;
-		
+
 		/* new id is a udev-style model_serial string */
 		/* old model/serial strings were fixed length and padded with spaces */
 		strcat_sb_old_id(sb->disks[i].id, sb_old->disks[i].model, 40);
@@ -354,25 +366,25 @@ static int md_read_sb(mddev_t *mddev)
 	/* check for old version */
 	if (mddev->sb.major_version != MD_MAJOR_VERSION) {
 		printk("md: converting superblock version %d to version %d\n",
-			mddev->sb.major_version, MD_MAJOR_VERSION);
+		       mddev->sb.major_version, MD_MAJOR_VERSION);
 		if (convert_sb(&mddev->sb) != 0)
 			return -EINVAL;
 	}
 
-        /* check for pre-P/Q version where P is active but Q is not active */
-        if (disk_active(&mddev->sb.disks[MD_SB_P_IDX]) &&
-            !disk_active(&mddev->sb.disks[MD_SB_Q_IDX])) {
-                mark_disk_active(&mddev->sb.disks[MD_SB_Q_IDX]);
+	/* check for pre-P/Q version where P is active but Q is not active */
+	if (disk_active(&mddev->sb.disks[MD_SB_P_IDX]) &&
+	    !disk_active(&mddev->sb.disks[MD_SB_Q_IDX])) {
+		mark_disk_active(&mddev->sb.disks[MD_SB_Q_IDX]);
 	}
 
-        dprintk("md: superblock events: %d\n", mddev->sb.events);
+	dprintk("md: superblock events: %d\n", mddev->sb.events);
 	return 0;
 }
 
 /* write the superblock */
 int md_update_sb(mddev_t *mddev)
 {
-        int retval = 0;
+	int retval = 0;
 
 	mutex_lock(&mddev->sb_sem);
 
@@ -384,7 +396,7 @@ int md_update_sb(mddev_t *mddev)
 	mddev->sb.sb_csum = calc_sb_csum(&mddev->sb);
 
 	/* write the superblock */
- 	dprintk("md: writing superblock to %s\n", super);
+	dprintk("md: writing superblock to %s\n", super);
 	if (write_file(super, &mddev->sb, MD_SB_BYTES) != MD_SB_BYTES) {
 		printk("md: could not write superblock file: %s\n", super);
 		retval = -EINVAL;
@@ -409,17 +421,17 @@ static char DISK_NEW[] =        "DISK_NEW";               /* new disk */
 
 static int lock_bdev(char *name, struct block_device **bdevP)
 {
-        char path[BDEVNAME_SIZE+6];
+	char path[BDEVNAME_SIZE + 6];
 	struct block_device *bdev;
-	
-        snprintf(path, sizeof(path), "/dev/%s", name);
-        
-	bdev = blkdev_get_by_path(path, FMODE_READ|FMODE_WRITE, NULL);
+
+	snprintf(path, sizeof(path), "/dev/%s", name);
+
+	bdev = blkdev_get_by_path(path, FMODE_READ | FMODE_WRITE, NULL);
 	if (IS_ERR(bdev)) {
-                *bdevP = NULL;
+		*bdevP = NULL;
 		return PTR_ERR(bdev);
-        }
-	
+	}
+
 	*bdevP = bdev;
 	return 0;
 }
@@ -427,7 +439,7 @@ static int lock_bdev(char *name, struct block_device **bdevP)
 static void unlock_bdev(struct block_device *bdev)
 {
 	if (bdev)
-		blkdev_put(bdev, FMODE_READ|FMODE_WRITE);
+		blkdev_put(bdev, FMODE_READ | FMODE_WRITE);
 }
 
 /* Import a device.
@@ -438,12 +450,12 @@ static int import_device(mdk_rdev_t *rdev, char *name,
 {
 	struct block_device *bdev;
 	int err = 0;
-	
+
 	memset(rdev, 0, sizeof(mdk_rdev_t));
 	rdev->status = DISK_NP; /* assume not present */
 
 	/* check if device assigned to slot */
-        if (size == 0) {
+	if (size == 0) {
 		dprintk("md: import disk%d: no device\n", unit);
 		return -ENODEV;
 	}
@@ -456,15 +468,15 @@ static int import_device(mdk_rdev_t *rdev, char *name,
 	}
 
 	/* record device name, eg, "hda" */
-        strcpy( rdev->name, name);
+	strcpy( rdev->name, name);
 
 	/* record geometry */
-        rdev->offset = offset; /* in 512-byte sectors */
+	rdev->offset = offset; /* in 512-byte sectors */
 	rdev->size = size;     /* in 1024-byte blocks */
-        rdev->erased = erased;
+	rdev->erased = erased;
 
 	/* get id string */
-	strncpy(rdev->id, id, MD_ID_SIZE-1);
+	strncpy(rdev->id, id, MD_ID_SIZE - 1);
 
 	/* disk is present */
 	rdev->status = DISK_OK;
@@ -489,21 +501,21 @@ static int import_device(mdk_rdev_t *rdev, char *name,
  */
 static int same_disk_info(mdp_disk_t *disk, mdk_rdev_t *rdev, int strict)
 {
-        char *disk_sn, *rdev_sn, *ptr;
+	char *disk_sn, *rdev_sn, *ptr;
 
 	if (disk->size != rdev->size)
 		return 0;
 
-        if (!strict && ((ptr = strrchr(disk->id, '_')) != NULL))
-                disk_sn = ptr + 1;
-        else
-                disk_sn = disk->id;
-        
-        if (!strict && ((ptr = strrchr(rdev->id, '_')) != NULL))
-                rdev_sn = ptr + 1;
-        else
-                rdev_sn = rdev->id;
-        
+	if (!strict && ((ptr = strrchr(disk->id, '_')) != NULL))
+		disk_sn = ptr + 1;
+	else
+		disk_sn = disk->id;
+
+	if (!strict && ((ptr = strrchr(rdev->id, '_')) != NULL))
+		rdev_sn = ptr + 1;
+	else
+		rdev_sn = rdev->id;
+
 	return (strcmp(disk_sn, rdev_sn) == 0);
 }
 
@@ -610,19 +622,19 @@ static mddev_t *alloc_mddev(dev_t dev)
 		mark_sb_clean(&mddev->sb);
 	}
 	sb = &mddev->sb;
-        sb->num_disks = 2;
+	sb->num_disks = 2;
 
 	/* initialize */
 	mddev->state = NO_DATA_DISKS;
-        mddev->num_disks = 0;
+	mddev->num_disks = 0;
 	mddev->num_disabled = 0;
 	mddev->num_replaced = 0;
 	mddev->num_invalid = 0;
 	mddev->num_missing = 0;
 	mddev->num_wrong = 0;
 	mddev->num_new = 0;;
-        mddev->swap_p_idx = 0;
-        mddev->swap_q_idx = 0;
+	mddev->swap_p_idx = 0;
+	mddev->swap_q_idx = 0;
 
 	for (i = 0; i < MD_SB_DISKS; i++) {
 		mdp_disk_t *disk = &sb->disks[i];
@@ -637,7 +649,7 @@ static mddev_t *alloc_mddev(dev_t dev)
 
 static int is_parity_idx(int idx)
 {
-        return (idx == MD_SB_P_IDX || idx == MD_SB_Q_IDX);
+	return (idx == MD_SB_P_IDX || idx == MD_SB_Q_IDX);
 }
 
 /* Check that physical size of parity disk(s) is as large or larger than logical
@@ -646,21 +658,21 @@ static int is_parity_idx(int idx)
 static int valid_parity_size(mddev_t *mddev)
 {
 	mdp_super_t *sb = &mddev->sb;
-        unsigned long long smallest_parity = 0;
-        unsigned long long largest_data = 0;
-        int i;
+	unsigned long long smallest_parity = 0;
+	unsigned long long largest_data = 0;
+	int i;
 
-        for (i = 0; i < MD_SB_DISKS; i++) {
-                mdp_disk_t *disk = &sb->disks[i];
-                mdk_rdev_t *rdev = &mddev->rdev[i];
-                
-                if (is_parity_idx(i))
-                        smallest_parity = min_not_zero(smallest_parity, rdev->size);
-                else
-                        largest_data = max3(largest_data, rdev->size, disk->size);
-        }
+	for (i = 0; i < MD_SB_DISKS; i++) {
+		mdp_disk_t *disk = &sb->disks[i];
+		mdk_rdev_t *rdev = &mddev->rdev[i];
 
-        return (smallest_parity == 0 || smallest_parity >= largest_data);
+		if (is_parity_idx(i))
+			smallest_parity = min_not_zero(smallest_parity, rdev->size);
+		else
+			largest_data = max3(largest_data, rdev->size, disk->size);
+	}
+
+	return (smallest_parity == 0 || smallest_parity >= largest_data);
 }
 
 /* Check that physical size of any data disk marked DISK_DSBL_NEW or DISK_WRONG is as large
@@ -669,34 +681,34 @@ static int valid_parity_size(mddev_t *mddev)
 static int valid_replacement(mddev_t *mddev)
 {
 	mdp_super_t *sb = &mddev->sb;
-        int i;
+	int i;
 
-        for (i = 0; i < MD_SB_DISKS; i++) {
-                mdp_disk_t *disk = &sb->disks[i];
-                mdk_rdev_t *rdev = &mddev->rdev[i];
-                
-                if (!rdev->size || is_parity_idx(i))
-                        continue;
-                
-                if ((rdev->status == DISK_DSBL_NEW || rdev->status == DISK_WRONG) && (rdev->size < disk->size))
-                        return 0;
-        }
+	for (i = 0; i < MD_SB_DISKS; i++) {
+		mdp_disk_t *disk = &sb->disks[i];
+		mdk_rdev_t *rdev = &mddev->rdev[i];
 
-        return 1;
+		if (!rdev->size || is_parity_idx(i))
+			continue;
+
+		if ((rdev->status == DISK_DSBL_NEW || rdev->status == DISK_WRONG) && (rdev->size < disk->size))
+			return 0;
+	}
+
+	return 1;
 }
 
 static int find_disk_info(mddev_t *mddev, mdp_disk_t *disk)
 {
-        int i;
+	int i;
 
-        for (i = 0; i < MD_SB_DISKS; i++) {
-                mdk_rdev_t *rdev = &mddev->rdev[i];
+	for (i = 0; i < MD_SB_DISKS; i++) {
+		mdk_rdev_t *rdev = &mddev->rdev[i];
 
-                if (!is_parity_idx(i) && same_disk_info(disk, rdev, 0))
-                        return i;
-        }
+		if (!is_parity_idx(i) && same_disk_info(disk, rdev, 0))
+			return i;
+	}
 
-        return 0;
+	return 0;
 }
 
 static int import_slot(dev_t array_dev, int slot, char *name,
@@ -717,33 +729,33 @@ static int import_slot(dev_t array_dev, int slot, char *name,
 	/*** establish disk status ***/
 
 	/* import the disk device */
-	import_device(rdev, name,offset,size,erased,id,  mddev,slot);
-        if (rdev->status == DISK_OK)
-                mddev->num_disks++;
+	import_device(rdev, name, offset, size, erased, id,  mddev, slot);
+	if (rdev->status == DISK_OK)
+		mddev->num_disks++;
 
 	if (disk_active(disk)) {
 		if (disk_enabled(disk)) {
 			if (rdev->status == DISK_NP) {
-                                if (disk_valid(disk)) {
-                                        printk("md: import_slot: %d missing\n", disk->number);
-                                        rdev->status = DISK_NP_MISSING;
-                                        mddev->num_missing++;
-                                }
-                                else {
-                                        rdev->status = DISK_NP_DSBL;
-                                        mark_disk_disabled(disk);
-                                        mddev->num_disabled++;
-                                }
+				if (disk_valid(disk)) {
+					printk("md: import_slot: %d missing\n", disk->number);
+					rdev->status = DISK_NP_MISSING;
+					mddev->num_missing++;
+				}
+				else {
+					rdev->status = DISK_NP_DSBL;
+					mark_disk_disabled(disk);
+					mddev->num_disabled++;
+				}
 			}
 			else if (!same_disk_info(disk, rdev, 0)) {
-                                if (disk_valid(disk)) {
-                                        printk("md: import_slot: %d wrong\n", disk->number);
-                                        rdev->status = DISK_WRONG;
-                                        mddev->num_wrong++;
-                                }
-                                else {
-                                        rdev->status = DISK_INVALID;
-                                }
+				if (disk_valid(disk)) {
+					printk("md: import_slot: %d wrong\n", disk->number);
+					rdev->status = DISK_WRONG;
+					mddev->num_wrong++;
+				}
+				else {
+					rdev->status = DISK_INVALID;
+				}
 			}
 			else if (!disk_valid(disk)) {
 				rdev->status = DISK_INVALID;
@@ -761,104 +773,104 @@ static int import_slot(dev_t array_dev, int slot, char *name,
 			}
 			else
 				rdev->status = DISK_DSBL;
-			
+
 			mddev->num_disabled++;
 		}
 
 		if (!disk_valid(disk))
 			mddev->num_invalid++;
 
-                if (!is_parity_idx(slot))
-                        sb->num_disks = slot+2;
+		if (!is_parity_idx(slot))
+			sb->num_disks = slot + 2;
 	}
 	else {
-                memset(disk->id, 0, sizeof(disk->id));
-                disk->size = 0;
+		memset(disk->id, 0, sizeof(disk->id));
+		disk->size = 0;
 
-                disk->state = 0;
-                if (rdev->status == DISK_OK) {
-                        printk("md: disk%d new disk\n", disk->number);
+		disk->state = 0;
+		if (rdev->status == DISK_OK) {
+			printk("md: disk%d new disk\n", disk->number);
 
-                        rdev->status = DISK_NEW;
-                        mddev->num_new++;
+			rdev->status = DISK_NEW;
+			mddev->num_new++;
 
-                        if (!is_parity_idx(slot))
-                                sb->num_disks = slot+2;
-                }
-        }
+			if (!is_parity_idx(slot))
+				sb->num_disks = slot + 2;
+		}
+	}
 
 	/*** now establish array state ***/
 
 	/* assume we're just stopped */
 	mddev->state = STOPPED;
 
-        /* verify at least one data disk assigned */
-        if (sb->num_disks == 2) {
-                mddev->state = NO_DATA_DISKS;
-        }
-        else
-        /* verify parity disk(s) large enough */
-        if (!valid_parity_size(mddev)) {
-                mddev->state = PARITY_NOT_BIGGEST;
-        }
-        else
-        /* check cases where new disks are detected */
-        if (mddev->num_new) {
-                /* check for new array special case */
-                if (mddev->num_new == mddev->num_disks) {
-                        mddev->state = NEW_ARRAY;
-                }
-                else
-                /* cannot add new disks if any other config change */
-                if (mddev->num_missing || mddev->num_wrong || mddev->num_replaced ||
-                    (mddev->num_invalid != mddev->num_disabled)) {
-                        mddev->state = INVALID_EXPANSION;
-                }
-        }
-        else
-        /* maybe we yanked some disks */
-        if (mddev->num_missing) {
-                if ((mddev->num_missing + mddev->num_invalid) <= 2 && !mddev->num_replaced && !mddev->num_wrong) {
-                        mddev->state = DISABLE_DISK;
-                }
-                else {
-                        mddev->state = TOO_MANY_MISSING_DISKS;
-                }
-        }
-        else
-        /* maybe we replaced one or two data disks */
-        if (mddev->num_wrong || mddev->num_replaced) {
-                int num_wrong = mddev->num_wrong;
-                int swap_idx;
+	/* verify at least one data disk assigned */
+	if (sb->num_disks == 2) {
+		mddev->state = NO_DATA_DISKS;
+	}
+	else
+		/* verify parity disk(s) large enough */
+		if (!valid_parity_size(mddev)) {
+			mddev->state = PARITY_NOT_BIGGEST;
+		}
+		else
+			/* check cases where new disks are detected */
+			if (mddev->num_new) {
+				/* check for new array special case */
+				if (mddev->num_new == mddev->num_disks) {
+					mddev->state = NEW_ARRAY;
+				}
+				else
+					/* cannot add new disks if any other config change */
+					if (mddev->num_missing || mddev->num_wrong || mddev->num_replaced ||
+					    (mddev->num_invalid != mddev->num_disabled)) {
+						mddev->state = INVALID_EXPANSION;
+					}
+			}
+			else
+				/* maybe we yanked some disks */
+				if (mddev->num_missing) {
+					if ((mddev->num_missing + mddev->num_invalid) <= 2 && !mddev->num_replaced && !mddev->num_wrong) {
+						mddev->state = DISABLE_DISK;
+					}
+					else {
+						mddev->state = TOO_MANY_MISSING_DISKS;
+					}
+				}
+				else
+					/* maybe we replaced one or two data disks */
+					if (mddev->num_wrong || mddev->num_replaced) {
+						int num_wrong = mddev->num_wrong;
+						int swap_idx;
 
-                mddev->state = RECON_DISK;
+						mddev->state = RECON_DISK;
 
-                if (mddev->rdev[MD_SB_P_IDX].status == DISK_WRONG) {
-                        swap_idx = find_disk_info(mddev, &sb->disks[MD_SB_P_IDX]);
-                        if (swap_idx && (mddev->rdev[swap_idx].status == DISK_DSBL_NEW)) {
-                                mddev->swap_p_idx = swap_idx;
-                                mddev->state = SWAP_DSBL;
-                                num_wrong--;
-                        }
-                }
-                if (mddev->rdev[MD_SB_Q_IDX].status == DISK_WRONG) {
-                        swap_idx = find_disk_info(mddev, &sb->disks[MD_SB_Q_IDX]);
-                        if (swap_idx && (mddev->rdev[swap_idx].status == DISK_DSBL_NEW)) {
-                                mddev->swap_q_idx = swap_idx;
-                                mddev->state = SWAP_DSBL;
-                                num_wrong--;
-                        }
-                }
+						if (mddev->rdev[MD_SB_P_IDX].status == DISK_WRONG) {
+							swap_idx = find_disk_info(mddev, &sb->disks[MD_SB_P_IDX]);
+							if (swap_idx && (mddev->rdev[swap_idx].status == DISK_DSBL_NEW)) {
+								mddev->swap_p_idx = swap_idx;
+								mddev->state = SWAP_DSBL;
+								num_wrong--;
+							}
+						}
+						if (mddev->rdev[MD_SB_Q_IDX].status == DISK_WRONG) {
+							swap_idx = find_disk_info(mddev, &sb->disks[MD_SB_Q_IDX]);
+							if (swap_idx && (mddev->rdev[swap_idx].status == DISK_DSBL_NEW)) {
+								mddev->swap_q_idx = swap_idx;
+								mddev->state = SWAP_DSBL;
+								num_wrong--;
+							}
+						}
 
-                if ((num_wrong + mddev->num_invalid) <= 2) {
-                        if (!valid_replacement(mddev)) {
-                                mddev->state = NEW_DISK_TOO_SMALL;
-                        }
-                }
-                else {
-                        mddev->state = TOO_MANY_MISSING_DISKS;
-                }
-        }
+						if ((num_wrong + mddev->num_invalid) <= 2) {
+							if (!valid_replacement(mddev)) {
+								mddev->state = NEW_DISK_TOO_SMALL;
+							}
+						}
+						else {
+							mddev->state = TOO_MANY_MISSING_DISKS;
+						}
+					}
 
 	return 0;
 }
@@ -866,84 +878,84 @@ static int import_slot(dev_t array_dev, int slot, char *name,
 /* called on read error, with device_lock held */
 void md_read_error(mddev_t *mddev, int disk_number, sector_t sector)
 {
-        printk("md: disk%d read error, sector=%llu\n", disk_number, (unsigned long long)sector);
-        mddev->rdev[disk_number].errors++;
+	printk("md: disk%d read error, sector=%llu\n", disk_number, (unsigned long long)sector);
+	mddev->rdev[disk_number].errors++;
 }
 
 /* called on write error, with device_lock held */
 int md_write_error(mddev_t *mddev, int disk_number, sector_t sector)
 {
-        mdp_disk_t *disk = &mddev->sb.disks[disk_number];
-        mdk_rdev_t *rdev = &mddev->rdev[disk_number];
-        int update_sb = 0;
+	mdp_disk_t *disk = &mddev->sb.disks[disk_number];
+	mdk_rdev_t *rdev = &mddev->rdev[disk_number];
+	int update_sb = 0;
 
-        printk("md: disk%d write error, sector=%llu\n", disk_number, (unsigned long long)sector);
-        rdev->errors++;
+	printk("md: disk%d write error, sector=%llu\n", disk_number, (unsigned long long)sector);
+	rdev->errors++;
 
 	if (disk_active(disk)) {
-                /* an active array disk failed */
-                if (disk_enabled(disk) && (mddev->num_disabled < 2)) {
-                        /* mark the failing disk "not enabled" and "not valid" */
-                        rdev->status = DISK_DSBL;
+		/* an active array disk failed */
+		if (disk_enabled(disk) && (mddev->num_disabled < 2)) {
+			/* mark the failing disk "not enabled" and "not valid" */
+			rdev->status = DISK_DSBL;
 
-                        mark_disk_disabled(disk);
-                        mddev->num_disabled++;
-	
-                        if (disk_valid(disk)) {
-                                mark_disk_invalid(disk);
-                                mddev->num_invalid++;
+			mark_disk_disabled(disk);
+			mddev->num_disabled++;
 
-                                if (mddev->num_disabled == 2) {
-                                        /* stop recovery if it's running */
-                                        md_interrupt_thread(mddev->recovery_thread);
-                                }
-                        }
-                        else {
-                                /* failure of disk being rebuilt */
-                                if (mddev->num_invalid == mddev->num_disabled) {
-                                        /* stop recovery if it's running */
-                                        md_interrupt_thread(mddev->recovery_thread);
-                                }
-                        }
+			if (disk_valid(disk)) {
+				mark_disk_invalid(disk);
+				mddev->num_invalid++;
 
-                        /* config changed */
-                        update_sb++;
-                }
-        }
-        else {
-                if (disk_enabled(disk)) {
-                        /* must be a disk we're clearing */
-                        mark_disk_disabled(disk);
-                        mddev->num_new--;
-                        if (mddev->num_new == 0) {
-                                /* stop recovery (clearing) if it's running */
-                                md_interrupt_thread(mddev->recovery_thread);
-                        }
+				if (mddev->num_disabled == 2) {
+					/* stop recovery if it's running */
+					md_interrupt_thread(mddev->recovery_thread);
+				}
+			}
+			else {
+				/* failure of disk being rebuilt */
+				if (mddev->num_invalid == mddev->num_disabled) {
+					/* stop recovery if it's running */
+					md_interrupt_thread(mddev->recovery_thread);
+				}
+			}
 
-                        /* config changed */
-                        update_sb++;
-                }
-        }
+			/* config changed */
+			update_sb++;
+		}
+	}
+	else {
+		if (disk_enabled(disk)) {
+			/* must be a disk we're clearing */
+			mark_disk_disabled(disk);
+			mddev->num_new--;
+			if (mddev->num_new == 0) {
+				/* stop recovery (clearing) if it's running */
+				md_interrupt_thread(mddev->recovery_thread);
+			}
 
-        return update_sb;
+			/* config changed */
+			update_sb++;
+		}
+	}
+
+	return update_sb;
 }
 
 static void md_submit_bio(struct bio *bi)
 {
-        mddev_t *mddev = bi->bi_bdev->bd_disk->private_data;
-        int unit = bi->bi_bdev->bd_disk->first_minor;
-        mdp_disk_t *disk = &mddev->sb.disks[unit];
+	mddev_t *mddev = bi->bi_bdev->bd_disk->private_data;
+	int unit = bi->bi_bdev->bd_disk->first_minor;
+	mdp_disk_t *disk = &mddev->sb.disks[unit];
 
-        /* verify this unit is active */
-        if (!disk_active(disk)) {
-                bio_io_error(bi);
-                return;
-        }
-        
-        blk_queue_split(&bi);
-        bi->bi_opf &= ~REQ_NOMERGE;
+	/* verify this unit is active */
+	if (!disk_active(disk)) {
+		bio_io_error(bi);
+		return;
+	}
 
-        unraid_make_request(mddev, unit, bi);
+	blk_queue_split(&bi);
+	bi->bi_opf &= ~REQ_NOMERGE;
+
+	unraid_make_request(mddev, unit, bi);
 }
 
 static int md_open(struct block_device *bdev, fmode_t mode)
@@ -996,7 +1008,7 @@ static int do_run(mddev_t *mddev)
 		mdk_rdev_t *rdev = &mddev->rdev[i];
 
 		/* only lock present devices */
-                if (!strstr(rdev->status, "DISK_NP")) {
+		if (!strstr(rdev->status, "DISK_NP")) {
 			err = lock_bdev(rdev->name, &rdev->bdev);
 			if (err) {
 				printk("md: do_run: lock_bdev error: %d\n", err);
@@ -1015,7 +1027,7 @@ static int do_run(mddev_t *mddev)
 		return -EINVAL;
 	}
 
-        /* create the md devices */
+	/* create the md devices */
 	for (i = 1; i <= 28; i++) {
 		mdp_disk_t *disk = &sb->disks[i];
 
@@ -1033,29 +1045,37 @@ static int do_run(mddev_t *mddev)
 			gd->private_data = mddev;
 			gd->queue->queuedata = mddev;
 
-                        /* capacity in 512-byte sectors */
-                        set_capacity(gd, disk->size*2);
+			/* capacity in 512-byte sectors */
+			set_capacity(gd, disk->size * 2);
 
-                        blk_set_stacking_limits(&gd->queue->limits);
+			blk_set_stacking_limits(&gd->queue->limits);
 			blk_queue_write_cache(gd->queue, true, true);
 
-                        blk_queue_io_min(gd->queue, PAGE_SIZE);
-                        blk_queue_io_opt(gd->queue, 128*1024);
-                        //gd->queue->backing_dev_info->ra_pages = (128*1024)/PAGE_SIZE;
+			//blk_queue_io_min(gd->queue, PAGE_SIZE);
+			//blk_queue_io_opt(gd->queue, 128 * 1024);
+			//gd->queue->backing_dev_info->ra_pages = (128*1024)/PAGE_SIZE;
 
-                        if (md_restrict & 1)
-                                blk_queue_max_hw_sectors(gd->queue, 256);  /* 256 sectors => 128K */
+			if (md_restrict & 1)
+				blk_queue_max_hw_sectors(gd->queue, 256);  /* 256 sectors => 128K */
 
-                        blk_queue_max_write_same_sectors(gd->queue, 0);
-                        blk_queue_max_write_zeroes_sectors(gd->queue, 0);
-                        blk_queue_flag_clear(QUEUE_FLAG_DISCARD, gd->queue);
-                        blk_queue_flag_clear(QUEUE_FLAG_NONROT, gd->queue);
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(5,17,99)
+			blk_queue_max_write_same_sectors(gd->queue, 0);
+#endif
+			blk_queue_max_write_zeroes_sectors(gd->queue, 0);
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(5,18,99)
+			blk_queue_flag_clear(QUEUE_FLAG_DISCARD, gd->queue);
+#endif
+			blk_queue_flag_clear(QUEUE_FLAG_NONROT, gd->queue);
 
-			add_disk(gd);
+			err = add_disk(gd);
+			if (err) {
+				printk("md: unraid_run: failed add_disk: %d\n", err);
+				return -EINVAL;
+			}
 			printk("md%d: running, size: %llu blocks\n", unit, disk->size);
 		}
 	}
-	
+
 	return 0;
 }
 
@@ -1067,11 +1087,11 @@ static int do_stop(mddev_t *mddev)
 	/* remove md devices */
 	for (i = 1; i <= 28; i++) {
 		mdp_disk_t *disk = &sb->disks[i];
-                int unit = disk->number;
+		int unit = disk->number;
 
-                if (mddev->gendisk[unit]) {
+		if (mddev->gendisk[unit]) {
 			struct gendisk *gd = mddev->gendisk[unit];
-                        struct request_queue *gq = gd->queue;
+			struct request_queue *gq = gd->queue;
 
 			printk("md%d: stopping\n", unit);
 
@@ -1091,7 +1111,7 @@ static int do_stop(mddev_t *mddev)
 		mdk_rdev_t *rdev = &mddev->rdev[i];
 
 		unlock_bdev(rdev->bdev);
-                rdev->bdev = NULL;
+		rdev->bdev = NULL;
 	}
 
 	return 0;
@@ -1106,23 +1126,23 @@ static int do_stop(mddev_t *mddev)
 /* called on a sync error */
 void md_sync_error(mddev_t *mddev, sector_t sector, char *message)
 {
-        mdp_super_t *sb = &mddev->sb;
-        
-        sb->sync_errs++;
-        
-        /* limit number of messages generated */
-        if (sb->sync_errs <= SYNC_ERROR_LIMIT)
-                printk("md: recovery thread: %s, sector=%llu\n", message, (unsigned long long)sector);
-        if (sb->sync_errs == SYNC_ERROR_LIMIT+1)
-                printk("md: recovery thread: stopped logging\n");
+	mdp_super_t *sb = &mddev->sb;
+
+	sb->sync_errs++;
+
+	/* limit number of messages generated */
+	if (sb->sync_errs <= SYNC_ERROR_LIMIT)
+		printk("md: recovery thread: %s, sector=%llu\n", message, (unsigned long long)sector);
+	if (sb->sync_errs == SYNC_ERROR_LIMIT + 1)
+		printk("md: recovery thread: stopped logging\n");
 }
 
 /* called when a stripe sync completes */
 void md_sync_done(mddev_t *mddev, sector_t sector, int count)
 {
-        /* another "count" sectors have been sync'ed */
-        atomic_sub(count, &mddev->recovery_active);
-        wake_up(&mddev->recovery_wait);
+	/* another "count" sectors have been sync'ed */
+	atomic_sub(count, &mddev->recovery_active);
+	wake_up(&mddev->recovery_wait);
 }
 
 /* SYNC_MARKS * SYNC_MARK_STEP is the number of past seconds that rate is calcuated over */
@@ -1156,10 +1176,10 @@ int md_do_sync(mddev_t *mddev)
 		atomic_add(sectors, &mddev->recovery_active);
 
 		if (jiffies >= mark[last_mark] + SYNC_MARK_STEP) {
-                        unsigned long long prev_cnt = mark_cnt[last_mark];
+			unsigned long long prev_cnt = mark_cnt[last_mark];
 
 			/* step marks */
-			last_mark = (last_mark+1) % SYNC_MARKS;
+			last_mark = (last_mark + 1) % SYNC_MARKS;
 
 			mddev->resync_mark = mark[last_mark];
 			mddev->resync_mark_cnt = mark_cnt[last_mark];
@@ -1168,7 +1188,7 @@ int md_do_sync(mddev_t *mddev)
 			mark_cnt[last_mark] = mddev->curr_resync - atomic_read(&mddev->recovery_active);
 
 			dprintk("md: curr_resync=%llu delta=%llu\n",
-                                mddev->curr_resync, mark_cnt[last_mark] - prev_cnt);
+			        mddev->curr_resync, mark_cnt[last_mark] - prev_cnt);
 		}
 
 		if (signal_pending(current)) {
@@ -1206,44 +1226,44 @@ static void md_do_recovery(mddev_t *mddev, unsigned long unused)
 		flush_signals(current);
 		return;
 	}
-        printk("md: recovery thread: %s ...\n", mddev->recovery_action);
-	mddev->recovery_running = mddev->recovery_size*2; /* count of sectors */
+	printk("md: recovery thread: %s ...\n", mddev->recovery_action);
+	mddev->recovery_running = mddev->recovery_size * 2; /* count of sectors */
 
-        /* record start of resync */
-        sb->stime = get_seconds();
-        sb->stime2 = 0;
-        sb->sync_exit = 0;
+	/* record start of resync */
+	sb->stime = get_seconds();
+	sb->stime2 = 0;
+	sb->sync_exit = 0;
 	md_update_sb(mddev);
 
-        /* execute resync */
+	/* execute resync */
 	sb->sync_exit = md_do_sync(mddev);
-        sb->stime2 = get_seconds();
+	sb->stime2 = get_seconds();
 
 	if (sb->sync_exit == 0) {
-                int i;
-                        
-                /* After successful rebuild, invalid enabled disk(s) now valid and
-                 * new disks are now active.
-                 */
-                for (i = 0; i < MD_SB_DISKS; i++) {
-                        mdp_disk_t *disk = &sb->disks[i];
-                        mdk_rdev_t *rdev = &mddev->rdev[i];
-                                
-                        if (disk_enabled(disk) && !disk_valid(disk)) {
-                                if (rdev->status == DISK_NEW) {
-                                        mark_disk_active(disk);
-                                        mddev->num_new--;
-                                }
-                                else {
-                                        mddev->num_invalid--;
-                                }
-                                mark_disk_valid(disk);
-                                rdev->status = DISK_OK;
-                        }
-                }
+		int i;
 
-                mddev->curr_resync = 0;
-                printk("md: sync done. time=%usec\n", sb->stime2 - sb->stime);
+		/* After successful rebuild, invalid enabled disk(s) now valid and
+		 * new disks are now active.
+		 */
+		for (i = 0; i < MD_SB_DISKS; i++) {
+			mdp_disk_t *disk = &sb->disks[i];
+			mdk_rdev_t *rdev = &mddev->rdev[i];
+
+			if (disk_enabled(disk) && !disk_valid(disk)) {
+				if (rdev->status == DISK_NEW) {
+					mark_disk_active(disk);
+					mddev->num_new--;
+				}
+				else {
+					mddev->num_invalid--;
+				}
+				mark_disk_valid(disk);
+				rdev->status = DISK_OK;
+			}
+		}
+
+		mddev->curr_resync = 0;
+		printk("md: sync done. time=%usec\n", sb->stime2 - sb->stime);
 	}
 
 	/* record sync result */
@@ -1264,7 +1284,7 @@ static int start_array(dev_t array_dev, char *state)
 	mdp_super_t *sb;
 	int err;
 
-        int update_sb = 0;
+	int update_sb = 0;
 
 	if (mddev->private) {
 		printk("md: start_array: already started\n");
@@ -1276,169 +1296,165 @@ static int start_array(dev_t array_dev, char *state)
 		printk("md: start_array: %s\n", mddev->state);
 		return -EINVAL;
 	}
-	
+
 	/* ensure no state change */
 	if (strcmp(state, mddev->state)) {
 		printk("md: start_array: state %s does't match %s\n", state, mddev->state);
 		return -EINVAL;
 	}
-	
+
 	sb = &mddev->sb;
 
-        /* new array (both P and Q are invalid) */
+	/* new array (both P and Q are invalid) */
 	if (mddev->state == NEW_ARRAY) {
 		int i;
 
-                if (invalidslota != MD_SB_P_IDX)
-                        printk("md: invalidslota=%d\n", invalidslota);
-                if (invalidslotb != MD_SB_Q_IDX)
-                        printk("md: invalidslotb=%d\n", invalidslotb);
+		if (invalidslota != MD_SB_P_IDX)
+			printk("md: invalidslota=%d\n", invalidslota);
+		if (invalidslotb != MD_SB_Q_IDX)
+			printk("md: invalidslotb=%d\n", invalidslotb);
 
-                sb->num_disks = 2;
-                mddev->num_disabled = 0;
-                mddev->num_replaced = 0;
-                mddev->num_invalid = 0;
-                mddev->num_missing = 0;
-                mddev->num_wrong = 0;
-                mddev->num_new = 0;;
-                mddev->swap_p_idx = 0;
-                mddev->swap_q_idx = 0;
-
-                for (i = 0; i < MD_SB_DISKS; i++) {
-                        mdp_disk_t *disk = &sb->disks[i];
-                        mdk_rdev_t *rdev = &mddev->rdev[i];
-
-                        disk->state = 0;
-
-                        /* special handling for parity disks */
-                        if (i == invalidslota || i == invalidslotb) {
-                                /* P/Q always active */
-                                mark_disk_active(disk);
-
-                                /* if device present, mark enabled */
-                                if (rdev->size) {
-                                        rdev->status = DISK_INVALID;
-                                        mark_disk_enabled(disk);
-                                }
-                                else {
-                                        rdev->status = DISK_NP_DSBL;
-                                        mark_disk_disabled(disk);
-                                        mddev->num_disabled++;
-                                }
-
-                                /* parity disks start out invalid */
-                                mark_disk_invalid(disk);
-                                mddev->num_invalid++;
-                        }
-                        else if (rdev->size) {
-                                /* data disks start out valid */
-                                rdev->status = DISK_OK;
-                                mark_disk_active(disk);
-                                mark_disk_enabled(disk);
-                                mark_disk_valid(disk);
-                        }
-                        else {
-                                /* empty slot */
-                                rdev->status = DISK_NP;
-                        }
-
-                        /* record disk information */
-                        record_disk_info(disk, rdev);
-                        disk->size = rdev->size;
-
-                        /* array width for Q calculation */
-                        if (disk_active(disk) && !is_parity_idx(i))
-                                sb->num_disks = i+2;
-                }
-
-                update_sb++;
-        }
-	else
-	if (mddev->state == DISABLE_DISK) {
-		int i;
+		sb->num_disks = 2;
+		mddev->num_disabled = 0;
+		mddev->num_replaced = 0;
+		mddev->num_invalid = 0;
+		mddev->num_missing = 0;
+		mddev->num_wrong = 0;
+		mddev->num_new = 0;;
+		mddev->swap_p_idx = 0;
+		mddev->swap_q_idx = 0;
 
 		for (i = 0; i < MD_SB_DISKS; i++) {
 			mdp_disk_t *disk = &sb->disks[i];
 			mdk_rdev_t *rdev = &mddev->rdev[i];
 
-                        if (rdev->status == DISK_NP_MISSING) {
-                                /* disable the disk */
-                                rdev->status = DISK_NP_DSBL;
+			disk->state = 0;
 
-                                mark_disk_disabled(disk);
-                                mddev->num_disabled++;
+			/* special handling for parity disks */
+			if (i == invalidslota || i == invalidslotb) {
+				/* P/Q always active */
+				mark_disk_active(disk);
 
-                                mark_disk_invalid(disk);
-                                mddev->num_invalid++;
+				/* if device present, mark enabled */
+				if (rdev->size) {
+					rdev->status = DISK_INVALID;
+					mark_disk_enabled(disk);
+				}
+				else {
+					rdev->status = DISK_NP_DSBL;
+					mark_disk_disabled(disk);
+					mddev->num_disabled++;
+				}
 
-                                /* record (cleared) disk information */
-                                record_disk_info(disk, rdev);
+				/* parity disks start out invalid */
+				mark_disk_invalid(disk);
+				mddev->num_invalid++;
+			}
+			else if (rdev->size) {
+				/* data disks start out valid */
+				rdev->status = DISK_OK;
+				mark_disk_active(disk);
+				mark_disk_enabled(disk);
+				mark_disk_valid(disk);
+			}
+			else {
+				/* empty slot */
+				rdev->status = DISK_NP;
+			}
 
-                                mddev->num_missing--;
+			/* record disk information */
+			record_disk_info(disk, rdev);
+			disk->size = rdev->size;
 
-                                update_sb++;
-                        }
-                }
+			/* array width for Q calculation */
+			if (disk_active(disk) && !is_parity_idx(i))
+				sb->num_disks = i + 2;
+		}
+
+		update_sb++;
 	}
-        else
-	if (mddev->state == RECON_DISK || mddev->state == SWAP_DSBL) {
+	else if (mddev->state == DISABLE_DISK) {
 		int i;
 
 		for (i = 0; i < MD_SB_DISKS; i++) {
 			mdp_disk_t *disk = &sb->disks[i];
 			mdk_rdev_t *rdev = &mddev->rdev[i];
 
-                        if (rdev->status == DISK_WRONG) {
-                                if (i == MD_SB_P_IDX && mddev->swap_p_idx) {
-                                        mddev->swap_p_idx = 0;
+			if (rdev->status == DISK_NP_MISSING) {
+				/* disable the disk */
+				rdev->status = DISK_NP_DSBL;
 
-                                        /* status is 'ok' */
-                                        rdev->status = DISK_OK;
-                                }
-                                else
-                                if (i == MD_SB_Q_IDX && mddev->swap_q_idx) {
-                                        mddev->swap_q_idx = 0;
+				mark_disk_disabled(disk);
+				mddev->num_disabled++;
 
-                                        /* status is 'ok' */
-                                        rdev->status = DISK_OK;
-                                }
-                                else {
-                                        /* if not already invalid, mark disk invalid */
-                                        if (disk_valid(disk)) {
-                                                mark_disk_invalid(disk);
-                                                mddev->num_invalid++;
-                                        }
+				mark_disk_invalid(disk);
+				mddev->num_invalid++;
 
-                                        /* status is 'invalid' */
-                                        rdev->status = DISK_INVALID;
-                                }
+				/* record (cleared) disk information */
+				record_disk_info(disk, rdev);
 
-                                /* record disk information */
-                                record_disk_info(disk, rdev);
-                                disk->size = rdev->size;
+				mddev->num_missing--;
 
-                                mddev->num_wrong--;
+				update_sb++;
+			}
+		}
+	}
+	else if (mddev->state == RECON_DISK || mddev->state == SWAP_DSBL) {
+		int i;
 
-                                update_sb++;
-                        }
-                        else
-                        if (rdev->status == DISK_DSBL_NEW) {
-                                /* enable the disk */
-                                mark_disk_enabled(disk);
-                                mddev->num_disabled--;
+		for (i = 0; i < MD_SB_DISKS; i++) {
+			mdp_disk_t *disk = &sb->disks[i];
+			mdk_rdev_t *rdev = &mddev->rdev[i];
 
-                                /* status is 'invalid' */
-                                rdev->status = DISK_INVALID;
+			if (rdev->status == DISK_WRONG) {
+				if (i == MD_SB_P_IDX && mddev->swap_p_idx) {
+					mddev->swap_p_idx = 0;
 
-                                /* record disk information */
-                                record_disk_info(disk, rdev);
-                                disk->size = rdev->size;
+					/* status is 'ok' */
+					rdev->status = DISK_OK;
+				}
+				else if (i == MD_SB_Q_IDX && mddev->swap_q_idx) {
+					mddev->swap_q_idx = 0;
 
-                                mddev->num_replaced--;
+					/* status is 'ok' */
+					rdev->status = DISK_OK;
+				}
+				else {
+					/* if not already invalid, mark disk invalid */
+					if (disk_valid(disk)) {
+						mark_disk_invalid(disk);
+						mddev->num_invalid++;
+					}
 
-                                update_sb++;
-                        }
-                }
+					/* status is 'invalid' */
+					rdev->status = DISK_INVALID;
+				}
+
+				/* record disk information */
+				record_disk_info(disk, rdev);
+				disk->size = rdev->size;
+
+				mddev->num_wrong--;
+
+				update_sb++;
+			}
+			else if (rdev->status == DISK_DSBL_NEW) {
+				/* enable the disk */
+				mark_disk_enabled(disk);
+				mddev->num_disabled--;
+
+				/* status is 'invalid' */
+				rdev->status = DISK_INVALID;
+
+				/* record disk information */
+				record_disk_info(disk, rdev);
+				disk->size = rdev->size;
+
+				mddev->num_replaced--;
+
+				update_sb++;
+			}
+		}
 	}
 
 	/* check if a disabled disk has been removed */
@@ -1449,42 +1465,42 @@ static int start_array(dev_t array_dev, char *state)
 			mdp_disk_t *disk = &sb->disks[i];
 			mdk_rdev_t *rdev = &mddev->rdev[i];
 
-                        if ((rdev->status == DISK_NP_DSBL) && !same_disk_info(disk, rdev, 1)) {
-                                /* record (clear) disk information */
-                                record_disk_info(disk, rdev);
+			if ((rdev->status == DISK_NP_DSBL) && !same_disk_info(disk, rdev, 1)) {
+				/* record (clear) disk information */
+				record_disk_info(disk, rdev);
 
-                                update_sb++;
-                        }
-                }
-        }
+				update_sb++;
+			}
+		}
+	}
 
 	/* check if new data disks added */
 	if (mddev->num_new) {
-                int parity_valid = (disk_valid(&sb->disks[MD_SB_P_IDX]) || disk_valid(&sb->disks[MD_SB_Q_IDX]));
+		int parity_valid = (disk_valid(&sb->disks[MD_SB_P_IDX]) || disk_valid(&sb->disks[MD_SB_Q_IDX]));
 		int i;
 
 		for (i = 0; i < MD_SB_DISKS; i++) {
 			mdp_disk_t *disk = &sb->disks[i];
 			mdk_rdev_t *rdev = &mddev->rdev[i];
 
-                        if (rdev->status == DISK_NEW) {
-                                mark_disk_enabled(disk);
+			if (rdev->status == DISK_NEW) {
+				mark_disk_enabled(disk);
 
-                                if (rdev->erased || !parity_valid) {
-                                        rdev->status = DISK_OK;
-                                        mark_disk_active(disk);
-                                        mark_disk_valid(disk);
-                                        mddev->num_new--;
-                                }
+				if (rdev->erased || !parity_valid) {
+					rdev->status = DISK_OK;
+					mark_disk_active(disk);
+					mark_disk_valid(disk);
+					mddev->num_new--;
+				}
 
-                                /* record disk information */
-                                record_disk_info(disk, rdev);
-                                disk->size = rdev->size;
+				/* record disk information */
+				record_disk_info(disk, rdev);
+				disk->size = rdev->size;
 
-                                update_sb++;
-                        }
-                }
-        }
+				update_sb++;
+			}
+		}
+	}
 
 	/* gitty up */
 	err = do_run(mddev);
@@ -1496,8 +1512,8 @@ static int start_array(dev_t array_dev, char *state)
 	mddev->state = STARTED;
 
 	/* commit the superblock */
-        if (update_sb)
-                md_update_sb(mddev);
+	if (update_sb)
+		md_update_sb(mddev);
 
 	return 0;
 }
@@ -1527,7 +1543,7 @@ static int stop_array(dev_t array_dev, int notifier)
 	md_interrupt_thread(mddev->recovery_thread);
 	mutex_lock(&mddev->recovery_sem);
 	mutex_unlock(&mddev->recovery_sem);
-        mddev->curr_resync = 0;
+	mddev->curr_resync = 0;
 
 	do_stop(mddev);
 	mddev->state = STOPPED;
@@ -1544,7 +1560,7 @@ static int stop_array(dev_t array_dev, int notifier)
 static int check_array(dev_t array_dev, char *option, unsigned long long offset)
 {
 	mddev_t *mddev = dev_to_mddev(array_dev);
-        int recovery_option, recovery_resume;
+	int recovery_option, recovery_resume;
 
 	if (!mddev->private) {
 		printk("md: check_array: not started\n");
@@ -1553,43 +1569,43 @@ static int check_array(dev_t array_dev, char *option, unsigned long long offset)
 
 	/* process option */
 	if (strcasecmp(option, "NOCORRECT") == 0) {
-                recovery_option = 0;
-                recovery_resume = 0;
-        }
+		recovery_option = 0;
+		recovery_resume = 0;
+	}
 	else if (strcasecmp(option, "CORRECT") == 0) {
-                recovery_option = 1;
-                recovery_resume = 0;
-        }
+		recovery_option = 1;
+		recovery_resume = 0;
+	}
 	else if (strcasecmp(option, "RESUME") == 0) {
-                recovery_resume = 1;
+		recovery_resume = 1;
 	}
 	else {
 		printk("md: check_array: invalid option: %s\n", option);
 		return -EINVAL;
 	}
-        /* validate offset */
-        if (offset >= (mddev->recovery_size*2) || (offset%8)) {
+	/* validate offset */
+	if (offset >= (mddev->recovery_size * 2) || (offset % 8)) {
 		printk("md: check_array: invalid offset %llu\n", offset);
 		return -EINVAL;
 	}
 
-        /* if recovery already running, just exit */
-        if (mddev->recovery_running)
-                return 0;
+	/* if recovery already running, just exit */
+	if (mddev->recovery_running)
+		return 0;
 
-        /* if resume indicated but not paused, just exit */
-        if (recovery_resume) {
-                if (mddev->curr_resync == 0)
-                        return 0;
-        }
-        else {
+	/* if resume indicated but not paused, just exit */
+	if (recovery_resume) {
+		if (mddev->curr_resync == 0)
+			return 0;
+	}
+	else {
 		mddev->recovery_option = recovery_option;
-                mddev->curr_resync = offset;
-                mddev->sb.sync_errs = 0;
-        }
+		mddev->curr_resync = offset;
+		mddev->sb.sync_errs = 0;
+	}
 
-        /* kick the thread */
-        md_wakeup_thread(mddev->recovery_thread);
+	/* kick the thread */
+	md_wakeup_thread(mddev->recovery_thread);
 	return 0;
 }
 
@@ -1598,7 +1614,7 @@ static int check_array(dev_t array_dev, char *option, unsigned long long offset)
 static int nocheck_array(dev_t array_dev, char *option)
 {
 	mddev_t *mddev = dev_to_mddev(array_dev);
-        int recovery_pause;
+	int recovery_pause;
 
 	if (!mddev->private) {
 		printk("md: nocheck_array: not started\n");
@@ -1615,14 +1631,14 @@ static int nocheck_array(dev_t array_dev, char *option)
 		return -EINVAL;
 	}
 
-        /* stop the recovery thread */
-        md_interrupt_thread(mddev->recovery_thread);
-        mutex_lock(&mddev->recovery_sem);
-        mutex_unlock(&mddev->recovery_sem);
+	/* stop the recovery thread */
+	md_interrupt_thread(mddev->recovery_thread);
+	mutex_lock(&mddev->recovery_sem);
+	mutex_unlock(&mddev->recovery_sem);
 
-        if (!recovery_pause) {
-                mddev->curr_resync = 0;
-        }
+	if (!recovery_pause) {
+		mddev->curr_resync = 0;
+	}
 	return 0;
 }
 
@@ -1637,13 +1653,13 @@ static int label_array(dev_t array_dev, char *label)
 		return -EINVAL;
 	}
 
-        if (strlen(label) >= sizeof(mddev->sb.label)) {
+	if (strlen(label) >= sizeof(mddev->sb.label)) {
 		printk("md: label_array: invalid label\n");
 		return -EINVAL;
-        }
+	}
 
-        memset(mddev->sb.label, 0, sizeof(mddev->sb.label));
-        strcpy(mddev->sb.label, label);
+	memset(mddev->sb.label, 0, sizeof(mddev->sb.label));
+	strcpy(mddev->sb.label, label);
 	md_update_sb(mddev);
 	return 0;
 }
@@ -1654,13 +1670,13 @@ static int dump_array(dev_t array_dev)
 {
 	mddev_t *mddev = dev_to_mddev(array_dev);
 
-        printk("md_num_stripes=%d\n", md_num_stripes);
-        printk("md_write_method=%d\n", md_write_method);
-        printk("md_queue_limit=%d\n", md_queue_limit);
-        printk("md_sync_limit=%d\n", md_sync_limit);
-        printk("md_restrict=%d\n", md_restrict);
-        printk("recovery_active=%d\n", atomic_read(&mddev->recovery_active)/(int)(PAGE_SIZE/512));
-        
+	printk("md_num_stripes=%d\n", md_num_stripes);
+	printk("md_write_method=%d\n", md_write_method);
+	printk("md_queue_limit=%d\n", md_queue_limit);
+	printk("md_sync_limit=%d\n", md_sync_limit);
+	printk("md_restrict=%d\n", md_restrict);
+	printk("recovery_active=%d\n", atomic_read(&mddev->recovery_active) / (int)(PAGE_SIZE / 512));
+
 	if (mddev->private)
 		unraid_dump(mddev);
 
@@ -1677,7 +1693,7 @@ static void status_sb(struct seq_file *seq, mdp_super_t *sb)
 	seq_printf(seq, "sbUpdated=%u\n", sb->utime);
 	seq_printf(seq, "sbEvents=%d\n", sb->events);
 	seq_printf(seq, "sbState=%d\n", sb->state);
-        seq_printf(seq, "sbNumDisks=%d\n", sb->num_disks);
+	seq_printf(seq, "sbNumDisks=%d\n", sb->num_disks);
 	seq_printf(seq, "sbLabel=%s\n", sb->label);
 
 	seq_printf(seq, "sbSynced=%u\n", sb->stime);
@@ -1689,89 +1705,87 @@ static void status_sb(struct seq_file *seq, mdp_super_t *sb)
 static void status_resync(mddev_t *mddev)
 {
 	mdp_super_t *sb = &mddev->sb;
-        int i;
+	int i;
 
-        *mddev->recovery_action = '\0';
-        mddev->recovery_size = 0;
+	*mddev->recovery_action = '\0';
+	mddev->recovery_size = 0;
 
-        if (mddev->state == NEW_ARRAY) {
-                /* sync P and/or Q if present
-                 */
-                if (mddev->rdev[MD_SB_P_IDX].size || mddev->rdev[MD_SB_Q_IDX].size) {
-                        strcpy(mddev->recovery_action, "recon");
+	if (mddev->state == NEW_ARRAY) {
+		/* sync P and/or Q if present
+		 */
+		if (mddev->rdev[MD_SB_P_IDX].size || mddev->rdev[MD_SB_Q_IDX].size) {
+			strcpy(mddev->recovery_action, "recon");
 
-                        if (mddev->rdev[MD_SB_P_IDX].size)
-                                strcat(mddev->recovery_action, " P");
-                        if (mddev->rdev[MD_SB_Q_IDX].size)
-                                strcat(mddev->recovery_action, " Q");
-                }
-                else
-                        strcpy(mddev->recovery_action, "check");
-        }
-        else
-        if (mddev->num_invalid != mddev->num_disabled) {
-                /* reconstruct
-                 */
-                strcpy(mddev->recovery_action, "recon");
+			if (mddev->rdev[MD_SB_P_IDX].size)
+				strcat(mddev->recovery_action, " P");
+			if (mddev->rdev[MD_SB_Q_IDX].size)
+				strcat(mddev->recovery_action, " Q");
+		}
+		else
+			strcpy(mddev->recovery_action, "check");
+	}
+	else if (mddev->num_invalid != mddev->num_disabled) {
+		/* reconstruct
+		 */
+		strcpy(mddev->recovery_action, "recon");
 
-                /* find the target disk(s) */
-                for (i = 0; i < MD_SB_DISKS; i++) {
-                        mdp_disk_t *disk = &sb->disks[i];
-                                
-                        if (disk_enabled(disk) && !disk_valid(disk)) {
-                                if (i == MD_SB_P_IDX)
-                                        strcat(mddev->recovery_action, " P");
-                                else if (i == MD_SB_Q_IDX)
-                                        strcat(mddev->recovery_action, " Q");
-                                else
-                                        sprintf(mddev->recovery_action+strlen(mddev->recovery_action), " D%i", i);
+		/* find the target disk(s) */
+		for (i = 0; i < MD_SB_DISKS; i++) {
+			mdp_disk_t *disk = &sb->disks[i];
 
-                                mddev->recovery_size = max(mddev->recovery_size, disk->size);
-                        }
-                }
-        }
-        else
-        if (mddev->num_new && (disk_valid(&sb->disks[MD_SB_P_IDX]) || disk_valid(&sb->disks[MD_SB_Q_IDX]))) {
-                /* clear new data disks if array parity is valid
-                 */
-                strcpy(mddev->recovery_action, "clear");
+			if (disk_enabled(disk) && !disk_valid(disk)) {
+				if (i == MD_SB_P_IDX)
+					strcat(mddev->recovery_action, " P");
+				else if (i == MD_SB_Q_IDX)
+					strcat(mddev->recovery_action, " Q");
+				else
+					sprintf(mddev->recovery_action + strlen(mddev->recovery_action), " D%i", i);
 
-                for (i = 0; i < MD_SB_DISKS; i++) {
-                        mdk_rdev_t *rdev = &mddev->rdev[i];
-                
-                        if (rdev->status == DISK_NEW) {
-                                mddev->recovery_size = max(mddev->recovery_size, rdev->size);
-                        }
-                }
-        }
-        else {
-                /* read all data disks and check P and/or Q if present */
-                /* note: if it's a single disabled data disk we are really just checking Q
-                 * because check_parity() will generate D from P and then check Q.
-                 */
-                strcpy(mddev->recovery_action, "check");
+				mddev->recovery_size = max(mddev->recovery_size, disk->size);
+			}
+		}
+	}
+	else if (mddev->num_new && (disk_valid(&sb->disks[MD_SB_P_IDX]) || disk_valid(&sb->disks[MD_SB_Q_IDX]))) {
+		/* clear new data disks if array parity is valid
+		 */
+		strcpy(mddev->recovery_action, "clear");
 
-                if (mddev->num_disabled <= 1) {
-                        if (disk_valid(&sb->disks[MD_SB_P_IDX]))
-                                strcat(mddev->recovery_action, " P");
-                        if (disk_valid(&sb->disks[MD_SB_Q_IDX]))
-                                strcat(mddev->recovery_action, " Q");
-                }
+		for (i = 0; i < MD_SB_DISKS; i++) {
+			mdk_rdev_t *rdev = &mddev->rdev[i];
 
-                for (i = 0; i < MD_SB_DISKS; i++) {
-                        mdk_rdev_t *rdev = &mddev->rdev[i];
-                
-                        mddev->recovery_size = max(mddev->recovery_size, rdev->size);
-                }
-        }
+			if (rdev->status == DISK_NEW) {
+				mddev->recovery_size = max(mddev->recovery_size, rdev->size);
+			}
+		}
+	}
+	else {
+		/* read all data disks and check P and/or Q if present */
+		/* note: if it's a single disabled data disk we are really just checking Q
+		 * because check_parity() will generate D from P and then check Q.
+		 */
+		strcpy(mddev->recovery_action, "check");
+
+		if (mddev->num_disabled <= 1) {
+			if (disk_valid(&sb->disks[MD_SB_P_IDX]))
+				strcat(mddev->recovery_action, " P");
+			if (disk_valid(&sb->disks[MD_SB_Q_IDX]))
+				strcat(mddev->recovery_action, " Q");
+		}
+
+		for (i = 0; i < MD_SB_DISKS; i++) {
+			mdk_rdev_t *rdev = &mddev->rdev[i];
+
+			mddev->recovery_size = max(mddev->recovery_size, rdev->size);
+		}
+	}
 }
 
 static void status_md(struct seq_file *seq, mddev_t *mddev)
 {
 	seq_printf(seq, "mdVersion=%d.%d.%d\n",
-		   MD_MAJOR_VERSION, MD_MINOR_VERSION, MD_PATCHLEVEL_VERSION);
+	           MD_MAJOR_VERSION, MD_MINOR_VERSION, MD_PATCHLEVEL_VERSION);
 	seq_printf(seq, "mdState=%s\n", mddev->state);
-        seq_printf(seq, "mdNumDisks=%d\n", mddev->num_disks);
+	seq_printf(seq, "mdNumDisks=%d\n", mddev->num_disks);
 	seq_printf(seq, "mdNumDisabled=%d\n", mddev->num_disabled);
 	seq_printf(seq, "mdNumReplaced=%d\n", mddev->num_replaced);
 	seq_printf(seq, "mdNumInvalid=%d\n", mddev->num_invalid);
@@ -1781,12 +1795,12 @@ static void status_md(struct seq_file *seq, mddev_t *mddev)
 	seq_printf(seq, "mdSwapP=%d\n", mddev->swap_p_idx);
 	seq_printf(seq, "mdSwapQ=%d\n", mddev->swap_q_idx);
 
-        status_resync(mddev);
+	status_resync(mddev);
 
 	seq_printf(seq, "mdResyncAction=%s\n", mddev->recovery_action);
 	seq_printf(seq, "mdResyncSize=%llu\n", mddev->recovery_size);
 	seq_printf(seq, "mdResyncCorr=%d\n", mddev->recovery_option);
-	seq_printf(seq, "mdResync=%llu\n", mddev->recovery_running/2);
+	seq_printf(seq, "mdResync=%llu\n", mddev->recovery_running / 2);
 
 	if (mddev->recovery_running) {
 		unsigned long long resync;
@@ -1794,30 +1808,30 @@ static void status_md(struct seq_file *seq, mddev_t *mddev)
 		unsigned long long db;
 
 		/* compute number of 1024-byte blocks which have completed */
-		resync = (mddev->curr_resync - atomic_read(&mddev->recovery_active))/2;
+		resync = (mddev->curr_resync - atomic_read(&mddev->recovery_active)) / 2;
 		seq_printf(seq, "mdResyncPos=%llu\n", resync);
 
 		/* time delta in seconds */
 		dt = ((jiffies - mddev->resync_mark) / HZ);
 		if (!dt) dt++;
 		seq_printf(seq, "mdResyncDt=%lu\n", dt);
-		
+
 		/* resync'ed blocks delta */
-		db = resync - (mddev->resync_mark_cnt/2);
+		db = resync - (mddev->resync_mark_cnt / 2);
 		seq_printf(seq, "mdResyncDb=%llu\n", db);
 	}
 	else {
-		seq_printf(seq, "mdResyncPos=%llu\n", mddev->curr_resync/2);
+		seq_printf(seq, "mdResyncPos=%llu\n", mddev->curr_resync / 2);
 		seq_printf(seq, "mdResyncDt=0\n");
 		seq_printf(seq, "mdResyncDb=0\n");
-        }
+	}
 }
 
 static void status_disk(struct seq_file *seq, mdp_disk_t *disk, mdk_rdev_t *rdev)
 {
 	int number = disk->number;
 
-        seq_printf(seq, "diskNumber.%d=%d\n", number, number);
+	seq_printf(seq, "diskNumber.%d=%d\n", number, number);
 	if ((disk_active(disk) || disk_enabled(disk)) && !is_parity_idx(number))
 		seq_printf(seq, "diskName.%d=md%d\n", number, number);
 	else
@@ -1827,7 +1841,7 @@ static void status_disk(struct seq_file *seq, mdp_disk_t *disk, mdk_rdev_t *rdev
 	seq_printf(seq, "diskState.%d=%d\n", number, disk->state);
 	seq_printf(seq, "diskId.%d=%s\n", number, disk->id);
 
-        seq_printf(seq, "rdevNumber.%d=%d\n", number, number);
+	seq_printf(seq, "rdevNumber.%d=%d\n", number, number);
 	seq_printf(seq, "rdevStatus.%d=%s\n", number, rdev->status);
 	seq_printf(seq, "rdevName.%d=%s\n", number, rdev->name);
 
@@ -1839,7 +1853,7 @@ static void status_disk(struct seq_file *seq, mdp_disk_t *disk, mdk_rdev_t *rdev
 	seq_printf(seq, "rdevWrites.%d=%lu\n", number, rdev->writes);
 	seq_printf(seq, "rdevNumErrors.%d=%lu\n", number, rdev->errors);
 }
-	
+
 static int md_status(struct seq_file *seq, dev_t array_dev)
 {
 	mddev_t *mddev = dev_to_mddev(array_dev);
@@ -1854,7 +1868,7 @@ static int md_status(struct seq_file *seq, dev_t array_dev)
 
 		status_disk(seq, disk, rdev);
 	}
-			
+
 	return 0;
 }
 
@@ -1867,17 +1881,17 @@ static int md_status(struct seq_file *seq, dev_t array_dev)
 char *get_token(char **bufp, char *delim) {
 	char *ptr = *bufp;
 	char *token;
-	
+
 	/*skip leading delimeters */
 	while (strchr(delim, *ptr) != NULL) {
 		if (*ptr == '\0')
 			break;
 		ptr++;
 	}
-	
+
 	if (*ptr != '\0') {
 		token = ptr;
-		
+
 		/*skip over token */
 		while (strchr(delim, *ptr) == NULL) {
 			if (*ptr == '\0')
@@ -1889,48 +1903,48 @@ char *get_token(char **bufp, char *delim) {
 	}
 	else
 		token = NULL;
-	
+
 	/* update buffer pointer */
 	*bufp = ptr;
-	
+
 	return token;
 }
 
 static int cmd_seq = 0;  /* command sequence number */
 
 static ssize_t md_proc_write(struct file *file, const char *buffer,
-			      size_t count, loff_t *offset)
+                             size_t count, loff_t *offset)
 {
 	char buf[256], *bufp, *token, *temp;
 	char *delim = " ,\t\n";
 	int result;
-	
-	if (count > sizeof(buf)-1)
+
+	if (count > sizeof(buf) - 1)
 		return -EINVAL;
 
 	if (copy_from_user(buf, buffer, count))
-                return -EFAULT;
+		return -EFAULT;
 	buf[count] = '\0';
-	
+
 	bufp = buf;
 	token = get_token(&bufp, delim);
 	if (token == NULL)
 		return -EINVAL;
-	
+
 	/* dummy command as of 4.6 */
 	if (!strcmp("status", token))
 		return count;
 
 	cmd_seq++;
-	
+
 	if (md_trace)
 		printk("mdcmd (%d): %s %s\n", cmd_seq, token, bufp);
-	
+
 	if (!strcmp("set", token)) {
 		char *name = "";
 		int value = 0;
 		unsigned long long u64_value = 0;
-		
+
 		result = 0; /* assume ok */
 
 		/* this is the subcommand string */
@@ -1942,103 +1956,92 @@ static ssize_t md_proc_write(struct file *file, const char *buffer,
 			value = simple_strtol(token, &temp, 10);
 			u64_value = simple_strtoll(token, &temp, 10);
 		}
-		
+
 		/* process the subcommand */
 
 		if (!strcmp("md_trace", name))
 			md_trace = token ? value : MD_TRACE;
-		else
-		if (!strcmp("md_num_stripes", name)) {
-			dev_t array_dev = MKDEV(MAJOR_NR,0);
-                        mddev_t *mddev = dev_to_mddev(array_dev);
+		else if (!strcmp("md_num_stripes", name)) {
+			dev_t array_dev = MKDEV(MAJOR_NR, 0);
+			mddev_t *mddev = dev_to_mddev(array_dev);
 
-                        int num_stripes = token ? value : MD_NUM_STRIPES;
+			int num_stripes = token ? value : MD_NUM_STRIPES;
 
-                        if (mddev->private)
-                                md_num_stripes = unraid_num_stripes(mddev, num_stripes);
-                        else
-                                md_num_stripes = num_stripes;
-                }
-		else
-		if (!strcmp("md_queue_limit", name)) {
+			if (mddev->private)
+				md_num_stripes = unraid_num_stripes(mddev, num_stripes);
+			else
+				md_num_stripes = num_stripes;
+		}
+		else if (!strcmp("md_queue_limit", name)) {
 			md_queue_limit = token ? value : MD_QUEUE_LIMIT;
-                        if (md_queue_limit < 1)
-                                md_queue_limit = 1;
-                        else if (md_queue_limit > 100)
-                                md_queue_limit = 100;
-                }
-		else
-		if (!strcmp("md_sync_limit", name)) {
+			if (md_queue_limit < 1)
+				md_queue_limit = 1;
+			else if (md_queue_limit > 100)
+				md_queue_limit = 100;
+		}
+		else if (!strcmp("md_sync_limit", name)) {
 			md_sync_limit = token ? value : MD_SYNC_LIMIT;
-                        if (md_sync_limit < 0)
-                                md_sync_limit = 0;
-                        else if (md_sync_limit > 100)
-                                md_sync_limit = 100;
-                }
-		else
-                if (!strcmp("md_write_method", name)) {
-                        if (token) {
-                                if ((value != READ_MODIFY_WRITE) && (value != RECONSTRUCT_WRITE))
-                                        result = -EINVAL; /* fail */
-                                else
-                                        md_write_method = value;
-                        }
-                        else
-                                md_write_method = READ_MODIFY_WRITE;
-                }
-                else
-                if (!strcmp("md_restrict", name)) {
+			if (md_sync_limit < 0)
+				md_sync_limit = 0;
+			else if (md_sync_limit > 100)
+				md_sync_limit = 100;
+		}
+		else if (!strcmp("md_write_method", name)) {
+			if (token) {
+				if ((value != READ_MODIFY_WRITE) && (value != RECONSTRUCT_WRITE))
+					result = -EINVAL; /* fail */
+				else
+					md_write_method = value;
+			}
+			else
+				md_write_method = READ_MODIFY_WRITE;
+		}
+		else if (!strcmp("md_restrict", name)) {
 			md_restrict = token ? value : 1;
-                }
-                else
-	        if (!strcmp("invalidslot", name)) {
+		}
+		else if (!strcmp("invalidslot", name)) {
 			/* invalidslot slota slotb */
-                        if (token) {
-                                invalidslota = value;
-                                invalidslotb = 99; /* just a big number */
-                                if ((token = get_token(&bufp, delim)) != NULL)
-                                        invalidslotb = simple_strtol(token, &temp, 10);
-                        }
-                        else {
-                                invalidslota = MD_SB_P_IDX;
-                                invalidslotb = MD_SB_Q_IDX;
-                        }
-                }
-		else
-	        if (!strcmp("resync_start", name))
+			if (token) {
+				invalidslota = value;
+				invalidslotb = 99; /* just a big number */
+				if ((token = get_token(&bufp, delim)) != NULL)
+					invalidslotb = simple_strtol(token, &temp, 10);
+			}
+			else {
+				invalidslota = MD_SB_P_IDX;
+				invalidslotb = MD_SB_Q_IDX;
+			}
+		}
+		else if (!strcmp("resync_start", name))
 			md_resync_start = token ? u64_value : 0;
-		else
-		if (!strcmp("resync_end", name))
+		else if (!strcmp("resync_end", name))
 			md_resync_end = token ? u64_value : 0;
-		else
-		if (!strcmp("rderror", name)) {
-			dev_t array_dev = MKDEV(MAJOR_NR,0);
-                        mddev_t *mddev = dev_to_mddev(array_dev);
+		else if (!strcmp("rderror", name)) {
+			dev_t array_dev = MKDEV(MAJOR_NR, 0);
+			mddev_t *mddev = dev_to_mddev(array_dev);
 
-                        mddev->rdev[value].simulate_rderror = 1;
-                }
-		else
-		if (!strcmp("wrerror", name)) {
-			dev_t array_dev = MKDEV(MAJOR_NR,0);
-                        mddev_t *mddev = dev_to_mddev(array_dev);
+			mddev->rdev[value].simulate_rderror = 1;
+		}
+		else if (!strcmp("wrerror", name)) {
+			dev_t array_dev = MKDEV(MAJOR_NR, 0);
+			mddev_t *mddev = dev_to_mddev(array_dev);
 
-                        mddev->rdev[value].simulate_wrerror = 1;
-                }
+			mddev->rdev[value].simulate_wrerror = 1;
+		}
 		else
 			result = -EINVAL; /* fail */
 	}
-	else
-	if (!strcmp("import", token)) {
+	else if (!strcmp("import", token)) {
 		/* slot name size erased id
 		 */
-		dev_t array_dev = MKDEV(MAJOR_NR,0);
+		dev_t array_dev = MKDEV(MAJOR_NR, 0);
 		long slot = 0;
-                char name[32] = {'\0'};
+		char name[32] = {'\0'};
 		unsigned long offset = 0;
 		unsigned long long size = 0;
 		long erased = 0;
 		char id[MD_ID_SIZE] = {'\0'};
-		
+
 		if ((token = get_token(&bufp, delim)) != NULL)
 			slot = simple_strtol(token, &temp, 10);
 
@@ -2046,7 +2049,7 @@ static ssize_t md_proc_write(struct file *file, const char *buffer,
 			return -1;
 
 		if ((token = get_token(&bufp, delim)) != NULL)
-			strncpy(name, token, sizeof(name)-1);
+			strncpy(name, token, sizeof(name) - 1);
 
 		if ((token = get_token(&bufp, delim)) != NULL)
 			offset = simple_strtoul(token, &temp, 10);
@@ -2058,70 +2061,64 @@ static ssize_t md_proc_write(struct file *file, const char *buffer,
 			erased = simple_strtol(token, &temp, 10);
 
 		if ((token = get_token(&bufp, delim)) != NULL)
-			strncpy(id, token, sizeof(id)-1);
-		
-		result = import_slot(array_dev, slot, name, offset,size, erased, id);
+			strncpy(id, token, sizeof(id) - 1);
+
+		result = import_slot(array_dev, slot, name, offset, size, erased, id);
 	}
-	else
-	if (!strcmp("start", token)) {
-		dev_t array_dev = MKDEV(MAJOR_NR,0);
+	else if (!strcmp("start", token)) {
+		dev_t array_dev = MKDEV(MAJOR_NR, 0);
 		char *state = "STOPPED";
-		
+
 		if ((token = get_token(&bufp, delim)) != NULL)
 			state = token;
-		
+
 		result = start_array(array_dev, state);
 	}
-	else
-	if (!strcmp("stop", token)) {
-		dev_t array_dev = MKDEV(MAJOR_NR,0);
-		
+	else if (!strcmp("stop", token)) {
+		dev_t array_dev = MKDEV(MAJOR_NR, 0);
+
 		result = stop_array(array_dev, 0);
 	}
-	else
-	if (!strcmp("check", token)){
-		dev_t array_dev = MKDEV(MAJOR_NR,0);
+	else if (!strcmp("check", token)) {
+		dev_t array_dev = MKDEV(MAJOR_NR, 0);
 		char *option = "CORRECT";
 		unsigned long long offset = 0;
 
 		if ((token = get_token(&bufp, delim)) != NULL) {
 			option = token;
-                        if ((token = get_token(&bufp, delim)) != NULL) {
-                                offset = simple_strtoull(token, &temp, 10);
-                        }
-                }
-		
+			if ((token = get_token(&bufp, delim)) != NULL) {
+				offset = simple_strtoull(token, &temp, 10);
+			}
+		}
+
 		result = check_array(array_dev, option, offset);
 	}
-	else
-	if (!strcmp("nocheck", token)){
-		dev_t array_dev = MKDEV(MAJOR_NR,0);
+	else if (!strcmp("nocheck", token)) {
+		dev_t array_dev = MKDEV(MAJOR_NR, 0);
 		char *option = "CANCEL";
 
 		if ((token = get_token(&bufp, delim)) != NULL)
 			option = token;
-		
+
 		result = nocheck_array(array_dev, option);
 	}
-	else
-	if (!strcmp("label", token)){
-		dev_t array_dev = MKDEV(MAJOR_NR,0);
+	else if (!strcmp("label", token)) {
+		dev_t array_dev = MKDEV(MAJOR_NR, 0);
 		char *label = "";
-		
+
 		if ((token = get_token(&bufp, delim)) != NULL)
 			label = token;
-		
+
 		result = label_array(array_dev, label);
 	}
-	else
-	if (!strcmp("dump", token)) {
-		dev_t array_dev = MKDEV(MAJOR_NR,0);
-		
+	else if (!strcmp("dump", token)) {
+		dev_t array_dev = MKDEV(MAJOR_NR, 0);
+
 		result = dump_array(array_dev);
 	}
 	else
 		result = -EINVAL; /* fail */
-	
+
 	return (result ? (ssize_t)result : count);
 }
 
@@ -2140,9 +2137,9 @@ static const struct proc_ops md_proc_cmd_fops = {
  */
 static int md_seq_show(struct seq_file *seq, void *v)
 {
-	dev_t array_dev = MKDEV(MAJOR_NR,0);
+	dev_t array_dev = MKDEV(MAJOR_NR, 0);
 
-        return md_status(seq, array_dev);
+	return md_status(seq, array_dev);
 }
 
 static int md_seq_open(struct inode *inode, struct file *file)
@@ -2152,13 +2149,13 @@ static int md_seq_open(struct inode *inode, struct file *file)
 
 int md_seq_release(struct inode *inode, struct file *file)
 {
-        return single_release(inode, file);
+	return single_release(inode, file);
 }
 
 static const struct proc_ops md_proc_stat_fops = {
 	.proc_open = md_seq_open,
-        .proc_read = seq_read,
-        .proc_lseek = seq_lseek,
+	.proc_read = seq_read,
+	.proc_lseek = seq_lseek,
 	.proc_release = md_seq_release,
 };
 
@@ -2166,15 +2163,15 @@ static const struct proc_ops md_proc_stat_fops = {
 /* Driver install/remove */
 
 static int md_notify_reboot(struct notifier_block *this,
-			    unsigned long code, void *x)
+                            unsigned long code, void *x)
 {
-        printk("md: md_notify_reboot\n");
+	printk("md: md_notify_reboot\n");
 	if ((code == SYS_DOWN) ||
 	    (code == SYS_HALT) ||
 	    (code == SYS_POWER_OFF)) {
 
 		printk("md: stopping all md devices\n");
-		stop_array(MKDEV(MAJOR_NR,0), 1);
+		stop_array(MKDEV(MAJOR_NR, 0), 1);
 	}
 	return NOTIFY_DONE;
 }
@@ -2187,7 +2184,7 @@ static struct notifier_block md_notifier = {
 
 static int __init md_init(void)
 {
-	dev_t array_dev = MKDEV(MAJOR_NR,0);
+	dev_t array_dev = MKDEV(MAJOR_NR, 0);
 
 	printk("md: unRAID driver %d.%d.%d installed\n",
 	       MD_MAJOR_VERSION, MD_MINOR_VERSION,
@@ -2204,14 +2201,14 @@ static int __init md_init(void)
 	}
 
 	register_reboot_notifier(&md_notifier);
-        proc_create("mdcmd", S_IRUGO|S_IWUSR, NULL, &md_proc_cmd_fops);
-        proc_create("mdstat", S_IRUGO|S_IWUSR, NULL, &md_proc_stat_fops);
+	proc_create("mdcmd", S_IRUGO | S_IWUSR, NULL, &md_proc_cmd_fops);
+	proc_create("mdstat", S_IRUGO | S_IWUSR, NULL, &md_proc_stat_fops);
 	return (alloc_mddev(array_dev) ? 0 : -1);
 }
 
 static __exit void md_exit(void)
 {
-	free_mddev(dev_to_mddev(MKDEV(MAJOR_NR,0)));
+	free_mddev(dev_to_mddev(MKDEV(MAJOR_NR, 0)));
 	remove_proc_entry("mdcmd", NULL);
 	remove_proc_entry("mdstat", NULL);
 	unregister_reboot_notifier(&md_notifier);
@@ -2223,7 +2220,7 @@ static __exit void md_exit(void)
 
 module_init(md_init);
 module_exit(md_exit);
-		
+
 /****************************************************************************/
 
 MODULE_ALIAS("md");
