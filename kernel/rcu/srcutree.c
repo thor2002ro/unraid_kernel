@@ -57,8 +57,12 @@ module_param(counter_wrap_check, ulong, 0444);
 #define SRCU_SIZING_IS_INIT() (SRCU_SIZING_IS(SRCU_SIZING_INIT))
 #define SRCU_SIZING_IS_TORTURE() (SRCU_SIZING_IS(SRCU_SIZING_TORTURE))
 #define SRCU_SIZING_IS_CONTEND() (convert_to_big & SRCU_SIZING_CONTEND)
-static int convert_to_big = SRCU_SIZING_NONE;
+static int convert_to_big = SRCU_SIZING_AUTO;
 module_param(convert_to_big, int, 0444);
+
+/* Number of CPUs to trigger init_srcu_struct()-time transition to big. */
+static int big_cpu_lim __read_mostly = 128;
+module_param(big_cpu_lim, int, 0444);
 
 /* Contention events per jiffy to initiate transition to big. */
 static int small_contention_lim __read_mostly = 100;
@@ -1593,6 +1597,17 @@ void __init srcu_init(void)
 {
 	struct srcu_struct *ssp;
 
+	/* Decide on srcu_struct-size strategy. */
+	if (SRCU_SIZING_IS(SRCU_SIZING_AUTO)) {
+		if (nr_cpu_ids >= big_cpu_lim) {
+			convert_to_big = SRCU_SIZING_INIT; // Don't bother waiting for contention.
+			pr_info("%s: Setting srcu_struct sizes to big.\n", __func__);
+		} else {
+			convert_to_big = SRCU_SIZING_NONE | SRCU_SIZING_CONTEND;
+			pr_info("%s: Setting srcu_struct sizes based on contention.\n", __func__);
+		}
+	}
+
 	/*
 	 * Once that is set, call_srcu() can follow the normal path and
 	 * queue delayed work. This must follow RCU workqueues creation
@@ -1603,6 +1618,8 @@ void __init srcu_init(void)
 		ssp = list_first_entry(&srcu_boot_list, struct srcu_struct,
 				      work.work.entry);
 		list_del_init(&ssp->work.work.entry);
+		if (SRCU_SIZING_IS(SRCU_SIZING_INIT) && !ssp->srcu_size_state)
+			ssp->srcu_size_state = SRCU_SIZE_ALLOC;
 		queue_work(rcu_gp_wq, &ssp->work.work);
 	}
 }
