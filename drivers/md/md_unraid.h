@@ -65,7 +65,8 @@ extern void (*raid6_xor_syndrome)(int, int, int, size_t, void **);
  */
 #define MD_MAJOR_VERSION                2
 #define MD_MINOR_VERSION                9
-#define MD_PATCHLEVEL_VERSION           CONFIG_MD_UNRAID_PATCHLEVEL_VERSION
+static int MD_PATCHLEVEL_VERSION = 		17;
+//#define MD_PATCHLEVEL_VERSION			17
 
 /****************************************************************************/
 /* 'md_p.h' holds the 'physical' layout of RAID devices */
@@ -125,7 +126,7 @@ typedef struct mdp_device_descriptor_s {
 	__u32 number;		/* 2 Device slot number                       */
 	__u32 state;		/* 3 Operational state bits		      */
 	__u64 size;             /* 4-5 Size in 1024-byte blocks               */
-				__u8  id[MD_ID_SIZE];   /* 6-25 ID string (including null terminator) */
+	__u8  id[MD_ID_SIZE];   /* 6-25 ID string (including null terminator) */
 	__u32 reserved[MD_SB_DESCRIPTOR_WORDS - 26];
 } mdp_disk_t;
 
@@ -162,16 +163,16 @@ typedef struct mdp_superblock_s {
 	__u32 stime2;		/* 13 Last sync end time        	      */
 	__u32 sync_exit;	/* 14 Last sync exit code                     */
 	__u32 spare;	        /* 15 spare (not used)                        */
-				__u8  label[32];        /* 16-23 Label                                */
+	__u8  label[32];        /* 16-23 Label                                */
 	__u32 common_reserved[MD_SB_COMMON_WORDS - 24];
 	/*
 	 * Disks information
 	 */
 	mdp_disk_t disks[MD_SB_DISKS];
-				/*
-				 * Last descriptor reserved
-				 */
-				mdp_disk_t reserved_desc;
+	/*
+	 * Last descriptor reserved
+	 */
+	mdp_disk_t reserved_desc;
 } mdp_super_t;
 
 /* Previous version of the superblock */
@@ -183,7 +184,7 @@ typedef struct mdp_device_descriptor_v1_s {
 	__u32 number;		/* 2 Device slot number                       */
 	__u32 state;		/* 3 Operational state bits		      */
 	__u32 size;             /* 4 Size in 1024-byte blocks                 */
-				__u8  model[40];        /* 5-14 Model reported by device              */
+	__u8  model[40];        /* 5-14 Model reported by device              */
 	__u8  serial_no[20];    /* 15-19 Serial number reported by device     */
 	__u32 reserved[MD_SB_DESCRIPTOR_WORDS - 20];
 } mdp_disk_v1_t;
@@ -224,14 +225,14 @@ typedef struct mdk_rdev_s {
 	unsigned long long      size;		          /* disk size in 1024-byte blocks */
 	unsigned char           id[MD_ID_SIZE];           /* id string (including null terminator) */
 	unsigned char           name[BDEVNAME_SIZE];      /* device name string */
-				int                     erased;                   /* factory-erased flag */
+	int                     erased;                   /* factory-erased flag */
 
 	unsigned long           reads;                    /* reads statistic */
 	unsigned long           writes;                   /* writes statistic */
 	unsigned long           errors;                   /* errors statistic */
 
-				unsigned long           simulate_rderror;         /* used for testing */
-				unsigned long           simulate_wrerror;         /* used for testing */
+	unsigned long           simulate_rderror;         /* used for testing */
+	unsigned long           simulate_wrerror;         /* used for testing */
 } mdk_rdev_t;
 
 typedef struct mddev_s {
@@ -249,22 +250,22 @@ typedef struct mddev_s {
 	int                     recovery_option;
 	unsigned long long	recovery_running;         /* total sectors, or 0 if no recovery */
 	atomic_t		recovery_active;          /* sectors scheduled, but not written */
-				char                    recovery_action[128];
+	char                    recovery_action[128];
 	unsigned long long      recovery_size;
 	unsigned long long	curr_resync;	          /* blocks scheduled */
 	unsigned long		resync_mark;	          /* a recent timestamp */
 	unsigned long long	resync_mark_cnt;          /* blocks written at resync_mark */
 
 	char                    *state;
-				int                     num_disks;
+	int                     num_disks;
 	int                     num_disabled;
 	int                     num_replaced;
 	int                     num_invalid;
 	int                     num_missing;
 	int                     num_wrong;
 	int                     num_new;
-				int                     swap_p_idx;
-				int                     swap_q_idx;
+	int                     swap_p_idx;
+	int                     swap_q_idx;
 
 	mdk_rdev_t              rdev[MD_SB_DISKS];
 	struct gendisk          *gendisk[MD_SB_DISKS];
@@ -286,7 +287,7 @@ typedef struct mdk_thread_s {
 /* md */
 
 extern mdk_thread_t *md_register_thread(void (*run)(mddev_t *, unsigned long),
-									mddev_t *mddev, unsigned long arg,  const char *name);
+                                        mddev_t *mddev, unsigned long arg,  const char *name);
 extern void md_unregister_thread(mdk_thread_t *thread);
 extern void md_wakeup_thread(mdk_thread_t *thread);
 extern void md_interrupt_thread(mdk_thread_t *thread);
