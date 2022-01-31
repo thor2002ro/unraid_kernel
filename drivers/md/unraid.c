@@ -519,7 +519,7 @@ static void end_request(struct bio *bi)
 			break;
 	}
 	if (i == disks) {
-		bio_reset(bi);
+		bio_reset(bi, NULL, 0);
 		BUG();
 		return;
 	}
@@ -561,7 +561,7 @@ static void end_request(struct bio *bi)
 				mark_disk_invalid(col);
 		}
 	}
-	bio_reset(bi);
+	bio_reset(bi, NULL, 0);
 
 	clr_buff_locked(col);
 	spin_lock_irqsave(&conf->device_lock, flags);
@@ -1584,12 +1584,12 @@ static void handle_stripe(struct stripe_head *sh)
 		}
 
 		if (test_and_clear_bit(MD_BUFF_READ, &col->state)) {
-			bio_init(bi, &col->vec, 1);
+			bio_init(bi, NULL, &col->vec, 1, 0);
 			bi->bi_opf = REQ_OP_READ;
 			rdev->reads++;
 		}
 		else if (test_and_clear_bit(MD_BUFF_WRITE, &col->state)) {
-			bio_init(bi, &col->vec, 1);
+			bio_init(bi, NULL, &col->vec, 1, 0);
 			bi->bi_opf = REQ_OP_WRITE | ((i < pd_idx) ? op_flags : pq_flags);
 			rdev->writes++;
 		}
@@ -1648,7 +1648,7 @@ static void submit_flush_data(struct work_struct *ws)
 
 static void submit_flush_bio(flush_stripe_t *flush_stripe, struct bio *bi, mdk_rdev_t *rdev)
 {
-	bio_init(bi, NULL, 0);
+	bio_init(bi, NULL, NULL, 0, 0);
 	bio_set_dev(bi, rdev->bdev);
 	bi->bi_private = flush_stripe;
 	bi->bi_end_io = end_flush;
