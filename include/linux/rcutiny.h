@@ -23,6 +23,26 @@ static inline void cond_synchronize_rcu(unsigned long oldstate)
 	might_sleep();
 }
 
+static inline unsigned long get_state_synchronize_rcu_expedited(void)
+{
+	return get_state_synchronize_rcu();
+}
+
+static inline unsigned long start_poll_synchronize_rcu_expedited(void)
+{
+	return start_poll_synchronize_rcu();
+}
+
+static inline bool poll_state_synchronize_rcu_expedited(unsigned long oldstate)
+{
+	return poll_state_synchronize_rcu(oldstate);
+}
+
+static inline void cond_synchronize_rcu_expedited(unsigned long oldstate)
+{
+	cond_synchronize_rcu(oldstate);
+}
+
 extern void rcu_barrier(void);
 
 static inline void synchronize_rcu_expedited(void)

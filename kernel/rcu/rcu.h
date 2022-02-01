@@ -24,6 +24,13 @@
 #define RCU_SEQ_STATE_MASK	((1 << RCU_SEQ_CTR_SHIFT) - 1)
 
 /*
+ * Low-order bit definitions for polled grace-period APIs.
+ */
+#define RCU_GET_STATE_FROM_EXPEDITED	0x1
+#define RCU_GET_STATE_USE_NORMAL	0x2
+#define RCU_GET_STATE_BAD_FOR_NORMAL	(RCU_GET_STATE_FROM_EXPEDITED | RCU_GET_STATE_USE_NORMAL)
+
+/*
  * Return the counter portion of a sequence number previously returned
  * by rcu_seq_snap() or rcu_seq_current().
  */
