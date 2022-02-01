@@ -657,6 +657,28 @@ static inline unsigned long __arc_clear_user(void __user *to, unsigned long n)
 	return res;
 }
 
+#define HAVE_GET_KERNEL_NOFAULT
+
+#define __get_kernel_nofault(dst, src, type, err_label)			\
+	do {								\
+		long __err;						\
+									\
+		__err = __get_user_fn(sizeof(type), (type *)(src),	\
+				      (type *)(dst));			\
+		if (unlikely(__err))					\
+			goto err_label;					\
+	} while (0)
+
+#define __put_kernel_nofault(dst, src, type, err_label)			\
+	do {								\
+		long __err;						\
+									\
+		__err = __put_user_fn(sizeof(type), (type *)(dst),	\
+				      (type *)(src));			\
+		if (unlikely(__err))					\
+			goto err_label;					\
+	} while (0)
+
 #ifndef CONFIG_CC_OPTIMIZE_FOR_SIZE
 
 #define INLINE_COPY_TO_USER
