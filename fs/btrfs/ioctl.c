@@ -1320,6 +1320,7 @@ next:
 }
 
 #define CLUSTER_SIZE	(SZ_256K)
+static_assert(IS_ALIGNED(CLUSTER_SIZE, PAGE_SIZE));
 
 /*
  * Defrag one contiguous target range.
@@ -1463,7 +1464,6 @@ static int defrag_one_cluster(struct btrfs_inode *inode,
 	LIST_HEAD(target_list);
 	int ret;
 
-	BUILD_BUG_ON(!IS_ALIGNED(CLUSTER_SIZE, PAGE_SIZE));
 	ret = defrag_collect_targets(inode, start, len, extent_thresh,
 				     newer_than, do_compress, false,
 				     &target_list);
@@ -1592,9 +1592,6 @@ int btrfs_defrag_file(struct inode *inode, struct file_ra_state *ra,
 	while (cur < last_byte) {
 		const unsigned long prev_sectors_defragged = sectors_defragged;
 		u64 cluster_end;
-
-		/* The cluster size 256K should always be page aligned */
-		BUILD_BUG_ON(!IS_ALIGNED(CLUSTER_SIZE, PAGE_SIZE));
 
 		if (btrfs_defrag_cancelled(fs_info)) {
 			ret = -EAGAIN;
