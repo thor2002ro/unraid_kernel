@@ -62,6 +62,7 @@
 	case 2: __arc_get_user_one(*(k), u, "ldw", __ret); break;	\
 	case 4: __arc_get_user_one(*(k), u, "ld", __ret);  break;	\
 	case 8: __arc_get_user_one_64(*(k), u, __ret);     break;	\
+	default: BUILD_BUG();                                   \
 	}							\
 	__ret;							\
 })
@@ -123,6 +124,7 @@
 	case 2: __arc_put_user_one(*(k), u, "stw", __ret); break;	\
 	case 4: __arc_put_user_one(*(k), u, "st", __ret);  break;	\
 	case 8: __arc_put_user_one_64(*(k), u, __ret);     break;	\
+	default: BUILD_BUG();                                   \
 	}							\
 	__ret;							\
 })
