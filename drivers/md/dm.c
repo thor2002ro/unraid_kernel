@@ -519,9 +519,7 @@ static struct dm_io *alloc_io(struct mapped_device *md, struct bio *bio)
 	struct dm_target_io *tio;
 	struct bio *clone;
 
-	clone = bio_alloc_bioset(GFP_NOIO, 0, &md->io_bs);
-	if (!clone)
-		return NULL;
+	clone = bio_alloc_bioset(NULL, 0, 0, GFP_NOIO, &md->io_bs);
 
 	tio = container_of(clone, struct dm_target_io, clone);
 	tio->inside_dm_io = true;
@@ -554,7 +552,8 @@ static struct dm_target_io *alloc_tio(struct clone_info *ci, struct dm_target *t
 		/* the dm_target_io embedded in ci->io is available */
 		tio = &ci->io->tio;
 	} else {
-		struct bio *clone = bio_alloc_bioset(gfp_mask, 0, &ci->io->md->bs);
+		struct bio *clone = bio_alloc_bioset(NULL, 0, 0, gfp_mask,
+						     &ci->io->md->bs);
 		if (!clone)
 			return NULL;
 
@@ -1304,9 +1303,8 @@ static int __send_empty_flush(struct clone_info *ci)
 	 * need to reference it after submit. It's just used as
 	 * the basis for the clone(s).
 	 */
-	bio_init(&flush_bio, NULL, 0);
-	flush_bio.bi_opf = REQ_OP_WRITE | REQ_PREFLUSH | REQ_SYNC;
-	bio_set_dev(&flush_bio, ci->io->md->disk->part0);
+	bio_init(&flush_bio, ci->io->md->disk->part0, NULL, 0,
+		 REQ_OP_WRITE | REQ_PREFLUSH | REQ_SYNC);
 
 	ci->bio = &flush_bio;
 	ci->sector_count = 0;
