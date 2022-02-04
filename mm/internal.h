@@ -738,4 +738,9 @@ int numa_migrate_prep(struct page *page, struct vm_area_struct *vma,
 void free_zone_device_page(struct page *page);
 struct page *migrate_device_page(struct page *page, unsigned int gup_flags);
 
+/*
+ * mm/gup.c
+ */
+struct folio *try_grab_folio(struct page *page, int refs, unsigned int flags);
+
 #endif	/* __MM_INTERNAL_H */
