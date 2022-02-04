@@ -1850,6 +1850,14 @@ static void update_super_roots(struct btrfs_fs_info *fs_info)
 		super->cache_generation = 0;
 	if (test_bit(BTRFS_FS_UPDATE_UUID_TREE_GEN, &fs_info->flags))
 		super->uuid_tree_generation = root_item->generation;
+
+	if (btrfs_fs_incompat(fs_info, EXTENT_TREE_V2)) {
+		root_item = &fs_info->block_group_root->root_item;
+
+		super->block_group_root = root_item->bytenr;
+		super->block_group_root_generation = root_item->generation;
+		super->block_group_root_level = root_item->level;
+	}
 }
 
 int btrfs_transaction_in_commit(struct btrfs_fs_info *info)
@@ -2000,6 +2008,27 @@ static inline void btrfs_wait_delalloc_flush(struct btrfs_fs_info *fs_info)
 		btrfs_wait_ordered_roots(fs_info, U64_MAX, 0, (u64)-1);
 }
 
+/*
+ * Add a pending snapshot associated with the given transaction handle to the
+ * respective handle. This must be called after the transaction commit started
+ * and while holding fs_info->trans_lock.
+ * This serves to guarantee a caller of btrfs_commit_transaction() that it can
+ * safely free the pending snapshot pointer in case btrfs_commit_transaction()
+ * returns an error.
+ */
+static void add_pending_snapshot(struct btrfs_trans_handle *trans)
+{
+	struct btrfs_transaction *cur_trans = trans->transaction;
+
+	if (!trans->pending_snapshot)
+		return;
+
+	lockdep_assert_held(&trans->fs_info->trans_lock);
+	ASSERT(cur_trans->state >= TRANS_STATE_COMMIT_START);
+
+	list_add(&trans->pending_snapshot->list, &cur_trans->pending_snapshots);
+}
+
 int btrfs_commit_transaction(struct btrfs_trans_handle *trans)
 {
 	struct btrfs_fs_info *fs_info = trans->fs_info;
@@ -2072,6 +2101,8 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans)
 	spin_lock(&fs_info->trans_lock);
 	if (cur_trans->state >= TRANS_STATE_COMMIT_START) {
 		enum btrfs_trans_state want_state = TRANS_STATE_COMPLETED;
+
+		add_pending_snapshot(trans);
 
 		spin_unlock(&fs_info->trans_lock);
 		refcount_inc(&cur_trans->use_count);
@@ -2163,6 +2194,7 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans)
 	 * COMMIT_DOING so make sure to wait for num_writers to == 1 again.
 	 */
 	spin_lock(&fs_info->trans_lock);
+	add_pending_snapshot(trans);
 	cur_trans->state = TRANS_STATE_COMMIT_DOING;
 	spin_unlock(&fs_info->trans_lock);
 	wait_event(cur_trans->writer_wait,
@@ -2268,6 +2300,13 @@ int btrfs_commit_transaction(struct btrfs_trans_handle *trans)
 			    fs_info->chunk_root->node);
 	list_add_tail(&fs_info->chunk_root->dirty_list,
 		      &cur_trans->switch_commits);
+
+	if (btrfs_fs_incompat(fs_info, EXTENT_TREE_V2)) {
+		btrfs_set_root_node(&fs_info->block_group_root->root_item,
+				    fs_info->block_group_root->node);
+		list_add_tail(&fs_info->block_group_root->dirty_list,
+			      &cur_trans->switch_commits);
+	}
 
 	switch_commit_roots(trans);
 
