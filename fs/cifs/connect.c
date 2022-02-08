@@ -193,7 +193,7 @@ cifs_mark_tcp_ses_conns_for_reconnect(struct TCP_Server_Info *server,
 			goto next_session;
 
 		if (mark_smb_session)
-			CIFS_SET_ALL_CHANS_NEED_RECONNECT(ses);
+			cifs_all_chans_set_need_reconnect(ses);
 		else
 			cifs_chan_set_need_reconnect(ses, server);
 

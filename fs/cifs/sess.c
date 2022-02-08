@@ -86,12 +86,26 @@ cifs_ses_get_chan_index(struct cifs_ses *ses,
 }
 
 void
+cifs_all_chans_set_need_reconnect(struct cifs_ses *ses)
+{
+	unsigned int i;
+
+	CIFS_SET_ALL_CHANS_NEED_RECONNECT(ses);
+	for (i = 0; i < ses->chan_count; i++) {
+		if (ses->chans[i].server->tcpStatus != CifsExiting)
+			ses->chans[i].server->tcpStatus = CifsNeedReconnect;
+	}
+}
+
+void
 cifs_chan_set_need_reconnect(struct cifs_ses *ses,
 			     struct TCP_Server_Info *server)
 {
 	unsigned int chan_index = cifs_ses_get_chan_index(ses, server);
 
 	set_bit(chan_index, &ses->chans_need_reconnect);
+	if (server->tcpStatus != CifsExiting)
+		server->tcpStatus = CifsNeedReconnect;
 	cifs_dbg(FYI, "Set reconnect bitmask for chan %u; now 0x%lx\n",
 		 chan_index, ses->chans_need_reconnect);
 }
