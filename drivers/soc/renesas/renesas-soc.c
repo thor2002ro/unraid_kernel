@@ -393,6 +393,7 @@ static int __init renesas_soc_init(void)
 	const struct renesas_soc *soc;
 	const struct renesas_id *id;
 	void __iomem *chipid = NULL;
+	const char *rev_prefix = "";
 	struct soc_device *soc_dev;
 	struct device_node *np;
 	const char *soc_id;
@@ -448,6 +449,7 @@ static int __init renesas_soc_init(void)
 			eshi =  ((product >> 28) & 0x0f);
 			soc_dev_attr->revision = kasprintf(GFP_KERNEL, "%u",
 							   eshi);
+			rev_prefix = "Rev ";
 		}
 
 		if (soc->id &&
@@ -458,8 +460,8 @@ static int __init renesas_soc_init(void)
 		}
 	}
 
-	pr_info("Detected Renesas %s %s %s\n", soc_dev_attr->family,
-		soc_dev_attr->soc_id, soc_dev_attr->revision ?: "");
+	pr_info("Detected Renesas %s %s %s%s\n", soc_dev_attr->family,
+		soc_dev_attr->soc_id, rev_prefix, soc_dev_attr->revision ?: "");
 
 	soc_dev = soc_device_register(soc_dev_attr);
 	if (IS_ERR(soc_dev)) {
