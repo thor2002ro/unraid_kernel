@@ -335,3 +335,8 @@ long strnlen_user_nofault(const void __user *unsafe_addr, long count)
 
 	return ret;
 }
+
+void copy_overflow(int size, unsigned long count)
+{
+	WARN(1, "Buffer overflow detected (%d < %lu)!\n", size, count);
+}
