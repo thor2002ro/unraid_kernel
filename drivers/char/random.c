@@ -864,6 +864,13 @@ void add_interrupt_randomness(int irq)
 		    crng_fast_load((u8 *)fast_pool->pool, sizeof(fast_pool->pool)) > 0) {
 			fast_pool->count = 0;
 			fast_pool->last = now;
+
+			/* Technically this call means that we're using a spinlock_t
+			 * in the IRQ handler, which isn't terrific for PREEMPT_RT.
+			 * However, this only happens during boot, and then never
+			 * again, so we live with it.
+			 */
+			mix_pool_bytes(&fast_pool->pool, sizeof(fast_pool->pool));
 		}
 		return;
 	}
