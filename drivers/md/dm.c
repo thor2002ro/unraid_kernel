@@ -485,9 +485,11 @@ u64 dm_start_time_ns_from_clone(struct bio *bio)
 }
 EXPORT_SYMBOL_GPL(dm_start_time_ns_from_clone);
 
-static void start_io_acct(struct dm_io *io)
+static void start_io_acct(struct dm_io *io, struct bio *bio)
 {
-	struct bio *bio = io->orig_bio;
+	/* Ensure IO accounting is only ever started once */
+	if (xchg(&io->was_accounted, 1) == 1)
+		return;
 
 	bio_start_io_acct_remapped(bio, io->start_time,
 				   io->orig_bio->bi_bdev);
@@ -530,6 +532,7 @@ static struct dm_io *alloc_io(struct mapped_device *md, struct bio *bio)
 	spin_lock_init(&io->endio_lock);
 
 	io->start_time = jiffies;
+	io->was_accounted = 0;
 
 	return io;
 }
@@ -786,6 +789,7 @@ void dm_io_dec_pending(struct dm_io *io, blk_status_t error)
 	blk_status_t io_error;
 	struct bio *bio;
 	struct mapped_device *md = io->md;
+	bool was_accounted = false;
 	unsigned long start_time = 0;
 	struct dm_stats_aux stats_aux;
 
@@ -819,10 +823,14 @@ void dm_io_dec_pending(struct dm_io *io, blk_status_t error)
 		}
 
 		io_error = io->status;
-		start_time = io->start_time;
-		stats_aux = io->stats_aux;
+		if (io->was_accounted) {
+			was_accounted = true;
+			start_time = io->start_time;
+			stats_aux = io->stats_aux;
+		}
 		free_io(io);
-		end_io_acct(md, bio, start_time, &stats_aux);
+		if (was_accounted)
+			end_io_acct(md, bio, start_time, &stats_aux);
 
 		/* nudge anyone waiting on suspend queue */
 		if (unlikely(wq_has_sleeper(&md->wait)))
@@ -1100,6 +1108,40 @@ void dm_accept_partial_bio(struct bio *bio, unsigned n_sectors)
 }
 EXPORT_SYMBOL_GPL(dm_accept_partial_bio);
 
+/*
+ * @clone: clone bio that DM core passed to target's .map function
+ * @tgt_clone: bio that target needs to submit (after DM_MAPIO_SUBMITTED)
+ *
+ * Targets should use this interface to submit bios they take
+ * ownership of when returning DM_MAPIO_SUBMITTED.
+ *
+ * Target should also enable ti->accounts_remapped_io
+ */
+void dm_submit_bio_remap(struct bio *clone, struct bio *tgt_clone)
+{
+	struct dm_target_io *tio = clone_to_tio(clone);
+	struct dm_io *io = tio->io;
+
+	/* establish bio that will get submitted */
+	if (!tgt_clone)
+		tgt_clone = clone;
+
+	/*
+	 * account IO to DM device in terms of clone's
+	 * payload to avoid concern about late bio splitting.
+	 * - clone will reflect any dm_accept_partial_bio()
+	 * - any bio splitting is ultimately reflected in
+	 *   io->orig_bio so there is no IO imbalance in
+	 *   end_io_acct().
+	 */
+	start_io_acct(io, clone);
+
+	trace_block_bio_remap(tgt_clone, bio_dev(io->orig_bio),
+			      tio->old_sector);
+	submit_bio_noacct(tgt_clone);
+}
+EXPORT_SYMBOL_GPL(dm_submit_bio_remap);
+
 static noinline void __set_swap_bios_limit(struct mapped_device *md, int latch)
 {
 	mutex_lock(&md->swap_bios_lock);
@@ -1152,12 +1194,12 @@ static void __map_bio(struct bio *clone)
 	switch (r) {
 	case DM_MAPIO_SUBMITTED:
 		/* target has assumed ownership of this io */
+		if (!ti->accounts_remapped_io)
+			start_io_acct(io, clone);
 		break;
 	case DM_MAPIO_REMAPPED:
 		/* the bio has been remapped so dispatch it */
-		trace_block_bio_remap(clone, bio_dev(io->orig_bio),
-				      tio->old_sector);
-		submit_bio_noacct(clone);
+		dm_submit_bio_remap(clone, NULL);
 		break;
 	case DM_MAPIO_KILL:
 	case DM_MAPIO_REQUEUE:
@@ -1405,7 +1447,6 @@ static void dm_split_and_process_bio(struct mapped_device *md,
 	trace_block_split(b, bio->bi_iter.bi_sector);
 	submit_bio_noacct(bio);
 out:
-	start_io_acct(ci.io);
 	/* drop the extra reference count */
 	dm_io_dec_pending(ci.io, errno_to_blk_status(error));
 }
