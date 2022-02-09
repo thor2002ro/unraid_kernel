@@ -595,14 +595,14 @@ Documentation/admin-guide/kernel-parameters.rst).
 numa_balancing
 ==============
 
-Enables/disables and configure automatic page fault based NUMA memory
-balancing.  Memory is moved automatically to nodes that access it
-often.  The value to set can be the result to OR the following,
+Enables/disables and configures automatic page fault based NUMA memory
+balancing.  Memory is moved automatically to nodes that access it often. 
+The value to set can be the result of ORing the following,
 
 = =================================
-0x0 NUMA_BALANCING_DISABLED
-0x1 NUMA_BALANCING_NORMAL
-0x2 NUMA_BALANCING_MEMORY_TIERING
+0 NUMA_BALANCING_DISABLED
+1 NUMA_BALANCING_NORMAL
+2 NUMA_BALANCING_MEMORY_TIERING
 = =================================
 
 Or NUMA_BALANCING_NORMAL to optimize page placement among different
