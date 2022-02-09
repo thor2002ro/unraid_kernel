@@ -597,7 +597,7 @@ numa_balancing
 
 Enables/disables and configures automatic page fault based NUMA memory
 balancing.  Memory is moved automatically to nodes that access it often. 
-The value to set can be the result of ORing the following,
+The value to set can be the result of ORing the following::
 
 = =================================
 0 NUMA_BALANCING_DISABLED
