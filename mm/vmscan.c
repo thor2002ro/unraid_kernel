@@ -56,6 +56,7 @@
 
 #include <linux/swapops.h>
 #include <linux/balloon_compaction.h>
+#include <linux/sched/sysctl.h>
 
 #include "internal.h"
 
@@ -3941,6 +3942,13 @@ static bool pgdat_watermark_boosted(pg_data_t *pgdat, int highest_zoneidx)
 }
 
 /*
+ * Keep the free pages on fast memory node a little more than the high
+ * watermark to accommodate the promoted pages.
+ */
+#define NUMA_BALANCING_PROMOTE_WATERMARK_DIV	4
+#define NUMA_BALANCING_PROMOTE_WATERMARK_MIN	(10UL * 1024 * 1024 >> PAGE_SHIFT)
+
+/*
  * Returns true if there is an eligible zone balanced for the request order
  * and highest_zoneidx
  */
@@ -3961,6 +3969,15 @@ static bool pgdat_balanced(pg_data_t *pgdat, int order, int highest_zoneidx)
 			continue;
 
 		mark = high_wmark_pages(zone);
+		if (sysctl_numa_balancing_mode & NUMA_BALANCING_MEMORY_TIERING &&
+		    numa_demotion_enabled &&
+		    next_demotion_node(pgdat->node_id) != NUMA_NO_NODE) {
+			unsigned long promote_mark;
+
+			promote_mark = max(NUMA_BALANCING_PROMOTE_WATERMARK_MIN,
+				mark / NUMA_BALANCING_PROMOTE_WATERMARK_DIV);
+			mark += promote_mark;
+		}
 		if (zone_watermark_ok_safe(zone, order, mark, highest_zoneidx))
 			return true;
 	}
