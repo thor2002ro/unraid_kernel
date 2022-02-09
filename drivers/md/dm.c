@@ -485,21 +485,54 @@ u64 dm_start_time_ns_from_clone(struct bio *bio)
 }
 EXPORT_SYMBOL_GPL(dm_start_time_ns_from_clone);
 
-static void start_io_acct(struct dm_io *io)
+static void __start_io_acct(struct dm_io *io, struct bio *bio)
 {
-	struct bio *bio = io->orig_bio;
+	unsigned long flags;
+
+	/* Ensure IO accounting is only ever started once */
+	spin_lock_irqsave(&io->lock, flags);
+	if (smp_load_acquire(&io->io_acct_time)) {
+		spin_unlock_irqrestore(&io->lock, flags);
+		return;
+	}
+	smp_store_release(&io->io_acct_time, jiffies);
+	spin_unlock_irqrestore(&io->lock, flags);
 
 	bio_start_io_acct_time(bio, io->start_time);
-
 	if (unlikely(dm_stats_used(&io->md->stats)))
 		dm_stats_account_io(&io->md->stats, bio_data_dir(bio),
 				    bio->bi_iter.bi_sector, bio_sectors(bio),
 				    false, 0, &io->stats_aux);
 }
 
+static void start_io_acct(struct dm_io *io, struct bio *bio)
+{
+	/* Only start_io_acct() once for this IO */
+	if (smp_load_acquire(&io->io_acct_time))
+		return;
+
+	__start_io_acct(io, bio);
+}
+
+static void clone_and_start_io_acct(struct dm_io *io, struct bio *bio)
+{
+	struct bio io_acct_clone;
+
+	/* Only clone_and_start_io_acct() once for this IO */
+	if (smp_load_acquire(&io->io_acct_time))
+		return;
+
+	bio_init_clone(io->orig_bio->bi_bdev,
+		       &io_acct_clone, bio, GFP_NOIO);
+	__start_io_acct(io, &io_acct_clone);
+}
+
 static void end_io_acct(struct mapped_device *md, struct bio *bio,
 			unsigned long start_time, struct dm_stats_aux *stats_aux)
 {
+	if (!start_time)
+		return;
+
 	bio_end_io_acct(bio, start_time);
 
 	if (unlikely(dm_stats_used(&md->stats)))
@@ -529,6 +562,7 @@ static struct dm_io *alloc_io(struct mapped_device *md, struct bio *bio)
 	spin_lock_init(&io->lock);
 
 	io->start_time = jiffies;
+	io->io_acct_time = 0;
 
 	return io;
 }
@@ -818,7 +852,8 @@ void dm_io_dec_pending(struct dm_io *io, blk_status_t error)
 		}
 
 		io_error = io->status;
-		start_time = io->start_time;
+		if (io->io_acct_time)
+			start_time = io->start_time;
 		stats_aux = io->stats_aux;
 		free_io(io);
 		end_io_acct(md, bio, start_time, &stats_aux);
@@ -1099,6 +1134,43 @@ void dm_accept_partial_bio(struct bio *bio, unsigned n_sectors)
 }
 EXPORT_SYMBOL_GPL(dm_accept_partial_bio);
 
+/*
+ * @clone: clone bio that DM core passed to target's .map function
+ * @tgt_clone: bio that target needs to submit (after DM_MAPIO_SUBMITTED)
+ *
+ * Targets should use this interface to submit bios they take
+ * ownership of when returning DM_MAPIO_SUBMITTED.
+ *
+ * Target should also enable ti->accounts_remapped_io
+ */
+void dm_submit_bio_remap(struct bio *clone, struct bio *tgt_clone)
+{
+	struct dm_target_io *tio = clone_to_tio(clone);
+	struct dm_io *io = tio->io;
+	struct block_device *clone_bdev = clone->bi_bdev;
+
+	/* establish bio that will get submitted */
+	if (!tgt_clone)
+		tgt_clone = clone;
+
+	/*
+	 * account IO to DM device in terms of clone's
+	 * payload to avoid concern about late bio splitting.
+	 * - clone will reflect any dm_accept_partial_bio()
+	 * - any bio splitting is ultimately reflected in
+	 *   io->orig_bio so there is no IO imbalance in
+	 *   end_io_acct().
+	 */
+	clone->bi_bdev = io->orig_bio->bi_bdev;
+	start_io_acct(io, clone);
+	clone->bi_bdev = clone_bdev;
+
+	trace_block_bio_remap(tgt_clone, bio_dev(io->orig_bio),
+			      tio->old_sector);
+	submit_bio_noacct(tgt_clone);
+}
+EXPORT_SYMBOL_GPL(dm_submit_bio_remap);
+
 static noinline void __set_swap_bios_limit(struct mapped_device *md, int latch)
 {
 	mutex_lock(&md->swap_bios_lock);
@@ -1151,12 +1223,18 @@ static void __map_bio(struct bio *clone)
 	switch (r) {
 	case DM_MAPIO_SUBMITTED:
 		/* target has assumed ownership of this io */
+		if (!ti->accounts_remapped_io) {
+			/*
+			 * Any split isn't reflected in io->orig_bio yet. And bio
+			 * cannot be modified because target is submitting it.
+			 * Clone bio and account IO to DM device.
+			 */
+			clone_and_start_io_acct(io, clone);
+		}
 		break;
 	case DM_MAPIO_REMAPPED:
 		/* the bio has been remapped so dispatch it */
-		trace_block_bio_remap(clone, bio_dev(io->orig_bio),
-				      tio->old_sector);
-		submit_bio_noacct(clone);
+		dm_submit_bio_remap(clone, NULL);
 		break;
 	case DM_MAPIO_KILL:
 	case DM_MAPIO_REQUEUE:
@@ -1403,7 +1481,6 @@ static void dm_split_and_process_bio(struct mapped_device *md,
 		submit_bio_noacct(bio);
 	}
 out:
-	start_io_acct(ci.io);
 	/* drop the extra reference count */
 	dm_io_dec_pending(ci.io, errno_to_blk_status(error));
 }
