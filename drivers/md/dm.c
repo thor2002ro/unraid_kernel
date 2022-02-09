@@ -556,7 +556,7 @@ static struct dm_io *alloc_io(struct mapped_device *md, struct bio *bio)
 	return io;
 }
 
-static void free_io(struct mapped_device *md, struct dm_io *io)
+static void free_io(struct dm_io *io)
 {
 	bio_put(&io->tio.clone);
 }
@@ -842,7 +842,7 @@ void dm_io_dec_pending(struct dm_io *io, blk_status_t error)
 		io_error = io->status;
 		start_time = io->start_time;
 		stats_aux = io->stats_aux;
-		free_io(md, io);
+		free_io(io);
 		dm_end_io_acct(md, bio, start_time, &stats_aux);
 
 		/* nudge anyone waiting on suspend queue */
@@ -1327,10 +1327,9 @@ static bool is_abnormal_io(struct bio *bio)
 static bool __process_abnormal_io(struct clone_info *ci, struct dm_target *ti,
 				  int *result)
 {
-	struct bio *bio = ci->bio;
 	unsigned num_bios = 0;
 
-	switch (bio_op(bio)) {
+	switch (bio_op(ci->bio)) {
 	case REQ_OP_DISCARD:
 		num_bios = ti->num_discard_bios;
 		break;
