@@ -340,3 +340,4 @@ void copy_overflow(int size, unsigned long count)
 {
 	WARN(1, "Buffer overflow detected (%d < %lu)!\n", size, count);
 }
+EXPORT_SYMBOL_GPL(copy_overflow);
