@@ -355,7 +355,6 @@ static int nilfs_segbuf_submit_bio(struct nilfs_segment_buffer *segbuf,
 	wi->start = wi->end;
 	return 0;
 
- failed:
 	wi->bio = NULL;
 	return err;
 }
