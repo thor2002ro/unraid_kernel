@@ -489,7 +489,8 @@ static void start_io_acct(struct dm_io *io)
 {
 	struct bio *bio = io->orig_bio;
 
-	bio_start_io_acct_time(bio, io->start_time);
+	bio_start_io_acct_remapped(bio, io->start_time,
+				   io->orig_bio->bi_bdev);
 
 	if (unlikely(dm_stats_used(&io->md->stats)))
 		dm_stats_account_io(&io->md->stats, bio_data_dir(bio),
