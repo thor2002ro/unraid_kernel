@@ -148,18 +148,38 @@ int fixup_exception(struct pt_regs *regs)
 		 * Fix up get_user() and put_user().
 		 * ASM_EXCEPTIONTABLE_ENTRY_EFAULT() sets the least-significant
 		 * bit in the relative address of the fixup routine to indicate
-		 * that gr[ASM_EXCEPTIONTABLE_REG] should be loaded with
-		 * -EFAULT to report a userspace access error.
+		 * that the error register should be loaded with -EFAULT to
+		 * report a userspace access error. The error register is zeroed
+		 * before doing the load or store, so the exception handler can
+		 * read the "copy %%r0,reg" instruction to extract the register.
 		 */
 		if (fix->fixup & 1) {
-			regs->gr[ASM_EXCEPTIONTABLE_REG] = -EFAULT;
+			u32 treg;
 
 			/* zero target register for get_user() */
 			if (parisc_acctyp(0, regs->iir) == VM_READ) {
-				int treg = regs->iir & 0x1f;
-				BUG_ON(treg == 0);
+				treg = regs->iir & 0x1f;
+				if (WARN_ON(treg == 0))
+					goto wrong_get_put_user;
 				regs->gr[treg] = 0;
 			}
+
+			/* check 1-2 previous assembly statement(s) */
+			__get_kernel_nofault(&treg, (regs->iaoq[0] - 4) & ~3,
+				u32, wrong_get_put_user);
+			if (!IS_ENABLED(CONFIG_64BIT) &&
+			    (treg & 0xffffff00) != 0x08000200)
+				__get_kernel_nofault(&treg,
+					(regs->iaoq[0] - 8) & ~3,
+					u32, wrong_get_put_user);
+			/* check assembly statement for: copy %r0,%rX */
+			if (WARN_ON((treg & 0xffffff00) != 0x08000200))
+				goto wrong_get_put_user;
+			/* extract error register used for get_user/put_user */
+			treg &= 0x1f;
+			if (WARN_ON(treg == 0))
+				goto wrong_get_put_user;
+			regs->gr[treg] = -EFAULT;
 		}
 
 		regs->iaoq[0] = (unsigned long)&fix->fixup + fix->fixup;
@@ -177,6 +197,7 @@ int fixup_exception(struct pt_regs *regs)
 		return 1;
 	}
 
+wrong_get_put_user:
 	return 0;
 }
 
