@@ -219,7 +219,7 @@ static bool dec_and_test_compressed_bio(struct compressed_bio *cb, struct bio *b
 		bi_size += bvec->bv_len;
 
 	if (bio->bi_status)
-		cb->errors = 1;
+		cb->status = bio->bi_status;
 
 	ASSERT(bi_size && bi_size <= cb->compressed_len);
 	last_io = refcount_sub_and_test(bi_size >> fs_info->sectorsize_bits,
@@ -247,8 +247,9 @@ static void finish_compressed_bio_read(struct compressed_bio *cb)
 	}
 
 	/* Do io completion on the original bio */
-	if (cb->errors) {
-		bio_io_error(cb->orig_bio);
+	if (cb->status != BLK_STS_OK) {
+		cb->orig_bio->bi_status = cb->status;
+		bio_endio(cb->orig_bio);
 	} else {
 		struct bio_vec *bvec;
 		struct bvec_iter_all iter_all;
@@ -306,7 +307,7 @@ static void end_compressed_bio_read(struct bio *bio)
 	 * Some IO in this cb have failed, just skip checksum as there
 	 * is no way it could be correct.
 	 */
-	if (cb->errors == 1)
+	if (cb->status != BLK_STS_OK)
 		goto csum_failed;
 
 	inode = cb->inode;
@@ -322,7 +323,7 @@ static void end_compressed_bio_read(struct bio *bio)
 
 csum_failed:
 	if (ret)
-		cb->errors = 1;
+		cb->status = errno_to_blk_status(ret);
 	finish_compressed_bio_read(cb);
 out:
 	bio_put(bio);
@@ -340,11 +341,12 @@ static noinline void end_compressed_writeback(struct inode *inode,
 	unsigned long end_index = (cb->start + cb->len - 1) >> PAGE_SHIFT;
 	struct page *pages[16];
 	unsigned long nr_pages = end_index - index + 1;
+	int errno = blk_status_to_errno(cb->status);
 	int i;
 	int ret;
 
-	if (cb->errors)
-		mapping_set_error(inode->i_mapping, -EIO);
+	if (errno)
+		mapping_set_error(inode->i_mapping, errno);
 
 	while (nr_pages > 0) {
 		ret = find_get_pages_contig(inode->i_mapping, index,
@@ -356,7 +358,7 @@ static noinline void end_compressed_writeback(struct inode *inode,
 			continue;
 		}
 		for (i = 0; i < ret; i++) {
-			if (cb->errors)
+			if (errno)
 				SetPageError(pages[i]);
 			btrfs_page_clamp_clear_writeback(fs_info, pages[i],
 							 cb->start, cb->len);
@@ -372,14 +374,14 @@ static void finish_compressed_bio_write(struct compressed_bio *cb)
 {
 	struct inode *inode = cb->inode;
 	unsigned int index;
+	int errno = blk_status_to_errno(cb->status);
 
 	/*
 	 * Ok, we're the last bio for this extent, step one is to call back
 	 * into the FS and do all the end_io operations.
 	 */
 	btrfs_writepage_endio_finish_ordered(BTRFS_I(inode), NULL,
-			cb->start, cb->start + cb->len - 1,
-			!cb->errors);
+			cb->start, cb->start + cb->len - 1, errno == 0);
 
 	end_compressed_writeback(inode, cb);
 	/* Note, our inode could be gone now */
@@ -522,7 +524,7 @@ blk_status_t btrfs_submit_compressed_write(struct btrfs_inode *inode, u64 start,
 	if (!cb)
 		return BLK_STS_RESOURCE;
 	refcount_set(&cb->pending_sectors, compressed_len >> fs_info->sectorsize_bits);
-	cb->errors = 0;
+	cb->status = BLK_STS_OK;
 	cb->inode = &inode->vfs_inode;
 	cb->start = start;
 	cb->len = len;
@@ -829,7 +831,7 @@ blk_status_t btrfs_submit_compressed_read(struct inode *inode, struct bio *bio,
 		goto out;
 
 	refcount_set(&cb->pending_sectors, compressed_len >> fs_info->sectorsize_bits);
-	cb->errors = 0;
+	cb->status = BLK_STS_OK;
 	cb->inode = inode;
 	cb->mirror_num = mirror_num;
 	sums = cb->sums;
