@@ -53,18 +53,15 @@ struct exception_table_entry {
 /*
  * ASM_EXCEPTIONTABLE_ENTRY_EFAULT() creates a special exception table entry
  * (with lowest bit set) for which the fault handler in fixup_exception() will
- * load -EFAULT into %r29 for a read or write fault, and zeroes the target
- * register in case of a read fault in get_user().
+ * load -EFAULT into the error register for a read or write fault, and zeroes
+ * the target register in case of a read fault in get_user().
  */
-#define ASM_EXCEPTIONTABLE_REG	29
-#define ASM_EXCEPTIONTABLE_VAR(__variable)		\
-	register long __variable __asm__ ("r29") = 0
 #define ASM_EXCEPTIONTABLE_ENTRY_EFAULT( fault_addr, except_addr )\
 	ASM_EXCEPTIONTABLE_ENTRY( fault_addr, except_addr + 1)
 
 #define __get_user_internal(sr, val, ptr)		\
 ({							\
-	ASM_EXCEPTIONTABLE_VAR(__gu_err);		\
+	register long __gu_err;				\
 							\
 	switch (sizeof(*(ptr))) {			\
 	case 1: __get_user_asm(sr, val, "ldb", ptr); break; \
@@ -86,11 +83,12 @@ struct exception_table_entry {
 {							\
 	register long __gu_val;				\
 							\
-	__asm__("1: " ldx " 0(" sr "%2),%0\n"		\
+	__asm__("\tcopy %%r0,%1\n"			\
+		"1: " ldx " 0(" sr "%2),%0\n"		\
 		"9:\n"					\
 		ASM_EXCEPTIONTABLE_ENTRY_EFAULT(1b, 9b)	\
-		: "=r"(__gu_val), "=r"(__gu_err)        \
-		: "r"(ptr), "1"(__gu_err));		\
+		: "=r"(__gu_val), "=&r"(__gu_err)	\
+		: "r"(ptr));				\
 							\
 	(val) = (__force __typeof__(*(ptr))) __gu_val;	\
 }
@@ -117,14 +115,15 @@ struct exception_table_entry {
 		__typeof__(*(ptr))	t;		\
 	} __gu_tmp;					\
 							\
-	__asm__("   copy %%r0,%R0\n"			\
+	__asm__("\tcopy %%r0,%R0\n"			\
+		"\tcopy %%r0,%1\n"			\
 		"1: ldw 0(" sr "%2),%0\n"		\
 		"2: ldw 4(" sr "%2),%R0\n"		\
 		"9:\n"					\
 		ASM_EXCEPTIONTABLE_ENTRY_EFAULT(1b, 9b)	\
 		ASM_EXCEPTIONTABLE_ENTRY_EFAULT(2b, 9b)	\
-		: "=&r"(__gu_tmp.l), "=r"(__gu_err)	\
-		: "r"(ptr), "1"(__gu_err));		\
+		: "=&r"(__gu_tmp.l), "=&r"(__gu_err)	\
+		: "r"(ptr));				\
 							\
 	(val) = __gu_tmp.t;				\
 }
@@ -134,8 +133,8 @@ struct exception_table_entry {
 
 #define __put_user_internal(sr, x, ptr)				\
 ({								\
-	ASM_EXCEPTIONTABLE_VAR(__pu_err);		      	\
         __typeof__(*(ptr)) __x = (__typeof__(*(ptr)))(x);	\
+	register long __pu_err;					\
 								\
 	switch (sizeof(*(ptr))) {				\
 	case 1: __put_user_asm(sr, "stb", __x, ptr); break;	\
@@ -177,24 +176,26 @@ struct exception_table_entry {
 
 #define __put_user_asm(sr, stx, x, ptr)				\
 	__asm__ __volatile__ (					\
+		"\tcopy %%r0,%0\n"				\
 		"1: " stx " %2,0(" sr "%1)\n"			\
 		"9:\n"						\
 		ASM_EXCEPTIONTABLE_ENTRY_EFAULT(1b, 9b)		\
-		: "=r"(__pu_err)				\
-		: "r"(ptr), "r"(x), "0"(__pu_err))
+		: "=&r"(__pu_err)				\
+		: "r"(ptr), "r"(x))
 
 
 #if !defined(CONFIG_64BIT)
 
 #define __put_user_asm64(sr, __val, ptr) do {			\
 	__asm__ __volatile__ (					\
+		"\tcopy %%r0,%0\n"				\
 		"1: stw %2,0(" sr "%1)\n"			\
 		"2: stw %R2,4(" sr "%1)\n"			\
 		"9:\n"						\
 		ASM_EXCEPTIONTABLE_ENTRY_EFAULT(1b, 9b)		\
 		ASM_EXCEPTIONTABLE_ENTRY_EFAULT(2b, 9b)		\
-		: "=r"(__pu_err)				\
-		: "r"(ptr), "r"(__val), "0"(__pu_err));		\
+		: "=&r"(__pu_err)				\
+		: "r"(ptr), "r"(__val));			\
 } while (0)
 
 #endif /* !defined(CONFIG_64BIT) */
