@@ -487,17 +487,6 @@ EXPORT_SYMBOL_GPL(dm_start_time_ns_from_clone);
 
 static void __start_io_acct(struct dm_io *io, struct bio *bio)
 {
-	unsigned long flags;
-
-	/* Ensure IO accounting is only ever started once */
-	spin_lock_irqsave(&io->lock, flags);
-	if (smp_load_acquire(&io->io_acct_time)) {
-		spin_unlock_irqrestore(&io->lock, flags);
-		return;
-	}
-	smp_store_release(&io->io_acct_time, jiffies);
-	spin_unlock_irqrestore(&io->lock, flags);
-
 	bio_start_io_acct_time(bio, io->start_time);
 	if (unlikely(dm_stats_used(&io->md->stats)))
 		dm_stats_account_io(&io->md->stats, bio_data_dir(bio),
@@ -507,8 +496,8 @@ static void __start_io_acct(struct dm_io *io, struct bio *bio)
 
 static void start_io_acct(struct dm_io *io, struct bio *bio)
 {
-	/* Only start_io_acct() once for this IO */
-	if (smp_load_acquire(&io->io_acct_time))
+	/* Ensure IO accounting is only ever started once */
+	if (xchg(&io->was_accounted, 1) == 1)
 		return;
 
 	__start_io_acct(io, bio);
@@ -518,8 +507,8 @@ static void clone_and_start_io_acct(struct dm_io *io, struct bio *bio)
 {
 	struct bio io_acct_clone;
 
-	/* Only clone_and_start_io_acct() once for this IO */
-	if (smp_load_acquire(&io->io_acct_time))
+	/* Ensure IO accounting is only ever started once */
+	if (xchg(&io->was_accounted, 1) == 1)
 		return;
 
 	bio_init_clone(io->orig_bio->bi_bdev,
@@ -530,9 +519,6 @@ static void clone_and_start_io_acct(struct dm_io *io, struct bio *bio)
 static void end_io_acct(struct mapped_device *md, struct bio *bio,
 			unsigned long start_time, struct dm_stats_aux *stats_aux)
 {
-	if (!start_time)
-		return;
-
 	bio_end_io_acct(bio, start_time);
 
 	if (unlikely(dm_stats_used(&md->stats)))
@@ -562,7 +548,7 @@ static struct dm_io *alloc_io(struct mapped_device *md, struct bio *bio)
 	spin_lock_init(&io->lock);
 
 	io->start_time = jiffies;
-	io->io_acct_time = 0;
+	io->was_accounted = 0;
 
 	return io;
 }
@@ -819,6 +805,7 @@ void dm_io_dec_pending(struct dm_io *io, blk_status_t error)
 	blk_status_t io_error;
 	struct bio *bio;
 	struct mapped_device *md = io->md;
+	bool was_accounted = false;
 	unsigned long start_time = 0;
 	struct dm_stats_aux stats_aux;
 
@@ -852,11 +839,14 @@ void dm_io_dec_pending(struct dm_io *io, blk_status_t error)
 		}
 
 		io_error = io->status;
-		if (io->io_acct_time)
+		if (io->was_accounted) {
+			was_accounted = true;
 			start_time = io->start_time;
-		stats_aux = io->stats_aux;
+			stats_aux = io->stats_aux;
+		}
 		free_io(io);
-		end_io_acct(md, bio, start_time, &stats_aux);
+		if (was_accounted)
+			end_io_acct(md, bio, start_time, &stats_aux);
 
 		/* nudge anyone waiting on suspend queue */
 		if (unlikely(wq_has_sleeper(&md->wait)))
