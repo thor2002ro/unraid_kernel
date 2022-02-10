@@ -713,7 +713,7 @@
 			clock-names = "bam_clk";
 			#dma-cells = <1>;
 			qcom,ee = <0>;
-			qcom,controlled-remotely = <1>;
+			qcom,controlled-remotely;
 		};
 
 		crypto: crypto@67a000 {
@@ -1546,7 +1546,7 @@
 			reg = <0x00290000 0x10000>;
 		};
 
-		spmi_bus: qcom,spmi@400f000 {
+		spmi_bus: spmi@400f000 {
 			compatible = "qcom,spmi-pmic-arb";
 			reg = <0x0400f000 0x1000>,
 			      <0x04400000 0x800000>,
@@ -2693,7 +2693,7 @@
 		};
 
 		sdhc1: sdhci@7464900 {
-			compatible = "qcom,sdhci-msm-v4";
+			compatible = "qcom,msm8996-sdhci", "qcom,sdhci-msm-v4";
 			reg = <0x07464900 0x11c>, <0x07464000 0x800>;
 			reg-names = "hc_mem", "core_mem";
 
@@ -2716,7 +2716,7 @@
 		};
 
 		sdhc2: sdhci@74a4900 {
-			compatible = "qcom,sdhci-msm-v4";
+			compatible = "qcom,msm8996-sdhci", "qcom,sdhci-msm-v4";
 			reg = <0x074a4900 0x314>, <0x074a4000 0x800>;
 			reg-names = "hc_mem", "core_mem";
 
@@ -3054,7 +3054,7 @@
 					power-domains = <&gcc HLOS1_VOTE_LPASS_ADSP_GDSC>;
 					compatible = "qcom,apr-v2";
 					qcom,smd-channels = "apr_audio_svc";
-					qcom,apr-domain = <APR_DOMAIN_ADSP>;
+					qcom,domain = <APR_DOMAIN_ADSP>;
 					#address-cells = <1>;
 					#size-cells = <0>;
 
@@ -3273,7 +3273,7 @@
 			};
 		};
 
-		gpu-thermal-top {
+		gpu-top-thermal {
 			polling-delay-passive = <250>;
 			polling-delay = <1000>;
 
@@ -3295,7 +3295,7 @@
 			};
 		};
 
-		gpu-thermal-bottom {
+		gpu-bottom-thermal {
 			polling-delay-passive = <250>;
 			polling-delay = <1000>;
 
