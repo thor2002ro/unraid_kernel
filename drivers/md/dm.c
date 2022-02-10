@@ -485,35 +485,19 @@ u64 dm_start_time_ns_from_clone(struct bio *bio)
 }
 EXPORT_SYMBOL_GPL(dm_start_time_ns_from_clone);
 
-static void __start_io_acct(struct dm_io *io, struct bio *bio)
-{
-	bio_start_io_acct_time(bio, io->start_time);
-	if (unlikely(dm_stats_used(&io->md->stats)))
-		dm_stats_account_io(&io->md->stats, bio_data_dir(bio),
-				    bio->bi_iter.bi_sector, bio_sectors(bio),
-				    false, 0, &io->stats_aux);
-}
-
 static void start_io_acct(struct dm_io *io, struct bio *bio)
 {
 	/* Ensure IO accounting is only ever started once */
 	if (xchg(&io->was_accounted, 1) == 1)
 		return;
 
-	__start_io_acct(io, bio);
-}
+	bio_start_io_acct_remapped(bio, io->start_time,
+				   io->orig_bio->bi_bdev);
 
-static void clone_and_start_io_acct(struct dm_io *io, struct bio *bio)
-{
-	struct bio io_acct_clone;
-
-	/* Ensure IO accounting is only ever started once */
-	if (xchg(&io->was_accounted, 1) == 1)
-		return;
-
-	bio_init_clone(io->orig_bio->bi_bdev,
-		       &io_acct_clone, bio, GFP_NOIO);
-	__start_io_acct(io, &io_acct_clone);
+	if (unlikely(dm_stats_used(&io->md->stats)))
+		dm_stats_account_io(&io->md->stats, bio_data_dir(bio),
+				    bio->bi_iter.bi_sector, bio_sectors(bio),
+				    false, 0, &io->stats_aux);
 }
 
 static void end_io_acct(struct mapped_device *md, struct bio *bio,
@@ -1137,7 +1121,6 @@ void dm_submit_bio_remap(struct bio *clone, struct bio *tgt_clone)
 {
 	struct dm_target_io *tio = clone_to_tio(clone);
 	struct dm_io *io = tio->io;
-	struct block_device *clone_bdev = clone->bi_bdev;
 
 	/* establish bio that will get submitted */
 	if (!tgt_clone)
@@ -1151,9 +1134,7 @@ void dm_submit_bio_remap(struct bio *clone, struct bio *tgt_clone)
 	 *   io->orig_bio so there is no IO imbalance in
 	 *   end_io_acct().
 	 */
-	clone->bi_bdev = io->orig_bio->bi_bdev;
 	start_io_acct(io, clone);
-	clone->bi_bdev = clone_bdev;
 
 	trace_block_bio_remap(tgt_clone, bio_dev(io->orig_bio),
 			      tio->old_sector);
@@ -1213,14 +1194,8 @@ static void __map_bio(struct bio *clone)
 	switch (r) {
 	case DM_MAPIO_SUBMITTED:
 		/* target has assumed ownership of this io */
-		if (!ti->accounts_remapped_io) {
-			/*
-			 * Any split isn't reflected in io->orig_bio yet. And bio
-			 * cannot be modified because target is submitting it.
-			 * Clone bio and account IO to DM device.
-			 */
-			clone_and_start_io_acct(io, clone);
-		}
+		if (!ti->accounts_remapped_io)
+			start_io_acct(io, clone);
 		break;
 	case DM_MAPIO_REMAPPED:
 		/* the bio has been remapped so dispatch it */
