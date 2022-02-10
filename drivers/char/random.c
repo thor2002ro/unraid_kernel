@@ -283,7 +283,7 @@ static void mix_pool_bytes(const void *in, size_t nbytes)
 }
 
 struct fast_pool {
-	u32 pool[4];
+	unsigned long pool[16 / sizeof(long)];
 	unsigned long last;
 	u16 reg_idx;
 	u8 count;
@@ -294,10 +294,10 @@ struct fast_pool {
  * collector.  It's hardcoded for an 128 bit pool and assumes that any
  * locks that might be needed are taken by the caller.
  */
-static void fast_mix(struct fast_pool *f)
+static void fast_mix(u32 pool[4])
 {
-	u32 a = f->pool[0],	b = f->pool[1];
-	u32 c = f->pool[2],	d = f->pool[3];
+	u32 a = pool[0],	b = pool[1];
+	u32 c = pool[2],	d = pool[3];
 
 	a += b;			c += d;
 	b = rol32(b, 6);	d = rol32(d, 27);
@@ -315,9 +315,8 @@ static void fast_mix(struct fast_pool *f)
 	b = rol32(b, 16);	d = rol32(d, 14);
 	d ^= a;			b ^= c;
 
-	f->pool[0] = a;  f->pool[1] = b;
-	f->pool[2] = c;  f->pool[3] = d;
-	f->count++;
+	pool[0] = a;  pool[1] = b;
+	pool[2] = c;  pool[3] = d;
 }
 
 static void process_random_ready_list(void)
@@ -778,21 +777,22 @@ void add_interrupt_randomness(int irq)
 	struct pt_regs *regs = get_irq_regs();
 	unsigned long now = jiffies;
 	cycles_t cycles = random_get_entropy();
-	u32 c_high, j_high;
-	u64 ip;
 
 	if (cycles == 0)
 		cycles = get_reg(fast_pool, regs);
-	c_high = (sizeof(cycles) > 4) ? cycles >> 32 : 0;
-	j_high = (sizeof(now) > 4) ? now >> 32 : 0;
-	fast_pool->pool[0] ^= cycles ^ j_high ^ irq;
-	fast_pool->pool[1] ^= now ^ c_high;
-	ip = regs ? instruction_pointer(regs) : _RET_IP_;
-	fast_pool->pool[2] ^= ip;
-	fast_pool->pool[3] ^=
-		(sizeof(ip) > 4) ? ip >> 32 : get_reg(fast_pool, regs);
 
-	fast_mix(fast_pool);
+	if (sizeof(unsigned long) == 8) {
+		fast_pool->pool[0] ^= cycles ^ rol64(now, 32) ^ irq;
+		fast_pool->pool[1] ^= regs ? instruction_pointer(regs) : _RET_IP_;
+	} else {
+		fast_pool->pool[0] ^= cycles ^ irq;
+		fast_pool->pool[1] ^= now;
+		fast_pool->pool[2] ^= regs ? instruction_pointer(regs) : _RET_IP_;
+		fast_pool->pool[3] ^= get_reg(fast_pool, regs);
+	}
+
+	fast_mix((u32 *)fast_pool->pool);
+	++fast_pool->count;
 
 	if (unlikely(crng_init == 0)) {
 		if (fast_pool->count >= 64 &&
