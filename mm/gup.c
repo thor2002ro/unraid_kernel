@@ -1834,6 +1834,7 @@ struct page *get_dump_page(unsigned long addr)
 #endif /* CONFIG_ELF_CORE */
 
 #ifdef CONFIG_MIGRATION
+#ifdef CONFIG_DEVICE_PRIVATE
 /*
  * Migrates a device coherent page back to normal memory. Caller should have a
  * reference on page which will be copied to the new page if migration is
@@ -1887,6 +1888,14 @@ static struct page *migrate_device_page(struct page *page,
 
 	return dpage;
 }
+#else
+static inline struct page *migrate_device_page(struct page *page,
+					unsigned int gup_flags)
+{
+	return NULL;
+}
+#endif /* CONFIG_DEVICE_PRIVATE */
+
 
 /*
  * Check whether all pages are pinnable, if so return number of pages.  If some
