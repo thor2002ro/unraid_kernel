@@ -704,10 +704,11 @@ static int gfs2_release(struct inode *inode, struct file *file)
 	kfree(file->private_data);
 	file->private_data = NULL;
 
-	if (gfs2_rs_active(&ip->i_res))
-		gfs2_rs_delete(ip, &inode->i_writecount);
-	if (file->f_mode & FMODE_WRITE)
+	if (file->f_mode & FMODE_WRITE) {
+		if (gfs2_rs_active(&ip->i_res))
+			gfs2_rs_delete(ip);
 		gfs2_qa_put(ip);
+	}
 	return 0;
 }
 
@@ -1496,7 +1497,6 @@ static int do_flock(struct file *file, int cmd, struct file_lock *fl)
 		if (error != GLR_TRYFAILED)
 			break;
 		fl_gh->gh_flags = LM_FLAG_TRY | GL_EXACT;
-		fl_gh->gh_error = 0;
 		msleep(sleeptime);
 	}
 	if (error) {
