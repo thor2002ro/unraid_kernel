@@ -411,6 +411,9 @@ choice
 	  benefit.
 endchoice
 
+config ARCH_WANT_GENERAL_HUGETLB
+	bool
+
 config ARCH_WANTS_THP_SWAP
 	def_bool n
 
@@ -742,6 +745,9 @@ config IDLE_PAGE_TRACKING
 	  more details.
 
 config ARCH_HAS_CACHE_LINE_SIZE
+	bool
+
+config ARCH_HAS_FILTER_PGPROT
 	bool
 
 config ARCH_HAS_PTE_DEVMAP
