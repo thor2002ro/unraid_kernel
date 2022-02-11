@@ -213,7 +213,8 @@ struct dm_target_io {
 	struct dm_target *ti;
 	unsigned int target_bio_nr;
 	unsigned int *len_ptr;
-	bool inside_dm_io;
+	bool inside_dm_io:1;
+	bool preserve_orig_bio:1;
 	sector_t old_sector;
 	struct bio clone;
 };

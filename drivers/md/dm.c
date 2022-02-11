@@ -494,10 +494,14 @@ static void start_io_acct(struct dm_io *io, struct bio *bio)
 	bio_start_io_acct_remapped(bio, io->start_time,
 				   io->orig_bio->bi_bdev);
 
-	if (unlikely(dm_stats_used(&io->md->stats)))
+	if (unlikely(dm_stats_used(&io->md->stats))) {
+		if (unlikely(clone_to_tio(bio)->preserve_orig_bio))
+			bio = io->orig_bio;
+
 		dm_stats_account_io(&io->md->stats, bio_data_dir(bio),
 				    bio->bi_iter.bi_sector, bio_sectors(bio),
 				    false, 0, &io->stats_aux);
+	}
 }
 
 static void end_io_acct(struct mapped_device *md, struct bio *bio,
@@ -567,6 +571,7 @@ static struct bio *alloc_tio(struct clone_info *ci, struct dm_target *ti,
 	tio->io = ci->io;
 	tio->ti = ti;
 	tio->target_bio_nr = target_bio_nr;
+	tio->preserve_orig_bio = false;
 	tio->len_ptr = len;
 	tio->old_sector = 0;
 
@@ -1106,6 +1111,7 @@ void dm_accept_partial_bio(struct bio *bio, unsigned n_sectors)
 	struct dm_target_io *tio = clone_to_tio(bio);
 	unsigned bi_size = bio->bi_iter.bi_size >> SECTOR_SHIFT;
 
+	BUG_ON(tio->preserve_orig_bio);
 	BUG_ON(bio->bi_opf & REQ_PREFLUSH);
 	BUG_ON(op_is_zone_mgmt(bio_op(bio)));
 	BUG_ON(bio_op(bio) == REQ_OP_ZONE_APPEND);
@@ -1267,12 +1273,19 @@ static void __send_duplicate_bios(struct clone_info *ci, struct dm_target *ti,
 		break;
 	case 1:
 		clone = alloc_tio(ci, ti, 0, len, GFP_NOIO);
+		clone_to_tio(clone)->preserve_orig_bio = true;
 		__map_bio(clone);
 		break;
 	default:
 		alloc_multiple_bios(&blist, ci, ti, num_bios, len);
-		while ((clone = bio_list_pop(&blist)))
+		while ((clone = bio_list_pop(&blist))) {
+			/*
+			 * Both dm_accept_partial_bio() and dmstats
+			 * don't work with __send_duplicate_bios
+			 */
+			clone_to_tio(clone)->preserve_orig_bio = true;
 			__map_bio(clone);
+		}
 		break;
 	}
 }
@@ -1440,7 +1453,8 @@ static void dm_split_and_process_bio(struct mapped_device *md,
 	 */
 	b = bio_split(bio, bio_sectors(bio) - ci.sector_count,
 		      GFP_NOIO, &md->queue->bio_split);
-	ci.io->orig_bio = b;
+	if (likely(!ci.io->tio.preserve_orig_bio))
+		ci.io->orig_bio = b;
 
 	bio_chain(b, bio);
 	trace_block_split(b, bio->bi_iter.bi_sector);
