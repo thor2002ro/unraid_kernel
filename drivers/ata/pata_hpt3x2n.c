@@ -24,10 +24,9 @@
 #include <linux/libata.h>
 
 #define DRV_NAME	"pata_hpt3x2n"
-#define DRV_VERSION	"0.3.15"
+#define DRV_VERSION	"0.3.17"
 
 enum {
-	HPT_PCI_FAST	=	(1 << 31),
 	PCI66		=	(1 << 1),
 	USE_DPLL	=	(1 << 0)
 };
@@ -35,11 +34,6 @@ enum {
 struct hpt_clock {
 	u8	xfer_speed;
 	u32	timing;
-};
-
-struct hpt_chip {
-	const char *name;
-	struct hpt_clock *clocks[3];
 };
 
 /* key for bus clock timings
@@ -168,6 +162,13 @@ static int hpt3x2n_pre_reset(struct ata_link *link, unsigned long deadline)
 {
 	struct ata_port *ap = link->ap;
 	struct pci_dev *pdev = to_pci_dev(ap->host->dev);
+	static const struct pci_bits hpt3x2n_enable_bits[] = {
+		{ 0x50, 1, 0x04, 0x04 },
+		{ 0x54, 1, 0x04, 0x04 }
+	};
+
+	if (!pci_test_config_bits(pdev, &hpt3x2n_enable_bits[ap->port_no]))
+		return -ENOENT;
 
 	/* Reset the state machine */
 	pci_write_config_byte(pdev, 0x50 + 4 * ap->port_no, 0x37);
@@ -244,7 +245,7 @@ static void hpt3x2n_bmdma_stop(struct ata_queued_cmd *qc)
 {
 	struct ata_port *ap = qc->ap;
 	struct pci_dev *pdev = to_pci_dev(ap->host->dev);
-	int mscreg = 0x50 + 2 * ap->port_no;
+	int mscreg = 0x50 + 4 * ap->port_no;
 	u8 bwsr_stat, msc_stat;
 
 	pci_read_config_byte(pdev, 0x6A, &bwsr_stat);
