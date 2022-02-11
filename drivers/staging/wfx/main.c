@@ -94,8 +94,7 @@ static const struct ieee80211_supported_band wfx_band_2ghz = {
 	.ht_cap = {
 		/* Receive caps */
 		.cap = IEEE80211_HT_CAP_GRN_FLD | IEEE80211_HT_CAP_SGI_20 |
-		       IEEE80211_HT_CAP_MAX_AMSDU |
-		       (1 << IEEE80211_HT_CAP_RX_STBC_SHIFT),
+		       IEEE80211_HT_CAP_MAX_AMSDU | (1 << IEEE80211_HT_CAP_RX_STBC_SHIFT),
 		.ht_supported = 1,
 		.ampdu_factor = IEEE80211_HT_MAX_AMPDU_16K,
 		.ampdu_density = IEEE80211_HT_MPDU_DENSITY_NONE,
@@ -122,34 +121,34 @@ static const struct ieee80211_iface_combination wfx_iface_combinations[] = {
 };
 
 static const struct ieee80211_ops wfx_ops = {
-	.start			= wfx_start,
-	.stop			= wfx_stop,
-	.add_interface		= wfx_add_interface,
-	.remove_interface	= wfx_remove_interface,
-	.config                 = wfx_config,
-	.tx			= wfx_tx,
-	.join_ibss		= wfx_join_ibss,
-	.leave_ibss		= wfx_leave_ibss,
-	.conf_tx		= wfx_conf_tx,
-	.hw_scan		= wfx_hw_scan,
-	.cancel_hw_scan		= wfx_cancel_hw_scan,
-	.start_ap		= wfx_start_ap,
-	.stop_ap		= wfx_stop_ap,
-	.sta_add		= wfx_sta_add,
-	.sta_remove		= wfx_sta_remove,
-	.set_tim		= wfx_set_tim,
-	.set_key		= wfx_set_key,
-	.set_rts_threshold	= wfx_set_rts_threshold,
+	.start                   = wfx_start,
+	.stop                    = wfx_stop,
+	.add_interface           = wfx_add_interface,
+	.remove_interface        = wfx_remove_interface,
+	.config                  = wfx_config,
+	.tx                      = wfx_tx,
+	.join_ibss               = wfx_join_ibss,
+	.leave_ibss              = wfx_leave_ibss,
+	.conf_tx                 = wfx_conf_tx,
+	.hw_scan                 = wfx_hw_scan,
+	.cancel_hw_scan          = wfx_cancel_hw_scan,
+	.start_ap                = wfx_start_ap,
+	.stop_ap                 = wfx_stop_ap,
+	.sta_add                 = wfx_sta_add,
+	.sta_remove              = wfx_sta_remove,
+	.set_tim                 = wfx_set_tim,
+	.set_key                 = wfx_set_key,
+	.set_rts_threshold       = wfx_set_rts_threshold,
 	.set_default_unicast_key = wfx_set_default_unicast_key,
-	.bss_info_changed	= wfx_bss_info_changed,
-	.configure_filter	= wfx_configure_filter,
-	.ampdu_action		= wfx_ampdu_action,
-	.flush			= wfx_flush,
-	.add_chanctx		= wfx_add_chanctx,
-	.remove_chanctx		= wfx_remove_chanctx,
-	.change_chanctx		= wfx_change_chanctx,
-	.assign_vif_chanctx	= wfx_assign_vif_chanctx,
-	.unassign_vif_chanctx	= wfx_unassign_vif_chanctx,
+	.bss_info_changed        = wfx_bss_info_changed,
+	.configure_filter        = wfx_configure_filter,
+	.ampdu_action            = wfx_ampdu_action,
+	.flush                   = wfx_flush,
+	.add_chanctx             = wfx_add_chanctx,
+	.remove_chanctx          = wfx_remove_chanctx,
+	.change_chanctx          = wfx_change_chanctx,
+	.assign_vif_chanctx      = wfx_assign_vif_chanctx,
+	.unassign_vif_chanctx    = wfx_unassign_vif_chanctx,
 };
 
 bool wfx_api_older_than(struct wfx_dev *wdev, int major, int minor)
@@ -163,19 +162,17 @@ bool wfx_api_older_than(struct wfx_dev *wdev, int major, int minor)
 	return false;
 }
 
-/* The device needs data about the antenna configuration. This information in
- * provided by PDS (Platform Data Set, this is the wording used in WF200
- * documentation) files. For hardware integrators, the full process to create
- * PDS files is described here:
+/* The device needs data about the antenna configuration. This information in provided by PDS
+ * (Platform Data Set, this is the wording used in WF200 documentation) files. For hardware
+ * integrators, the full process to create PDS files is described here:
  *   https:github.com/SiliconLabs/wfx-firmware/blob/master/PDS/README.md
  *
- * So this function aims to send PDS to the device. However, the PDS file is
- * often bigger than Rx buffers of the chip, so it has to be sent in multiple
- * parts.
+ * So this function aims to send PDS to the device. However, the PDS file is often bigger than Rx
+ * buffers of the chip, so it has to be sent in multiple parts.
  *
- * In add, the PDS data cannot be split anywhere. The PDS files contains tree
- * structures. Braces are used to enter/leave a level of the tree (in a JSON
- * fashion). PDS files can only been split between root nodes.
+ * In add, the PDS data cannot be split anywhere. The PDS files contains tree structures. Braces are
+ * used to enter/leave a level of the tree (in a JSON fashion). PDS files can only been split
+ * between root nodes.
  */
 int wfx_send_pds(struct wfx_dev *wdev, u8 *buf, size_t len)
 {
@@ -201,8 +198,8 @@ int wfx_send_pds(struct wfx_dev *wdev, u8 *buf, size_t len)
 			buf[i] = 0;
 			dev_dbg(wdev->dev, "send PDS '%s}'\n", buf + start);
 			buf[i] = '}';
-			ret = hif_configuration(wdev, buf + start,
-						i - start + 1);
+			ret = wfx_hif_configuration(wdev, buf + start,
+						    i - start + 1);
 			if (ret > 0) {
 				dev_err(wdev->dev, "PDS bytes %d to %d: invalid data (unsupported options?)\n",
 					start, i);
@@ -235,18 +232,17 @@ static int wfx_send_pdata_pds(struct wfx_dev *wdev)
 	if (ret) {
 		dev_err(wdev->dev, "can't load antenna parameters (PDS file %s). The device may be unstable.\n",
 			wdev->pdata.file_pds);
-		goto err1;
+		return ret;
 	}
 	tmp_buf = kmemdup(pds->data, pds->size, GFP_KERNEL);
 	if (!tmp_buf) {
 		ret = -ENOMEM;
-		goto err2;
+		goto release_fw;
 	}
 	ret = wfx_send_pds(wdev, tmp_buf, pds->size);
 	kfree(tmp_buf);
-err2:
+release_fw:
 	release_firmware(pds);
-err1:
 	return ret;
 }
 
@@ -260,10 +256,8 @@ static void wfx_free_common(void *data)
 	ieee80211_free_hw(wdev->hw);
 }
 
-struct wfx_dev *wfx_init_common(struct device *dev,
-				const struct wfx_platform_data *pdata,
-				const struct hwbus_ops *hwbus_ops,
-				void *hwbus_priv)
+struct wfx_dev *wfx_init_common(struct device *dev, const struct wfx_platform_data *pdata,
+				const struct wfx_hwbus_ops *hwbus_ops, void *hwbus_priv)
 {
 	struct ieee80211_hw *hw;
 	struct wfx_dev *wdev;
@@ -288,9 +282,8 @@ struct wfx_dev *wfx_init_common(struct device *dev,
 	hw->queues = 4;
 	hw->max_rates = 8;
 	hw->max_rate_tries = 8;
-	hw->extra_tx_headroom = sizeof(struct hif_msg)
-				+ sizeof(struct hif_req_tx)
-				+ 4 /* alignment */ + 8 /* TKIP IV */;
+	hw->extra_tx_headroom = sizeof(struct wfx_hif_msg) + sizeof(struct wfx_hif_req_tx) +
+				4 /* alignment */ + 8 /* TKIP IV */;
 	hw->wiphy->interface_modes = BIT(NL80211_IFTYPE_STATION) |
 				     BIT(NL80211_IFTYPE_ADHOC) |
 				     BIT(NL80211_IFTYPE_AP);
@@ -308,8 +301,7 @@ struct wfx_dev *wfx_init_common(struct device *dev,
 	hw->wiphy->iface_combinations = wfx_iface_combinations;
 	hw->wiphy->bands[NL80211_BAND_2GHZ] = devm_kmalloc(dev, sizeof(wfx_band_2ghz), GFP_KERNEL);
 	/* FIXME: also copy wfx_rates and wfx_2ghz_chantable */
-	memcpy(hw->wiphy->bands[NL80211_BAND_2GHZ], &wfx_band_2ghz,
-	       sizeof(wfx_band_2ghz));
+	memcpy(hw->wiphy->bands[NL80211_BAND_2GHZ], &wfx_band_2ghz, sizeof(wfx_band_2ghz));
 
 	wdev = hw->priv;
 	wdev->hw = hw;
@@ -317,10 +309,8 @@ struct wfx_dev *wfx_init_common(struct device *dev,
 	wdev->hwbus_ops = hwbus_ops;
 	wdev->hwbus_priv = hwbus_priv;
 	memcpy(&wdev->pdata, pdata, sizeof(*pdata));
-	of_property_read_string(dev->of_node, "config-file",
-				&wdev->pdata.file_pds);
-	wdev->pdata.gpio_wakeup = devm_gpiod_get_optional(dev, "wakeup",
-							  GPIOD_OUT_LOW);
+	of_property_read_string(dev->of_node, "silabs,antenna-config-file", &wdev->pdata.file_pds);
+	wdev->pdata.gpio_wakeup = devm_gpiod_get_optional(dev, "wakeup", GPIOD_OUT_LOW);
 	if (IS_ERR(wdev->pdata.gpio_wakeup))
 		return NULL;
 	if (wdev->pdata.gpio_wakeup)
@@ -330,12 +320,10 @@ struct wfx_dev *wfx_init_common(struct device *dev,
 	mutex_init(&wdev->rx_stats_lock);
 	mutex_init(&wdev->tx_power_loop_info_lock);
 	init_completion(&wdev->firmware_ready);
-	INIT_DELAYED_WORK(&wdev->cooling_timeout_work,
-			  wfx_cooling_timeout_work);
+	INIT_DELAYED_WORK(&wdev->cooling_timeout_work, wfx_cooling_timeout_work);
 	skb_queue_head_init(&wdev->tx_pending);
 	init_waitqueue_head(&wdev->tx_dequeue);
 	wfx_init_hif_cmd(&wdev->hif_cmd);
-	wdev->force_ps_timeout = -1;
 
 	if (devm_add_action_or_reset(dev, wfx_free_common, wdev))
 		return NULL;
@@ -349,8 +337,8 @@ int wfx_probe(struct wfx_dev *wdev)
 	int err;
 	struct gpio_desc *gpio_saved;
 
-	/* During first part of boot, gpio_wakeup cannot yet been used. So
-	 * prevent bh() to touch it.
+	/* During first part of boot, gpio_wakeup cannot yet been used. So prevent bh() to touch
+	 * it.
 	 */
 	gpio_saved = wdev->pdata.gpio_wakeup;
 	wdev->pdata.gpio_wakeup = NULL;
@@ -360,7 +348,7 @@ int wfx_probe(struct wfx_dev *wdev)
 
 	err = wfx_init_device(wdev);
 	if (err)
-		goto err0;
+		goto bh_unregister;
 
 	wfx_bh_poll_irq(wdev);
 	err = wait_for_completion_timeout(&wdev->firmware_ready, 1 * HZ);
@@ -371,7 +359,7 @@ int wfx_probe(struct wfx_dev *wdev)
 		} else if (err == -ERESTARTSYS) {
 			dev_info(wdev->dev, "probe interrupted by user\n");
 		}
-		goto err0;
+		goto bh_unregister;
 	}
 
 	/* FIXME: fill wiphy::hw_version */
@@ -388,68 +376,63 @@ int wfx_probe(struct wfx_dev *wdev)
 		 wdev->hw_caps.firmware_build);
 
 	if (wfx_api_older_than(wdev, 1, 0)) {
-		dev_err(wdev->dev,
-			"unsupported firmware API version (expect 1 while firmware returns %d)\n",
+		dev_err(wdev->dev, "unsupported firmware API version (expect 1 while firmware returns %d)\n",
 			wdev->hw_caps.api_version_major);
-		err = -ENOTSUPP;
-		goto err0;
+		err = -EOPNOTSUPP;
+		goto bh_unregister;
 	}
 
 	if (wdev->hw_caps.link_mode == SEC_LINK_ENFORCED) {
-		dev_err(wdev->dev,
-			"chip require secure_link, but can't negotiate it\n");
-		goto err0;
+		dev_err(wdev->dev, "chip require secure_link, but can't negotiate it\n");
+		goto bh_unregister;
 	}
 
 	if (wdev->hw_caps.region_sel_mode) {
-		wdev->hw->wiphy->bands[NL80211_BAND_2GHZ]->channels[11].flags |= IEEE80211_CHAN_NO_IR;
-		wdev->hw->wiphy->bands[NL80211_BAND_2GHZ]->channels[12].flags |= IEEE80211_CHAN_NO_IR;
-		wdev->hw->wiphy->bands[NL80211_BAND_2GHZ]->channels[13].flags |= IEEE80211_CHAN_DISABLED;
+		wdev->hw->wiphy->bands[NL80211_BAND_2GHZ]->channels[11].flags |=
+			IEEE80211_CHAN_NO_IR;
+		wdev->hw->wiphy->bands[NL80211_BAND_2GHZ]->channels[12].flags |=
+			IEEE80211_CHAN_NO_IR;
+		wdev->hw->wiphy->bands[NL80211_BAND_2GHZ]->channels[13].flags |=
+			IEEE80211_CHAN_DISABLED;
 	}
 
-	dev_dbg(wdev->dev, "sending configuration file %s\n",
-		wdev->pdata.file_pds);
+	dev_dbg(wdev->dev, "sending configuration file %s\n", wdev->pdata.file_pds);
 	err = wfx_send_pdata_pds(wdev);
 	if (err < 0 && err != -ENOENT)
-		goto err0;
+		goto bh_unregister;
 
 	wdev->poll_irq = false;
 	err = wdev->hwbus_ops->irq_subscribe(wdev->hwbus_priv);
 	if (err)
-		goto err0;
+		goto bh_unregister;
 
-	err = hif_use_multi_tx_conf(wdev, true);
+	err = wfx_hif_use_multi_tx_conf(wdev, true);
 	if (err)
 		dev_err(wdev->dev, "misconfigured IRQ?\n");
 
 	wdev->pdata.gpio_wakeup = gpio_saved;
 	if (wdev->pdata.gpio_wakeup) {
-		dev_dbg(wdev->dev,
-			"enable 'quiescent' power mode with wakeup GPIO and PDS file %s\n",
+		dev_dbg(wdev->dev, "enable 'quiescent' power mode with wakeup GPIO and PDS file %s\n",
 			wdev->pdata.file_pds);
 		gpiod_set_value_cansleep(wdev->pdata.gpio_wakeup, 1);
-		control_reg_write(wdev, 0);
-		hif_set_operational_mode(wdev, HIF_OP_POWER_MODE_QUIESCENT);
+		wfx_control_reg_write(wdev, 0);
+		wfx_hif_set_operational_mode(wdev, HIF_OP_POWER_MODE_QUIESCENT);
 	} else {
-		hif_set_operational_mode(wdev, HIF_OP_POWER_MODE_DOZE);
+		wfx_hif_set_operational_mode(wdev, HIF_OP_POWER_MODE_DOZE);
 	}
 
 	for (i = 0; i < ARRAY_SIZE(wdev->addresses); i++) {
 		eth_zero_addr(wdev->addresses[i].addr);
-		err = of_get_mac_address(wdev->dev->of_node,
-					 wdev->addresses[i].addr);
-		if (!err) {
+		err = of_get_mac_address(wdev->dev->of_node, wdev->addresses[i].addr);
+		if (!err)
 			wdev->addresses[i].addr[ETH_ALEN - 1] += i;
-		} else {
-			ether_addr_copy(wdev->addresses[i].addr,
-					wdev->hw_caps.mac_addr[i]);
-		}
+		else
+			ether_addr_copy(wdev->addresses[i].addr, wdev->hw_caps.mac_addr[i]);
 		if (!is_valid_ether_addr(wdev->addresses[i].addr)) {
 			dev_warn(wdev->dev, "using random MAC address\n");
 			eth_random_addr(wdev->addresses[i].addr);
 		}
-		dev_info(wdev->dev, "MAC address %d: %pM\n", i,
-			 wdev->addresses[i].addr);
+		dev_info(wdev->dev, "MAC address %d: %pM\n", i, wdev->addresses[i].addr);
 	}
 	wdev->hw->wiphy->n_addresses = ARRAY_SIZE(wdev->addresses);
 	wdev->hw->wiphy->addresses = wdev->addresses;
@@ -459,19 +442,19 @@ int wfx_probe(struct wfx_dev *wdev)
 
 	err = ieee80211_register_hw(wdev->hw);
 	if (err)
-		goto err1;
+		goto irq_unsubscribe;
 
 	err = wfx_debug_init(wdev);
 	if (err)
-		goto err2;
+		goto ieee80211_unregister;
 
 	return 0;
 
-err2:
+ieee80211_unregister:
 	ieee80211_unregister_hw(wdev->hw);
-err1:
+irq_unsubscribe:
 	wdev->hwbus_ops->irq_unsubscribe(wdev->hwbus_priv);
-err0:
+bh_unregister:
 	wfx_bh_unregister(wdev);
 	return err;
 }
@@ -479,7 +462,7 @@ err0:
 void wfx_release(struct wfx_dev *wdev)
 {
 	ieee80211_unregister_hw(wdev->hw);
-	hif_shutdown(wdev);
+	wfx_hif_shutdown(wdev);
 	wdev->hwbus_ops->irq_unsubscribe(wdev->hwbus_priv);
 	wfx_bh_unregister(wdev);
 }

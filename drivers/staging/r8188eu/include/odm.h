@@ -148,18 +148,9 @@ enum odm_common_info_def {
 
 enum odm_ability_def {
 	/*  BB ODM section BIT 0-15 */
-	ODM_BB_FA_CNT			= BIT(3),
 	ODM_BB_RSSI_MONITOR		= BIT(4),
-	ODM_BB_CCK_PD			= BIT(5),
 	ODM_BB_ANT_DIV			= BIT(6),
 	ODM_BB_PWR_TRA			= BIT(8),
-
-	/*  MAC DM section BIT 16-23 */
-	ODM_MAC_EDCA_TURBO		= BIT(16),
-
-	/*  RF ODM section BIT 24-31 */
-	ODM_RF_TX_PWR_TRACK		= BIT(24),
-	ODM_RF_CALIBRATION		= BIT(26),
 };
 
 # define ODM_ITRF_USB 0x2
@@ -238,9 +229,6 @@ struct odm_rf_cal {
 	s32	RegEB4;
 	s32	RegEBC;
 
-	u8	TXPowercount;
-	bool	bTXPowerTrackingInit;
-	bool	bTXPowerTracking;
 	u8	TxPowerTrackControl; /* for mp mode, turn off txpwrtracking
 				      * as default */
 	u8	TM_Trigger;
@@ -263,11 +251,10 @@ struct odm_rf_cal {
 
 	bool	bReloadtxpowerindex;
 	u8	bRfPiEnable;
-	u32	TXPowerTrackingCallbackCnt; /* cosa add for debug */
 
 	u8	bCCKinCH14;
 	u8	CCK_index;
-	u8	OFDM_index[2];
+	u8	OFDM_index;
 	bool bDoneTxpower;
 
 	u8	ThermalValue_HP[HP_THERMAL_NUM];

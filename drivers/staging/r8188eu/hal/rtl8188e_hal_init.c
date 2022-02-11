@@ -3,12 +3,12 @@
 
 #define _HAL_INIT_C_
 
-#include "../include/linux/firmware.h"
 #include "../include/drv_types.h"
 #include "../include/rtw_efuse.h"
 #include "../include/rtl8188e_hal.h"
 #include "../include/rtw_iol.h"
 #include "../include/usb_ops.h"
+#include "../include/rtw_fw.h"
 
 static void iol_mode_enable(struct adapter *padapter, u8 enable)
 {
@@ -21,7 +21,7 @@ static void iol_mode_enable(struct adapter *padapter, u8 enable)
 
 		if (!padapter->bFWReady) {
 			DBG_88E("bFWReady == false call reset 8051...\n");
-			_8051Reset88E(padapter);
+			rtw_reset_8051(padapter);
 		}
 
 	} else {
@@ -336,305 +336,6 @@ exit:
 	return ret;
 }
 
-static void _FWDownloadEnable(struct adapter *padapter, bool enable)
-{
-	u8 tmp;
-
-	if (enable) {
-		/*  MCU firmware download enable. */
-		tmp = rtw_read8(padapter, REG_MCUFWDL);
-		rtw_write8(padapter, REG_MCUFWDL, tmp | 0x01);
-
-		/*  8051 reset */
-		tmp = rtw_read8(padapter, REG_MCUFWDL + 2);
-		rtw_write8(padapter, REG_MCUFWDL + 2, tmp & 0xf7);
-	} else {
-		/*  MCU firmware download disable. */
-		tmp = rtw_read8(padapter, REG_MCUFWDL);
-		rtw_write8(padapter, REG_MCUFWDL, tmp & 0xfe);
-
-		/*  Reserved for fw extension. */
-		rtw_write8(padapter, REG_MCUFWDL + 1, 0x00);
-	}
-}
-
-#define MAX_REG_BOLCK_SIZE	196
-
-static int _BlockWrite(struct adapter *padapter, void *buffer, u32 buffSize)
-{
-	int ret = _SUCCESS;
-	u32	blockSize_p1 = 4;	/*  (Default) Phase #1 : PCI muse use 4-byte write to download FW */
-	u32	blockSize_p2 = 8;	/*  Phase #2 : Use 8-byte, if Phase#1 use big size to write FW. */
-	u32	blockSize_p3 = 1;	/*  Phase #3 : Use 1-byte, the remnant of FW image. */
-	u32	blockCount_p1 = 0, blockCount_p2 = 0, blockCount_p3 = 0;
-	u32	remainSize_p1 = 0, remainSize_p2 = 0;
-	u8 *bufferPtr	= (u8 *)buffer;
-	u32	i = 0, offset = 0;
-
-	blockSize_p1 = MAX_REG_BOLCK_SIZE;
-
-	/* 3 Phase #1 */
-	blockCount_p1 = buffSize / blockSize_p1;
-	remainSize_p1 = buffSize % blockSize_p1;
-
-	for (i = 0; i < blockCount_p1; i++) {
-		ret = rtw_writeN(padapter, (FW_8188E_START_ADDRESS + i * blockSize_p1), blockSize_p1, (bufferPtr + i * blockSize_p1));
-		if (ret == _FAIL)
-			goto exit;
-	}
-
-	/* 3 Phase #2 */
-	if (remainSize_p1) {
-		offset = blockCount_p1 * blockSize_p1;
-
-		blockCount_p2 = remainSize_p1 / blockSize_p2;
-		remainSize_p2 = remainSize_p1 % blockSize_p2;
-
-		for (i = 0; i < blockCount_p2; i++) {
-			ret = rtw_writeN(padapter, (FW_8188E_START_ADDRESS + offset + i * blockSize_p2), blockSize_p2, (bufferPtr + offset + i * blockSize_p2));
-
-			if (ret == _FAIL)
-				goto exit;
-		}
-	}
-
-	/* 3 Phase #3 */
-	if (remainSize_p2) {
-		offset = (blockCount_p1 * blockSize_p1) + (blockCount_p2 * blockSize_p2);
-
-		blockCount_p3 = remainSize_p2 / blockSize_p3;
-
-		for (i = 0; i < blockCount_p3; i++) {
-			ret = rtw_write8(padapter, (FW_8188E_START_ADDRESS + offset + i), *(bufferPtr + offset + i));
-
-			if (ret == _FAIL)
-				goto exit;
-		}
-	}
-
-exit:
-	return ret;
-}
-
-static int _PageWrite(struct adapter *padapter, u32 page, void *buffer, u32 size)
-{
-	u8 value8;
-	u8 u8Page = (u8)(page & 0x07);
-
-	value8 = (rtw_read8(padapter, REG_MCUFWDL + 2) & 0xF8) | u8Page;
-	rtw_write8(padapter, REG_MCUFWDL + 2, value8);
-
-	return _BlockWrite(padapter, buffer, size);
-}
-
-static int _WriteFW(struct adapter *padapter, void *buffer, u32 size)
-{
-	/*  Since we need dynamic decide method of dwonload fw, so we call this function to get chip version. */
-	/*  We can remove _ReadChipVersion from ReadpadapterInfo8192C later. */
-	int ret = _SUCCESS;
-	u32	pageNums, remainSize;
-	u32	page, offset;
-	u8 *bufferPtr = (u8 *)buffer;
-
-	pageNums = size / MAX_PAGE_SIZE;
-	remainSize = size % MAX_PAGE_SIZE;
-
-	for (page = 0; page < pageNums; page++) {
-		offset = page * MAX_PAGE_SIZE;
-		ret = _PageWrite(padapter, page, bufferPtr + offset, MAX_PAGE_SIZE);
-
-		if (ret == _FAIL)
-			goto exit;
-	}
-	if (remainSize) {
-		offset = pageNums * MAX_PAGE_SIZE;
-		page = pageNums;
-		ret = _PageWrite(padapter, page, bufferPtr + offset, remainSize);
-
-		if (ret == _FAIL)
-			goto exit;
-	}
-exit:
-	return ret;
-}
-
-void _8051Reset88E(struct adapter *padapter)
-{
-	u8 u1bTmp;
-
-	u1bTmp = rtw_read8(padapter, REG_SYS_FUNC_EN + 1);
-	rtw_write8(padapter, REG_SYS_FUNC_EN + 1, u1bTmp & (~BIT(2)));
-	rtw_write8(padapter, REG_SYS_FUNC_EN + 1, u1bTmp | (BIT(2)));
-	DBG_88E("=====> _8051Reset88E(): 8051 reset success .\n");
-}
-
-static s32 _FWFreeToGo(struct adapter *padapter)
-{
-	u32	counter = 0;
-	u32	value32;
-
-	/*  polling CheckSum report */
-	do {
-		value32 = rtw_read32(padapter, REG_MCUFWDL);
-		if (value32 & FWDL_ChkSum_rpt)
-			break;
-	} while (counter++ < POLLING_READY_TIMEOUT_COUNT);
-
-	if (counter >= POLLING_READY_TIMEOUT_COUNT) {
-		DBG_88E("%s: chksum report fail! REG_MCUFWDL:0x%08x\n", __func__, value32);
-		return _FAIL;
-	}
-	DBG_88E("%s: Checksum report OK! REG_MCUFWDL:0x%08x\n", __func__, value32);
-
-	value32 = rtw_read32(padapter, REG_MCUFWDL);
-	value32 |= MCUFWDL_RDY;
-	value32 &= ~WINTINI_RDY;
-	rtw_write32(padapter, REG_MCUFWDL, value32);
-
-	_8051Reset88E(padapter);
-
-	/*  polling for FW ready */
-	counter = 0;
-	do {
-		value32 = rtw_read32(padapter, REG_MCUFWDL);
-		if (value32 & WINTINI_RDY) {
-			DBG_88E("%s: Polling FW ready success!! REG_MCUFWDL:0x%08x\n", __func__, value32);
-			return _SUCCESS;
-		}
-		udelay(5);
-	} while (counter++ < POLLING_READY_TIMEOUT_COUNT);
-
-	DBG_88E("%s: Polling FW ready fail!! REG_MCUFWDL:0x%08x\n", __func__, value32);
-	return _FAIL;
-}
-
-static int load_firmware(struct rt_firmware *pFirmware, struct device *device)
-{
-	s32	rtStatus = _SUCCESS;
-	const struct firmware *fw;
-	const char *fw_name = "rtlwifi/rtl8188eufw.bin";
-	int err = request_firmware(&fw, fw_name, device);
-
-	if (err) {
-		pr_err("Request firmware failed with error 0x%x\n", err);
-		rtStatus = _FAIL;
-		goto Exit;
-	}
-	if (!fw) {
-		pr_err("Firmware %s not available\n", fw_name);
-		rtStatus = _FAIL;
-		goto Exit;
-	}
-	if (fw->size > FW_8188E_SIZE) {
-		rtStatus = _FAIL;
-		goto Exit;
-	}
-
-	pFirmware->szFwBuffer = kzalloc(FW_8188E_SIZE, GFP_KERNEL);
-	if (!pFirmware->szFwBuffer) {
-		pr_err("Failed to allocate pFirmware->szFwBuffer\n");
-		rtStatus = _FAIL;
-		goto Exit;
-	}
-	memcpy(pFirmware->szFwBuffer, fw->data, fw->size);
-	pFirmware->ulFwLength = fw->size;
-	release_firmware(fw);
-	dev_dbg(device, "!bUsedWoWLANFw, FmrmwareLen:%d+\n", pFirmware->ulFwLength);
-
-Exit:
-	return rtStatus;
-}
-
-s32 rtl8188e_FirmwareDownload(struct adapter *padapter)
-{
-	s32	rtStatus = _SUCCESS;
-	u8 writeFW_retry = 0;
-	u32 fwdl_start_time;
-	struct hal_data_8188e *pHalData = &padapter->haldata;
-	struct dvobj_priv *dvobj = adapter_to_dvobj(padapter);
-	struct device *device = dvobj_to_dev(dvobj);
-	struct rt_firmware_hdr *pFwHdr = NULL;
-	u8 *pFirmwareBuf;
-	u32 FirmwareLen;
-	static int log_version;
-
-	if (!dvobj->firmware.szFwBuffer)
-		rtStatus = load_firmware(&dvobj->firmware, device);
-	if (rtStatus == _FAIL) {
-		dvobj->firmware.szFwBuffer = NULL;
-		goto Exit;
-	}
-	pFirmwareBuf = dvobj->firmware.szFwBuffer;
-	FirmwareLen = dvobj->firmware.ulFwLength;
-
-	/*  To Check Fw header. Added by tynli. 2009.12.04. */
-	pFwHdr = (struct rt_firmware_hdr *)dvobj->firmware.szFwBuffer;
-
-	pHalData->FirmwareVersion =  le16_to_cpu(pFwHdr->Version);
-	pHalData->FirmwareSubVersion = pFwHdr->Subversion;
-	pHalData->FirmwareSignature = le16_to_cpu(pFwHdr->Signature);
-
-	if (!log_version++)
-		pr_info("%sFirmware Version %d, SubVersion %d, Signature 0x%x\n",
-			DRIVER_PREFIX, pHalData->FirmwareVersion,
-			pHalData->FirmwareSubVersion, pHalData->FirmwareSignature);
-
-	if (IS_FW_HEADER_EXIST(pFwHdr)) {
-		/*  Shift 32 bytes for FW header */
-		pFirmwareBuf = pFirmwareBuf + 32;
-		FirmwareLen = FirmwareLen - 32;
-	}
-
-	/*  Suggested by Filen. If 8051 is running in RAM code, driver should inform Fw to reset by itself, */
-	/*  or it will cause download Fw fail. 2010.02.01. by tynli. */
-	if (rtw_read8(padapter, REG_MCUFWDL) & RAM_DL_SEL) { /* 8051 RAM code */
-		rtw_write8(padapter, REG_MCUFWDL, 0x00);
-		_8051Reset88E(padapter);
-	}
-
-	_FWDownloadEnable(padapter, true);
-	fwdl_start_time = jiffies;
-	while (1) {
-		/* reset the FWDL chksum */
-		rtw_write8(padapter, REG_MCUFWDL, rtw_read8(padapter, REG_MCUFWDL) | FWDL_ChkSum_rpt);
-
-		rtStatus = _WriteFW(padapter, pFirmwareBuf, FirmwareLen);
-
-		if (rtStatus == _SUCCESS ||
-		    (rtw_get_passing_time_ms(fwdl_start_time) > 500 && writeFW_retry++ >= 3))
-			break;
-
-		DBG_88E("%s writeFW_retry:%u, time after fwdl_start_time:%ums\n",
-			__func__, writeFW_retry, rtw_get_passing_time_ms(fwdl_start_time)
-		);
-	}
-	_FWDownloadEnable(padapter, false);
-	if (_SUCCESS != rtStatus) {
-		DBG_88E("DL Firmware failed!\n");
-		goto Exit;
-	}
-
-	rtStatus = _FWFreeToGo(padapter);
-	if (_SUCCESS != rtStatus) {
-		DBG_88E("DL Firmware failed!\n");
-		goto Exit;
-	}
-
-Exit:
-	return rtStatus;
-}
-
-void rtl8188e_InitializeFirmwareVars(struct adapter *padapter)
-{
-	struct hal_data_8188e *pHalData = &padapter->haldata;
-
-	/*  Init Fw LPS related. */
-	padapter->pwrctrlpriv.bFwCurrentInPSMode = false;
-
-	/*  Init H2C counter. by tynli. 2009.12.09. */
-	pHalData->LastHMEBoxNum = 0;
-}
-
 /*  */
 /*			Efuse related code */
 /*  */
@@ -796,9 +497,6 @@ static void Hal_EfuseReadEFuse88E(struct adapter *Adapter,
 	/*  4. Copy from Efuse map to output pointer memory!!! */
 	for (i = 0; i < _size_byte; i++)
 		pbuf[i] = efuseTbl[_offset + i];
-
-	/*  5. Calculate Efuse utilization. */
-	SetHwReg8188EU(Adapter, HW_VAR_EFUSE_BYTES, (u8 *)&eFuse_Addr);
 
 exit:
 	kfree(efuseTbl);
