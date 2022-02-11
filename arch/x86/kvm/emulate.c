@@ -2600,8 +2600,7 @@ emulate_shutdown:
 }
 
 static void
-setup_syscalls_segments(struct x86_emulate_ctxt *ctxt,
-			struct desc_struct *cs, struct desc_struct *ss)
+setup_syscalls_segments(struct desc_struct *cs, struct desc_struct *ss)
 {
 	cs->l = 0;		/* will be adjusted later */
 	set_desc_base(cs, 0);	/* flat segment */
@@ -2690,7 +2689,7 @@ static int em_syscall(struct x86_emulate_ctxt *ctxt)
 	if (!(efer & EFER_SCE))
 		return emulate_ud(ctxt);
 
-	setup_syscalls_segments(ctxt, &cs, &ss);
+	setup_syscalls_segments(&cs, &ss);
 	ops->get_msr(ctxt, MSR_STAR, &msr_data);
 	msr_data >>= 32;
 	cs_sel = (u16)(msr_data & 0xfffc);
@@ -2758,7 +2757,7 @@ static int em_sysenter(struct x86_emulate_ctxt *ctxt)
 	if ((msr_data & 0xfffc) == 0x0)
 		return emulate_gp(ctxt, 0);
 
-	setup_syscalls_segments(ctxt, &cs, &ss);
+	setup_syscalls_segments(&cs, &ss);
 	ctxt->eflags &= ~(X86_EFLAGS_VM | X86_EFLAGS_IF);
 	cs_sel = (u16)msr_data & ~SEGMENT_RPL_MASK;
 	ss_sel = cs_sel + 8;
@@ -2795,7 +2794,7 @@ static int em_sysexit(struct x86_emulate_ctxt *ctxt)
 	    ctxt->mode == X86EMUL_MODE_VM86)
 		return emulate_gp(ctxt, 0);
 
-	setup_syscalls_segments(ctxt, &cs, &ss);
+	setup_syscalls_segments(&cs, &ss);
 
 	if ((ctxt->rex_prefix & 0x8) != 0x0)
 		usermode = X86EMUL_MODE_PROT64;
@@ -3013,8 +3012,7 @@ static int load_state_from_tss16(struct x86_emulate_ctxt *ctxt,
 	return X86EMUL_CONTINUE;
 }
 
-static int task_switch_16(struct x86_emulate_ctxt *ctxt,
-			  u16 tss_selector, u16 old_tss_sel,
+static int task_switch_16(struct x86_emulate_ctxt *ctxt, u16 old_tss_sel,
 			  ulong old_tss_base, struct desc_struct *new_desc)
 {
 	struct tss_segment_16 tss_seg;
@@ -3152,8 +3150,7 @@ static int load_state_from_tss32(struct x86_emulate_ctxt *ctxt,
 	return ret;
 }
 
-static int task_switch_32(struct x86_emulate_ctxt *ctxt,
-			  u16 tss_selector, u16 old_tss_sel,
+static int task_switch_32(struct x86_emulate_ctxt *ctxt, u16 old_tss_sel,
 			  ulong old_tss_base, struct desc_struct *new_desc)
 {
 	struct tss_segment_32 tss_seg;
@@ -3261,10 +3258,9 @@ static int emulator_do_task_switch(struct x86_emulate_ctxt *ctxt,
 		old_tss_sel = 0xffff;
 
 	if (next_tss_desc.type & 8)
-		ret = task_switch_32(ctxt, tss_selector, old_tss_sel,
-				     old_tss_base, &next_tss_desc);
+		ret = task_switch_32(ctxt, old_tss_sel, old_tss_base, &next_tss_desc);
 	else
-		ret = task_switch_16(ctxt, tss_selector, old_tss_sel,
+		ret = task_switch_16(ctxt, old_tss_sel,
 				     old_tss_base, &next_tss_desc);
 	if (ret != X86EMUL_CONTINUE)
 		return ret;
