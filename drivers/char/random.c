@@ -1149,13 +1149,10 @@ void add_bootloader_randomness(const void *buf, size_t size)
 EXPORT_SYMBOL_GPL(add_bootloader_randomness);
 
 struct fast_pool {
-	union {
-		u64 pool64[2];
-		u32 pool32[4];
-	};
+	unsigned long pool[16 / sizeof(long)];
 	struct work_struct mix;
 	unsigned long last;
-	unsigned int count;
+	atomic_t count;
 	u16 reg_idx;
 };
 #define FAST_POOL_MIX_INFLIGHT (1U << 31)
@@ -1210,14 +1207,39 @@ static u32 get_reg(struct fast_pool *f, struct pt_regs *regs)
 static void mix_interrupt_randomness(struct work_struct *work)
 {
 	struct fast_pool *fast_pool = container_of(work, struct fast_pool, mix);
-	u32 pool[ARRAY_SIZE(fast_pool->pool32)];
+	unsigned long pool[ARRAY_SIZE(fast_pool->pool)];
+	unsigned int count_snapshot;
+	size_t i;
 
-	/* Copy the pool to the stack so that the mixer always has a consistent view. */
-	memcpy(pool, fast_pool->pool32, sizeof(pool));
+	/* Check to see if we're running on the wrong CPU due to hotplug. */
+	migrate_disable();
+	if (fast_pool != this_cpu_ptr(&irq_randomness)) {
+		migrate_enable();
+		/*
+		 * If we are unlucky enough to have been moved to another CPU,
+		 * then we set our count to zero atomically so that when the
+		 * CPU comes back online, it can enqueue work again.
+		 */
+		atomic_set_release(&fast_pool->count, 0);
+		return;
+	}
+
+	/*
+	 * Copy the pool to the stack so that the mixer always has a
+	 * consistent view. It's extremely unlikely but possible that
+	 * this 2 or 4 word read is interrupted by an irq, but in case
+	 * it is, we double check that count stays the same.
+	 */
+	do {
+		count_snapshot = (unsigned int)atomic_read(&fast_pool->count);
+		for (i = 0; i < ARRAY_SIZE(pool); ++i)
+			pool[i] = READ_ONCE(fast_pool->pool[i]);
+	} while (count_snapshot != (unsigned int)atomic_read(&fast_pool->count));
 
 	/* We take care to zero out the count only after we're done reading the pool. */
-	WRITE_ONCE(fast_pool->count, 0);
+	atomic_set(&fast_pool->count, 0);
 	fast_pool->last = jiffies;
+	migrate_enable();
 
 	mix_pool_bytes(pool, sizeof(pool));
 	credit_entropy_bits(1);
@@ -1236,22 +1258,22 @@ void add_interrupt_randomness(int irq)
 		cycles = get_reg(fast_pool, regs);
 
 	if (sizeof(unsigned long) == 8) {
-		fast_pool->pool64[0] ^= cycles ^ rol64(now, 32) ^ irq;
-		fast_pool->pool64[1] ^= regs ? instruction_pointer(regs) : _RET_IP_;
+		fast_pool->pool[0] ^= cycles ^ rol64(now, 32) ^ irq;
+		fast_pool->pool[1] ^= regs ? instruction_pointer(regs) : _RET_IP_;
 	} else {
-		fast_pool->pool32[0] ^= cycles ^ irq;
-		fast_pool->pool32[1] ^= now;
-		fast_pool->pool32[2] ^= regs ? instruction_pointer(regs) : _RET_IP_;
-		fast_pool->pool32[3] ^= get_reg(fast_pool, regs);
+		fast_pool->pool[0] ^= cycles ^ irq;
+		fast_pool->pool[1] ^= now;
+		fast_pool->pool[2] ^= regs ? instruction_pointer(regs) : _RET_IP_;
+		fast_pool->pool[3] ^= get_reg(fast_pool, regs);
 	}
 
-	fast_mix(fast_pool->pool32);
-	new_count = ++fast_pool->count;
+	fast_mix((u32 *)fast_pool->pool);
+	new_count = (unsigned int)atomic_inc_return_acquire(&fast_pool->count);
 
 	if (unlikely(crng_init == 0)) {
 		if (new_count >= 64 &&
-		    crng_fast_load(fast_pool->pool32, sizeof(fast_pool->pool32)) > 0) {
-			fast_pool->count = 0;
+		    crng_fast_load(fast_pool->pool, sizeof(fast_pool->pool)) > 0) {
+			atomic_set(&fast_pool->count, 0);
 			fast_pool->last = now;
 
 			/*
@@ -1260,7 +1282,7 @@ void add_interrupt_randomness(int irq)
 			 * However, this only happens during boot, and then never
 			 * again, so we live with it.
 			 */
-			mix_pool_bytes(&fast_pool->pool32, sizeof(fast_pool->pool32));
+			mix_pool_bytes(&fast_pool->pool, sizeof(fast_pool->pool));
 		}
 		return;
 	}
@@ -1273,7 +1295,7 @@ void add_interrupt_randomness(int irq)
 
 	if (unlikely(!fast_pool->mix.func))
 		INIT_WORK(&fast_pool->mix, mix_interrupt_randomness);
-	fast_pool->count |= FAST_POOL_MIX_INFLIGHT;
+	atomic_or(FAST_POOL_MIX_INFLIGHT, &fast_pool->count);
 	queue_work_on(raw_smp_processor_id(), system_highpri_wq, &fast_pool->mix);
 }
 EXPORT_SYMBOL_GPL(add_interrupt_randomness);
