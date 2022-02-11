@@ -3318,6 +3318,27 @@ int btrfs_fileattr_set(struct user_namespace *mnt_userns,
 int btrfs_ioctl_get_supported_features(void __user *arg);
 void btrfs_sync_inode_flags_to_i_flags(struct inode *inode);
 int __pure btrfs_is_empty_uuid(u8 *uuid);
+
+/* Control structure for inode defragmentation */
+struct btrfs_defrag_ctrl {
+	/* Input, read-only fields */
+	u64 start;
+	u64 len;
+	u32 extent_thresh;
+	u64 newer_than;
+	u64 max_sectors_to_defrag;
+	u8 compress;
+	u8 flags;
+
+	/* Output fields */
+	u64 sectors_defragged;
+	/* Exclusive bytenr */
+	u64 last_scanned;
+};
+int btrfs_defrag_ioctl_args_to_ctrl(struct btrfs_fs_info *fs_info,
+				    struct btrfs_ioctl_defrag_range_args *args,
+				    struct btrfs_defrag_ctrl *ctrl,
+				    u64 max_sectors_to_defrag, u64 newer_than);
 int btrfs_defrag_file(struct inode *inode, struct file_ra_state *ra,
 		      struct btrfs_ioctl_defrag_range_args *range,
 		      u64 newer_than, unsigned long max_to_defrag);
