@@ -42,6 +42,25 @@ static ssize_t name##_list_read(struct file *file, struct kobject *kobj,	\
 					off, count);				\
 }
 
+#define define_siblings_show_map(name, mask)				\
+static ssize_t name##_show(struct device *dev,				\
+			   struct device_attribute *attr, char *buf)	\
+{									\
+	return cpumap_print_to_pagebuf(false, buf, topology_##mask(dev->id));\
+}
+
+#define define_siblings_show_list(name, mask)				\
+static ssize_t name##_list_show(struct device *dev,			\
+				struct device_attribute *attr,		\
+				char *buf)				\
+{									\
+	return cpumap_print_to_pagebuf(true, buf, topology_##mask(dev->id));\
+}
+
+#define define_siblings_show_func(name, mask)	\
+	define_siblings_show_map(name, mask);	\
+	define_siblings_show_list(name, mask)
+	
 define_id_show_func(physical_package_id, "%d");
 static DEVICE_ATTR_RO(physical_package_id);
 
@@ -61,17 +80,17 @@ static DEVICE_ATTR_RO(core_id);
 define_id_show_func(ppin, "0x%llx");
 static DEVICE_ATTR_ADMIN_RO(ppin);
 
-define_siblings_read_func(thread_siblings, sibling_cpumask);
-static BIN_ATTR_RO(thread_siblings, 0);
-static BIN_ATTR_RO(thread_siblings_list, 0);
+define_siblings_show_func(thread_siblings, sibling_cpumask);
+static DEVICE_ATTR_RO(thread_siblings);
+static DEVICE_ATTR_RO(thread_siblings_list);
 
-define_siblings_read_func(core_cpus, sibling_cpumask);
-static BIN_ATTR_RO(core_cpus, 0);
-static BIN_ATTR_RO(core_cpus_list, 0);
+define_siblings_show_func(core_cpus, sibling_cpumask);
+static DEVICE_ATTR_RO(core_cpus);
+static DEVICE_ATTR_RO(core_cpus_list);
 
-define_siblings_read_func(core_siblings, core_cpumask);
-static BIN_ATTR_RO(core_siblings, 0);
-static BIN_ATTR_RO(core_siblings_list, 0);
+define_siblings_show_func(core_siblings, core_cpumask);
+static DEVICE_ATTR_RO(core_siblings);
+static DEVICE_ATTR_RO(core_siblings_list);
 
 #ifdef TOPOLOGY_CLUSTER_SYSFS
 define_siblings_read_func(cluster_cpus, cluster_cpumask);
@@ -80,55 +99,35 @@ static BIN_ATTR_RO(cluster_cpus_list, 0);
 #endif
 
 #ifdef TOPOLOGY_DIE_SYSFS
-define_siblings_read_func(die_cpus, die_cpumask);
-static BIN_ATTR_RO(die_cpus, 0);
-static BIN_ATTR_RO(die_cpus_list, 0);
+define_siblings_show_func(die_cpus, die_cpumask);
+static DEVICE_ATTR_RO(die_cpus);
+static DEVICE_ATTR_RO(die_cpus_list);
 #endif
 
-define_siblings_read_func(package_cpus, core_cpumask);
-static BIN_ATTR_RO(package_cpus, 0);
-static BIN_ATTR_RO(package_cpus_list, 0);
+define_siblings_show_func(package_cpus, core_cpumask);
+static DEVICE_ATTR_RO(package_cpus);
+static DEVICE_ATTR_RO(package_cpus_list);
 
 #ifdef TOPOLOGY_BOOK_SYSFS
 define_id_show_func(book_id, "%d");
 static DEVICE_ATTR_RO(book_id);
-define_siblings_read_func(book_siblings, book_cpumask);
-static BIN_ATTR_RO(book_siblings, 0);
-static BIN_ATTR_RO(book_siblings_list, 0);
+define_siblings_show_func(book_siblings, book_cpumask);
+static DEVICE_ATTR_RO(book_siblings);
+static DEVICE_ATTR_RO(book_siblings_list);
 #endif
 
 #ifdef TOPOLOGY_DRAWER_SYSFS
 define_id_show_func(drawer_id, "%d");
 static DEVICE_ATTR_RO(drawer_id);
-define_siblings_read_func(drawer_siblings, drawer_cpumask);
-static BIN_ATTR_RO(drawer_siblings, 0);
-static BIN_ATTR_RO(drawer_siblings_list, 0);
+define_siblings_show_func(drawer_siblings, drawer_cpumask);
+static DEVICE_ATTR_RO(drawer_siblings);
+static DEVICE_ATTR_RO(drawer_siblings_list);
 #endif
 
 static struct bin_attribute *bin_attrs[] = {
-	&bin_attr_core_cpus,
-	&bin_attr_core_cpus_list,
-	&bin_attr_thread_siblings,
-	&bin_attr_thread_siblings_list,
-	&bin_attr_core_siblings,
-	&bin_attr_core_siblings_list,
 #ifdef TOPOLOGY_CLUSTER_SYSFS
 	&bin_attr_cluster_cpus,
 	&bin_attr_cluster_cpus_list,
-#endif
-#ifdef TOPOLOGY_DIE_SYSFS
-	&bin_attr_die_cpus,
-	&bin_attr_die_cpus_list,
-#endif
-	&bin_attr_package_cpus,
-	&bin_attr_package_cpus_list,
-#ifdef TOPOLOGY_BOOK_SYSFS
-	&bin_attr_book_siblings,
-	&bin_attr_book_siblings_list,
-#endif
-#ifdef TOPOLOGY_DRAWER_SYSFS
-	&bin_attr_drawer_siblings,
-	&bin_attr_drawer_siblings_list,
 #endif
 	NULL
 };
@@ -138,15 +137,31 @@ static struct attribute *default_attrs[] = {
 #ifdef TOPOLOGY_DIE_SYSFS
 	&dev_attr_die_id.attr,
 #endif
+	&dev_attr_thread_siblings.attr,
+	&dev_attr_thread_siblings_list.attr,
+	&dev_attr_core_cpus.attr,
+	&dev_attr_core_cpus_list.attr,
+	&dev_attr_core_siblings.attr,
+	&dev_attr_core_siblings_list.attr,
+#ifdef TOPOLOGY_DIE_SYSFS
+	&dev_attr_die_cpus.attr,
+	&dev_attr_die_cpus_list.attr,
+#endif
+	&dev_attr_package_cpus.attr,
+	&dev_attr_package_cpus_list.attr,
 #ifdef TOPOLOGY_CLUSTER_SYSFS
 	&dev_attr_cluster_id.attr,
 #endif
 	&dev_attr_core_id.attr,
 #ifdef TOPOLOGY_BOOK_SYSFS
 	&dev_attr_book_id.attr,
+	&dev_attr_book_siblings.attr,
+	&dev_attr_book_siblings_list.attr,
 #endif
 #ifdef TOPOLOGY_DRAWER_SYSFS
 	&dev_attr_drawer_id.attr,
+	&dev_attr_drawer_siblings.attr,
+	&dev_attr_drawer_siblings_list.attr,
 #endif
 	&dev_attr_ppin.attr,
 	NULL
