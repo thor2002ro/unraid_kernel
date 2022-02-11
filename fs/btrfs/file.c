@@ -277,8 +277,7 @@ static int __btrfs_run_defrag_inode(struct btrfs_fs_info *fs_info,
 {
 	struct btrfs_root *inode_root;
 	struct inode *inode;
-	struct btrfs_ioctl_defrag_range_args range;
-	int num_defrag;
+	struct btrfs_defrag_ctrl ctrl = { 0 };
 	int ret;
 
 	/* get the inode */
@@ -297,21 +296,23 @@ static int __btrfs_run_defrag_inode(struct btrfs_fs_info *fs_info,
 
 	/* do a chunk of defrag */
 	clear_bit(BTRFS_INODE_IN_DEFRAG, &BTRFS_I(inode)->runtime_flags);
-	memset(&range, 0, sizeof(range));
-	range.len = (u64)-1;
-	range.start = defrag->last_offset;
+	ctrl.len = (u64)-1;
+	ctrl.start = defrag->last_offset;
+	ctrl.newer_than = defrag->transid;
+	ctrl.max_sectors_to_defrag = BTRFS_DEFRAG_BATCH;
 
 	sb_start_write(fs_info->sb);
-	num_defrag = btrfs_defrag_file(inode, NULL, &range, defrag->transid,
-				       BTRFS_DEFRAG_BATCH);
+	ret = btrfs_defrag_file(inode, NULL, &ctrl);
 	sb_end_write(fs_info->sb);
+	if (ret < 0)
+		goto out;
 	/*
 	 * if we filled the whole defrag batch, there
 	 * must be more work to do.  Queue this defrag
 	 * again
 	 */
-	if (num_defrag == BTRFS_DEFRAG_BATCH) {
-		defrag->last_offset = range.start;
+	if (ctrl.sectors_defragged == BTRFS_DEFRAG_BATCH) {
+		defrag->last_offset = ctrl.last_scanned;
 		btrfs_requeue_inode_defrag(BTRFS_I(inode), defrag);
 	} else if (defrag->last_offset && !defrag->cycled) {
 		/*
@@ -325,7 +326,7 @@ static int __btrfs_run_defrag_inode(struct btrfs_fs_info *fs_info,
 	} else {
 		kmem_cache_free(btrfs_inode_defrag_cachep, defrag);
 	}
-
+out:
 	iput(inode);
 	return 0;
 cleanup:
