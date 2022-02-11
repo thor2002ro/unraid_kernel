@@ -1070,23 +1070,37 @@ static struct extent_map *defrag_lookup_extent(struct inode *inode, u64 start,
 	return em;
 }
 
+static u32 get_extent_max_capacity(const struct extent_map *em)
+{
+	if (test_bit(EXTENT_FLAG_COMPRESSED, &em->flags))
+		return BTRFS_MAX_COMPRESSED;
+	return BTRFS_MAX_EXTENT_SIZE;
+}
+
 static bool defrag_check_next_extent(struct inode *inode, struct extent_map *em,
 				     bool locked)
 {
 	struct extent_map *next;
-	bool ret = true;
+	bool ret = false;
 
 	/* this is the last extent */
 	if (em->start + em->len >= i_size_read(inode))
-		return false;
+		return ret;
 
 	next = defrag_lookup_extent(inode, em->start + em->len, locked);
+	/* No more em or hole */
 	if (!next || next->block_start >= EXTENT_MAP_LAST_BYTE)
-		ret = false;
-	else if ((em->block_start + em->block_len == next->block_start) &&
-		 (em->block_len > SZ_128K && next->block_len > SZ_128K))
-		ret = false;
-
+		goto out;
+	if (test_bit(EXTENT_FLAG_PREALLOC, &next->flags))
+		goto out;
+	/*
+	 * If the next extent is at its max capcity, defragging current extent
+	 * makes no sense, as the total number of extents won't change.
+	 */
+	if (next->len >= get_extent_max_capacity(em))
+		goto out;
+	ret = true;
+out:
 	free_extent_map(next);
 	return ret;
 }
@@ -1276,6 +1290,13 @@ static int defrag_collect_targets(struct btrfs_inode *inode,
 
 		/* Skip too large extent */
 		if (range_len >= extent_thresh)
+			goto next;
+
+		/*
+		 * Skip extents already at its max capacity, this is mostly for
+		 * compressed extents, which max cap is only 128K.
+		 */
+		if (em->len >= get_extent_max_capacity(em))
 			goto next;
 
 		next_mergeable = defrag_check_next_extent(&inode->vfs_inode, em,
