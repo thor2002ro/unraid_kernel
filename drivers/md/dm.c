@@ -487,15 +487,23 @@ EXPORT_SYMBOL_GPL(dm_start_time_ns_from_clone);
 
 static void start_io_acct(struct dm_io *io, struct bio *bio)
 {
-	/* Ensure IO accounting is only ever started once */
-	if (xchg(&io->was_accounted, 1) == 1)
-		return;
+	struct dm_target_io *tio = clone_to_tio(bio);
+
+	if (unlikely(tio->preserve_orig_bio)) {
+		/* Ensure IO accounting is only ever started once */
+		if (xchg(&io->was_accounted, 1) == 1)
+			return;
+	} else {
+		if (WARN_ON(io->was_accounted))
+			return;
+		io->was_accounted = 1;
+	}
 
 	bio_start_io_acct_remapped(bio, io->start_time,
 				   io->orig_bio->bi_bdev);
 
 	if (unlikely(dm_stats_used(&io->md->stats))) {
-		if (unlikely(clone_to_tio(bio)->preserve_orig_bio))
+		if (unlikely(tio->preserve_orig_bio))
 			bio = io->orig_bio;
 
 		dm_stats_account_io(&io->md->stats, bio_data_dir(bio),
