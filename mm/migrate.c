@@ -54,7 +54,6 @@
 
 #include <asm/tlbflush.h>
 
-#define CREATE_TRACE_POINTS
 #include <trace/events/migrate.h>
 
 #include "internal.h"
@@ -256,6 +255,9 @@ static bool remove_migration_pte(struct page *page, struct vm_area_struct *vma,
 
 		if (PageTransHuge(page) && PageMlocked(page))
 			clear_page_mlock(page);
+
+		trace_remove_migration_pte(pvmw.address, pte_val(pte),
+					   compound_order(new));
 
 		/* No need to invalidate - it was non-present before */
 		update_mmu_cache(vma, pvmw.address, pvmw.pte);
