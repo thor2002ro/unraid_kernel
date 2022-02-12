@@ -1170,6 +1170,10 @@ out_free_interp:
 			}
 		}
 
+		/*
+		 * Figure out which segment in the file contains the Program
+		 * Header table, and map to the associated memory address.
+		 */
 		if (elf_ppnt->p_offset <= elf_ex->e_phoff &&
 		    elf_ex->e_phoff < elf_ppnt->p_offset + elf_ppnt->p_filesz) {
 			phdr_addr = elf_ex->e_phoff - elf_ppnt->p_offset +
