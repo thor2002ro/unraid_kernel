@@ -209,9 +209,9 @@ struct dm_table {
 #define DM_TIO_MAGIC 7282014
 struct dm_target_io {
 	unsigned int magic;
+	unsigned int target_bio_nr;
 	struct dm_io *io;
 	struct dm_target *ti;
-	unsigned int target_bio_nr;
 	unsigned int *len_ptr;
 	bool inside_dm_io:1;
 	bool preserve_orig_bio:1;
