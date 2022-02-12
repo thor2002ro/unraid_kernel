@@ -883,10 +883,13 @@ posix_test_lock(struct file *filp, struct file_lock *fl)
 
 	spin_lock(&ctx->flc_lock);
 	list_for_each_entry(cfl, &ctx->flc_posix, fl_list) {
-		if (posix_locks_conflict(fl, cfl)) {
-			locks_copy_conflock(fl, cfl);
-			goto out;
-		}
+		if (!posix_locks_conflict(fl, cfl))
+			continue;
+		if (cfl->fl_lmops && cfl->fl_lmops->lm_lock_expired &&
+			cfl->fl_lmops->lm_lock_expired(cfl))
+			continue;
+		locks_copy_conflock(fl, cfl);
+		goto out;
 	}
 	fl->fl_type = F_UNLCK;
 out:
@@ -1088,6 +1091,9 @@ static int posix_lock_inode(struct inode *inode, struct file_lock *request,
 	if (request->fl_type != F_UNLCK) {
 		list_for_each_entry(fl, &ctx->flc_posix, fl_list) {
 			if (!posix_locks_conflict(request, fl))
+				continue;
+			if (fl->fl_lmops && fl->fl_lmops->lm_lock_expired &&
+				fl->fl_lmops->lm_lock_expired(fl))
 				continue;
 			if (conflock)
 				locks_copy_conflock(conflock, fl);
