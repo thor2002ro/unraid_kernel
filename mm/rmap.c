@@ -1183,17 +1183,17 @@ void do_page_add_anon_rmap(struct page *page,
 		__mod_lruvec_page_state(page, NR_ANON_MAPPED, nr);
 	}
 
-	if (unlikely(PageKsm(page))) {
+	if (unlikely(PageKsm(page)))
 		unlock_page_memcg(page);
-		return;
-	}
 
 	/* address might be in next vma when migration races vma_adjust */
-	if (first)
+	else if (first)
 		__page_set_anon_rmap(page, vma, address,
 				flags & RMAP_EXCLUSIVE);
 	else
 		__page_check_anon_rmap(page, vma, address);
+
+	mlock_vma_page(page, vma, compound);
 }
 
 /**
@@ -1234,12 +1234,14 @@ void page_add_new_anon_rmap(struct page *page,
 
 /**
  * page_add_file_rmap - add pte mapping to a file page
- * @page: the page to add the mapping to
- * @compound: charge the page as compound or small page
+ * @page:	the page to add the mapping to
+ * @vma:	the vm area in which the mapping is added
+ * @compound:	charge the page as compound or small page
  *
  * The caller needs to hold the pte lock.
  */
-void page_add_file_rmap(struct page *page, bool compound)
+void page_add_file_rmap(struct page *page,
+	struct vm_area_struct *vma, bool compound)
 {
 	int i, nr = 1;
 
@@ -1262,13 +1264,8 @@ void page_add_file_rmap(struct page *page, bool compound)
 						nr_pages);
 	} else {
 		if (PageTransCompound(page) && page_mapping(page)) {
-			struct page *head = compound_head(page);
-
 			VM_WARN_ON_ONCE(!PageLocked(page));
-
-			SetPageDoubleMap(head);
-			if (PageMlocked(page))
-				clear_page_mlock(head);
+			SetPageDoubleMap(compound_head(page));
 		}
 		if (!atomic_inc_and_test(&page->_mapcount))
 			goto out;
@@ -1276,6 +1273,8 @@ void page_add_file_rmap(struct page *page, bool compound)
 	__mod_lruvec_page_state(page, NR_FILE_MAPPED, nr);
 out:
 	unlock_page_memcg(page);
+
+	mlock_vma_page(page, vma, compound);
 }
 
 static void page_remove_file_rmap(struct page *page, bool compound)
@@ -1370,11 +1369,13 @@ static void page_remove_anon_compound_rmap(struct page *page)
 /**
  * page_remove_rmap - take down pte mapping from a page
  * @page:	page to remove mapping from
+ * @vma:	the vm area from which the mapping is removed
  * @compound:	uncharge the page as compound or small page
  *
  * The caller needs to hold the pte lock.
  */
-void page_remove_rmap(struct page *page, bool compound)
+void page_remove_rmap(struct page *page,
+	struct vm_area_struct *vma, bool compound)
 {
 	lock_page_memcg(page);
 
@@ -1416,6 +1417,8 @@ void page_remove_rmap(struct page *page, bool compound)
 	 */
 out:
 	unlock_page_memcg(page);
+
+	munlock_vma_page(page, vma, compound);
 }
 
 /*
@@ -1471,27 +1474,20 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 	mmu_notifier_invalidate_range_start(&range);
 
 	while (page_vma_mapped_walk(&pvmw)) {
+		/* Unexpected PMD-mapped THP? */
+		VM_BUG_ON_PAGE(!pvmw.pte, page);
+
 		/*
-		 * If the page is mlock()d, we cannot swap it out.
+		 * If the page is in an mlock()d vma, we must not swap it out.
 		 */
 		if (!(flags & TTU_IGNORE_MLOCK) &&
 		    (vma->vm_flags & VM_LOCKED)) {
-			/*
-			 * PTE-mapped THP are never marked as mlocked: so do
-			 * not set it on a DoubleMap THP, nor on an Anon THP
-			 * (which may still be PTE-mapped after DoubleMap was
-			 * cleared).  But stop unmapping even in those cases.
-			 */
-			if (!PageTransCompound(page) || (PageHead(page) &&
-			     !PageDoubleMap(page) && !PageAnon(page)))
-				mlock_vma_page(page);
+			/* Restore the mlock which got missed */
+			mlock_vma_page(page, vma, false);
 			page_vma_mapped_walk_done(&pvmw);
 			ret = false;
 			break;
 		}
-
-		/* Unexpected PMD-mapped THP? */
-		VM_BUG_ON_PAGE(!pvmw.pte, page);
 
 		subpage = page - page_to_pfn(page) + pte_pfn(*pvmw.pte);
 		address = pvmw.address;
@@ -1693,7 +1689,7 @@ discard:
 		 *
 		 * See Documentation/vm/mmu_notifier.rst
 		 */
-		page_remove_rmap(subpage, PageHuge(page));
+		page_remove_rmap(subpage, vma, PageHuge(page));
 		put_page(page);
 	}
 
@@ -1971,7 +1967,7 @@ static bool try_to_migrate_one(struct page *page, struct vm_area_struct *vma,
 		 *
 		 * See Documentation/vm/mmu_notifier.rst
 		 */
-		page_remove_rmap(subpage, PageHuge(page));
+		page_remove_rmap(subpage, vma, PageHuge(page));
 		put_page(page);
 	}
 
@@ -2107,7 +2103,7 @@ static bool page_make_device_exclusive_one(struct page *page,
 		 * There is a reference on the page for the swap entry which has
 		 * been removed, so shouldn't take another.
 		 */
-		page_remove_rmap(subpage, false);
+		page_remove_rmap(subpage, vma, false);
 	}
 
 	mmu_notifier_invalidate_range_end(&range);
