@@ -212,7 +212,7 @@ bool need_mlock_page_drain(int cpu)
 
 /**
  * mlock_page - mlock a page already on (or temporarily off) LRU
- * @page - page to be mlocked, either a normal page or a THP head.
+ * @page: page to be mlocked, either a normal page or a THP head.
  */
 void mlock_page(struct page *page)
 {
@@ -234,7 +234,7 @@ void mlock_page(struct page *page)
 
 /**
  * mlock_new_page - mlock a newly allocated page not yet on LRU
- * @page - page to be mlocked, either a normal page or a THP head.
+ * @page: page to be mlocked, either a normal page or a THP head.
  */
 void mlock_new_page(struct page *page)
 {
@@ -254,7 +254,7 @@ void mlock_new_page(struct page *page)
 
 /**
  * munlock_page - munlock a page
- * @page - page to be munlocked, either a normal page or a THP head.
+ * @page: page to be munlocked, either a normal page or a THP head.
  */
 void munlock_page(struct page *page)
 {
