@@ -2580,7 +2580,7 @@ retry:
 	 * put the burden of reclaim on regular allocation requests
 	 * and let these go through as privileged allocations.
 	 */
-	if (gfp_mask & __GFP_ATOMIC)
+	if (gfp_mask & __GFP_HIGH)
 		goto force;
 
 	/*
