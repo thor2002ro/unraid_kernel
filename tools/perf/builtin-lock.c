@@ -38,21 +38,16 @@ static struct perf_session *session;
 #define LOCKHASH_BITS		12
 #define LOCKHASH_SIZE		(1UL << LOCKHASH_BITS)
 
-static struct list_head lockhash_table[LOCKHASH_SIZE];
+static struct hlist_head lockhash_table[LOCKHASH_SIZE];
 
 #define __lockhashfn(key)	hash_long((unsigned long)key, LOCKHASH_BITS)
 #define lockhashentry(key)	(lockhash_table + __lockhashfn((key)))
 
 struct lock_stat {
-	struct list_head	hash_entry;
+	struct hlist_node	hash_entry;
 	struct rb_node		rb;		/* used for sorting */
 
-	/*
-	 * FIXME: evsel__intval() returns u64,
-	 * so address of lockdep_map should be treated as 64bit.
-	 * Is there more better solution?
-	 */
-	void			*addr;		/* address of lockdep_map, used as ID */
+	u64			addr;		/* address of lockdep_map, used as ID */
 	char			*name;		/* for strcpy(), we cannot use const */
 
 	unsigned int		nr_acquire;
@@ -70,6 +65,7 @@ struct lock_stat {
 	u64			wait_time_max;
 
 	int			discard; /* flag of blacklist */
+	int			combined;
 };
 
 /*
@@ -106,7 +102,7 @@ struct lock_seq_stat {
 	struct list_head        list;
 	int			state;
 	u64			prev_event_time;
-	void                    *addr;
+	u64                     addr;
 
 	int                     read_count;
 };
@@ -119,6 +115,8 @@ struct thread_stat {
 };
 
 static struct rb_root		thread_stats;
+
+static bool combine_locks;
 
 static struct thread_stat *thread_stat_find(u32 tid)
 {
@@ -246,6 +244,7 @@ static const char		*sort_key = "acquired";
 
 static int			(*compare)(struct lock_stat *, struct lock_stat *);
 
+static struct rb_root		sorted; /* place to store intermediate data */
 static struct rb_root		result;	/* place to store sorted data */
 
 #define DEF_KEY_LOCK(name, fn_suffix)	\
@@ -279,12 +278,74 @@ static int select_key(void)
 	return -1;
 }
 
+static void combine_lock_stats(struct lock_stat *st)
+{
+	struct rb_node **rb = &sorted.rb_node;
+	struct rb_node *parent = NULL;
+	struct lock_stat *p;
+	int ret;
+
+	while (*rb) {
+		p = container_of(*rb, struct lock_stat, rb);
+		parent = *rb;
+
+		if (st->name && p->name)
+			ret = strcmp(st->name, p->name);
+		else
+			ret = !!st->name - !!p->name;
+
+		if (ret == 0) {
+			if (st->discard)
+				goto out;
+
+			p->nr_acquired += st->nr_acquired;
+			p->nr_contended += st->nr_contended;
+			p->wait_time_total += st->wait_time_total;
+
+			if (p->nr_contended)
+				p->avg_wait_time = p->wait_time_total / p->nr_contended;
+
+			if (p->wait_time_min > st->wait_time_min)
+				p->wait_time_min = st->wait_time_min;
+			if (p->wait_time_max < st->wait_time_max)
+				p->wait_time_max = st->wait_time_max;
+
+			/* now it got a new !discard record */
+			p->discard = 0;
+
+out:
+			st->combined = 1;
+			return;
+		}
+
+		if (ret < 0)
+			rb = &(*rb)->rb_left;
+		else
+			rb = &(*rb)->rb_right;
+	}
+
+	rb_link_node(&st->rb, parent, rb);
+	rb_insert_color(&st->rb, &sorted);
+
+	if (st->discard) {
+		st->nr_acquired = 0;
+		st->nr_contended = 0;
+		st->wait_time_total = 0;
+		st->avg_wait_time = 0;
+		st->wait_time_min = ULLONG_MAX;
+		st->wait_time_max = 0;
+	}
+}
+
 static void insert_to_result(struct lock_stat *st,
 			     int (*bigger)(struct lock_stat *, struct lock_stat *))
 {
 	struct rb_node **rb = &result.rb_node;
 	struct rb_node *parent = NULL;
 	struct lock_stat *p;
+
+	if (combine_locks && st->combined)
+		return;
 
 	while (*rb) {
 		p = container_of(*rb, struct lock_stat, rb);
@@ -315,12 +376,12 @@ static struct lock_stat *pop_from_result(void)
 	return container_of(node, struct lock_stat, rb);
 }
 
-static struct lock_stat *lock_stat_findnew(void *addr, const char *name)
+static struct lock_stat *lock_stat_findnew(u64 addr, const char *name)
 {
-	struct list_head *entry = lockhashentry(addr);
+	struct hlist_head *entry = lockhashentry(addr);
 	struct lock_stat *ret, *new;
 
-	list_for_each_entry(ret, entry, hash_entry) {
+	hlist_for_each_entry(ret, entry, hash_entry) {
 		if (ret->addr == addr)
 			return ret;
 	}
@@ -339,7 +400,7 @@ static struct lock_stat *lock_stat_findnew(void *addr, const char *name)
 	strcpy(new->name, name);
 	new->wait_time_min = ULLONG_MAX;
 
-	list_add(&new->hash_entry, entry);
+	hlist_add_head(&new->hash_entry, entry);
 	return new;
 
 alloc_failed:
@@ -361,7 +422,7 @@ struct trace_lock_handler {
 			     struct perf_sample *sample);
 };
 
-static struct lock_seq_stat *get_seq(struct thread_stat *ts, void *addr)
+static struct lock_seq_stat *get_seq(struct thread_stat *ts, u64 addr)
 {
 	struct lock_seq_stat *seq;
 
@@ -400,15 +461,12 @@ enum acquire_flags {
 static int report_lock_acquire_event(struct evsel *evsel,
 				     struct perf_sample *sample)
 {
-	void *addr;
 	struct lock_stat *ls;
 	struct thread_stat *ts;
 	struct lock_seq_stat *seq;
 	const char *name = evsel__strval(evsel, sample, "name");
-	u64 tmp	 = evsel__intval(evsel, sample, "lockdep_addr");
+	u64 addr = evsel__intval(evsel, sample, "lockdep_addr");
 	int flag = evsel__intval(evsel, sample, "flags");
-
-	memcpy(&addr, &tmp, sizeof(void *));
 
 	ls = lock_stat_findnew(addr, name);
 	if (!ls)
@@ -472,15 +530,12 @@ end:
 static int report_lock_acquired_event(struct evsel *evsel,
 				      struct perf_sample *sample)
 {
-	void *addr;
 	struct lock_stat *ls;
 	struct thread_stat *ts;
 	struct lock_seq_stat *seq;
 	u64 contended_term;
 	const char *name = evsel__strval(evsel, sample, "name");
-	u64 tmp = evsel__intval(evsel, sample, "lockdep_addr");
-
-	memcpy(&addr, &tmp, sizeof(void *));
+	u64 addr = evsel__intval(evsel, sample, "lockdep_addr");
 
 	ls = lock_stat_findnew(addr, name);
 	if (!ls)
@@ -535,14 +590,11 @@ end:
 static int report_lock_contended_event(struct evsel *evsel,
 				       struct perf_sample *sample)
 {
-	void *addr;
 	struct lock_stat *ls;
 	struct thread_stat *ts;
 	struct lock_seq_stat *seq;
 	const char *name = evsel__strval(evsel, sample, "name");
-	u64 tmp = evsel__intval(evsel, sample, "lockdep_addr");
-
-	memcpy(&addr, &tmp, sizeof(void *));
+	u64 addr = evsel__intval(evsel, sample, "lockdep_addr");
 
 	ls = lock_stat_findnew(addr, name);
 	if (!ls)
@@ -590,14 +642,11 @@ end:
 static int report_lock_release_event(struct evsel *evsel,
 				     struct perf_sample *sample)
 {
-	void *addr;
 	struct lock_stat *ls;
 	struct thread_stat *ts;
 	struct lock_seq_stat *seq;
 	const char *name = evsel__strval(evsel, sample, "name");
-	u64 tmp = evsel__intval(evsel, sample, "lockdep_addr");
-
-	memcpy(&addr, &tmp, sizeof(void *));
+	u64 addr = evsel__intval(evsel, sample, "lockdep_addr");
 
 	ls = lock_stat_findnew(addr, name);
 	if (!ls)
@@ -727,7 +776,7 @@ static void print_result(void)
 		}
 		bzero(cut_name, 20);
 
-		if (strlen(st->name) < 16) {
+		if (strlen(st->name) < 20) {
 			/* output raw name */
 			pr_info("%20s ", st->name);
 		} else {
@@ -774,6 +823,21 @@ static void dump_threads(void)
 	}
 }
 
+static int compare_maps(struct lock_stat *a, struct lock_stat *b)
+{
+	int ret;
+
+	if (a->name && b->name)
+		ret = strcmp(a->name, b->name);
+	else
+		ret = !!a->name - !!b->name;
+
+	if (!ret)
+		return a->addr < b->addr;
+	else
+		return ret < 0;
+}
+
 static void dump_map(void)
 {
 	unsigned int i;
@@ -781,10 +845,13 @@ static void dump_map(void)
 
 	pr_info("Address of instance: name of class\n");
 	for (i = 0; i < LOCKHASH_SIZE; i++) {
-		list_for_each_entry(st, &lockhash_table[i], hash_entry) {
-			pr_info(" %p: %s\n", st->addr, st->name);
+		hlist_for_each_entry(st, &lockhash_table[i], hash_entry) {
+			insert_to_result(st, compare_maps);
 		}
 	}
+
+	while ((st = pop_from_result()))
+		pr_info(" %#llx: %s\n", (unsigned long long)st->addr, st->name);
 }
 
 static int dump_info(void)
@@ -832,13 +899,28 @@ static int process_sample_event(struct perf_tool *tool __maybe_unused,
 	return err;
 }
 
+static void combine_result(void)
+{
+	unsigned int i;
+	struct lock_stat *st;
+
+	if (!combine_locks)
+		return;
+
+	for (i = 0; i < LOCKHASH_SIZE; i++) {
+		hlist_for_each_entry(st, &lockhash_table[i], hash_entry) {
+			combine_lock_stats(st);
+		}
+	}
+}
+
 static void sort_result(void)
 {
 	unsigned int i;
 	struct lock_stat *st;
 
 	for (i = 0; i < LOCKHASH_SIZE; i++) {
-		list_for_each_entry(st, &lockhash_table[i], hash_entry) {
+		hlist_for_each_entry(st, &lockhash_table[i], hash_entry) {
 			insert_to_result(st, compare);
 		}
 	}
@@ -895,6 +977,7 @@ static int __cmd_report(bool display_info)
 	if (display_info) /* used for info subcommand */
 		err = dump_info();
 	else {
+		combine_result();
 		sort_result();
 		print_result();
 	}
@@ -969,6 +1052,8 @@ int cmd_lock(int argc, const char **argv)
 	OPT_STRING('k', "key", &sort_key, "acquired",
 		    "key for sorting (acquired / contended / avg_wait / wait_total / wait_max / wait_min)"),
 	/* TODO: type */
+	OPT_BOOLEAN('c', "combine-locks", &combine_locks,
+		    "combine locks in the same class"),
 	OPT_PARENT(lock_options)
 	};
 
@@ -990,7 +1075,7 @@ int cmd_lock(int argc, const char **argv)
 	int rc = 0;
 
 	for (i = 0; i < LOCKHASH_SIZE; i++)
-		INIT_LIST_HEAD(lockhash_table + i);
+		INIT_HLIST_HEAD(lockhash_table + i);
 
 	argc = parse_options_subcommand(argc, argv, lock_options, lock_subcommands,
 					lock_usage, PARSE_OPT_STOP_AT_NON_OPTION);
