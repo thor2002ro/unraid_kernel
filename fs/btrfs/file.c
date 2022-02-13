@@ -718,7 +718,6 @@ int btrfs_drop_extents(struct btrfs_trans_handle *trans,
 	int modify_tree = -1;
 	int update_refs;
 	int found = 0;
-	int leafs_visited = 0;
 	struct btrfs_path *path = args->path;
 
 	args->bytes_found = 0;
@@ -756,7 +755,6 @@ int btrfs_drop_extents(struct btrfs_trans_handle *trans,
 				path->slots[0]--;
 		}
 		ret = 0;
-		leafs_visited++;
 next_slot:
 		leaf = path->nodes[0];
 		if (path->slots[0] >= btrfs_header_nritems(leaf)) {
@@ -768,7 +766,6 @@ next_slot:
 				ret = 0;
 				break;
 			}
-			leafs_visited++;
 			leaf = path->nodes[0];
 			recow = 1;
 		}
@@ -1014,7 +1011,7 @@ delete_extent_item:
 	 * which case it unlocked our path, so check path->locks[0] matches a
 	 * write lock.
 	 */
-	if (!ret && args->replace_extent && leafs_visited == 1 &&
+	if (!ret && args->replace_extent &&
 	    path->locks[0] == BTRFS_WRITE_LOCK &&
 	    btrfs_leaf_free_space(leaf) >=
 	    sizeof(struct btrfs_item) + args->extent_item_size) {
@@ -1749,7 +1746,8 @@ static noinline ssize_t btrfs_buffered_write(struct kiocb *iocb,
 					 fs_info->sectorsize);
 		WARN_ON(reserve_bytes == 0);
 		ret = btrfs_delalloc_reserve_metadata(BTRFS_I(inode),
-				reserve_bytes);
+						      reserve_bytes,
+						      reserve_bytes);
 		if (ret) {
 			if (!only_release_metadata)
 				btrfs_free_reserved_data_space(BTRFS_I(inode),
@@ -2066,12 +2064,43 @@ out:
 	return err < 0 ? err : written;
 }
 
-static ssize_t btrfs_file_write_iter(struct kiocb *iocb,
-				    struct iov_iter *from)
+static ssize_t btrfs_encoded_write(struct kiocb *iocb, struct iov_iter *from,
+			const struct btrfs_ioctl_encoded_io_args *encoded)
+{
+	struct file *file = iocb->ki_filp;
+	struct inode *inode = file_inode(file);
+	loff_t count;
+	ssize_t ret;
+
+	btrfs_inode_lock(inode, 0);
+	count = encoded->len;
+	ret = generic_write_checks_count(iocb, &count);
+	if (ret == 0 && count != encoded->len) {
+		/*
+		 * The write got truncated by generic_write_checks_count(). We
+		 * can't do a partial encoded write.
+		 */
+		ret = -EFBIG;
+	}
+	if (ret || encoded->len == 0)
+		goto out;
+
+	ret = btrfs_write_check(iocb, from, encoded->len);
+	if (ret < 0)
+		goto out;
+
+	ret = btrfs_do_encoded_write(iocb, from, encoded);
+out:
+	btrfs_inode_unlock(inode, 0);
+	return ret;
+}
+
+ssize_t btrfs_do_write_iter(struct kiocb *iocb, struct iov_iter *from,
+			    const struct btrfs_ioctl_encoded_io_args *encoded)
 {
 	struct file *file = iocb->ki_filp;
 	struct btrfs_inode *inode = BTRFS_I(file_inode(file));
-	ssize_t num_written = 0;
+	ssize_t num_written, num_sync;
 	const bool sync = iocb->ki_flags & IOCB_DSYNC;
 
 	/*
@@ -2082,28 +2111,39 @@ static ssize_t btrfs_file_write_iter(struct kiocb *iocb,
 	if (BTRFS_FS_ERROR(inode->root->fs_info))
 		return -EROFS;
 
-	if (!(iocb->ki_flags & IOCB_DIRECT) &&
-	    (iocb->ki_flags & IOCB_NOWAIT))
+	if ((iocb->ki_flags & IOCB_NOWAIT) && !(iocb->ki_flags & IOCB_DIRECT))
 		return -EOPNOTSUPP;
 
 	if (sync)
 		atomic_inc(&inode->sync_writers);
 
-	if (iocb->ki_flags & IOCB_DIRECT)
-		num_written = btrfs_direct_write(iocb, from);
-	else
-		num_written = btrfs_buffered_write(iocb, from);
+	if (encoded) {
+		num_written = btrfs_encoded_write(iocb, from, encoded);
+		num_sync = encoded->len;
+	} else if (iocb->ki_flags & IOCB_DIRECT) {
+		num_written = num_sync = btrfs_direct_write(iocb, from);
+	} else {
+		num_written = num_sync = btrfs_buffered_write(iocb, from);
+	}
 
 	btrfs_set_inode_last_sub_trans(inode);
 
-	if (num_written > 0)
-		num_written = generic_write_sync(iocb, num_written);
+	if (num_sync > 0) {
+		num_sync = generic_write_sync(iocb, num_sync);
+		if (num_sync < 0)
+			num_written = num_sync;
+	}
 
 	if (sync)
 		atomic_dec(&inode->sync_writers);
 
 	current->backing_dev_info = NULL;
 	return num_written;
+}
+
+static ssize_t btrfs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
+{
+	return btrfs_do_write_iter(iocb, from, NULL);
 }
 
 int btrfs_release_file(struct inode *inode, struct file *filp)
