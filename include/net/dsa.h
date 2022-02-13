@@ -278,6 +278,10 @@ struct dsa_port {
 
 	u8			devlink_port_setup:1;
 
+	/* Master state bits, valid only on CPU ports */
+	u8			master_admin_up:1;
+	u8			master_oper_up:1;
+
 	u8			setup:1;
 
 	struct device_node	*dn;
@@ -478,6 +482,12 @@ static inline bool dsa_port_is_unused(struct dsa_port *dp)
 	return dp->type == DSA_PORT_TYPE_UNUSED;
 }
 
+static inline bool dsa_port_master_is_operational(struct dsa_port *dp)
+{
+	return dsa_port_is_cpu(dp) && dp->master_admin_up &&
+	       dp->master_oper_up;
+}
+
 static inline bool dsa_is_unused_port(struct dsa_switch *ds, int p)
 {
 	return dsa_to_port(ds, p)->type == DSA_PORT_TYPE_UNUSED;
@@ -579,6 +589,24 @@ static inline bool dsa_is_upstream_port(struct dsa_switch *ds, int port)
 		return false;
 
 	return port == dsa_upstream_port(ds, port);
+}
+
+/* Return true if this is a DSA port leading away from the CPU */
+static inline bool dsa_is_downstream_port(struct dsa_switch *ds, int port)
+{
+	return dsa_is_dsa_port(ds, port) && !dsa_is_upstream_port(ds, port);
+}
+
+/* Return the local port used to reach the CPU port */
+static inline unsigned int dsa_switch_upstream_port(struct dsa_switch *ds)
+{
+	struct dsa_port *dp;
+
+	dsa_switch_for_each_available_port(dp, ds) {
+		return dsa_upstream_port(ds, dp->index);
+	}
+
+	return ds->num_ports;
 }
 
 /* Return true if @upstream_ds is an upstream switch of @downstream_ds, meaning
@@ -1036,6 +1064,13 @@ struct dsa_switch_ops {
 	int	(*tag_8021q_vlan_add)(struct dsa_switch *ds, int port, u16 vid,
 				      u16 flags);
 	int	(*tag_8021q_vlan_del)(struct dsa_switch *ds, int port, u16 vid);
+
+	/*
+	 * DSA master tracking operations
+	 */
+	void	(*master_state_change)(struct dsa_switch *ds,
+				       const struct net_device *master,
+				       bool operational);
 };
 
 #define DSA_DEVLINK_PARAM_DRIVER(_id, _name, _type, _cmodes)		\
@@ -1246,7 +1281,7 @@ module_exit(dsa_tag_driver_module_exit)
 /**
  * module_dsa_tag_drivers() - Helper macro for registering DSA tag
  * drivers
- * @__ops_array: Array of tag driver strucutres
+ * @__ops_array: Array of tag driver structures
  *
  * Helper macro for DSA tag drivers which do not do anything special
  * in module init/exit. Each module may only use this macro once, and

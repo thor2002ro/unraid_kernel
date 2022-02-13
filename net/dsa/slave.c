@@ -515,26 +515,6 @@ static int dsa_slave_port_obj_del(struct net_device *dev, const void *ctx,
 	return err;
 }
 
-static int dsa_slave_get_port_parent_id(struct net_device *dev,
-					struct netdev_phys_item_id *ppid)
-{
-	struct dsa_port *dp = dsa_slave_to_port(dev);
-	struct dsa_switch *ds = dp->ds;
-	struct dsa_switch_tree *dst = ds->dst;
-
-	/* For non-legacy ports, devlink is used and it takes
-	 * care of the name generation. This ndo implementation
-	 * should be removed with legacy support.
-	 */
-	if (dp->ds->devlink)
-		return -EOPNOTSUPP;
-
-	ppid->id_len = sizeof(dst->index);
-	memcpy(&ppid->id, &dst->index, ppid->id_len);
-
-	return 0;
-}
-
 static inline netdev_tx_t dsa_slave_netpoll_send_skb(struct net_device *dev,
 						     struct sk_buff *skb)
 {
@@ -972,24 +952,6 @@ static void dsa_slave_poll_controller(struct net_device *dev)
 {
 }
 #endif
-
-static int dsa_slave_get_phys_port_name(struct net_device *dev,
-					char *name, size_t len)
-{
-	struct dsa_port *dp = dsa_slave_to_port(dev);
-
-	/* For non-legacy ports, devlink is used and it takes
-	 * care of the name generation. This ndo implementation
-	 * should be removed with legacy support.
-	 */
-	if (dp->ds->devlink)
-		return -EOPNOTSUPP;
-
-	if (snprintf(name, len, "p%d", dp->index) >= len)
-		return -EINVAL;
-
-	return 0;
-}
 
 static struct dsa_mall_tc_entry *
 dsa_slave_mall_tc_entry_find(struct net_device *dev, unsigned long cookie)
@@ -1747,7 +1709,7 @@ static struct devlink_port *dsa_slave_get_devlink_port(struct net_device *dev)
 {
 	struct dsa_port *dp = dsa_slave_to_port(dev);
 
-	return dp->ds->devlink ? &dp->devlink_port : NULL;
+	return &dp->devlink_port;
 }
 
 static void dsa_slave_get_stats64(struct net_device *dev,
@@ -1792,10 +1754,8 @@ static const struct net_device_ops dsa_slave_netdev_ops = {
 	.ndo_netpoll_cleanup	= dsa_slave_netpoll_cleanup,
 	.ndo_poll_controller	= dsa_slave_poll_controller,
 #endif
-	.ndo_get_phys_port_name	= dsa_slave_get_phys_port_name,
 	.ndo_setup_tc		= dsa_slave_setup_tc,
 	.ndo_get_stats64	= dsa_slave_get_stats64,
-	.ndo_get_port_parent_id	= dsa_slave_get_port_parent_id,
 	.ndo_vlan_rx_add_vid	= dsa_slave_vlan_rx_add_vid,
 	.ndo_vlan_rx_kill_vid	= dsa_slave_vlan_rx_kill_vid,
 	.ndo_get_devlink_port	= dsa_slave_get_devlink_port,
@@ -1917,15 +1877,6 @@ void dsa_slave_setup_tagger(struct net_device *slave)
 		slave->features |= NETIF_F_HW_VLAN_CTAG_FILTER;
 }
 
-static struct lock_class_key dsa_slave_netdev_xmit_lock_key;
-static void dsa_slave_set_lockdep_class_one(struct net_device *dev,
-					    struct netdev_queue *txq,
-					    void *_unused)
-{
-	lockdep_set_class(&txq->_xmit_lock,
-			  &dsa_slave_netdev_xmit_lock_key);
-}
-
 int dsa_slave_suspend(struct net_device *slave_dev)
 {
 	struct dsa_port *dp = dsa_slave_to_port(slave_dev);
@@ -1987,9 +1938,6 @@ int dsa_slave_create(struct dsa_port *port)
 	if (ds->ops->port_max_mtu)
 		slave_dev->max_mtu = ds->ops->port_max_mtu(ds, port->index);
 	SET_NETDEV_DEVTYPE(slave_dev, &dsa_type);
-
-	netdev_for_each_tx_queue(slave_dev, dsa_slave_set_lockdep_class_one,
-				 NULL);
 
 	SET_NETDEV_DEV(slave_dev, port->ds->dev);
 	slave_dev->dev.of_node = port->dn;
@@ -2346,6 +2294,36 @@ static int dsa_slave_netdevice_event(struct notifier_block *nb,
 		err = dsa_port_lag_change(dp, info->lower_state_info);
 		return notifier_from_errno(err);
 	}
+	case NETDEV_CHANGE:
+	case NETDEV_UP: {
+		/* Track state of master port.
+		 * DSA driver may require the master port (and indirectly
+		 * the tagger) to be available for some special operation.
+		 */
+		if (netdev_uses_dsa(dev)) {
+			struct dsa_port *cpu_dp = dev->dsa_ptr;
+			struct dsa_switch_tree *dst = cpu_dp->ds->dst;
+
+			/* Track when the master port is UP */
+			dsa_tree_master_oper_state_change(dst, dev,
+							  netif_oper_up(dev));
+
+			/* Track when the master port is ready and can accept
+			 * packet.
+			 * NETDEV_UP event is not enough to flag a port as ready.
+			 * We also have to wait for linkwatch_do_dev to dev_activate
+			 * and emit a NETDEV_CHANGE event.
+			 * We check if a master port is ready by checking if the dev
+			 * have a qdisc assigned and is not noop.
+			 */
+			dsa_tree_master_admin_state_change(dst, dev,
+							   !qdisc_tx_is_noop(dev));
+
+			return NOTIFY_OK;
+		}
+
+		return NOTIFY_DONE;
+	}
 	case NETDEV_GOING_DOWN: {
 		struct dsa_port *dp, *cpu_dp;
 		struct dsa_switch_tree *dst;
@@ -2356,6 +2334,8 @@ static int dsa_slave_netdevice_event(struct notifier_block *nb,
 
 		cpu_dp = dev->dsa_ptr;
 		dst = cpu_dp->ds->dst;
+
+		dsa_tree_master_admin_state_change(dst, dev, false);
 
 		list_for_each_entry(dp, &dst->ports, list) {
 			if (!dsa_port_is_user(dp))
