@@ -1301,6 +1301,7 @@ static int defrag_collect_targets(struct btrfs_inode *inode,
 add:
 		last_is_target = true;
 		range_len = min(extent_map_end(em), start + len) - cur;
+		trace_defrag_add_target(inode, em, cur, range_len);
 		/*
 		 * This one is a good target, check if it can be merged into
 		 * last range of the target list.
@@ -1401,6 +1402,7 @@ static int defrag_one_locked_target(struct btrfs_inode *inode,
 	ret = btrfs_delalloc_reserve_space(inode, &data_reserved, start, len);
 	if (ret < 0)
 		return ret;
+	trace_defrag_one_locked_range(inode, start, (u32)len);
 	clear_extent_bit(&inode->io_tree, start, start + len - 1,
 			 EXTENT_DELALLOC | EXTENT_DO_ACCOUNTING |
 			 EXTENT_DEFRAG, 0, 0, cached_state);
@@ -1641,6 +1643,7 @@ int btrfs_defrag_file(struct inode *inode, struct file_ra_state *ra,
 	cur = round_down(ctrl->start, fs_info->sectorsize);
 	ctrl->last_scanned = cur;
 	last_byte = round_up(last_byte, fs_info->sectorsize) - 1;
+	trace_defrag_file_start(BTRFS_I(inode), ctrl, cur, last_byte + 1 - cur);
 
 	/*
 	 * If we were not given a ra, allocate a readahead context. As
@@ -1728,6 +1731,7 @@ int btrfs_defrag_file(struct inode *inode, struct file_ra_state *ra,
 		BTRFS_I(inode)->defrag_compress = BTRFS_COMPRESS_NONE;
 		btrfs_inode_unlock(inode, 0);
 	}
+	trace_defrag_file_end(BTRFS_I(inode), ctrl, ret);
 	return ret;
 }
 
