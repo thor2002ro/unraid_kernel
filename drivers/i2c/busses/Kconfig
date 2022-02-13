@@ -477,8 +477,8 @@ config I2C_BCM_KONA
 
 config I2C_BRCMSTB
 	tristate "BRCM Settop/DSL I2C controller"
-	depends on ARCH_BCM2835 || ARCH_BRCMSTB || BMIPS_GENERIC || \
-		   ARCH_BCM_63XX || COMPILE_TEST
+	depends on ARCH_BCM2835 || ARCH_BCM4908 || ARCH_BCM_63XX || \
+		   ARCH_BRCMSTB || BMIPS_GENERIC || COMPILE_TEST
 	default y
 	help
 	  If you say yes to this option, support will be included for the
@@ -552,6 +552,17 @@ config I2C_DESIGNWARE_PLATFORM
 
 	  This driver can also be built as a module.  If so, the module
 	  will be called i2c-designware-platform.
+
+config I2C_DESIGNWARE_AMDPSP
+	bool "AMD PSP I2C semaphore support"
+	depends on X86_MSR
+	depends on ACPI
+	depends on I2C_DESIGNWARE_PLATFORM
+	help
+	  This driver enables managed host access to the selected I2C bus shared
+	  between AMD CPU and AMD PSP.
+
+	  You should say Y if running on an AMD system equipped with the PSP.
 
 config I2C_DESIGNWARE_BAYTRAIL
 	bool "Intel Baytrail I2C semaphore support"
