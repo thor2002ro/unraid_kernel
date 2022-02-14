@@ -3,10 +3,6 @@
 
 #include "../include/drv_types.h"
 
-#define READ_AND_CONFIG     READ_AND_CONFIG_MP
-
-#define READ_AND_CONFIG_MP(ic, txt) (ODM_ReadAndConfig##txt##ic(dm_odm))
-
 static u8 odm_QueryRxPwrPercentage(s8 AntPower)
 {
 	if ((AntPower <= -100) || (AntPower >= 20))
@@ -362,33 +358,7 @@ void ODM_PhyStatusQuery(struct odm_dm_struct *dm_odm,
 	odm_Process_RSSIForDM(dm_odm, pPhyInfo, pPktinfo);
 }
 
-enum HAL_STATUS ODM_ConfigRFWithHeaderFile(struct odm_dm_struct *dm_odm,
-					   enum rf_radio_path content,
-					   enum rf_radio_path rfpath)
+enum HAL_STATUS ODM_ConfigRFWithHeaderFile(struct odm_dm_struct *dm_odm)
 {
-	if (rfpath == RF_PATH_A)
-		READ_AND_CONFIG(8188E, _RadioA_1T_);
-
-	return HAL_STATUS_SUCCESS;
-}
-
-enum HAL_STATUS ODM_ConfigBBWithHeaderFile(struct odm_dm_struct *dm_odm,
-					   enum odm_bb_config_type config_tp)
-{
-	if (config_tp == CONFIG_BB_PHY_REG) {
-		READ_AND_CONFIG(8188E, _PHY_REG_1T_);
-	} else if (config_tp == CONFIG_BB_AGC_TAB) {
-		READ_AND_CONFIG(8188E, _AGC_TAB_1T_);
-	} else if (config_tp == CONFIG_BB_PHY_REG_PG) {
-		READ_AND_CONFIG(8188E, _PHY_REG_PG_);
-	}
-
-	return HAL_STATUS_SUCCESS;
-}
-
-enum HAL_STATUS ODM_ConfigMACWithHeaderFile(struct odm_dm_struct *dm_odm)
-{
-	u8 result = HAL_STATUS_SUCCESS;
-	result = READ_AND_CONFIG(8188E, _MAC_REG_);
-	return result;
+	return ODM_ReadAndConfig_RadioA_1T_8188E(dm_odm);
 }

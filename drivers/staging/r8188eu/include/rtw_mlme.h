@@ -316,7 +316,6 @@ struct mlme_priv {
 
 	u8 *nic_hdl;
 
-	u8 not_indic_disco;
 	struct list_head *pscanned;
 	struct __queue free_bss_pool;
 	struct __queue scanned_queue;
@@ -415,10 +414,6 @@ struct mlme_priv {
 	u32 p2p_assoc_req_ie_len;
 	spinlock_t bcn_update_lock;
 	u8		update_bcn;
-};
-
-struct hostapd_priv {
-	struct adapter *padapter;
 };
 
 int hostapd_mode_init(struct adapter *padapter);
