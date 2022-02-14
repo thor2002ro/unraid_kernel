@@ -34,6 +34,7 @@
 #include <linux/scs.h>
 #include <linux/percpu-rwsem.h>
 #include <linux/cpuset.h>
+#include <linux/random.h>
 
 #include <trace/events/power.h>
 #define CREATE_TRACE_POINTS
@@ -1776,6 +1777,11 @@ static struct cpuhp_step cpuhp_hp_states[] = {
 		.name			= "lockup_detector:online",
 		.startup.single		= lockup_detector_online_cpu,
 		.teardown.single	= lockup_detector_offline_cpu,
+	},
+	[CPUHP_AP_RANDOM_ONLINE] = {
+		.name			= "random:online",
+		.startup.single		= NULL,
+		.teardown.single	= random_offline_cpu,
 	},
 	[CPUHP_AP_WORKQUEUE_ONLINE] = {
 		.name			= "workqueue:online",
