@@ -485,7 +485,7 @@ int aa_label_next_confined(struct aa_label *label, int i)
 }
 
 /**
- * aa_label_next_not_in_set - return the next profile of @sub not in @set
+ * __aa_label_next_not_in_set - return the next profile of @sub not in @set
  * @I: label iterator
  * @set: label to test against
  * @sub: label to if is subset of @set
@@ -1631,9 +1631,9 @@ int aa_label_snxprint(char *str, size_t size, struct aa_ns *ns,
 	AA_BUG(!str && size != 0);
 	AA_BUG(!label);
 
-	if (flags & FLAG_ABS_ROOT) {
+	if (AA_DEBUG_LABEL && (flags & FLAG_ABS_ROOT)) {
 		ns = root_ns;
-		len = snprintf(str, size, "=");
+		len = snprintf(str, size, "_");
 		update_for_len(total, len, size, str);
 	} else if (!ns) {
 		ns = labels_ns(label);
@@ -1895,7 +1895,8 @@ struct aa_label *aa_label_strn_parse(struct aa_label *base, const char *str,
 	AA_BUG(!str);
 
 	str = skipn_spaces(str, n);
-	if (str == NULL || (*str == '=' && base != &root_ns->unconfined->label))
+	if (str == NULL || (AA_DEBUG_LABEL && *str == '_' &&
+			    base != &root_ns->unconfined->label))
 		return ERR_PTR(-EINVAL);
 
 	len = label_count_strn_entries(str, end - str);
@@ -2136,7 +2137,7 @@ static void __labelset_update(struct aa_ns *ns)
 }
 
 /**
- * __aa_labelset_udate_subtree - update all labels with a stale component
+ * __aa_labelset_update_subtree - update all labels with a stale component
  * @ns: ns to start update at (NOT NULL)
  *
  * Requires: @ns lock be held

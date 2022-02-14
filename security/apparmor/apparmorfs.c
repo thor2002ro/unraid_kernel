@@ -70,6 +70,7 @@ struct rawdata_f_data {
 	struct aa_loaddata *loaddata;
 };
 
+#ifdef CONFIG_SECURITY_APPARMOR_EXPORT_BINARY
 #define RAWDATA_F_DATA_BUF(p) (char *)(p + 1)
 
 static void rawdata_f_data_free(struct rawdata_f_data *private)
@@ -94,9 +95,10 @@ static struct rawdata_f_data *rawdata_f_data_alloc(size_t size)
 
 	return ret;
 }
+#endif
 
 /**
- * aa_mangle_name - mangle a profile name to std profile layout form
+ * mangle_name - mangle a profile name to std profile layout form
  * @name: profile name to mangle  (NOT NULL)
  * @target: buffer to store mangled name, same length as @name (MAYBE NULL)
  *
@@ -1201,7 +1203,7 @@ SEQ_NS_FOPS(name);
 
 
 /* policy/raw_data/ * file ops */
-
+#ifdef CONFIG_SECURITY_APPARMOR_EXPORT_BINARY
 #define SEQ_RAWDATA_FOPS(NAME)						      \
 static int seq_rawdata_ ##NAME ##_open(struct inode *inode, struct file *file)\
 {									      \
@@ -1492,10 +1494,12 @@ fail:
 
 	return PTR_ERR(dent);
 }
+#endif /* CONFIG_SECURITY_APPARMOR_EXPORT_BINARY */
+
 
 /** fns to setup dynamic per profile/namespace files **/
 
-/**
+/*
  *
  * Requires: @profile->ns->lock held
  */
@@ -1522,7 +1526,7 @@ void __aafs_profile_rmdir(struct aa_profile *profile)
 	}
 }
 
-/**
+/*
  *
  * Requires: @old->ns->lock held
  */
@@ -1557,6 +1561,7 @@ static struct dentry *create_profile_file(struct dentry *dir, const char *name,
 	return dent;
 }
 
+#ifdef CONFIG_SECURITY_APPARMOR_EXPORT_BINARY
 static int profile_depth(struct aa_profile *profile)
 {
 	int depth = 0;
@@ -1658,7 +1663,7 @@ static const struct inode_operations rawdata_link_abi_iops = {
 static const struct inode_operations rawdata_link_data_iops = {
 	.get_link	= rawdata_get_link_data,
 };
-
+#endif /* CONFIG_SECURITY_APPARMOR_EXPORT_BINARY */
 
 /*
  * Requires: @profile->ns->lock held
@@ -1729,15 +1734,17 @@ int __aafs_profile_mkdir(struct aa_profile *profile, struct dentry *parent)
 		profile->dents[AAFS_PROF_HASH] = dent;
 	}
 
+#ifdef CONFIG_SECURITY_APPARMOR_EXPORT_BINARY
 	if (profile->rawdata) {
-		dent = aafs_create("raw_sha1", S_IFLNK | 0444, dir,
-				   profile->label.proxy, NULL, NULL,
-				   &rawdata_link_sha1_iops);
-		if (IS_ERR(dent))
-			goto fail;
-		aa_get_proxy(profile->label.proxy);
-		profile->dents[AAFS_PROF_RAW_HASH] = dent;
-
+		if (aa_g_hash_policy) {
+			dent = aafs_create("raw_sha1", S_IFLNK | 0444, dir,
+					   profile->label.proxy, NULL, NULL,
+					   &rawdata_link_sha1_iops);
+			if (IS_ERR(dent))
+				goto fail;
+			aa_get_proxy(profile->label.proxy);
+			profile->dents[AAFS_PROF_RAW_HASH] = dent;
+		}
 		dent = aafs_create("raw_abi", S_IFLNK | 0444, dir,
 				   profile->label.proxy, NULL, NULL,
 				   &rawdata_link_abi_iops);
@@ -1754,6 +1761,7 @@ int __aafs_profile_mkdir(struct aa_profile *profile, struct dentry *parent)
 		aa_get_proxy(profile->label.proxy);
 		profile->dents[AAFS_PROF_RAW_DATA] = dent;
 	}
+#endif /*CONFIG_SECURITY_APPARMOR_EXPORT_BINARY */
 
 	list_for_each_entry(child, &profile->base.profiles, base.list) {
 		error = __aafs_profile_mkdir(child, prof_child_dir(profile));
@@ -1880,7 +1888,7 @@ static void __aa_fs_list_remove_rawdata(struct aa_ns *ns)
 		__aa_fs_remove_rawdata(ent);
 }
 
-/**
+/*
  *
  * Requires: @ns->lock held
  */
