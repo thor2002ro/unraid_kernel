@@ -663,11 +663,6 @@ to i/o submission, if the bio fields are likely to be accessed after the
 i/o is issued (since the bio may otherwise get freed in case i/o completion
 happens in the meantime).
 
-The bio_clone_fast() routine may be used to duplicate a bio, where the clone
-shares the bio_vec_list with the original bio (i.e. both point to the
-same bio_vec_list). This would typically be used for splitting i/o requests
-in lvm or md.
-
 3.2 Generic bio helper Routines
 -------------------------------
 
@@ -970,11 +965,7 @@ till it fills up with a few more requests, before starting to service
 the requests. This provides an opportunity to merge/sort the requests before
 passing them down to the device. There are various conditions when the queue is
 unplugged (to open up the flow again), either through a scheduled task or
-could be on demand. For example wait_on_buffer sets the unplugging going
-through sync_buffer() running blk_run_address_space(mapping). Or the caller
-can do it explicity through blk_unplug(bdev). So in the read case,
-the queue gets explicitly unplugged as part of waiting for completion on that
-buffer.
+could be on demand.
 
 Aside:
   This is kind of controversial territory, as it's not clear if plugging is

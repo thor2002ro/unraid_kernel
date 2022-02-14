@@ -789,8 +789,10 @@ bool blk_update_request(struct request *req, blk_status_t error,
 #endif
 
 	if (unlikely(error && !blk_rq_is_passthrough(req) &&
-		     !(req->rq_flags & RQF_QUIET)))
+		     !(req->rq_flags & RQF_QUIET))) {
 		blk_print_req_error(req, error);
+		trace_block_rq_error(req, error, nr_bytes);
+	}
 
 	blk_account_io_completion(req, nr_bytes);
 
@@ -2975,10 +2977,10 @@ int blk_rq_prep_clone(struct request *rq, struct request *rq_src,
 		bs = &fs_bio_set;
 
 	__rq_for_each_bio(bio_src, rq_src) {
-		bio = bio_clone_fast(bio_src, gfp_mask, bs);
+		bio = bio_alloc_clone(rq->q->disk->part0, bio_src, gfp_mask,
+				      bs);
 		if (!bio)
 			goto free_and_out;
-		bio->bi_bdev = rq->q->disk->part0;
 
 		if (bio_ctr && bio_ctr(bio, bio_src, data))
 			goto free_and_out;

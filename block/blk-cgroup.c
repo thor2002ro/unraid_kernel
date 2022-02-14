@@ -23,15 +23,14 @@
 #include <linux/blkdev.h>
 #include <linux/backing-dev.h>
 #include <linux/slab.h>
-#include <linux/genhd.h>
 #include <linux/delay.h>
 #include <linux/atomic.h>
 #include <linux/ctype.h>
-#include <linux/blk-cgroup.h>
 #include <linux/tracehook.h>
 #include <linux/psi.h>
 #include <linux/part_stat.h>
 #include "blk.h"
+#include "blk-cgroup.h"
 #include "blk-ioprio.h"
 #include "blk-throttle.h"
 
@@ -1175,6 +1174,8 @@ int blkcg_init_queue(struct request_queue *q)
 	struct blkcg_gq *new_blkg, *blkg;
 	bool preloaded;
 	int ret;
+
+	INIT_LIST_HEAD(&q->blkg_list);
 
 	new_blkg = blkg_alloc(&blkcg_root, q, GFP_KERNEL);
 	if (!new_blkg)
