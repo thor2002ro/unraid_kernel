@@ -1074,29 +1074,21 @@ static unsigned long __part_start_io_acct(struct block_device *part,
 }
 
 /**
- * bio_start_io_acct_time - start I/O accounting for bio based drivers
+ * bio_start_io_acct_remapped - start I/O accounting for bio based drivers
  * @bio:	bio to start account for
  * @start_time:	start time that should be passed back to bio_end_io_acct().
- */
-void bio_start_io_acct_time(struct bio *bio, unsigned long start_time)
-{
-	__part_start_io_acct(bio->bi_bdev, bio_sectors(bio),
-			     bio_op(bio), start_time);
-}
-EXPORT_SYMBOL_GPL(bio_start_io_acct_time);
-
-/**
- * bio_start_io_acct - start I/O accounting for bio based drivers
- * @bio:	bio to start account for
+ * @orig_bdev:	block device that I/O must be accounted to.
  *
  * Returns the start time that should be passed back to bio_end_io_acct().
  */
-unsigned long bio_start_io_acct(struct bio *bio)
+unsigned long bio_start_io_acct_remapped(struct bio *bio,
+				unsigned long start_time,
+				struct block_device *orig_bdev)
 {
-	return __part_start_io_acct(bio->bi_bdev, bio_sectors(bio),
-				    bio_op(bio), jiffies);
+	return __part_start_io_acct(orig_bdev, bio_sectors(bio),
+				    bio_op(bio), start_time);
 }
-EXPORT_SYMBOL_GPL(bio_start_io_acct);
+EXPORT_SYMBOL_GPL(bio_start_io_acct_remapped);
 
 unsigned long disk_start_io_acct(struct gendisk *disk, unsigned int sectors,
 				 unsigned int op)

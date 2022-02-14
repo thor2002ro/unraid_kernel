@@ -209,11 +209,13 @@ struct dm_table {
 #define DM_TIO_MAGIC 7282014
 struct dm_target_io {
 	unsigned int magic;
+	unsigned int target_bio_nr;
 	struct dm_io *io;
 	struct dm_target *ti;
-	unsigned int target_bio_nr;
 	unsigned int *len_ptr;
-	bool inside_dm_io;
+	bool inside_dm_io:1;
+	bool preserve_orig_bio:1;
+	sector_t old_sector;
 	struct bio clone;
 };
 
@@ -229,6 +231,7 @@ struct dm_io {
 	atomic_t io_count;
 	struct bio *orig_bio;
 	unsigned long start_time;
+	int was_accounted;
 	spinlock_t endio_lock;
 	struct dm_stats_aux stats_aux;
 	/* last member of dm_target_io is 'struct bio' */
