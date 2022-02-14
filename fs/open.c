@@ -33,6 +33,8 @@
 #include <linux/dnotify.h>
 #include <linux/compat.h>
 #include <linux/mnt_idmapping.h>
+#include <linux/sysctl.h>
+#include <uapi/linux/trusted-for.h>
 
 #include "internal.h"
 
@@ -479,6 +481,137 @@ SYSCALL_DEFINE4(faccessat2, int, dfd, const char __user *, filename, int, mode,
 SYSCALL_DEFINE2(access, const char __user *, filename, int, mode)
 {
 	return do_faccessat(AT_FDCWD, filename, mode, 0);
+}
+
+#define TRUST_POLICY_EXEC_MOUNT			BIT(0)
+#define TRUST_POLICY_EXEC_FILE			BIT(1)
+
+static int sysctl_trusted_for_policy __read_mostly;
+
+#ifdef CONFIG_SYSCTL
+static struct ctl_table open_sysctls[] = {
+	{
+		.procname       = "trusted_for_policy",
+		.data           = &sysctl_trusted_for_policy,
+		.maxlen         = sizeof(int),
+		.mode           = 0600,
+		.proc_handler	= proc_dointvec_minmax_sysadmin,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_THREE,
+	},
+	{ }
+};
+
+static int __init init_fs_open_sysctls(void)
+{
+	register_sysctl_init("fs", open_sysctls);
+	return 0;
+}
+fs_initcall(init_fs_open_sysctls);
+#endif /* CONFIG_SYSCTL */
+
+/**
+ * sys_trusted_for - Check that a FD is trusted for a specific usage
+ *
+ * @fd: File descriptor to check.
+ * @usage: Identify the user space usage (defined by enum trusted_for_usage)
+ *         intended for the file descriptor (only TRUSTED_FOR_EXECUTION for
+ *         now).
+ *
+ * @flags: Must be 0.
+ *
+ * This system call enables user space to ask the kernel: is this file
+ * descriptor's content trusted to be used for this purpose?  The set of @usage
+ * currently only contains TRUSTED_FOR_EXECUTION, but other may follow (e.g.
+ * configuration, sensitive data).  If the kernel identifies the file
+ * descriptor as trustworthy for this usage, this call returns 0 and the caller
+ * should then take this information into account.
+ *
+ * The execution usage means that the content of the file descriptor is trusted
+ * according to the system policy to be executed by user space, which means
+ * that it interprets the content or (try to) maps it as executable memory.
+ *
+ * A simple system-wide security policy can be set by the system administrator
+ * through a sysctl configuration consistent with the mount points or the file
+ * access rights: Documentation/admin-guide/sysctl/fs.rst
+ *
+ * @flags could be used in the future to do complementary checks (e.g.
+ * signature or integrity requirements, origin of the file).
+ *
+ * Possible returned errors are:
+ *
+ * - EINVAL: unknown @usage or unknown @flags;
+ * - EBADF: @fd is not a file descriptor for the calling thread;
+ * - EACCES: the requested usage is denied (and user space should enforce it).
+ */
+SYSCALL_DEFINE3(trusted_for, const int, fd, const int, usage, const u32, flags)
+{
+	int mask, err = -EACCES;
+	struct fd f;
+	struct inode *inode;
+
+	if (flags)
+		return -EINVAL;
+
+	/* Only handles execution for now. */
+	if (usage != TRUSTED_FOR_EXECUTION)
+		return -EINVAL;
+	mask = MAY_EXEC;
+
+	f = fdget(fd);
+	if (!f.file)
+		return -EBADF;
+	inode = file_inode(f.file);
+
+	/*
+	 * For compatibility reasons, without a defined security policy, we
+	 * must map the execute permission to the read permission.  Indeed,
+	 * from user space point of view, being able to execute data (e.g.
+	 * scripts) implies to be able to read this data.
+	 */
+	if ((mask & MAY_EXEC)) {
+		/*
+		 * If there is a system-wide execute policy enforced, then
+		 * forbids access to non-regular files and special superblocks.
+		 */
+		if ((sysctl_trusted_for_policy & (TRUST_POLICY_EXEC_MOUNT |
+						TRUST_POLICY_EXEC_FILE))) {
+			if (!S_ISREG(inode->i_mode))
+				goto out_fd;
+			/*
+			 * Denies access to pseudo filesystems that will never
+			 * be mountable (e.g. sockfs, pipefs) but can still be
+			 * reachable through /proc/self/fd, or memfd-like file
+			 * descriptors, or nsfs-like files.
+			 *
+			 * According to the selftests, SB_NOEXEC seems to be
+			 * only used by proc and nsfs filesystems.
+			 */
+			if ((f.file->f_path.dentry->d_sb->s_flags &
+						(SB_NOUSER | SB_KERNMOUNT | SB_NOEXEC)))
+				goto out_fd;
+		}
+
+		if ((sysctl_trusted_for_policy & TRUST_POLICY_EXEC_MOUNT) &&
+				path_noexec(&f.file->f_path))
+			goto out_fd;
+		/*
+		 * For compatibility reasons, if the system-wide policy doesn't
+		 * enforce file permission checks, then replaces the execute
+		 * permission request with a read permission request.
+		 */
+		if (!(sysctl_trusted_for_policy & TRUST_POLICY_EXEC_FILE))
+			mask &= ~MAY_EXEC;
+		/* To be executed *by* user space, files must be readable. */
+		mask |= MAY_READ;
+	}
+
+	err = inode_permission(file_mnt_user_ns(f.file), inode,
+			mask | MAY_ACCESS);
+
+out_fd:
+	fdput(f);
+	return err;
 }
 
 SYSCALL_DEFINE1(chdir, const char __user *, filename)

@@ -48,6 +48,7 @@ Currently, these files are in /proc/sys/fs:
 - suid_dumpable
 - super-max
 - super-nr
+- trusted_for_policy
 
 
 aio-nr & aio-max-nr
@@ -382,3 +383,52 @@ Each "watch" costs roughly 90 bytes on a 32bit kernel, and roughly 160 bytes
 on a 64bit one.
 The current default value for  max_user_watches  is the 1/25 (4%) of the
 available low memory, divided for the "watch" cost in bytes.
+
+
+trusted_for_policy
+------------------
+
+An interpreter can call :manpage:`trusted_for(2)` with a
+``TRUSTED_FOR_EXECUTION`` usage to check that opened regular files are expected
+to be executable.  If the file is not identified as executable, then the
+syscall returns -EACCES.  This may allow a script interpreter to check
+executable permission before reading commands from a file, or a dynamic linker
+to only load executable shared objects.  One interesting use case is to enforce
+a "write xor execute" policy through interpreters.
+
+The ability to restrict code execution must be thought as a system-wide policy,
+which first starts by restricting mount points with the ``noexec`` option.
+This option is also automatically applied to special filesystems such as /proc .
+This prevents files on such mount points to be directly executed by the kernel
+or mapped as executable memory (e.g. libraries).  With script interpreters
+using :manpage:`trusted_for(2)`, the executable permission can then be checked
+before reading commands from files.  This makes it possible to enforce the
+``noexec`` at the interpreter level, and thus propagates this security policy
+to scripts.  To be fully effective, these interpreters also need to handle the
+other ways to execute code: command line parameters (e.g., option ``-e`` for
+Perl), module loading (e.g., option ``-m`` for Python), stdin, file sourcing,
+environment variables, configuration files, etc.  According to the threat
+model, it may be acceptable to allow some script interpreters (e.g.  Bash) to
+interpret commands from stdin, may it be a TTY or a pipe, because it may not be
+enough to (directly) perform syscalls.
+
+There are two complementary security policies: enforce the ``noexec`` mount
+option, and enforce executable file permission.  These policies are handled by
+the ``fs.trusted_for_policy`` sysctl (writable only with ``CAP_SYS_ADMIN``) as
+a bitmask:
+
+1 - Mount restriction: checks that the mount options for the underlying VFS
+    mount do not prevent execution.
+
+2 - File permission restriction: checks that the file is marked as
+    executable for the current process (e.g., POSIX permissions, ACLs).
+
+Note that as long as a policy is enforced, checking any non-regular file with
+:manpage:`trusted_for(2)` returns -EACCES (e.g. TTYs, pipe), even when such a
+file is marked as executable or is on an executable mount point.
+
+Code samples can be found in
+tools/testing/selftests/interpreter/trust_policy_test.c and interpreter patches
+(for the original O_MAYEXEC) are available at
+https://github.com/clipos-archive/clipos4_portage-overlay/search?q=O_MAYEXEC .
+See also an overview article: https://lwn.net/Articles/820000/ .
