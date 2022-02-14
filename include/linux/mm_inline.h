@@ -99,7 +99,8 @@ void lruvec_add_folio(struct lruvec *lruvec, struct folio *folio)
 
 	update_lru_size(lruvec, lru, folio_zonenum(folio),
 			folio_nr_pages(folio));
-	list_add(&folio->lru, &lruvec->lists[lru]);
+	if (lru != LRU_UNEVICTABLE)
+		list_add(&folio->lru, &lruvec->lists[lru]);
 }
 
 static __always_inline void add_page_to_lru_list(struct page *page,
@@ -115,6 +116,7 @@ void lruvec_add_folio_tail(struct lruvec *lruvec, struct folio *folio)
 
 	update_lru_size(lruvec, lru, folio_zonenum(folio),
 			folio_nr_pages(folio));
+	/* This is not expected to be used on LRU_UNEVICTABLE */
 	list_add_tail(&folio->lru, &lruvec->lists[lru]);
 }
 
@@ -127,8 +129,11 @@ static __always_inline void add_page_to_lru_list_tail(struct page *page,
 static __always_inline
 void lruvec_del_folio(struct lruvec *lruvec, struct folio *folio)
 {
-	list_del(&folio->lru);
-	update_lru_size(lruvec, folio_lru_list(folio), folio_zonenum(folio),
+	enum lru_list lru = folio_lru_list(folio);
+
+	if (lru != LRU_UNEVICTABLE)
+		list_del(&folio->lru);
+	update_lru_size(lruvec, lru, folio_zonenum(folio),
 			-folio_nr_pages(folio));
 }
 
@@ -144,6 +149,11 @@ static __always_inline void del_page_from_lru_list(struct page *page,
  * the returned pointer.
  */
 extern const char *vma_anon_name(struct vm_area_struct *vma);
+
+/* mmap_lock should be read-locked */
+extern struct anon_vma_name *vma_anon_name_get(struct vm_area_struct *vma);
+
+extern void vma_anon_name_put(struct anon_vma_name *anon_name);
 
 /*
  * mmap_lock should be read-locked for orig_vma->vm_mm.
@@ -176,6 +186,14 @@ static inline const char *vma_anon_name(struct vm_area_struct *vma)
 {
 	return NULL;
 }
+
+static inline
+struct anon_vma_name *vma_anon_name_get(struct vm_area_struct *vma)
+{
+	return NULL;
+}
+
+static inline void vma_anon_name_put(struct anon_vma_name *anon_name) {}
 static inline void dup_vma_anon_name(struct vm_area_struct *orig_vma,
 			      struct vm_area_struct *new_vma) {}
 static inline void free_vma_anon_name(struct vm_area_struct *vma) {}

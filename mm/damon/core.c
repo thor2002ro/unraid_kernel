@@ -144,7 +144,7 @@ void damon_destroy_scheme(struct damos *s)
  *
  * Returns the pointer to the new struct if success, or NULL otherwise
  */
-struct damon_target *damon_new_target(unsigned long id)
+struct damon_target *damon_new_target(void)
 {
 	struct damon_target *t;
 
@@ -152,7 +152,7 @@ struct damon_target *damon_new_target(unsigned long id)
 	if (!t)
 		return NULL;
 
-	t->id = id;
+	t->pid = NULL;
 	t->nr_regions = 0;
 	INIT_LIST_HEAD(&t->regions_list);
 
@@ -243,38 +243,6 @@ void damon_destroy_ctx(struct damon_ctx *ctx)
 		damon_destroy_scheme(s);
 
 	kfree(ctx);
-}
-
-/**
- * damon_set_targets() - Set monitoring targets.
- * @ctx:	monitoring context
- * @ids:	array of target ids
- * @nr_ids:	number of entries in @ids
- *
- * This function should not be called while the kdamond is running.
- *
- * Return: 0 on success, negative error code otherwise.
- */
-int damon_set_targets(struct damon_ctx *ctx,
-		      unsigned long *ids, ssize_t nr_ids)
-{
-	ssize_t i;
-	struct damon_target *t, *next;
-
-	damon_destroy_targets(ctx);
-
-	for (i = 0; i < nr_ids; i++) {
-		t = damon_new_target(ids[i]);
-		if (!t) {
-			/* The caller should do cleanup of the ids itself */
-			damon_for_each_target_safe(t, next, ctx)
-				damon_destroy_target(t);
-			return -ENOMEM;
-		}
-		damon_add_target(ctx, t);
-	}
-
-	return 0;
 }
 
 /**

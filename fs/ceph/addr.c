@@ -57,11 +57,6 @@
  * accounting is preserved.
  */
 
-#define CONGESTION_ON_THRESH(congestion_kb) (congestion_kb >> (PAGE_SHIFT-10))
-#define CONGESTION_OFF_THRESH(congestion_kb)				\
-	(CONGESTION_ON_THRESH(congestion_kb) -				\
-	 (CONGESTION_ON_THRESH(congestion_kb) >> 2))
-
 static int ceph_netfs_check_write_begin(struct file *file, loff_t pos, unsigned int len,
 					struct folio *folio, void **_fsdata);
 
@@ -561,10 +556,6 @@ static int writepage_nounlock(struct page *page, struct writeback_control *wbc)
 	dout("writepage %p page %p index %lu on %llu~%llu snapc %p seq %lld\n",
 	     inode, page, page->index, page_off, len, snapc, snapc->seq);
 
-	if (atomic_long_inc_return(&fsc->writeback_count) >
-	    CONGESTION_ON_THRESH(fsc->mount_options->congestion_kb))
-		set_bdi_congested(inode_to_bdi(inode), BLK_RW_ASYNC);
-
 	req = ceph_osdc_new_request(osdc, &ci->i_layout, ceph_vino(inode), page_off, &len, 0, 1,
 				    CEPH_OSD_OP_WRITE, CEPH_OSD_FLAG_WRITE, snapc,
 				    ceph_wbc.truncate_seq, ceph_wbc.truncate_size,
@@ -620,10 +611,6 @@ static int writepage_nounlock(struct page *page, struct writeback_control *wbc)
 	end_page_writeback(page);
 	ceph_put_wrbuffer_cap_refs(ci, 1, snapc);
 	ceph_put_snap_context(snapc);  /* page's reference */
-
-	if (atomic_long_dec_return(&fsc->writeback_count) <
-	    CONGESTION_OFF_THRESH(fsc->mount_options->congestion_kb))
-		clear_bdi_congested(inode_to_bdi(inode), BLK_RW_ASYNC);
 
 	return err;
 }
@@ -703,12 +690,6 @@ static void writepages_finish(struct ceph_osd_request *req)
 			page = osd_data->pages[j];
 			BUG_ON(!page);
 			WARN_ON(!PageUptodate(page));
-
-			if (atomic_long_dec_return(&fsc->writeback_count) <
-			     CONGESTION_OFF_THRESH(
-					fsc->mount_options->congestion_kb))
-				clear_bdi_congested(inode_to_bdi(inode),
-						    BLK_RW_ASYNC);
 
 			ceph_put_snap_context(detach_page_private(page));
 			end_page_writeback(page);
@@ -951,14 +932,6 @@ get_more_pages:
 			/* note position of first page in pvec */
 			dout("%p will write page %p idx %lu\n",
 			     inode, page, page->index);
-
-			if (atomic_long_inc_return(&fsc->writeback_count) >
-			    CONGESTION_ON_THRESH(
-				    fsc->mount_options->congestion_kb)) {
-				set_bdi_congested(inode_to_bdi(inode),
-						  BLK_RW_ASYNC);
-			}
-
 
 			pages[locked_pages++] = page;
 			pvec.pages[i] = NULL;
