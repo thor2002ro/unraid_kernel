@@ -23,6 +23,15 @@
 	};
 };
 
+&blsp1_i2c1 {
+	status = "okay";
+
+	fuel-gauge@55 {
+		compatible = "ti,bq27421";
+		reg = <0x55>;
+	};
+};
+
 &blsp1_i2c5 {
 	status = "okay";
 	clock-frequency = <384000>;
@@ -200,6 +209,15 @@
 	pinctrl-0 = <&sdhc1_pin_a>;
 };
 
+&smbb {
+	qcom,fast-charge-safe-current = <450000>;
+	qcom,fast-charge-current-limit = <400000>;
+	qcom,fast-charge-safe-voltage = <4350000>;
+	qcom,fast-charge-high-threshold-voltage = <4350000>;
+	qcom,auto-recharge-threshold-voltage = <4240000>;
+	qcom,minimum-input-voltage = <4450000>;
+};
+
 &tlmm {
 	sdhc1_pin_a: sdhc1-pin-active {
 		clk {
@@ -234,4 +252,16 @@
 			output-high;
 		};
 	};
+};
+
+&usb {
+	status = "okay";
+	extcon = <&smbb>;
+	dr_mode = "peripheral";
+};
+
+&usb_hs_phy {
+	extcon = <&smbb>;
+	v1p8-supply = <&pm8226_l10>;
+	v3p3-supply = <&pm8226_l20>;
 };
