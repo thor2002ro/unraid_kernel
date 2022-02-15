@@ -1674,29 +1674,6 @@ static struct ctl_table kern_table[] = {
 		.extra2		= SYSCTL_ONE,
 	},
 #endif /* CONFIG_NUMA_BALANCING */
-#ifdef CONFIG_UCLAMP_TASK
-	{
-		.procname	= "sched_util_clamp_min",
-		.data		= &sysctl_sched_uclamp_util_min,
-		.maxlen		= sizeof(unsigned int),
-		.mode		= 0644,
-		.proc_handler	= sysctl_sched_uclamp_handler,
-	},
-	{
-		.procname	= "sched_util_clamp_max",
-		.data		= &sysctl_sched_uclamp_util_max,
-		.maxlen		= sizeof(unsigned int),
-		.mode		= 0644,
-		.proc_handler	= sysctl_sched_uclamp_handler,
-	},
-	{
-		.procname	= "sched_util_clamp_min_rt_default",
-		.data		= &sysctl_sched_uclamp_util_min_rt_default,
-		.maxlen		= sizeof(unsigned int),
-		.mode		= 0644,
-		.proc_handler	= sysctl_sched_uclamp_handler,
-	},
-#endif
 #ifdef CONFIG_SCHED_AUTOGROUP
 	{
 		.procname	= "sched_autogroup_enabled",
