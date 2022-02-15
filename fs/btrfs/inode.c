@@ -2543,10 +2543,14 @@ blk_status_t btrfs_submit_data_bio(struct inode *inode, struct bio *bio,
 			goto out;
 
 		if (bio_flags & EXTENT_BIO_COMPRESSED) {
-			ret = btrfs_submit_compressed_read(inode, bio,
-							   mirror_num,
-							   bio_flags);
-			goto out;
+			/*
+			 * btrfs_submit_compressed_read will handle completing
+			 * the bio if there were any errors, so just return
+			 * here.
+			 */
+			return btrfs_submit_compressed_read(inode, bio,
+							    mirror_num,
+							    bio_flags);
 		} else {
 			/*
 			 * Lookup bio sums does extra checks around whether we
