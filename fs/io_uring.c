@@ -1603,8 +1603,8 @@ static void io_queue_async_work(struct io_kiocb *req, bool *dont_use)
 	if (WARN_ON_ONCE(!same_thread_group(req->task, current)))
 		req->work.flags |= IO_WQ_WORK_CANCEL;
 
-	trace_io_uring_queue_async_work(ctx, io_wq_is_hashed(&req->work), req,
-					&req->work, req->flags);
+	trace_io_uring_queue_async_work(ctx, req, req->user_data, req->opcode, req->flags,
+					&req->work, io_wq_is_hashed(&req->work));
 	io_wq_enqueue(tctx->io_wq, &req->work);
 	if (link)
 		io_queue_linked_timeout(link);
@@ -1914,12 +1914,10 @@ static bool io_cqring_event_overflow(struct io_ring_ctx *ctx, u64 user_data,
 	return true;
 }
 
-static inline bool __io_fill_cqe(struct io_ring_ctx *ctx, u64 user_data,
+static inline bool __fill_cqe(struct io_ring_ctx *ctx, u64 user_data,
 				 s32 res, u32 cflags)
 {
 	struct io_uring_cqe *cqe;
-
-	trace_io_uring_complete(ctx, user_data, res, cflags);
 
 	/*
 	 * If we can't get a cq entry, userspace overflowed the
@@ -1936,17 +1934,24 @@ static inline bool __io_fill_cqe(struct io_ring_ctx *ctx, u64 user_data,
 	return io_cqring_event_overflow(ctx, user_data, res, cflags);
 }
 
+static inline bool __io_fill_cqe(struct io_kiocb *req, s32 res, u32 cflags)
+{
+	trace_io_uring_complete(req->ctx, req, req->user_data, res, cflags);
+	return __fill_cqe(req->ctx, req->user_data, res, cflags);
+}
+
 static noinline void io_fill_cqe_req(struct io_kiocb *req, s32 res, u32 cflags)
 {
 	if (!(req->flags & REQ_F_CQE_SKIP))
-		__io_fill_cqe(req->ctx, req->user_data, res, cflags);
+		__io_fill_cqe(req, res, cflags);
 }
 
 static noinline bool io_fill_cqe_aux(struct io_ring_ctx *ctx, u64 user_data,
 				     s32 res, u32 cflags)
 {
 	ctx->cq_extra++;
-	return __io_fill_cqe(ctx, user_data, res, cflags);
+	trace_io_uring_complete(ctx, NULL, user_data, res, cflags);
+	return __fill_cqe(ctx, user_data, res, cflags);
 }
 
 static void __io_req_complete_post(struct io_kiocb *req, s32 res,
@@ -1955,7 +1960,7 @@ static void __io_req_complete_post(struct io_kiocb *req, s32 res,
 	struct io_ring_ctx *ctx = req->ctx;
 
 	if (!(req->flags & REQ_F_CQE_SKIP))
-		__io_fill_cqe(ctx, req->user_data, res, cflags);
+		__io_fill_cqe(req, res, cflags);
 	/*
 	 * If we're the last reference to this request, add to our locked
 	 * free_list cache.
@@ -2197,7 +2202,9 @@ static void io_fail_links(struct io_kiocb *req)
 		nxt = link->link;
 		link->link = NULL;
 
-		trace_io_uring_fail_link(req, link);
+		trace_io_uring_fail_link(req->ctx, req, req->user_data,
+					req->opcode, link);
+
 		if (!ignore_cqes) {
 			link->flags &= ~REQ_F_CQE_SKIP;
 			io_fill_cqe_req(link, res, 0);
@@ -2544,8 +2551,7 @@ static void __io_submit_flush_completions(struct io_ring_ctx *ctx)
 						    comp_list);
 
 			if (!(req->flags & REQ_F_CQE_SKIP))
-				__io_fill_cqe(ctx, req->user_data, req->result,
-					      req->cflags);
+				__io_fill_cqe(req, req->result, req->cflags);
 		}
 
 		io_commit_cqring(ctx);
@@ -2667,7 +2673,7 @@ static int io_do_iopoll(struct io_ring_ctx *ctx, bool force_nonspin)
 		if (unlikely(req->flags & REQ_F_CQE_SKIP))
 			continue;
 
-		__io_fill_cqe(ctx, req->user_data, req->result, io_put_kbuf(req));
+		__io_fill_cqe(req, req->result, io_put_kbuf(req));
 		nr_events++;
 	}
 
@@ -5625,7 +5631,7 @@ static void __io_poll_execute(struct io_kiocb *req, int mask)
 	else
 		req->io_task_work.func = io_apoll_task_func;
 
-	trace_io_uring_task_add(req->ctx, req->opcode, req->user_data, mask);
+	trace_io_uring_task_add(req->ctx, req, req->user_data, req->opcode, mask);
 	io_req_task_work_add(req, false);
 }
 
@@ -5854,7 +5860,7 @@ static int io_arm_poll_handler(struct io_kiocb *req)
 	if (ret || ipt.error)
 		return ret ? IO_APOLL_READY : IO_APOLL_ABORTED;
 
-	trace_io_uring_poll_arm(ctx, req, req->opcode, req->user_data,
+	trace_io_uring_poll_arm(ctx, req, req->user_data, req->opcode,
 				mask, apoll->poll.events);
 	return IO_APOLL_OK;
 }
@@ -6663,7 +6669,7 @@ fail:
 		goto queue;
 	}
 
-	trace_io_uring_defer(ctx, req, req->user_data);
+	trace_io_uring_defer(ctx, req, req->user_data, req->opcode);
 	de->req = req;
 	de->seq = seq;
 	list_add_tail(&de->list, &ctx->defer_list);
@@ -6997,7 +7003,7 @@ static struct file *io_file_get_normal(struct io_ring_ctx *ctx,
 {
 	struct file *file = fget(fd);
 
-	trace_io_uring_file_get(ctx, fd);
+	trace_io_uring_file_get(ctx, req, req->user_data, fd);
 
 	/* we don't allow fixed io_uring files */
 	if (file && unlikely(file->f_op == &io_uring_fops))
@@ -7295,7 +7301,7 @@ static int io_submit_sqe(struct io_ring_ctx *ctx, struct io_kiocb *req,
 
 	ret = io_init_req(ctx, req, sqe);
 	if (unlikely(ret)) {
-		trace_io_uring_req_failed(sqe, ret);
+		trace_io_uring_req_failed(sqe, ctx, req, ret);
 
 		/* fail even hard links since we don't submit */
 		if (link->head) {
@@ -7322,7 +7328,7 @@ static int io_submit_sqe(struct io_ring_ctx *ctx, struct io_kiocb *req,
 	}
 
 	/* don't need @sqe from now on */
-	trace_io_uring_submit_sqe(ctx, req, req->opcode, req->user_data,
+	trace_io_uring_submit_sqe(ctx, req, req->user_data, req->opcode,
 				  req->flags, true,
 				  ctx->flags & IORING_SETUP_SQPOLL);
 
