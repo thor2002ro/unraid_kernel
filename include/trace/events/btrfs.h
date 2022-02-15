@@ -30,6 +30,7 @@ struct btrfs_qgroup;
 struct extent_io_tree;
 struct prelim_ref;
 struct btrfs_space_info;
+struct btrfs_defrag_ctrl;
 
 #define show_ref_type(type)						\
 	__print_symbolic(type,						\
@@ -53,6 +54,7 @@ struct btrfs_space_info;
 		{ BTRFS_TREE_RELOC_OBJECTID,	"TREE_RELOC"	},	\
 		{ BTRFS_UUID_TREE_OBJECTID,	"UUID_TREE"	},	\
 		{ BTRFS_FREE_SPACE_TREE_OBJECTID, "FREE_SPACE_TREE" },	\
+		{ BTRFS_BLOCK_GROUP_TREE_OBJECTID, "BLOCK_GROUP_TREE" },\
 		{ BTRFS_DATA_RELOC_TREE_OBJECTID, "DATA_RELOC_TREE" })
 
 #define show_root_type(obj)						\
@@ -2261,6 +2263,132 @@ DEFINE_EVENT(btrfs__space_info_update, update_bytes_pinned,
 		 const struct btrfs_space_info *sinfo, u64 old, s64 diff),
 
 	TP_ARGS(fs_info, sinfo, old, diff)
+);
+
+TRACE_EVENT(defrag_one_locked_range,
+
+	TP_PROTO(const struct btrfs_inode *inode, u64 start, u32 len),
+
+	TP_ARGS(inode, start, len),
+
+	TP_STRUCT__entry_btrfs(
+		__field(	u64,	root		)
+		__field(	u64,	ino		)
+		__field(	u64,	start		)
+		__field(	u32,	len		)
+	),
+
+	TP_fast_assign_btrfs(inode->root->fs_info,
+		__entry->root	= inode->root->root_key.objectid;
+		__entry->ino	= btrfs_ino(inode);
+		__entry->start	= start;
+		__entry->len	= len;
+	),
+
+	TP_printk_btrfs("root=%llu ino=%llu start=%llu len=%u",
+		__entry->root, __entry->ino, __entry->start, __entry->len)
+);
+
+TRACE_EVENT(defrag_add_target,
+
+	TP_PROTO(const struct btrfs_inode *inode, const struct extent_map *em,
+		 u64 start, u32 len),
+
+	TP_ARGS(inode, em, start, len),
+
+	TP_STRUCT__entry_btrfs(
+		__field(	u64,	root		)
+		__field(	u64,	ino		)
+		__field(	u64,	target_start	)
+		__field(	u32,	target_len	)
+		__field(	u64,	em_generation	)
+		__field(	u64,	em_start	)
+		__field(	u64,	em_len		)
+	),
+
+	TP_fast_assign_btrfs(inode->root->fs_info,
+		__entry->root		= inode->root->root_key.objectid;
+		__entry->ino		= btrfs_ino(inode);
+		__entry->target_start	= start;
+		__entry->target_len	= len;
+		__entry->em_generation	= em->generation;
+		__entry->em_start	= em->start;
+		__entry->em_len		= em->len;
+	),
+
+	TP_printk_btrfs("root=%llu ino=%llu target_start=%llu target_len=%u "
+		"found em=%llu len=%llu generation=%llu",
+		__entry->root, __entry->ino, __entry->target_start,
+		__entry->target_len, __entry->em_start, __entry->em_len,
+		__entry->em_generation)
+);
+
+TRACE_EVENT(defrag_file_start,
+
+	TP_PROTO(const struct btrfs_inode *inode,
+		 const struct btrfs_defrag_ctrl *ctrl, u64 start, u64 len),
+
+	TP_ARGS(inode, ctrl, start, len),
+
+	TP_STRUCT__entry_btrfs(
+		__field(	u64,	root			)
+		__field(	u64,	ino			)
+		__field(	u64,	start			)
+		__field(	u64,	len			)
+		__field(	u64,	newer_than		)
+		__field(	u64,	max_sectors_to_defrag	)
+		__field(	u32,	extent_thresh		)
+		__field(	u8,	flags			)
+		__field(	u8,	compress		)
+	),
+
+	TP_fast_assign_btrfs(inode->root->fs_info,
+		__entry->root		= inode->root->root_key.objectid;
+		__entry->ino		= btrfs_ino(inode);
+		__entry->start		= start;
+		__entry->len		= len;
+		__entry->extent_thresh	= ctrl->extent_thresh;
+		__entry->newer_than	= ctrl->newer_than;
+		__entry->max_sectors_to_defrag = ctrl->max_sectors_to_defrag;
+		__entry->flags		= ctrl->flags;
+		__entry->compress	= ctrl->compress;
+	),
+
+	TP_printk_btrfs("root=%llu ino=%llu start=%llu len=%llu "
+		"extent_thresh=%u newer_than=%llu flags=0x%x compress=%u "
+		"max_sectors_to_defrag=%llu",
+		__entry->root, __entry->ino, __entry->start, __entry->len,
+		__entry->extent_thresh, __entry->newer_than, __entry->flags,
+		__entry->compress, __entry->max_sectors_to_defrag)
+);
+
+TRACE_EVENT(defrag_file_end,
+
+	TP_PROTO(const struct btrfs_inode *inode,
+		 const struct btrfs_defrag_ctrl *ctrl, int ret),
+
+	TP_ARGS(inode, ctrl, ret),
+
+	TP_STRUCT__entry_btrfs(
+		__field(	u64,	root			)
+		__field(	u64,	ino			)
+		__field(	u64,	sectors_defragged	)
+		__field(	u64,	last_scanned		)
+		__field(	int,	ret			)
+	),
+
+	TP_fast_assign_btrfs(inode->root->fs_info,
+		__entry->root		= inode->root->root_key.objectid;
+		__entry->ino		= btrfs_ino(inode);
+		__entry->sectors_defragged = ctrl->sectors_defragged;
+		__entry->last_scanned	= ctrl->last_scanned;
+		__entry->ret		= ret;
+	),
+
+	TP_printk_btrfs("root=%llu ino=%llu sectors_defragged=%llu "
+		"last_scanned=%llu ret=%d",
+		__entry->root, __entry->ino, __entry->sectors_defragged,
+		__entry->last_scanned, __entry->ret)
 );
 
 #endif /* _TRACE_BTRFS_H */
