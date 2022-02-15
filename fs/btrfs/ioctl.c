@@ -440,10 +440,8 @@ void btrfs_exclop_balance(struct btrfs_fs_info *fs_info,
 	}
 }
 
-static int btrfs_ioctl_getversion(struct file *file, int __user *arg)
+static int btrfs_ioctl_getversion(struct inode *inode, int __user *arg)
 {
-	struct inode *inode = file_inode(file);
-
 	return put_user(inode->i_generation, arg);
 }
 
@@ -753,6 +751,13 @@ static int create_snapshot(struct btrfs_root *root, struct inode *dir,
 	struct btrfs_trans_handle *trans;
 	int ret;
 
+	/* We do not support snapshotting right now. */
+	if (btrfs_fs_incompat(fs_info, EXTENT_TREE_V2)) {
+		btrfs_warn(fs_info,
+			   "extent tree v2 doesn't support snapshotting yet");
+		return -EOPNOTSUPP;
+	}
+
 	if (!test_bit(BTRFS_ROOT_SHAREABLE, &root->state))
 		return -EINVAL;
 
@@ -1046,23 +1051,37 @@ static struct extent_map *defrag_lookup_extent(struct inode *inode, u64 start,
 	return em;
 }
 
+static u32 get_extent_max_capacity(const struct extent_map *em)
+{
+	if (test_bit(EXTENT_FLAG_COMPRESSED, &em->flags))
+		return BTRFS_MAX_COMPRESSED;
+	return BTRFS_MAX_EXTENT_SIZE;
+}
+
 static bool defrag_check_next_extent(struct inode *inode, struct extent_map *em,
 				     bool locked)
 {
 	struct extent_map *next;
-	bool ret = true;
+	bool ret = false;
 
 	/* this is the last extent */
 	if (em->start + em->len >= i_size_read(inode))
-		return false;
+		return ret;
 
 	next = defrag_lookup_extent(inode, em->start + em->len, locked);
+	/* No more em or hole */
 	if (!next || next->block_start >= EXTENT_MAP_LAST_BYTE)
-		ret = false;
-	else if ((em->block_start + em->block_len == next->block_start) &&
-		 (em->block_len > SZ_128K && next->block_len > SZ_128K))
-		ret = false;
-
+		goto out;
+	if (test_bit(EXTENT_FLAG_PREALLOC, &next->flags))
+		goto out;
+	/*
+	 * If the next extent is at its max capacity, defragging current extent
+	 * makes no sense, as the total number of extents won't change.
+	 */
+	if (next->len >= get_extent_max_capacity(em))
+		goto out;
+	ret = true;
+out:
 	free_extent_map(next);
 	return ret;
 }
@@ -1169,25 +1188,25 @@ struct defrag_target_range {
 	u64 len;
 };
 
-/*
+/**
  * Collect all valid target extents.
  *
+ * @inode:         inode to defragment
+ * @ctrl:	   extra defrag policy control
  * @start:	   file offset to lookup
  * @len:	   length to lookup
- * @extent_thresh: file extent size threshold, any extent size >= this value
- *		   will be ignored
- * @newer_than:    only defrag extents newer than this value
- * @do_compress:   whether the defrag is doing compression
- *		   if true, @extent_thresh will be ignored and all regular
- *		   file extents meeting @newer_than will be targets.
  * @locked:	   if the range has already held extent lock
  * @target_list:   list of targets file extents
+ *
+ * Will update ctrl::last_scanned.
  */
 static int defrag_collect_targets(struct btrfs_inode *inode,
-				  u64 start, u64 len, u32 extent_thresh,
-				  u64 newer_than, bool do_compress,
+				  struct btrfs_defrag_ctrl *ctrl,
+				  u64 start, u32 len,
 				  bool locked, struct list_head *target_list)
 {
+	bool do_compress = (ctrl->flags & BTRFS_DEFRAG_RANGE_COMPRESS);
+	bool last_is_target = false;
 	u64 cur = start;
 	int ret = 0;
 
@@ -1197,6 +1216,7 @@ static int defrag_collect_targets(struct btrfs_inode *inode,
 		bool next_mergeable = true;
 		u64 range_len;
 
+		last_is_target = false;
 		em = defrag_lookup_extent(&inode->vfs_inode, cur, locked);
 		if (!em)
 			break;
@@ -1207,7 +1227,11 @@ static int defrag_collect_targets(struct btrfs_inode *inode,
 			goto next;
 
 		/* Skip older extent */
-		if (em->generation < newer_than)
+		if (em->generation < ctrl->newer_than)
+			goto next;
+
+		/* This em is under writeback, no need to defrag */
+		if (em->generation == (u64)-1)
 			goto next;
 
 		/*
@@ -1247,7 +1271,14 @@ static int defrag_collect_targets(struct btrfs_inode *inode,
 			goto add;
 
 		/* Skip too large extent */
-		if (range_len >= extent_thresh)
+		if (range_len >= ctrl->extent_thresh)
+			goto next;
+
+		/*
+		 * Skip extents already at its max capacity, this is mostly for
+		 * compressed extents, which max cap is only 128K.
+		 */
+		if (em->len >= get_extent_max_capacity(em))
 			goto next;
 
 		next_mergeable = defrag_check_next_extent(&inode->vfs_inode, em,
@@ -1268,6 +1299,7 @@ static int defrag_collect_targets(struct btrfs_inode *inode,
 		}
 
 add:
+		last_is_target = true;
 		range_len = min(extent_map_end(em), start + len) - cur;
 		/*
 		 * This one is a good target, check if it can be merged into
@@ -1311,10 +1343,27 @@ next:
 			kfree(entry);
 		}
 	}
+	if (!ret) {
+		/*
+		 * If the last extent is not a target, the caller can skip to
+		 * the end of that extent.
+		 * Otherwise, we can only go the end of the specified range.
+		 *
+		 * And we may got a range smaller than current
+		 * ctrl->last_scanned (e.g. executed in the defrag_one_range
+		 * call), so we have to ensure we didn't decrease
+		 * ctrl->last_scanned.
+		 */
+		if (!last_is_target)
+			ctrl->last_scanned = max(cur, ctrl->last_scanned);
+		else
+			ctrl->last_scanned = max(start + len, ctrl->last_scanned);
+	}
 	return ret;
 }
 
 #define CLUSTER_SIZE	(SZ_256K)
+static_assert(IS_ALIGNED(CLUSTER_SIZE, PAGE_SIZE));
 
 /*
  * Defrag one contiguous target range.
@@ -1368,8 +1417,8 @@ static int defrag_one_locked_target(struct btrfs_inode *inode,
 	return ret;
 }
 
-static int defrag_one_range(struct btrfs_inode *inode, u64 start, u32 len,
-			    u32 extent_thresh, u64 newer_than, bool do_compress)
+static int defrag_one_range(struct btrfs_inode *inode,
+			    struct btrfs_defrag_ctrl *ctrl, u64 start, u32 len)
 {
 	struct extent_state *cached_state = NULL;
 	struct defrag_target_range *entry;
@@ -1413,9 +1462,7 @@ static int defrag_one_range(struct btrfs_inode *inode, u64 start, u32 len,
 	 * And this time we have extent locked already, pass @locked = true
 	 * so that we won't relock the extent range and cause deadlock.
 	 */
-	ret = defrag_collect_targets(inode, start, len, extent_thresh,
-				     newer_than, do_compress, true,
-				     &target_list);
+	ret = defrag_collect_targets(inode, ctrl, start, len, true, &target_list);
 	if (ret < 0)
 		goto unlock_extent;
 
@@ -1445,12 +1492,17 @@ free_pages:
 	return ret;
 }
 
+/*
+ * Return <0 for error.
+ * Return >0 if we hit the ctrl->max_sectors_to_defrag limit
+ * Return 0 if we finished the range without error.
+ *
+ * For >= 0 case, ctrl->last_scanned and ctrl->sectors_defragged will be updated.
+ */
 static int defrag_one_cluster(struct btrfs_inode *inode,
 			      struct file_ra_state *ra,
-			      u64 start, u32 len, u32 extent_thresh,
-			      u64 newer_than, bool do_compress,
-			      unsigned long *sectors_defragged,
-			      unsigned long max_sectors)
+			      struct btrfs_defrag_ctrl *ctrl,
+			      u64 start, u32 len)
 {
 	const u32 sectorsize = inode->root->fs_info->sectorsize;
 	struct defrag_target_range *entry;
@@ -1458,10 +1510,7 @@ static int defrag_one_cluster(struct btrfs_inode *inode,
 	LIST_HEAD(target_list);
 	int ret;
 
-	BUILD_BUG_ON(!IS_ALIGNED(CLUSTER_SIZE, PAGE_SIZE));
-	ret = defrag_collect_targets(inode, start, len, extent_thresh,
-				     newer_than, do_compress, false,
-				     &target_list);
+	ret = defrag_collect_targets(inode, ctrl, start, len, false, &target_list);
 	if (ret < 0)
 		goto out;
 
@@ -1469,14 +1518,16 @@ static int defrag_one_cluster(struct btrfs_inode *inode,
 		u32 range_len = entry->len;
 
 		/* Reached or beyond the limit */
-		if (max_sectors && *sectors_defragged >= max_sectors) {
+		if (ctrl->max_sectors_to_defrag &&
+		    ctrl->sectors_defragged >= ctrl->max_sectors_to_defrag) {
 			ret = 1;
 			break;
 		}
 
-		if (max_sectors)
+		if (ctrl->max_sectors_to_defrag)
 			range_len = min_t(u32, range_len,
-				(max_sectors - *sectors_defragged) * sectorsize);
+					  (ctrl->max_sectors_to_defrag -
+					   ctrl->sectors_defragged) * sectorsize);
 
 		if (ra)
 			page_cache_sync_readahead(inode->vfs_inode.i_mapping,
@@ -1489,12 +1540,11 @@ static int defrag_one_cluster(struct btrfs_inode *inode,
 		 * But that's fine, it only affects the @sectors_defragged
 		 * accounting.
 		 */
-		ret = defrag_one_range(inode, entry->start, range_len,
-				       extent_thresh, newer_than, do_compress);
+		ret = defrag_one_range(inode, ctrl, entry->start, range_len);
 		if (ret < 0)
 			break;
-		*sectors_defragged += range_len >>
-				      inode->root->fs_info->sectorsize_bits;
+		ctrl->sectors_defragged += range_len >>
+					   inode->root->fs_info->sectorsize_bits;
 	}
 out:
 	list_for_each_entry_safe(entry, tmp, &target_list, list) {
@@ -1505,63 +1555,91 @@ out:
 }
 
 /*
+ * Convert the old ioctl format to the new btrfs_defrag_ctrl structure.
+ *
+ * Will also do basic tasks like setting default values and sanity checks.
+ */
+int btrfs_defrag_ioctl_args_to_ctrl(struct btrfs_fs_info *fs_info,
+				    struct btrfs_ioctl_defrag_range_args *args,
+				    struct btrfs_defrag_ctrl *ctrl,
+				    u64 max_sectors_to_defrag, u64 newer_than)
+{
+	u64 range_end;
+
+	if (args->flags & ~BTRFS_DEFRAG_RANGE_FLAGS_MASK)
+		return -EOPNOTSUPP;
+	if (args->compress_type >= BTRFS_NR_COMPRESS_TYPES)
+		return -EOPNOTSUPP;
+
+	ctrl->start = round_down(args->start, fs_info->sectorsize);
+	/*
+	 * If @len does not overflow with @start nor is -1, align the length.
+	 * Otherwise set it to (u64)-1 so later btrfs_defrag_file() will
+	 * determine the length using i_size.
+	 */
+	if (!check_add_overflow(args->start, args->len, &range_end) &&
+	    args->len != (u64)-1)
+		ctrl->len = round_up(range_end, fs_info->sectorsize) - ctrl->start;
+	else
+		ctrl->len = -1;
+	ctrl->flags = args->flags;
+	ctrl->compress = args->compress_type;
+	if (args->extent_thresh == 0)
+		ctrl->extent_thresh = SZ_256K;
+	else
+		ctrl->extent_thresh = args->extent_thresh;
+	ctrl->newer_than = newer_than;
+	ctrl->last_scanned = 0;
+	ctrl->sectors_defragged = 0;
+	return 0;
+}
+
+/**
  * Entry point to file defragmentation.
  *
  * @inode:	   inode to be defragged
- * @ra:		   readahead state (can be NUL)
- * @range:	   defrag options including range and flags
- * @newer_than:	   minimum transid to defrag
- * @max_to_defrag: max number of sectors to be defragged, if 0, the whole inode
- *		   will be defragged.
+ * @ra:		   readahead state (can be NULL)
+ * @ctrl:	   defrag options including range and various policy parameters
  *
  * Return <0 for error.
- * Return >=0 for the number of sectors defragged, and range->start will be updated
- * to indicate the file offset where next defrag should be started at.
- * (Mostly for autodefrag, which sets @max_to_defrag thus we may exit early without
- *  defragging all the range).
+ * Return 0 if the defrag is done without error, ctrl->last_scanned and
+ * ctrl->sectors_defragged will be updated.
  */
 int btrfs_defrag_file(struct inode *inode, struct file_ra_state *ra,
-		      struct btrfs_ioctl_defrag_range_args *range,
-		      u64 newer_than, unsigned long max_to_defrag)
+		      struct btrfs_defrag_ctrl *ctrl)
 {
 	struct btrfs_fs_info *fs_info = btrfs_sb(inode->i_sb);
-	unsigned long sectors_defragged = 0;
 	u64 isize = i_size_read(inode);
 	u64 cur;
 	u64 last_byte;
-	bool do_compress = range->flags & BTRFS_DEFRAG_RANGE_COMPRESS;
+	const bool do_compress = (ctrl->flags & BTRFS_DEFRAG_RANGE_COMPRESS);
 	bool ra_allocated = false;
-	int compress_type = BTRFS_COMPRESS_ZLIB;
 	int ret = 0;
-	u32 extent_thresh = range->extent_thresh;
 	pgoff_t start_index;
 
 	if (isize == 0)
 		return 0;
 
-	if (range->start >= isize)
+	if (ctrl->start >= isize)
 		return -EINVAL;
 
-	if (do_compress) {
-		if (range->compress_type >= BTRFS_NR_COMPRESS_TYPES)
-			return -EINVAL;
-		if (range->compress_type)
-			compress_type = range->compress_type;
-	}
+	if (do_compress)
+		ASSERT(ctrl->compress < BTRFS_NR_COMPRESS_TYPES);
 
-	if (extent_thresh == 0)
-		extent_thresh = SZ_256K;
+	if (ctrl->extent_thresh == 0)
+		ctrl->extent_thresh = SZ_256K;
 
-	if (range->start + range->len > range->start) {
+	if (ctrl->start + ctrl->len > ctrl->start) {
 		/* Got a specific range */
-		last_byte = min(isize, range->start + range->len);
+		last_byte = min(isize, ctrl->start + ctrl->len);
 	} else {
 		/* Defrag until file end */
 		last_byte = isize;
 	}
 
 	/* Align the range */
-	cur = round_down(range->start, fs_info->sectorsize);
+	cur = round_down(ctrl->start, fs_info->sectorsize);
+	ctrl->last_scanned = cur;
 	last_byte = round_up(last_byte, fs_info->sectorsize) - 1;
 
 	/*
@@ -1585,11 +1663,8 @@ int btrfs_defrag_file(struct inode *inode, struct file_ra_state *ra,
 		inode->i_mapping->writeback_index = start_index;
 
 	while (cur < last_byte) {
-		const unsigned long prev_sectors_defragged = sectors_defragged;
+		const unsigned long prev_sectors_defragged = ctrl->sectors_defragged;
 		u64 cluster_end;
-
-		/* The cluster size 256K should always be page aligned */
-		BUILD_BUG_ON(!IS_ALIGNED(CLUSTER_SIZE, PAGE_SIZE));
 
 		if (btrfs_defrag_cancelled(fs_info)) {
 			ret = -EAGAIN;
@@ -1612,48 +1687,41 @@ int btrfs_defrag_file(struct inode *inode, struct file_ra_state *ra,
 			break;
 		}
 		if (do_compress)
-			BTRFS_I(inode)->defrag_compress = compress_type;
-		ret = defrag_one_cluster(BTRFS_I(inode), ra, cur,
-				cluster_end + 1 - cur, extent_thresh,
-				newer_than, do_compress,
-				&sectors_defragged, max_to_defrag);
+			BTRFS_I(inode)->defrag_compress = ctrl->compress;
+		ret = defrag_one_cluster(BTRFS_I(inode), ra, ctrl, cur,
+					 cluster_end + 1 - cur);
 
-		if (sectors_defragged > prev_sectors_defragged)
+		if (ctrl->sectors_defragged > prev_sectors_defragged)
 			balance_dirty_pages_ratelimited(inode->i_mapping);
 
 		btrfs_inode_unlock(inode, 0);
 		if (ret < 0)
 			break;
-		cur = cluster_end + 1;
+		cur = max(cluster_end + 1, ctrl->last_scanned);
 		if (ret > 0) {
 			ret = 0;
 			break;
 		}
+		cond_resched();
 	}
 
 	if (ra_allocated)
 		kfree(ra);
-	/*
-	 * Update range.start for autodefrag, this will indicate where to start
-	 * in next run.
-	 */
-	range->start = cur;
-	if (sectors_defragged) {
+	if (ctrl->sectors_defragged) {
 		/*
 		 * We have defragged some sectors, for compression case they
 		 * need to be written back immediately.
 		 */
-		if (range->flags & BTRFS_DEFRAG_RANGE_START_IO) {
+		if (ctrl->flags & BTRFS_DEFRAG_RANGE_START_IO) {
 			filemap_flush(inode->i_mapping);
 			if (test_bit(BTRFS_INODE_HAS_ASYNC_EXTENT,
 				     &BTRFS_I(inode)->runtime_flags))
 				filemap_flush(inode->i_mapping);
 		}
-		if (range->compress_type == BTRFS_COMPRESS_LZO)
+		if (ctrl->compress == BTRFS_COMPRESS_LZO)
 			btrfs_set_fs_incompat(fs_info, COMPRESS_LZO);
-		else if (range->compress_type == BTRFS_COMPRESS_ZSTD)
+		else if (ctrl->compress == BTRFS_COMPRESS_ZSTD)
 			btrfs_set_fs_incompat(fs_info, COMPRESS_ZSTD);
-		ret = sectors_defragged;
 	}
 	if (do_compress) {
 		btrfs_inode_lock(inode, 0);
@@ -2006,10 +2074,9 @@ free_args:
 	return ret;
 }
 
-static noinline int btrfs_ioctl_subvol_getflags(struct file *file,
+static noinline int btrfs_ioctl_subvol_getflags(struct inode *inode,
 						void __user *arg)
 {
-	struct inode *inode = file_inode(file);
 	struct btrfs_fs_info *fs_info = btrfs_sb(inode->i_sb);
 	struct btrfs_root *root = BTRFS_I(inode)->root;
 	int ret = 0;
@@ -2339,12 +2406,11 @@ err:
 	return ret;
 }
 
-static noinline int btrfs_ioctl_tree_search(struct file *file,
-					   void __user *argp)
+static noinline int btrfs_ioctl_tree_search(struct inode *inode,
+					    void __user *argp)
 {
 	struct btrfs_ioctl_search_args __user *uargs;
 	struct btrfs_ioctl_search_key sk;
-	struct inode *inode;
 	int ret;
 	size_t buf_size;
 
@@ -2358,7 +2424,6 @@ static noinline int btrfs_ioctl_tree_search(struct file *file,
 
 	buf_size = sizeof(uargs->buf);
 
-	inode = file_inode(file);
 	ret = search_ioctl(inode, &sk, &buf_size, uargs->buf);
 
 	/*
@@ -2373,12 +2438,11 @@ static noinline int btrfs_ioctl_tree_search(struct file *file,
 	return ret;
 }
 
-static noinline int btrfs_ioctl_tree_search_v2(struct file *file,
+static noinline int btrfs_ioctl_tree_search_v2(struct inode *inode,
 					       void __user *argp)
 {
 	struct btrfs_ioctl_search_args_v2 __user *uarg;
 	struct btrfs_ioctl_search_args_v2 args;
-	struct inode *inode;
 	int ret;
 	size_t buf_size;
 	const size_t buf_limit = SZ_16M;
@@ -2397,7 +2461,6 @@ static noinline int btrfs_ioctl_tree_search_v2(struct file *file,
 	if (buf_size > buf_limit)
 		buf_size = buf_limit;
 
-	inode = file_inode(file);
 	ret = search_ioctl(inode, &args.key, &buf_size,
 			   (char __user *)(&uarg->buf[0]));
 	if (ret == 0 && copy_to_user(&uarg->key, &args.key, sizeof(args.key)))
@@ -2648,25 +2711,22 @@ out:
 	return ret;
 }
 
-static noinline int btrfs_ioctl_ino_lookup(struct file *file,
+static noinline int btrfs_ioctl_ino_lookup(struct btrfs_root *root,
 					   void __user *argp)
 {
 	struct btrfs_ioctl_ino_lookup_args *args;
-	struct inode *inode;
 	int ret = 0;
 
 	args = memdup_user(argp, sizeof(*args));
 	if (IS_ERR(args))
 		return PTR_ERR(args);
 
-	inode = file_inode(file);
-
 	/*
 	 * Unprivileged query to obtain the containing subvolume root id. The
 	 * path is reset so it's consistent with btrfs_search_path_in_tree.
 	 */
 	if (args->treeid == 0)
-		args->treeid = BTRFS_I(inode)->root->root_key.objectid;
+		args->treeid = root->root_key.objectid;
 
 	if (args->objectid == BTRFS_FIRST_FREE_OBJECTID) {
 		args->name[0] = 0;
@@ -2678,7 +2738,7 @@ static noinline int btrfs_ioctl_ino_lookup(struct file *file,
 		goto out;
 	}
 
-	ret = btrfs_search_path_in_tree(BTRFS_I(inode)->root->fs_info,
+	ret = btrfs_search_path_in_tree(root->fs_info,
 					args->treeid, args->objectid,
 					args->name);
 
@@ -2734,7 +2794,7 @@ static int btrfs_ioctl_ino_lookup_user(struct file *file, void __user *argp)
 }
 
 /* Get the subvolume information in BTRFS_ROOT_ITEM and BTRFS_ROOT_BACKREF */
-static int btrfs_ioctl_get_subvol_info(struct file *file, void __user *argp)
+static int btrfs_ioctl_get_subvol_info(struct inode *inode, void __user *argp)
 {
 	struct btrfs_ioctl_get_subvol_info_args *subvol_info;
 	struct btrfs_fs_info *fs_info;
@@ -2746,7 +2806,6 @@ static int btrfs_ioctl_get_subvol_info(struct file *file, void __user *argp)
 	struct extent_buffer *leaf;
 	unsigned long item_off;
 	unsigned long item_len;
-	struct inode *inode;
 	int slot;
 	int ret = 0;
 
@@ -2760,7 +2819,6 @@ static int btrfs_ioctl_get_subvol_info(struct file *file, void __user *argp)
 		return -ENOMEM;
 	}
 
-	inode = file_inode(file);
 	fs_info = BTRFS_I(inode)->root->fs_info;
 
 	/* Get root_item of inode's subvolume */
@@ -2854,15 +2912,14 @@ out_free:
  * Return ROOT_REF information of the subvolume containing this inode
  * except the subvolume name.
  */
-static int btrfs_ioctl_get_subvol_rootref(struct file *file, void __user *argp)
+static int btrfs_ioctl_get_subvol_rootref(struct btrfs_root *root,
+					  void __user *argp)
 {
 	struct btrfs_ioctl_get_subvol_rootref_args *rootrefs;
 	struct btrfs_root_ref *rref;
-	struct btrfs_root *root;
 	struct btrfs_path *path;
 	struct btrfs_key key;
 	struct extent_buffer *leaf;
-	struct inode *inode;
 	u64 objectid;
 	int slot;
 	int ret;
@@ -2878,15 +2935,13 @@ static int btrfs_ioctl_get_subvol_rootref(struct file *file, void __user *argp)
 		return PTR_ERR(rootrefs);
 	}
 
-	inode = file_inode(file);
-	root = BTRFS_I(inode)->root->fs_info->tree_root;
-	objectid = BTRFS_I(inode)->root->root_key.objectid;
-
+	objectid = root->root_key.objectid;
 	key.objectid = objectid;
 	key.type = BTRFS_ROOT_REF_KEY;
 	key.offset = rootrefs->min_treeid;
 	found = 0;
 
+	root = root->fs_info->tree_root;
 	ret = btrfs_search_slot(NULL, root, &key, path, 0, 0);
 	if (ret < 0) {
 		goto out;
@@ -2965,6 +3020,13 @@ static noinline int btrfs_ioctl_snap_destroy(struct file *file,
 	int subvol_namelen;
 	int err = 0;
 	bool destroy_parent = false;
+
+	/* We don't support snapshots with extent tree v2 yet. */
+	if (btrfs_fs_incompat(fs_info, EXTENT_TREE_V2)) {
+		btrfs_err(fs_info,
+			  "extent tree v2 doesn't support snapshot deletion yet");
+		return -EOPNOTSUPP;
+	}
 
 	if (destroy_v2) {
 		vol_args2 = memdup_user(arg, sizeof(*vol_args2));
@@ -3174,6 +3236,7 @@ static int btrfs_ioctl_defrag(struct file *file, void __user *argp)
 	struct inode *inode = file_inode(file);
 	struct btrfs_root *root = BTRFS_I(inode)->root;
 	struct btrfs_ioctl_defrag_range_args range = {0};
+	struct btrfs_defrag_ctrl ctrl = { 0 };
 	int ret;
 
 	ret = mnt_want_write_file(file);
@@ -3219,8 +3282,11 @@ static int btrfs_ioctl_defrag(struct file *file, void __user *argp)
 			/* the rest are all set to zero by kzalloc */
 			range.len = (u64)-1;
 		}
-		ret = btrfs_defrag_file(file_inode(file), &file->f_ra,
-					&range, BTRFS_OLDEST_GENERATION, 0);
+		ret = btrfs_defrag_ioctl_args_to_ctrl(root->fs_info, &range,
+						      &ctrl, 0, BTRFS_OLDEST_GENERATION);
+		if (ret < 0)
+			break;
+		ret = btrfs_defrag_file(file_inode(file), &file->f_ra, &ctrl);
 		if (ret > 0)
 			ret = 0;
 		break;
@@ -3240,6 +3306,11 @@ static long btrfs_ioctl_add_dev(struct btrfs_fs_info *fs_info, void __user *arg)
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
+
+	if (btrfs_fs_incompat(fs_info, EXTENT_TREE_V2)) {
+		btrfs_err(fs_info, "device add not supported on extent tree v2 yet");
+		return -EINVAL;
+	}
 
 	if (!btrfs_exclop_start(fs_info, BTRFS_EXCLOP_DEV_ADD)) {
 		if (!btrfs_exclop_start_try_lock(fs_info, BTRFS_EXCLOP_DEV_ADD))
@@ -3766,6 +3837,11 @@ static long btrfs_ioctl_scrub(struct file *file, void __user *arg)
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
+	if (btrfs_fs_incompat(fs_info, EXTENT_TREE_V2)) {
+		btrfs_err(fs_info, "scrub is not supported on extent tree v2 yet");
+		return -EINVAL;
+	}
+
 	sa = memdup_user(arg, sizeof(*sa));
 	if (IS_ERR(sa))
 		return PTR_ERR(sa);
@@ -3864,6 +3940,11 @@ static long btrfs_ioctl_dev_replace(struct btrfs_fs_info *fs_info,
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
+
+	if (btrfs_fs_incompat(fs_info, EXTENT_TREE_V2)) {
+		btrfs_err(fs_info, "device replace not supported on extent tree v2 yet");
+		return -EINVAL;
+	}
 
 	p = memdup_user(arg, sizeof(*p));
 	if (IS_ERR(p))
@@ -4926,7 +5007,7 @@ out_drop_write:
 	return ret;
 }
 
-static int _btrfs_ioctl_send(struct file *file, void __user *argp, bool compat)
+static int _btrfs_ioctl_send(struct inode *inode, void __user *argp, bool compat)
 {
 	struct btrfs_ioctl_send_args *arg;
 	int ret;
@@ -4956,7 +5037,7 @@ static int _btrfs_ioctl_send(struct file *file, void __user *argp, bool compat)
 		if (IS_ERR(arg))
 			return PTR_ERR(arg);
 	}
-	ret = btrfs_ioctl_send(file, arg);
+	ret = btrfs_ioctl_send(inode, arg);
 	kfree(arg);
 	return ret;
 }
@@ -4971,7 +5052,7 @@ long btrfs_ioctl(struct file *file, unsigned int
 
 	switch (cmd) {
 	case FS_IOC_GETVERSION:
-		return btrfs_ioctl_getversion(file, argp);
+		return btrfs_ioctl_getversion(inode, argp);
 	case FS_IOC_GETFSLABEL:
 		return btrfs_ioctl_get_fslabel(fs_info, argp);
 	case FS_IOC_SETFSLABEL:
@@ -4991,7 +5072,7 @@ long btrfs_ioctl(struct file *file, unsigned int
 	case BTRFS_IOC_SNAP_DESTROY_V2:
 		return btrfs_ioctl_snap_destroy(file, argp, true);
 	case BTRFS_IOC_SUBVOL_GETFLAGS:
-		return btrfs_ioctl_subvol_getflags(file, argp);
+		return btrfs_ioctl_subvol_getflags(inode, argp);
 	case BTRFS_IOC_SUBVOL_SETFLAGS:
 		return btrfs_ioctl_subvol_setflags(file, argp);
 	case BTRFS_IOC_DEFAULT_SUBVOL:
@@ -5015,11 +5096,11 @@ long btrfs_ioctl(struct file *file, unsigned int
 	case BTRFS_IOC_BALANCE:
 		return btrfs_ioctl_balance(file, NULL);
 	case BTRFS_IOC_TREE_SEARCH:
-		return btrfs_ioctl_tree_search(file, argp);
+		return btrfs_ioctl_tree_search(inode, argp);
 	case BTRFS_IOC_TREE_SEARCH_V2:
-		return btrfs_ioctl_tree_search_v2(file, argp);
+		return btrfs_ioctl_tree_search_v2(inode, argp);
 	case BTRFS_IOC_INO_LOOKUP:
-		return btrfs_ioctl_ino_lookup(file, argp);
+		return btrfs_ioctl_ino_lookup(root, argp);
 	case BTRFS_IOC_INO_PATHS:
 		return btrfs_ioctl_ino_to_path(root, argp);
 	case BTRFS_IOC_LOGICAL_INO:
@@ -5066,10 +5147,10 @@ long btrfs_ioctl(struct file *file, unsigned int
 		return btrfs_ioctl_set_received_subvol_32(file, argp);
 #endif
 	case BTRFS_IOC_SEND:
-		return _btrfs_ioctl_send(file, argp, false);
+		return _btrfs_ioctl_send(inode, argp, false);
 #if defined(CONFIG_64BIT) && defined(CONFIG_COMPAT)
 	case BTRFS_IOC_SEND_32:
-		return _btrfs_ioctl_send(file, argp, true);
+		return _btrfs_ioctl_send(inode, argp, true);
 #endif
 	case BTRFS_IOC_GET_DEV_STATS:
 		return btrfs_ioctl_get_dev_stats(fs_info, argp);
@@ -5096,9 +5177,9 @@ long btrfs_ioctl(struct file *file, unsigned int
 	case BTRFS_IOC_SET_FEATURES:
 		return btrfs_ioctl_set_features(file, argp);
 	case BTRFS_IOC_GET_SUBVOL_INFO:
-		return btrfs_ioctl_get_subvol_info(file, argp);
+		return btrfs_ioctl_get_subvol_info(inode, argp);
 	case BTRFS_IOC_GET_SUBVOL_ROOTREF:
-		return btrfs_ioctl_get_subvol_rootref(file, argp);
+		return btrfs_ioctl_get_subvol_rootref(root, argp);
 	case BTRFS_IOC_INO_LOOKUP_USER:
 		return btrfs_ioctl_ino_lookup_user(file, argp);
 	case FS_IOC_ENABLE_VERITY:

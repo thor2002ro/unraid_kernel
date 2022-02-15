@@ -3534,7 +3534,7 @@ __get_extent_map(struct inode *inode, struct page *page, size_t pg_offset,
 	}
 
 	em = btrfs_get_extent(BTRFS_I(inode), page, pg_offset, start, len);
-	if (em_cached && !IS_ERR_OR_NULL(em)) {
+	if (em_cached && !IS_ERR(em)) {
 		BUG_ON(*em_cached);
 		refcount_inc(&em->refs);
 		*em_cached = em;
@@ -3563,7 +3563,6 @@ int btrfs_do_readpage(struct page *page, struct extent_map **em_cached,
 	u64 cur_end;
 	struct extent_map *em;
 	int ret = 0;
-	int nr = 0;
 	size_t pg_offset = 0;
 	size_t iosize;
 	size_t blocksize = inode->i_sb->s_blocksize;
@@ -3608,9 +3607,10 @@ int btrfs_do_readpage(struct page *page, struct extent_map **em_cached,
 		}
 		em = __get_extent_map(inode, page, pg_offset, cur,
 				      end - cur + 1, em_cached);
-		if (IS_ERR_OR_NULL(em)) {
+		if (IS_ERR(em)) {
 			unlock_extent(tree, cur, end);
 			end_page_read(page, false, cur, end + 1 - cur);
+			ret = PTR_ERR(em);
 			break;
 		}
 		extent_offset = cur - em->start;
@@ -3721,9 +3721,7 @@ int btrfs_do_readpage(struct page *page, struct extent_map **em_cached,
 					 end_bio_extent_readpage, 0,
 					 this_bio_flag,
 					 force_bio_submit);
-		if (!ret) {
-			nr++;
-		} else {
+		if (ret) {
 			unlock_extent(tree, cur, cur + iosize - 1);
 			end_page_read(page, false, cur, iosize);
 			goto out;
@@ -3951,7 +3949,7 @@ static noinline_for_stack int __extent_writepage_io(struct btrfs_inode *inode,
 		}
 
 		em = btrfs_get_extent(inode, NULL, 0, cur, end - cur + 1);
-		if (IS_ERR_OR_NULL(em)) {
+		if (IS_ERR(em)) {
 			btrfs_page_set_error(fs_info, page, cur, end - cur + 1);
 			ret = PTR_ERR_OR_ZERO(em);
 			break;
@@ -5390,7 +5388,7 @@ static struct extent_map *get_extent_skip_holes(struct btrfs_inode *inode,
 			break;
 		len = ALIGN(len, sectorsize);
 		em = btrfs_get_extent_fiemap(inode, offset, len);
-		if (IS_ERR_OR_NULL(em))
+		if (IS_ERR(em))
 			return em;
 
 		/* if this isn't a hole return it */
