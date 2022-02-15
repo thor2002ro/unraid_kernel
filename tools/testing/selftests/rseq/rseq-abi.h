@@ -1,51 +1,51 @@
 /* SPDX-License-Identifier: GPL-2.0+ WITH Linux-syscall-note */
-#ifndef _UAPI_LINUX_RSEQ_H
-#define _UAPI_LINUX_RSEQ_H
+#ifndef _RSEQ_ABI_H
+#define _RSEQ_ABI_H
 
 /*
- * linux/rseq.h
+ * rseq-abi.h
  *
  * Restartable sequences system call API
  *
- * Copyright (c) 2015-2018 Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+ * Copyright (c) 2015-2022 Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
  */
 
 #include <linux/types.h>
 #include <asm/byteorder.h>
 
-enum rseq_cpu_id_state {
-	RSEQ_CPU_ID_UNINITIALIZED		= -1,
-	RSEQ_CPU_ID_REGISTRATION_FAILED		= -2,
+enum rseq_abi_cpu_id_state {
+	RSEQ_ABI_CPU_ID_UNINITIALIZED			= -1,
+	RSEQ_ABI_CPU_ID_REGISTRATION_FAILED		= -2,
 };
 
-enum rseq_flags {
-	RSEQ_FLAG_UNREGISTER = (1 << 0),
+enum rseq_abi_flags {
+	RSEQ_ABI_FLAG_UNREGISTER = (1 << 0),
 };
 
-enum rseq_cs_flags_bit {
-	RSEQ_CS_FLAG_NO_RESTART_ON_PREEMPT_BIT	= 0,
-	RSEQ_CS_FLAG_NO_RESTART_ON_SIGNAL_BIT	= 1,
-	RSEQ_CS_FLAG_NO_RESTART_ON_MIGRATE_BIT	= 2,
+enum rseq_abi_cs_flags_bit {
+	RSEQ_ABI_CS_FLAG_NO_RESTART_ON_PREEMPT_BIT	= 0,
+	RSEQ_ABI_CS_FLAG_NO_RESTART_ON_SIGNAL_BIT	= 1,
+	RSEQ_ABI_CS_FLAG_NO_RESTART_ON_MIGRATE_BIT	= 2,
 };
 
-enum rseq_cs_flags {
-	RSEQ_CS_FLAG_NO_RESTART_ON_PREEMPT	=
-		(1U << RSEQ_CS_FLAG_NO_RESTART_ON_PREEMPT_BIT),
-	RSEQ_CS_FLAG_NO_RESTART_ON_SIGNAL	=
-		(1U << RSEQ_CS_FLAG_NO_RESTART_ON_SIGNAL_BIT),
-	RSEQ_CS_FLAG_NO_RESTART_ON_MIGRATE	=
-		(1U << RSEQ_CS_FLAG_NO_RESTART_ON_MIGRATE_BIT),
+enum rseq_abi_cs_flags {
+	RSEQ_ABI_CS_FLAG_NO_RESTART_ON_PREEMPT	=
+		(1U << RSEQ_ABI_CS_FLAG_NO_RESTART_ON_PREEMPT_BIT),
+	RSEQ_ABI_CS_FLAG_NO_RESTART_ON_SIGNAL	=
+		(1U << RSEQ_ABI_CS_FLAG_NO_RESTART_ON_SIGNAL_BIT),
+	RSEQ_ABI_CS_FLAG_NO_RESTART_ON_MIGRATE	=
+		(1U << RSEQ_ABI_CS_FLAG_NO_RESTART_ON_MIGRATE_BIT),
 };
 
 /*
- * struct rseq_cs is aligned on 4 * 8 bytes to ensure it is always
+ * struct rseq_abi_cs is aligned on 4 * 8 bytes to ensure it is always
  * contained within a single cache-line. It is usually declared as
  * link-time constant data.
  */
-struct rseq_cs {
+struct rseq_abi_cs {
 	/* Version of this structure. */
 	__u32 version;
-	/* enum rseq_cs_flags */
+	/* enum rseq_abi_cs_flags */
 	__u32 flags;
 	__u64 start_ip;
 	/* Offset from start_ip. */
@@ -54,12 +54,12 @@ struct rseq_cs {
 } __attribute__((aligned(4 * sizeof(__u64))));
 
 /*
- * struct rseq is aligned on 4 * 8 bytes to ensure it is always
+ * struct rseq_abi is aligned on 4 * 8 bytes to ensure it is always
  * contained within a single cache-line.
  *
- * A single struct rseq per thread is allowed.
+ * A single struct rseq_abi per thread is allowed.
  */
-struct rseq {
+struct rseq_abi {
 	/*
 	 * Restartable sequences cpu_id_start field. Updated by the
 	 * kernel. Read by user-space with single-copy atomicity
@@ -105,11 +105,27 @@ struct rseq {
 	 * Read and set by the kernel. Set by user-space with single-copy
 	 * atomicity semantics. This field should only be updated by the
 	 * thread which registered this data structure. Aligned on 64-bit.
-	 *
-	 * 32-bit architectures should update the low order bits of the
-	 * rseq_cs field, leaving the high order bits initialized to 0.
 	 */
-	__u64 rseq_cs;
+	union {
+		__u64 ptr64;
+
+		/*
+		 * The "arch" field provides architecture accessor for
+		 * the ptr field based on architecture pointer size and
+		 * endianness.
+		 */
+		struct {
+#ifdef __LP64__
+			__u64 ptr;
+#elif defined(__BYTE_ORDER) ? (__BYTE_ORDER == __BIG_ENDIAN) : defined(__BIG_ENDIAN)
+			__u32 padding;		/* Initialized to zero. */
+			__u32 ptr;
+#else
+			__u32 ptr;
+			__u32 padding;		/* Initialized to zero. */
+#endif
+		} arch;
+	} rseq_cs;
 
 	/*
 	 * Restartable sequences flags field.
@@ -119,17 +135,17 @@ struct rseq {
 	 * Mainly used for single-stepping through rseq critical sections
 	 * with debuggers.
 	 *
-	 * - RSEQ_CS_FLAG_NO_RESTART_ON_PREEMPT
+	 * - RSEQ_ABI_CS_FLAG_NO_RESTART_ON_PREEMPT
 	 *     Inhibit instruction sequence block restart on preemption
 	 *     for this thread.
-	 * - RSEQ_CS_FLAG_NO_RESTART_ON_SIGNAL
+	 * - RSEQ_ABI_CS_FLAG_NO_RESTART_ON_SIGNAL
 	 *     Inhibit instruction sequence block restart on signal
 	 *     delivery for this thread.
-	 * - RSEQ_CS_FLAG_NO_RESTART_ON_MIGRATE
+	 * - RSEQ_ABI_CS_FLAG_NO_RESTART_ON_MIGRATE
 	 *     Inhibit instruction sequence block restart on migration for
 	 *     this thread.
 	 */
 	__u32 flags;
 } __attribute__((aligned(4 * sizeof(__u64))));
 
-#endif /* _UAPI_LINUX_RSEQ_H */
+#endif /* _RSEQ_ABI_H */
