@@ -32,6 +32,7 @@
 #include <media/v4l2-event.h>
 #include <media/v4l2-ioctl.h>
 #include <media/videobuf2-dma-contig.h>
+#include <linux/videodev2.h>
 
 #define DEVICE_NAME			"aspeed-video"
 
@@ -143,26 +144,24 @@
 #define  VE_SRC_LR_EDGE_DET_NO_H	BIT(13)
 #define  VE_SRC_LR_EDGE_DET_NO_DISP	BIT(14)
 #define  VE_SRC_LR_EDGE_DET_NO_CLK	BIT(15)
-#define  VE_SRC_LR_EDGE_DET_RT_SHF	16
-#define  VE_SRC_LR_EDGE_DET_RT		GENMASK(27, VE_SRC_LR_EDGE_DET_RT_SHF)
+#define  VE_SRC_LR_EDGE_DET_RT		GENMASK(27, 16)
 #define  VE_SRC_LR_EDGE_DET_INTERLACE	BIT(31)
 
 #define VE_SRC_TB_EDGE_DET		0x094
 #define  VE_SRC_TB_EDGE_DET_TOP		GENMASK(12, 0)
-#define  VE_SRC_TB_EDGE_DET_BOT_SHF	16
-#define  VE_SRC_TB_EDGE_DET_BOT		GENMASK(28, VE_SRC_TB_EDGE_DET_BOT_SHF)
+#define  VE_SRC_TB_EDGE_DET_BOT		GENMASK(28, 16)
 
 #define VE_MODE_DETECT_STATUS		0x098
-#define  VE_MODE_DETECT_H_PIXELS	GENMASK(11, 0)
-#define  VE_MODE_DETECT_V_LINES_SHF	16
-#define  VE_MODE_DETECT_V_LINES		GENMASK(27, VE_MODE_DETECT_V_LINES_SHF)
+#define  VE_MODE_DETECT_H_PERIOD	GENMASK(11, 0)
+#define  VE_MODE_DETECT_V_LINES		GENMASK(27, 16)
 #define  VE_MODE_DETECT_STATUS_VSYNC	BIT(28)
 #define  VE_MODE_DETECT_STATUS_HSYNC	BIT(29)
 
 #define VE_SYNC_STATUS			0x09c
 #define  VE_SYNC_STATUS_HSYNC		GENMASK(11, 0)
-#define  VE_SYNC_STATUS_VSYNC_SHF	16
-#define  VE_SYNC_STATUS_VSYNC		GENMASK(27, VE_SYNC_STATUS_VSYNC_SHF)
+#define  VE_SYNC_STATUS_VSYNC		GENMASK(27, 16)
+
+#define VE_H_TOTAL_PIXELS		0x0A0
 
 #define VE_INTERRUPT_CTRL		0x304
 #define VE_INTERRUPT_STATUS		0x308
@@ -411,6 +410,8 @@ static const struct v4l2_dv_timings_cap aspeed_video_timings_cap = {
 	},
 };
 
+static unsigned int debug;
+
 static void aspeed_video_init_jpeg_table(u32 *table, bool yuv420)
 {
 	int i;
@@ -458,33 +459,38 @@ static void aspeed_video_update(struct aspeed_video *video, u32 reg, u32 clear,
 	t &= ~clear;
 	t |= bits;
 	writel(t, video->base + reg);
-	dev_dbg(video->dev, "update %03x[%08x -> %08x]\n", reg, before,
-		readl(video->base + reg));
+	v4l2_dbg(3, debug, &video->v4l2_dev, "update %03x[%08x -> %08x]\n",
+		 reg, before, readl(video->base + reg));
 }
 
 static u32 aspeed_video_read(struct aspeed_video *video, u32 reg)
 {
 	u32 t = readl(video->base + reg);
 
-	dev_dbg(video->dev, "read %03x[%08x]\n", reg, t);
+	v4l2_dbg(3, debug, &video->v4l2_dev, "read %03x[%08x]\n", reg, t);
 	return t;
 }
 
 static void aspeed_video_write(struct aspeed_video *video, u32 reg, u32 val)
 {
 	writel(val, video->base + reg);
-	dev_dbg(video->dev, "write %03x[%08x]\n", reg,
-		readl(video->base + reg));
+	v4l2_dbg(3, debug, &video->v4l2_dev, "write %03x[%08x]\n", reg,
+		 readl(video->base + reg));
 }
 
 static void update_perf(struct aspeed_video_perf *p)
 {
+	struct aspeed_video *v = container_of(p, struct aspeed_video,
+					      perf);
+
 	p->duration =
 		ktime_to_ms(ktime_sub(ktime_get(),  p->last_sample));
 	p->totaltime += p->duration;
 
 	p->duration_max = max(p->duration, p->duration_max);
 	p->duration_min = min(p->duration, p->duration_min);
+	v4l2_dbg(2, debug, &v->v4l2_dev, "time consumed: %d ms\n",
+		 p->duration);
 }
 
 static int aspeed_video_start_frame(struct aspeed_video *video)
@@ -495,13 +501,13 @@ static int aspeed_video_start_frame(struct aspeed_video *video)
 	u32 seq_ctrl = aspeed_video_read(video, VE_SEQ_CTRL);
 
 	if (video->v4l2_input_status) {
-		dev_dbg(video->dev, "No signal; don't start frame\n");
+		v4l2_warn(&video->v4l2_dev, "No signal; don't start frame\n");
 		return 0;
 	}
 
 	if (!(seq_ctrl & VE_SEQ_CTRL_COMP_BUSY) ||
 	    !(seq_ctrl & VE_SEQ_CTRL_CAP_BUSY)) {
-		dev_dbg(video->dev, "Engine busy; don't start frame\n");
+		v4l2_warn(&video->v4l2_dev, "Engine busy; don't start frame\n");
 		return -EBUSY;
 	}
 
@@ -510,7 +516,7 @@ static int aspeed_video_start_frame(struct aspeed_video *video)
 				       struct aspeed_video_buffer, link);
 	if (!buf) {
 		spin_unlock_irqrestore(&video->lock, flags);
-		dev_dbg(video->dev, "No buffers; don't start frame\n");
+		v4l2_warn(&video->v4l2_dev, "No buffers; don't start frame\n");
 		return -EPROTO;
 	}
 
@@ -590,7 +596,7 @@ static void aspeed_video_bufs_done(struct aspeed_video *video,
 
 static void aspeed_video_irq_res_change(struct aspeed_video *video, ulong delay)
 {
-	dev_dbg(video->dev, "Resolution changed; resetting\n");
+	v4l2_dbg(1, debug, &video->v4l2_dev, "Resolution changed; resetting\n");
 
 	set_bit(VIDEO_RES_CHANGE, &video->flags);
 	clear_bit(VIDEO_FRAME_INPRG, &video->flags);
@@ -613,6 +619,12 @@ static irqreturn_t aspeed_video_irq(int irq, void *arg)
 	 * enabled; ignore them if so.
 	 */
 	sts &= aspeed_video_read(video, VE_INTERRUPT_CTRL);
+
+	v4l2_dbg(2, debug, &video->v4l2_dev, "irq sts=%#x %s%s%s%s\n", sts,
+		 sts & VE_INTERRUPT_MODE_DETECT_WD ? ", unlock" : "",
+		 sts & VE_INTERRUPT_MODE_DETECT ? ", lock" : "",
+		 sts & VE_INTERRUPT_CAPTURE_COMPLETE ? ", capture-done" : "",
+		 sts & VE_INTERRUPT_COMP_COMPLETE ? ", comp-done" : "");
 
 	/*
 	 * Resolution changed or signal was lost; reset the engine and
@@ -787,8 +799,101 @@ static void aspeed_video_calc_compressed_size(struct aspeed_video *video,
 	aspeed_video_write(video, VE_STREAM_BUF_SIZE,
 			   compression_buffer_size_reg);
 
-	dev_dbg(video->dev, "Max compressed size: %x\n",
-		video->max_compressed_size);
+	v4l2_dbg(1, debug, &video->v4l2_dev, "Max compressed size: %#x\n",
+		 video->max_compressed_size);
+}
+
+/*
+ * Update v4l2_bt_timings per current status.
+ * frame_top/frame_bottom/frame_left/frame_right need to be ready.
+ *
+ * The following registers start counting from sync's rising edge:
+ * 1. VR090: frame edge's left and right
+ * 2. VR094: frame edge's top and bottom
+ * 3. VR09C: counting from sync's rising edge to falling edge
+ *
+ * [Vertical timing]
+ *             +--+     +-------------------+     +--+
+ *             |  |     |     v i d e o     |     |  |
+ *          +--+  +-----+                   +-----+  +---+
+ *        vsync+--+
+ *    frame_top+--------+
+ * frame_bottom+----------------------------+
+ *
+ *                   +-------------------+
+ *                   |     v i d e o     |
+ *       +--+  +-----+                   +-----+  +---+
+ *          |  |                               |  |
+ *          +--+                               +--+
+ *        vsync+-------------------------------+
+ *    frame_top+-----+
+ * frame_bottom+-------------------------+
+ *
+ * [Horizontal timing]
+ *             +--+     +-------------------+     +--+
+ *             |  |     |     v i d e o     |     |  |
+ *          +--+  +-----+                   +-----+  +---+
+ *        hsync+--+
+ *   frame_left+--------+
+ *  frame_right+----------------------------+
+ *
+ *                   +-------------------+
+ *                   |     v i d e o     |
+ *       +--+  +-----+                   +-----+  +---+
+ *          |  |                               |  |
+ *          +--+                               +--+
+ *        hsync+-------------------------------+
+ *   frame_left+-----+
+ *  frame_right+-------------------------+
+ *
+ * @v: the struct of aspeed_video
+ * @det: v4l2_bt_timings to be updated.
+ */
+static void aspeed_video_get_timings(struct aspeed_video *v,
+				     struct v4l2_bt_timings *det)
+{
+	u32 mds, sync, htotal, vtotal, vsync, hsync;
+
+	mds = aspeed_video_read(v, VE_MODE_DETECT_STATUS);
+	sync = aspeed_video_read(v, VE_SYNC_STATUS);
+	htotal = aspeed_video_read(v, VE_H_TOTAL_PIXELS);
+	vtotal = FIELD_GET(VE_MODE_DETECT_V_LINES, mds);
+	vsync = FIELD_GET(VE_SYNC_STATUS_VSYNC, sync);
+	hsync = FIELD_GET(VE_SYNC_STATUS_HSYNC, sync);
+
+	/*
+	 * This is a workaround for polarity detection.
+	 * Because ast-soc counts sync from sync's rising edge, the reg value
+	 * of sync would be larger than video's active area if negative.
+	 */
+	if (vsync > det->height)
+		det->polarities &= ~V4L2_DV_VSYNC_POS_POL;
+	else
+		det->polarities |= V4L2_DV_VSYNC_POS_POL;
+	if (hsync > det->width)
+		det->polarities &= ~V4L2_DV_HSYNC_POS_POL;
+	else
+		det->polarities |= V4L2_DV_HSYNC_POS_POL;
+
+	if (det->polarities & V4L2_DV_VSYNC_POS_POL) {
+		det->vbackporch = v->frame_top - vsync;
+		det->vfrontporch = vtotal - v->frame_bottom;
+		det->vsync = vsync;
+	} else {
+		det->vbackporch = v->frame_top;
+		det->vfrontporch = vsync - v->frame_bottom;
+		det->vsync = vtotal - vsync;
+	}
+
+	if (det->polarities & V4L2_DV_HSYNC_POS_POL) {
+		det->hbackporch = v->frame_left - hsync;
+		det->hfrontporch = htotal - v->frame_right;
+		det->hsync = hsync;
+	} else {
+		det->hbackporch = v->frame_left;
+		det->hfrontporch = hsync - v->frame_right;
+		det->hsync = htotal - hsync;
+	}
 }
 
 #define res_check(v) test_and_clear_bit(VIDEO_MODE_DETECT_DONE, &(v)->flags)
@@ -798,10 +903,8 @@ static void aspeed_video_get_resolution(struct aspeed_video *video)
 	bool invalid_resolution = true;
 	int rc;
 	int tries = 0;
-	u32 mds;
 	u32 src_lr_edge;
 	u32 src_tb_edge;
-	u32 sync;
 	struct v4l2_bt_timings *det = &video->detected_timings;
 
 	det->width = MIN_WIDTH;
@@ -825,7 +928,7 @@ static void aspeed_video_get_resolution(struct aspeed_video *video)
 						      res_check(video),
 						      MODE_DETECT_TIMEOUT);
 		if (!rc) {
-			dev_dbg(video->dev, "Timed out; first mode detect\n");
+			v4l2_warn(&video->v4l2_dev, "Timed out; first mode detect\n");
 			clear_bit(VIDEO_RES_DETECT, &video->flags);
 			return;
 		}
@@ -839,33 +942,22 @@ static void aspeed_video_get_resolution(struct aspeed_video *video)
 						      MODE_DETECT_TIMEOUT);
 		clear_bit(VIDEO_RES_DETECT, &video->flags);
 		if (!rc) {
-			dev_dbg(video->dev, "Timed out; second mode detect\n");
+			v4l2_warn(&video->v4l2_dev, "Timed out; second mode detect\n");
 			return;
 		}
 
 		src_lr_edge = aspeed_video_read(video, VE_SRC_LR_EDGE_DET);
 		src_tb_edge = aspeed_video_read(video, VE_SRC_TB_EDGE_DET);
-		mds = aspeed_video_read(video, VE_MODE_DETECT_STATUS);
-		sync = aspeed_video_read(video, VE_SYNC_STATUS);
 
-		video->frame_bottom = (src_tb_edge & VE_SRC_TB_EDGE_DET_BOT) >>
-			VE_SRC_TB_EDGE_DET_BOT_SHF;
-		video->frame_top = src_tb_edge & VE_SRC_TB_EDGE_DET_TOP;
-		det->vfrontporch = video->frame_top;
-		det->vbackporch = ((mds & VE_MODE_DETECT_V_LINES) >>
-			VE_MODE_DETECT_V_LINES_SHF) - video->frame_bottom;
-		det->vsync = (sync & VE_SYNC_STATUS_VSYNC) >>
-			VE_SYNC_STATUS_VSYNC_SHF;
+		video->frame_bottom = FIELD_GET(VE_SRC_TB_EDGE_DET_BOT, src_tb_edge);
+		video->frame_top = FIELD_GET(VE_SRC_TB_EDGE_DET_TOP, src_tb_edge);
+
 		if (video->frame_top > video->frame_bottom)
 			continue;
 
-		video->frame_right = (src_lr_edge & VE_SRC_LR_EDGE_DET_RT) >>
-			VE_SRC_LR_EDGE_DET_RT_SHF;
-		video->frame_left = src_lr_edge & VE_SRC_LR_EDGE_DET_LEFT;
-		det->hfrontporch = video->frame_left;
-		det->hbackporch = (mds & VE_MODE_DETECT_H_PIXELS) -
-			video->frame_right;
-		det->hsync = sync & VE_SYNC_STATUS_HSYNC;
+		video->frame_right = FIELD_GET(VE_SRC_LR_EDGE_DET_RT, src_lr_edge);
+		video->frame_left = FIELD_GET(VE_SRC_LR_EDGE_DET_LEFT, src_lr_edge);
+
 		if (video->frame_left > video->frame_right)
 			continue;
 
@@ -873,13 +965,15 @@ static void aspeed_video_get_resolution(struct aspeed_video *video)
 	} while (invalid_resolution && (tries++ < INVALID_RESOLUTION_RETRIES));
 
 	if (invalid_resolution) {
-		dev_dbg(video->dev, "Invalid resolution detected\n");
+		v4l2_warn(&video->v4l2_dev, "Invalid resolution detected\n");
 		return;
 	}
 
 	det->height = (video->frame_bottom - video->frame_top) + 1;
 	det->width = (video->frame_right - video->frame_left) + 1;
 	video->v4l2_input_status = 0;
+
+	aspeed_video_get_timings(video, det);
 
 	/*
 	 * Enable mode-detect watchdog, resolution-change watchdog and
@@ -890,8 +984,8 @@ static void aspeed_video_get_resolution(struct aspeed_video *video)
 	aspeed_video_update(video, VE_SEQ_CTRL, 0,
 			    VE_SEQ_CTRL_AUTO_COMP | VE_SEQ_CTRL_EN_WATCHDOG);
 
-	dev_dbg(video->dev, "Got resolution: %dx%d\n", det->width,
-		det->height);
+	v4l2_dbg(1, debug, &video->v4l2_dev, "Got resolution: %dx%d\n",
+		 det->width, det->height);
 }
 
 static void aspeed_video_set_resolution(struct aspeed_video *video)
@@ -902,18 +996,19 @@ static void aspeed_video_set_resolution(struct aspeed_video *video)
 	/* Set capture/compression frame sizes */
 	aspeed_video_calc_compressed_size(video, size);
 
-	if (video->active_timings.width == 1680) {
+	if (!IS_ALIGNED(act->width, 64)) {
 		/*
-		 * This is a workaround to fix a silicon bug on A1 and A2
-		 * revisions. Since it doesn't break capturing operation of
+		 * This is a workaround to fix a AST2500 silicon bug on A1 and
+		 * A2 revisions. Since it doesn't break capturing operation of
 		 * other revisions, use it for all revisions without checking
-		 * the revision ID. It picked 1728 which is a very next
-		 * 64-pixels aligned value to 1680 to minimize memory bandwidth
+		 * the revision ID. It picked new width which is a very next
+		 * 64-pixels aligned value to minimize memory bandwidth
 		 * and to get better access speed from video engine.
 		 */
-		aspeed_video_write(video, VE_CAP_WINDOW,
-				   1728 << 16 | act->height);
-		size += (1728 - 1680) * video->active_timings.height;
+		u32 width = ALIGN(act->width, 64);
+
+		aspeed_video_write(video, VE_CAP_WINDOW, width << 16 | act->height);
+		size = width * act->height;
 	} else {
 		aspeed_video_write(video, VE_CAP_WINDOW,
 				   act->width << 16 | act->height);
@@ -924,6 +1019,7 @@ static void aspeed_video_set_resolution(struct aspeed_video *video)
 
 	/* Don't use direct mode below 1024 x 768 (irqs don't fire) */
 	if (size < DIRECT_FETCH_THRESHOLD) {
+		v4l2_dbg(1, debug, &video->v4l2_dev, "Capture: Sync Mode\n");
 		aspeed_video_write(video, VE_TGS_0,
 				   FIELD_PREP(VE_TGS_FIRST,
 					      video->frame_left - 1) |
@@ -935,6 +1031,7 @@ static void aspeed_video_set_resolution(struct aspeed_video *video)
 					      video->frame_bottom + 1));
 		aspeed_video_update(video, VE_CTRL, 0, VE_CTRL_INT_DE);
 	} else {
+		v4l2_dbg(1, debug, &video->v4l2_dev, "Capture: Direct Mode\n");
 		aspeed_video_update(video, VE_CTRL, 0, VE_CTRL_DIRECT_FETCH);
 	}
 
@@ -951,6 +1048,10 @@ static void aspeed_video_set_resolution(struct aspeed_video *video)
 		if (!aspeed_video_alloc_buf(video, &video->srcs[1], size))
 			goto err_mem;
 
+		v4l2_dbg(1, debug, &video->v4l2_dev, "src buf0 addr(%pad) size(%d)\n",
+			 &video->srcs[0].dma, video->srcs[0].size);
+		v4l2_dbg(1, debug, &video->v4l2_dev, "src buf1 addr(%pad) size(%d)\n",
+			 &video->srcs[1].dma, video->srcs[1].size);
 		aspeed_video_write(video, VE_SRC0_ADDR, video->srcs[0].dma);
 		aspeed_video_write(video, VE_SRC1_ADDR, video->srcs[1].dma);
 	}
@@ -1215,6 +1316,9 @@ static int aspeed_video_set_dv_timings(struct file *file, void *fh,
 
 	timings->type = V4L2_DV_BT_656_1120;
 
+	v4l2_dbg(1, debug, &video->v4l2_dev, "set new timings(%dx%d)\n",
+		 timings->bt.width, timings->bt.height);
+
 	return 0;
 }
 
@@ -1395,6 +1499,7 @@ static void aspeed_video_resolution_work(struct work_struct *work)
 			.u.src_change.changes = V4L2_EVENT_SRC_CH_RESOLUTION,
 		};
 
+		v4l2_dbg(1, debug, &video->v4l2_dev, "fire source change event\n");
 		v4l2_event_queue(&video->vdev, &ev);
 	} else if (test_bit(VIDEO_STREAMING, &video->flags)) {
 		/* No resolution change so just restart streaming */
@@ -1516,7 +1621,7 @@ static void aspeed_video_stop_streaming(struct vb2_queue *q)
 				!test_bit(VIDEO_FRAME_INPRG, &video->flags),
 				STOP_TIMEOUT);
 	if (!rc) {
-		dev_dbg(video->dev, "Timed out when stopping streaming\n");
+		v4l2_warn(&video->v4l2_dev, "Timed out when stopping streaming\n");
 
 		/*
 		 * Need to force stop any DMA and try and get HW into a good
@@ -1730,6 +1835,7 @@ static int aspeed_video_init(struct aspeed_video *video)
 		dev_err(dev, "Unable to request IRQ %d\n", irq);
 		return rc;
 	}
+	dev_info(video->dev, "irq %d\n", irq);
 
 	video->eclk = devm_clk_get(dev, "eclk");
 	if (IS_ERR(video->eclk)) {
@@ -1766,6 +1872,8 @@ static int aspeed_video_init(struct aspeed_video *video)
 		rc = -ENOMEM;
 		goto err_release_reserved_mem;
 	}
+	dev_info(video->dev, "alloc mem size(%d) at %pad for jpeg header\n",
+		 VE_JPEG_HEADER_SIZE, &video->jpeg.dma);
 
 	aspeed_video_init_jpeg_table(video->jpeg.virt, video->yuv420);
 
@@ -1874,6 +1982,9 @@ static struct platform_driver aspeed_video_driver = {
 };
 
 module_platform_driver(aspeed_video_driver);
+
+module_param(debug, int, 0644);
+MODULE_PARM_DESC(debug, "Debug level (0=off,1=info,2=debug,3=reg ops)");
 
 MODULE_DESCRIPTION("ASPEED Video Engine Driver");
 MODULE_AUTHOR("Eddie James");
