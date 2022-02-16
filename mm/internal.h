@@ -720,5 +720,6 @@ int numa_migrate_prep(struct page *page, struct vm_area_struct *vma,
 DECLARE_PER_CPU(struct per_cpu_nodestat, boot_nodestats);
 
 void free_zone_device_page(struct page *page);
+struct page *migrate_device_page(struct page *page, unsigned int gup_flags);
 
 #endif	/* __MM_INTERNAL_H */
