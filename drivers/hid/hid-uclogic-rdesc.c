@@ -633,7 +633,17 @@ const __u8 uclogic_rdesc_pen_v2_template_arr[] = {
 	0x27, UCLOGIC_RDESC_PEN_PH(PRESSURE_LM),
 				/*          Logical Maximum (PLACEHOLDER),  */
 	0x81, 0x02,             /*          Input (Variable),               */
-	0x81, 0x03,             /*          Input (Constant, Variable),     */
+	0x54,                   /*          Unit Exponent (0),              */
+	0x65, 0x14,             /*          Unit (Degrees),                 */
+	0x35, 0xC4,             /*          Physical Minimum (-60),         */
+	0x45, 0x3C,             /*          Physical Maximum (60),          */
+	0x15, 0xC4,             /*          Logical Minimum (-60),          */
+	0x25, 0x3C,             /*          Logical Maximum (60),           */
+	0x75, 0x08,             /*          Report Size (8),                */
+	0x95, 0x02,             /*          Report Count (2),               */
+	0x09, 0x3D,             /*          Usage (X Tilt),                 */
+	0x09, 0x3E,             /*          Usage (Y Tilt),                 */
+	0x81, 0x02,             /*          Input (Variable),               */
 	0xC0,                   /*      End Collection,                     */
 	0xC0                    /*  End Collection                          */
 };
@@ -679,8 +689,8 @@ const size_t uclogic_rdesc_pen_v2_template_size =
 	0xA0,           /*      Collection (Physical),          */ \
 	0x05, 0x09,     /*          Usage Page (Button),        */ \
 	0x19, 0x01,     /*          Usage Minimum (01h),        */ \
-	0x29, 0x02,     /*          Usage Maximum (02h),        */ \
-	0x95, 0x02,     /*          Report Count (2),           */ \
+	0x29, 0x03,     /*          Usage Maximum (03h),        */ \
+	0x95, 0x03,     /*          Report Count (3),           */ \
 	0x81, 0x02,     /*          Input (Variable),           */ \
 	0x95, _padding, /*          Report Count (_padding),    */ \
 	0x81, 0x01,     /*          Input (Constant),           */ \
@@ -689,14 +699,14 @@ const size_t uclogic_rdesc_pen_v2_template_size =
 
 /* Fixed report descriptor for (tweaked) v1 buttonpad reports */
 const __u8 uclogic_rdesc_buttonpad_v1_arr[] = {
-	UCLOGIC_RDESC_BUTTONPAD_BYTES(20)
+	UCLOGIC_RDESC_BUTTONPAD_BYTES(19)
 };
 const size_t uclogic_rdesc_buttonpad_v1_size =
 			sizeof(uclogic_rdesc_buttonpad_v1_arr);
 
 /* Fixed report descriptor for (tweaked) v2 buttonpad reports */
 const __u8 uclogic_rdesc_buttonpad_v2_arr[] = {
-	UCLOGIC_RDESC_BUTTONPAD_BYTES(52)
+	UCLOGIC_RDESC_BUTTONPAD_BYTES(51)
 };
 const size_t uclogic_rdesc_buttonpad_v2_size =
 			sizeof(uclogic_rdesc_buttonpad_v2_arr);

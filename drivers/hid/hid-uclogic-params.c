@@ -369,6 +369,7 @@ static int uclogic_params_pen_init_v2(struct uclogic_params_pen *pen,
 	pen->id = UCLOGIC_RDESC_PEN_V2_ID;
 	pen->inrange = UCLOGIC_PARAMS_PEN_INRANGE_NONE;
 	pen->fragmented_hires = true;
+	pen->tilt_y_flipped = true;
 	found = true;
 finish:
 	*pfound = found;
@@ -992,7 +993,7 @@ int uclogic_params_init(struct uclogic_params *params,
 	case VID_PID(USB_VENDOR_ID_HUION,
 		     USB_DEVICE_ID_HUION_TABLET):
 	case VID_PID(USB_VENDOR_ID_HUION,
-		     USB_DEVICE_ID_HUION_HS64):
+		     USB_DEVICE_ID_HUION_TABLET2):
 	case VID_PID(USB_VENDOR_ID_UCLOGIC,
 		     USB_DEVICE_ID_HUION_TABLET):
 	case VID_PID(USB_VENDOR_ID_UCLOGIC,
