@@ -536,15 +536,6 @@ out_err:
 }
 EXPORT_SYMBOL_GPL(svc_create_pooled);
 
-void svc_shutdown_net(struct svc_serv *serv, struct net *net)
-{
-	svc_close_net(serv, net);
-
-	if (serv->sv_ops->svo_shutdown)
-		serv->sv_ops->svo_shutdown(serv, net);
-}
-EXPORT_SYMBOL_GPL(svc_shutdown_net);
-
 /*
  * Destroy an RPC service. Should be called with appropriate locking to
  * protect sv_permsocks and sv_tempsocks.
@@ -1355,7 +1346,7 @@ svc_process_common(struct svc_rqst *rqstp, struct kvec *argv, struct kvec *resv)
 	svc_authorise(rqstp);
 close_xprt:
 	if (rqstp->rq_xprt && test_bit(XPT_TEMP, &rqstp->rq_xprt->xpt_flags))
-		svc_close_xprt(rqstp->rq_xprt);
+		svc_xprt_close(rqstp->rq_xprt);
 	dprintk("svc: svc_process close\n");
 	return 0;
 

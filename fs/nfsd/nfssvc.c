@@ -117,9 +117,7 @@ static struct svc_stat	nfsd_acl_svcstats = {
 
 static const struct svc_version *nfsd_version[] = {
 	[2] = &nfsd_version2,
-#if defined(CONFIG_NFSD_V3)
 	[3] = &nfsd_version3,
-#endif
 #if defined(CONFIG_NFSD_V4)
 	[4] = &nfsd_version4,
 #endif
@@ -293,13 +291,13 @@ static int nfsd_init_socks(struct net *net, const struct cred *cred)
 	if (!list_empty(&nn->nfsd_serv->sv_permsocks))
 		return 0;
 
-	error = svc_create_xprt(nn->nfsd_serv, "udp", net, PF_INET, NFS_PORT,
-					SVC_SOCK_DEFAULTS, cred);
+	error = svc_xprt_create(nn->nfsd_serv, "udp", net, PF_INET, NFS_PORT,
+				SVC_SOCK_DEFAULTS, cred);
 	if (error < 0)
 		return error;
 
-	error = svc_create_xprt(nn->nfsd_serv, "tcp", net, PF_INET, NFS_PORT,
-					SVC_SOCK_DEFAULTS, cred);
+	error = svc_xprt_create(nn->nfsd_serv, "tcp", net, PF_INET, NFS_PORT,
+				SVC_SOCK_DEFAULTS, cred);
 	if (error < 0)
 		return error;
 
@@ -613,9 +611,7 @@ static int nfsd_get_default_max_blksize(void)
 }
 
 static const struct svc_serv_ops nfsd_thread_sv_ops = {
-	.svo_shutdown		= nfsd_last_thread,
 	.svo_function		= nfsd,
-	.svo_enqueue_xprt	= svc_xprt_do_enqueue,
 	.svo_module		= THIS_MODULE,
 };
 
@@ -724,7 +720,8 @@ void nfsd_put(struct net *net)
 	struct nfsd_net *nn = net_generic(net, nfsd_net_id);
 
 	if (kref_put(&nn->nfsd_serv->sv_refcnt, nfsd_noop)) {
-		svc_shutdown_net(nn->nfsd_serv, net);
+		svc_xprt_destroy_all(nn->nfsd_serv, net);
+		nfsd_last_thread(nn->nfsd_serv, net);
 		svc_destroy(&nn->nfsd_serv->sv_refcnt);
 		spin_lock(&nfsd_notifier_lock);
 		nn->nfsd_serv = NULL;
