@@ -23,14 +23,9 @@
 
 #include <linux/string.h>	/* for generic string functions */
 
-
-#define __kernel_ok		(uaccess_kernel())
-
 /*
- * Algorithmically, for __user_ok() we want do:
+ * Algorithmically, for __access_ok() we want do:
  * 	(start < TASK_SIZE) && (start+len < TASK_SIZE)
- * where TASK_SIZE could either be retrieved from thread_info->addr_limit or
- * emitted directly in code.
  *
  * This can however be rewritten as follows:
  *	(len <= TASK_SIZE) && (start+len < TASK_SIZE)
@@ -41,16 +36,14 @@
  * The reason for rewriting being, for majority of cases, @len is generally
  * compile time constant, causing first sub-expression to be compile time
  * subsumed.
- *
- * The second part would generate weird large LIMMs e.g. (0x6000_0000 - 0x10),
- * so we check for TASK_SIZE using get_fs() since the addr_limit load from mem
- * would already have been done at this call site for __kernel_ok()
- *
  */
-#define __user_ok(addr, sz)	(((sz) <= TASK_SIZE) && \
-				 ((addr) <= (get_fs() - (sz))))
-#define __access_ok(addr, sz)	(unlikely(__kernel_ok) || \
-				 likely(__user_ok((addr), (sz))))
+static inline int __access_ok(unsigned long addr, unsigned long size)
+{
+	__chk_user_ptr(addr);
+	return size <= TASK_SIZE && addr <= TASK_SIZE - size;
+}
+
+#define __access_ok	__access_ok
 
 /*********** Single byte/hword/word copies ******************/
 
@@ -62,6 +55,7 @@
 	case 2: __arc_get_user_one(*(k), u, "ldw", __ret); break;	\
 	case 4: __arc_get_user_one(*(k), u, "ld", __ret);  break;	\
 	case 8: __arc_get_user_one_64(*(k), u, __ret);     break;	\
+	default: BUILD_BUG();                                   \
 	}							\
 	__ret;							\
 })
@@ -123,6 +117,7 @@
 	case 2: __arc_put_user_one(*(k), u, "stw", __ret); break;	\
 	case 4: __arc_put_user_one(*(k), u, "st", __ret);  break;	\
 	case 8: __arc_put_user_one_64(*(k), u, __ret);     break;	\
+	default: BUILD_BUG();                                   \
 	}							\
 	__ret;							\
 })
@@ -655,6 +650,28 @@ static inline unsigned long __arc_clear_user(void __user *to, unsigned long n)
 	return res;
 }
 
+#define HAVE_GET_KERNEL_NOFAULT
+
+#define __get_kernel_nofault(dst, src, type, err_label)			\
+	do {								\
+		long __err;						\
+									\
+		__err = __get_user_fn(sizeof(type), (type *)(src),	\
+				      (type *)(dst));			\
+		if (unlikely(__err))					\
+			goto err_label;					\
+	} while (0)
+
+#define __put_kernel_nofault(dst, src, type, err_label)			\
+	do {								\
+		long __err;						\
+									\
+		__err = __put_user_fn(sizeof(type), (type *)(dst),	\
+				      (type *)(src));			\
+		if (unlikely(__err))					\
+			goto err_label;					\
+	} while (0)
+
 #ifndef CONFIG_CC_OPTIMIZE_FOR_SIZE
 
 #define INLINE_COPY_TO_USER
@@ -667,7 +684,6 @@ extern unsigned long arc_clear_user_noinline(void __user *to,
 #define __clear_user(d, n)		arc_clear_user_noinline(d, n)
 #endif
 
-#include <asm/segment.h>
 #include <asm-generic/uaccess.h>
 
 #endif
