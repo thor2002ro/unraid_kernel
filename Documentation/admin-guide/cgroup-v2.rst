@@ -1317,6 +1317,11 @@ PAGE_SIZE multiple when read back.
 	  vmalloc (npn)
 		Amount of memory used for vmap backed memory.
 
+	  kernel (npn)
+		Amount of total kernel memory, including
+		(kernel_stack, pagetables, percpu, vmalloc, slab) in
+		addition to other kernel memory use cases.
+
 	  shmem
 		Amount of cached filesystem data that is swap-backed,
 		such as tmpfs, shm segments, shared anonymous mmap()s
