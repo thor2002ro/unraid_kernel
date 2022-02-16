@@ -50,6 +50,12 @@ int read_block(char *buf, int buf_size, FILE *fin)
 			return curr - buf;
 		if (!strncmp(curr, "PFN", 3))
 			continue;
+		if (!strncmp(curr, "Page allocated via order", 24)) {
+			char *end = strstr(curr, ", pid ");
+
+			if (end)
+				memcpy(end, "\n", 2);
+		}
 		curr += strlen(curr);
 	}
 
