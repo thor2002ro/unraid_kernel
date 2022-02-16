@@ -13,6 +13,7 @@
 #include <linux/pagewalk.h>
 #include <linux/rmap.h>
 #include <linux/swapops.h>
+#include <asm/tlbflush.h>
 #include "internal.h"
 
 static int migrate_vma_collect_skip(unsigned long start,
