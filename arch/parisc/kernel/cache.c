@@ -575,14 +575,14 @@ void flush_cache_mm(struct mm_struct *mm)
 	   rp3440, etc.  So, avoid it if the mm isn't too big.  */
 	if ((!IS_ENABLED(CONFIG_SMP) || !arch_irqs_disabled()) &&
 	    mm_total_size(mm) >= parisc_cache_flush_threshold) {
-		if (mm->context)
+		if (mm->context.space_id)
 			flush_tlb_all();
 		flush_cache_all();
 		return;
 	}
 
 	preempt_disable();
-	if (mm->context == mfsp(3)) {
+	if (mm->context.space_id == mfsp(3)) {
 		for (vma = mm->mmap; vma; vma = vma->vm_next)
 			flush_user_cache_tlb(vma, vma->vm_start, vma->vm_end);
 		preempt_enable();
@@ -599,14 +599,14 @@ void flush_cache_range(struct vm_area_struct *vma,
 {
 	if ((!IS_ENABLED(CONFIG_SMP) || !arch_irqs_disabled()) &&
 	    end - start >= parisc_cache_flush_threshold) {
-		if (vma->vm_mm->context)
+		if (vma->vm_mm->context.space_id)
 			flush_tlb_range(vma, start, end);
 		flush_cache_all();
 		return;
 	}
 
 	preempt_disable();
-	if (vma->vm_mm->context == mfsp(3)) {
+	if (vma->vm_mm->context.space_id == mfsp(3)) {
 		flush_user_cache_tlb(vma, start, end);
 		preempt_enable();
 		return;
@@ -620,7 +620,7 @@ void
 flush_cache_page(struct vm_area_struct *vma, unsigned long vmaddr, unsigned long pfn)
 {
 	if (pfn_valid(pfn)) {
-		if (likely(vma->vm_mm->context)) {
+		if (likely(vma->vm_mm->context.space_id)) {
 			flush_tlb_page(vma, vmaddr);
 			__flush_cache_page(vma, vmaddr, PFN_PHYS(pfn));
 		} else {
