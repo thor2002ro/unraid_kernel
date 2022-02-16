@@ -159,8 +159,15 @@ out:
  */
 #define LRU_PAGE 0x1
 #define NEW_PAGE 0x2
-#define mlock_lru(page) ((struct page *)((unsigned long)page + LRU_PAGE))
-#define mlock_new(page) ((struct page *)((unsigned long)page + NEW_PAGE))
+static inline struct page *mlock_lru(struct page *page)
+{
+	return (struct page *)((unsigned long)page + LRU_PAGE);
+}
+
+static inline struct page *mlock_new(struct page *page)
+{
+	return (struct page *)((unsigned long)page + NEW_PAGE);
+}
 
 /*
  * mlock_pagevec() is derived from pagevec_lru_move_fn():
