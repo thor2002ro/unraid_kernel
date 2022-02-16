@@ -104,14 +104,16 @@ TODOList:
    :maxdepth: 2
 
    core-api/index
+   accounting/index
    cpu-freq/index
    iio/index
+   infiniband/index
+   power/index
+   virt/index
    sound/index
    filesystems/index
-   virt/index
-   infiniband/index
-   accounting/index
    scheduler/index
+   vm/index
 
 TODOList:
 
@@ -129,7 +131,6 @@ TODOList:
 * netlabel/index
 * networking/index
 * pcmcia/index
-* power/index
 * target/index
 * timers/index
 * spi/index
@@ -140,7 +141,6 @@ TODOList:
 * gpu/index
 * security/index
 * crypto/index
-* vm/index
 * bpf/index
 * usb/index
 * PCI/index
