@@ -506,6 +506,7 @@ bool node_dirty_ok(struct pglist_data *pgdat)
 	return nr_pages <= limit;
 }
 
+#ifdef CONFIG_SYSCTL
 static int dirty_background_ratio_handler(struct ctl_table *table, int write,
 		void *buffer, size_t *lenp, loff_t *ppos)
 {
@@ -555,6 +556,7 @@ static int dirty_bytes_handler(struct ctl_table *table, int write,
 	}
 	return ret;
 }
+#endif
 
 static unsigned long wp_next_time(unsigned long cur_time)
 {
@@ -1996,6 +1998,7 @@ bool wb_over_bg_thresh(struct bdi_writeback *wb)
 	return false;
 }
 
+#ifdef CONFIG_SYSCTL
 /*
  * sysctl handler for /proc/sys/vm/dirty_writeback_centisecs
  */
@@ -2020,6 +2023,7 @@ static int dirty_writeback_centisecs_handler(struct ctl_table *table, int write,
 
 	return ret;
 }
+#endif
 
 void laptop_mode_timer_fn(struct timer_list *t)
 {
