@@ -3,8 +3,8 @@
  * Virtio Transport driver for Arm System Control and Management Interface
  * (SCMI).
  *
- * Copyright (C) 2020-2021 OpenSynergy.
- * Copyright (C) 2021 ARM Ltd.
+ * Copyright (C) 2020-2022 OpenSynergy.
+ * Copyright (C) 2021-2022 ARM Ltd.
  */
 
 /**
@@ -17,7 +17,9 @@
  * virtqueue. Access to each virtqueue is protected by spinlocks.
  */
 
+#include <linux/completion.h>
 #include <linux/errno.h>
+#include <linux/refcount.h>
 #include <linux/slab.h>
 #include <linux/virtio.h>
 #include <linux/virtio_config.h>
@@ -27,6 +29,7 @@
 
 #include "common.h"
 
+#define VIRTIO_MAX_RX_TIMEOUT_MS	60000
 #define VIRTIO_SCMI_MAX_MSG_SIZE 128 /* Value may be increased. */
 #define VIRTIO_SCMI_MAX_PDU_SIZE \
 	(VIRTIO_SCMI_MAX_MSG_SIZE + SCMI_MSG_MAX_PROT_OVERHEAD)
@@ -37,25 +40,41 @@
  *
  * @vqueue: Associated virtqueue
  * @cinfo: SCMI Tx or Rx channel
+ * @free_lock: Protects access to the @free_list.
  * @free_list: List of unused scmi_vio_msg, maintained for Tx channels only
+ * @deferred_tx_work: Worker for TX deferred replies processing
+ * @deferred_tx_wq: Workqueue for TX deferred replies
+ * @pending_lock: Protects access to the @pending_cmds_list.
+ * @pending_cmds_list: List of pre-fetched commands queueud for later processing
  * @is_rx: Whether channel is an Rx channel
- * @ready: Whether transport user is ready to hear about channel
  * @max_msg: Maximum number of pending messages for this channel.
- * @lock: Protects access to all members except ready.
- * @ready_lock: Protects access to ready. If required, it must be taken before
- *              lock.
+ * @lock: Protects access to all members except users, free_list.
+ * @shutdown_done: A reference to a completion used when freeing this channel.
+ * @users: A reference count to currently active users of this channel.
  */
 struct scmi_vio_channel {
 	struct virtqueue *vqueue;
 	struct scmi_chan_info *cinfo;
+	/* lock to protect access to the free list. */
+	spinlock_t free_lock;
 	struct list_head free_list;
+	/* lock to protect access to the pending list. */
+	spinlock_t pending_lock;
+	struct list_head pending_cmds_list;
+	struct work_struct deferred_tx_work;
+	struct workqueue_struct *deferred_tx_wq;
 	bool is_rx;
-	bool ready;
 	unsigned int max_msg;
-	/* lock to protect access to all members except ready. */
+	/* lock to protect access to all members except users, free_list  */
 	spinlock_t lock;
-	/* lock to rotects access to ready flag. */
-	spinlock_t ready_lock;
+	struct completion *shutdown_done;
+	refcount_t users;
+};
+
+enum poll_states {
+	VIO_MSG_NOT_POLLED,
+	VIO_MSG_POLLING,
+	VIO_MSG_POLL_DONE,
 };
 
 /**
@@ -65,16 +84,121 @@ struct scmi_vio_channel {
  * @input: SDU used for (delayed) responses and notifications
  * @list: List which scmi_vio_msg may be part of
  * @rx_len: Input SDU size in bytes, once input has been received
+ * @poll_idx: Last used index registered for polling purposes if this message
+ *	      transaction reply was configured for polling.
+ * @poll_status: Polling state for this message.
  */
 struct scmi_vio_msg {
 	struct scmi_msg_payld *request;
 	struct scmi_msg_payld *input;
 	struct list_head list;
 	unsigned int rx_len;
+	unsigned int poll_idx;
+	enum poll_states poll_status;
 };
 
 /* Only one SCMI VirtIO device can possibly exist */
 static struct virtio_device *scmi_vdev;
+
+static void scmi_vio_channel_ready(struct scmi_vio_channel *vioch,
+				   struct scmi_chan_info *cinfo)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&vioch->lock, flags);
+	cinfo->transport_info = vioch;
+	/* Indirectly setting channel not available any more */
+	vioch->cinfo = cinfo;
+	spin_unlock_irqrestore(&vioch->lock, flags);
+
+	refcount_set(&vioch->users, 1);
+}
+
+static inline bool scmi_vio_channel_acquire(struct scmi_vio_channel *vioch)
+{
+	return refcount_inc_not_zero(&vioch->users);
+}
+
+static inline void scmi_vio_channel_release(struct scmi_vio_channel *vioch)
+{
+	if (refcount_dec_and_test(&vioch->users)) {
+		unsigned long flags;
+
+		spin_lock_irqsave(&vioch->lock, flags);
+		if (vioch->shutdown_done) {
+			vioch->cinfo = NULL;
+			complete(vioch->shutdown_done);
+		}
+		spin_unlock_irqrestore(&vioch->lock, flags);
+	}
+}
+
+static void scmi_vio_channel_cleanup_sync(struct scmi_vio_channel *vioch)
+{
+	unsigned long flags;
+	DECLARE_COMPLETION_ONSTACK(vioch_shutdown_done);
+	void *deferred_wq = NULL;
+
+	/*
+	 * Prepare to wait for the last release if not already released
+	 * or in progress.
+	 */
+	spin_lock_irqsave(&vioch->lock, flags);
+	if (!vioch->cinfo || vioch->shutdown_done) {
+		spin_unlock_irqrestore(&vioch->lock, flags);
+		return;
+	}
+
+	vioch->shutdown_done = &vioch_shutdown_done;
+	virtio_break_device(vioch->vqueue->vdev);
+	if (!vioch->is_rx && vioch->deferred_tx_wq) {
+		deferred_wq = vioch->deferred_tx_wq;
+		/* Cannot be kicked anymore after this...*/
+		vioch->deferred_tx_wq = NULL;
+	}
+	spin_unlock_irqrestore(&vioch->lock, flags);
+
+	if (deferred_wq)
+		destroy_workqueue(deferred_wq);
+
+	scmi_vio_channel_release(vioch);
+
+	/* Let any possibly concurrent RX path release the channel */
+	wait_for_completion(vioch->shutdown_done);
+}
+
+/* Assumes to be called with vio channel acquired already */
+static struct scmi_vio_msg *
+scmi_virtio_get_free_msg(struct scmi_vio_channel *vioch)
+{
+	unsigned long flags;
+	struct scmi_vio_msg *msg;
+
+	spin_lock_irqsave(&vioch->free_lock, flags);
+	if (list_empty(&vioch->free_list)) {
+		spin_unlock_irqrestore(&vioch->free_lock, flags);
+		return NULL;
+	}
+
+	msg = list_first_entry(&vioch->free_list, typeof(*msg), list);
+	list_del_init(&msg->list);
+	spin_unlock_irqrestore(&vioch->free_lock, flags);
+
+	return msg;
+}
+
+/* Assumes to be called with vio channel acquired already */
+static void scmi_virtio_put_free_msg(struct scmi_vio_channel *vioch,
+				     struct scmi_vio_msg *msg)
+{
+	unsigned long flags;
+
+	msg->poll_status = VIO_MSG_NOT_POLLED;
+
+	spin_lock_irqsave(&vioch->free_lock, flags);
+	list_add_tail(&msg->list, &vioch->free_list);
+	spin_unlock_irqrestore(&vioch->free_lock, flags);
+}
 
 static bool scmi_vio_have_vq_rx(struct virtio_device *vdev)
 {
@@ -82,12 +206,12 @@ static bool scmi_vio_have_vq_rx(struct virtio_device *vdev)
 }
 
 static int scmi_vio_feed_vq_rx(struct scmi_vio_channel *vioch,
-			       struct scmi_vio_msg *msg,
-			       struct device *dev)
+			       struct scmi_vio_msg *msg)
 {
 	struct scatterlist sg_in;
 	int rc;
 	unsigned long flags;
+	struct device *dev = &vioch->vqueue->vdev->dev;
 
 	sg_init_one(&sg_in, msg->input, VIRTIO_SCMI_MAX_PDU_SIZE);
 
@@ -95,7 +219,7 @@ static int scmi_vio_feed_vq_rx(struct scmi_vio_channel *vioch,
 
 	rc = virtqueue_add_inbuf(vioch->vqueue, &sg_in, 1, msg, GFP_ATOMIC);
 	if (rc)
-		dev_err_once(dev, "failed to add to virtqueue (%d)\n", rc);
+		dev_err(dev, "failed to add to RX virtqueue (%d)\n", rc);
 	else
 		virtqueue_kick(vioch->vqueue);
 
@@ -104,22 +228,22 @@ static int scmi_vio_feed_vq_rx(struct scmi_vio_channel *vioch,
 	return rc;
 }
 
+/*
+ * Assume to be called with channel already acquired or not ready at all;
+ * vioch->lock MUST NOT have been already acquired.
+ */
 static void scmi_finalize_message(struct scmi_vio_channel *vioch,
 				  struct scmi_vio_msg *msg)
 {
-	if (vioch->is_rx) {
-		scmi_vio_feed_vq_rx(vioch, msg, vioch->cinfo->dev);
-	} else {
-		/* Here IRQs are assumed to be already disabled by the caller */
-		spin_lock(&vioch->lock);
-		list_add(&msg->list, &vioch->free_list);
-		spin_unlock(&vioch->lock);
-	}
+	if (vioch->is_rx)
+		scmi_vio_feed_vq_rx(vioch, msg);
+	else
+		scmi_virtio_put_free_msg(vioch, msg);
 }
 
 static void scmi_vio_complete_cb(struct virtqueue *vqueue)
 {
-	unsigned long ready_flags;
+	unsigned long flags;
 	unsigned int length;
 	struct scmi_vio_channel *vioch;
 	struct scmi_vio_msg *msg;
@@ -130,27 +254,28 @@ static void scmi_vio_complete_cb(struct virtqueue *vqueue)
 	vioch = &((struct scmi_vio_channel *)vqueue->vdev->priv)[vqueue->index];
 
 	for (;;) {
-		spin_lock_irqsave(&vioch->ready_lock, ready_flags);
-
-		if (!vioch->ready) {
+		if (!scmi_vio_channel_acquire(vioch)) {
 			if (!cb_enabled)
 				(void)virtqueue_enable_cb(vqueue);
-			goto unlock_ready_out;
+			return;
 		}
 
-		/* IRQs already disabled here no need to irqsave */
-		spin_lock(&vioch->lock);
+		spin_lock_irqsave(&vioch->lock, flags);
 		if (cb_enabled) {
 			virtqueue_disable_cb(vqueue);
 			cb_enabled = false;
 		}
+
 		msg = virtqueue_get_buf(vqueue, &length);
 		if (!msg) {
-			if (virtqueue_enable_cb(vqueue))
-				goto unlock_out;
+			if (virtqueue_enable_cb(vqueue)) {
+				spin_unlock_irqrestore(&vioch->lock, flags);
+				scmi_vio_channel_release(vioch);
+				return;
+			}
 			cb_enabled = true;
 		}
-		spin_unlock(&vioch->lock);
+		spin_unlock_irqrestore(&vioch->lock, flags);
 
 		if (msg) {
 			msg->rx_len = length;
@@ -161,19 +286,48 @@ static void scmi_vio_complete_cb(struct virtqueue *vqueue)
 		}
 
 		/*
-		 * Release ready_lock and re-enable IRQs between loop iterations
-		 * to allow virtio_chan_free() to possibly kick in and set the
-		 * flag vioch->ready to false even in between processing of
-		 * messages, so as to force outstanding messages to be ignored
-		 * when system is shutting down.
+		 * Release vio channel between loop iterations to allow
+		 * virtio_chan_free() to eventually fully release it when
+		 * shutting down; in such a case, any outstanding message will
+		 * be ignored since this loop will bail out at the next
+		 * iteration.
 		 */
-		spin_unlock_irqrestore(&vioch->ready_lock, ready_flags);
+		scmi_vio_channel_release(vioch);
+	}
+}
+
+static void scmi_vio_deferred_tx_worker(struct work_struct *work)
+{
+	unsigned long flags;
+	struct scmi_vio_channel *vioch;
+	struct scmi_vio_msg *msg, *tmp;
+
+	vioch = container_of(work, struct scmi_vio_channel, deferred_tx_work);
+
+	if (!scmi_vio_channel_acquire(vioch))
+		return;
+
+	/* Process pre-fetched messages */
+	spin_lock_irqsave(&vioch->pending_lock, flags);
+
+	/* Scan the list of possibly pre-fetched messages during polling. */
+	list_for_each_entry_safe(msg, tmp, &vioch->pending_cmds_list, list) {
+		list_del(&msg->list);
+
+		/* Channel is acquired here and cannot vanish */
+		scmi_rx_callback(vioch->cinfo,
+				 msg_read_header(msg->input), msg);
+
+		/* Free the processed message once done */
+		scmi_virtio_put_free_msg(vioch, msg);
 	}
 
-unlock_out:
-	spin_unlock(&vioch->lock);
-unlock_ready_out:
-	spin_unlock_irqrestore(&vioch->ready_lock, ready_flags);
+	spin_unlock_irqrestore(&vioch->pending_lock, flags);
+
+	/* Process possibly still pending messages */
+	scmi_vio_complete_cb(vioch->vqueue);
+
+	scmi_vio_channel_release(vioch);
 }
 
 static const char *const scmi_vio_vqueue_names[] = { "tx", "rx" };
@@ -193,8 +347,8 @@ static unsigned int virtio_get_max_msg(struct scmi_chan_info *base_cinfo)
 static int virtio_link_supplier(struct device *dev)
 {
 	if (!scmi_vdev) {
-		dev_notice_once(dev,
-				"Deferring probe after not finding a bound scmi-virtio device\n");
+		dev_notice(dev,
+			   "Deferring probe after not finding a bound scmi-virtio device\n");
 		return -EPROBE_DEFER;
 	}
 
@@ -234,7 +388,6 @@ static bool virtio_chan_available(struct device *dev, int idx)
 static int virtio_chan_setup(struct scmi_chan_info *cinfo, struct device *dev,
 			     bool tx)
 {
-	unsigned long flags;
 	struct scmi_vio_channel *vioch;
 	int index = tx ? VIRTIO_SCMI_VQ_TX : VIRTIO_SCMI_VQ_RX;
 	int i;
@@ -243,6 +396,19 @@ static int virtio_chan_setup(struct scmi_chan_info *cinfo, struct device *dev,
 		return -EPROBE_DEFER;
 
 	vioch = &((struct scmi_vio_channel *)scmi_vdev->priv)[index];
+
+	/* Setup a deferred worker for polling. */
+	if (tx && !vioch->deferred_tx_wq) {
+		vioch->deferred_tx_wq =
+			alloc_workqueue(dev_name(&scmi_vdev->dev),
+					WQ_UNBOUND | WQ_FREEZABLE | WQ_SYSFS,
+					0);
+		if (!vioch->deferred_tx_wq)
+			return -ENOMEM;
+
+		INIT_WORK(&vioch->deferred_tx_work,
+			  scmi_vio_deferred_tx_worker);
+	}
 
 	for (i = 0; i < vioch->max_msg; i++) {
 		struct scmi_vio_msg *msg;
@@ -264,43 +430,22 @@ static int virtio_chan_setup(struct scmi_chan_info *cinfo, struct device *dev,
 		if (!msg->input)
 			return -ENOMEM;
 
-		if (tx) {
-			spin_lock_irqsave(&vioch->lock, flags);
-			list_add_tail(&msg->list, &vioch->free_list);
-			spin_unlock_irqrestore(&vioch->lock, flags);
-		} else {
-			scmi_vio_feed_vq_rx(vioch, msg, cinfo->dev);
-		}
+		scmi_finalize_message(vioch, msg);
 	}
 
-	spin_lock_irqsave(&vioch->lock, flags);
-	cinfo->transport_info = vioch;
-	/* Indirectly setting channel not available any more */
-	vioch->cinfo = cinfo;
-	spin_unlock_irqrestore(&vioch->lock, flags);
-
-	spin_lock_irqsave(&vioch->ready_lock, flags);
-	vioch->ready = true;
-	spin_unlock_irqrestore(&vioch->ready_lock, flags);
+	scmi_vio_channel_ready(vioch, cinfo);
 
 	return 0;
 }
 
 static int virtio_chan_free(int id, void *p, void *data)
 {
-	unsigned long flags;
 	struct scmi_chan_info *cinfo = p;
 	struct scmi_vio_channel *vioch = cinfo->transport_info;
 
-	spin_lock_irqsave(&vioch->ready_lock, flags);
-	vioch->ready = false;
-	spin_unlock_irqrestore(&vioch->ready_lock, flags);
+	scmi_vio_channel_cleanup_sync(vioch);
 
 	scmi_free_channel(cinfo, data, id);
-
-	spin_lock_irqsave(&vioch->lock, flags);
-	vioch->cinfo = NULL;
-	spin_unlock_irqrestore(&vioch->lock, flags);
 
 	return 0;
 }
@@ -316,32 +461,50 @@ static int virtio_send_message(struct scmi_chan_info *cinfo,
 	int rc;
 	struct scmi_vio_msg *msg;
 
-	spin_lock_irqsave(&vioch->lock, flags);
+	if (!scmi_vio_channel_acquire(vioch))
+		return -EINVAL;
 
-	if (list_empty(&vioch->free_list)) {
-		spin_unlock_irqrestore(&vioch->lock, flags);
+	msg = scmi_virtio_get_free_msg(vioch);
+	if (!msg) {
+		scmi_vio_channel_release(vioch);
 		return -EBUSY;
 	}
-
-	msg = list_first_entry(&vioch->free_list, typeof(*msg), list);
-	list_del(&msg->list);
 
 	msg_tx_prepare(msg->request, xfer);
 
 	sg_init_one(&sg_out, msg->request, msg_command_size(xfer));
 	sg_init_one(&sg_in, msg->input, msg_response_size(xfer));
 
-	rc = virtqueue_add_sgs(vioch->vqueue, sgs, 1, 1, msg, GFP_ATOMIC);
-	if (rc) {
-		list_add(&msg->list, &vioch->free_list);
-		dev_err_once(vioch->cinfo->dev,
-			     "%s() failed to add to virtqueue (%d)\n", __func__,
-			     rc);
-	} else {
-		virtqueue_kick(vioch->vqueue);
+	spin_lock_irqsave(&vioch->lock, flags);
+
+	/*
+	 * If polling was requested for this transaction:
+	 *  - retrieve last used index (will be used as polling reference)
+	 *  - bind the polled message to the xfer via .priv
+	 */
+	if (xfer->hdr.poll_completion) {
+		msg->poll_idx = virtqueue_enable_cb_prepare(vioch->vqueue);
+		msg->poll_status = VIO_MSG_POLLING;
+		/* Ensure initialized msg is visibly bound to xfer */
+		smp_store_mb(xfer->priv, msg);
 	}
 
+	rc = virtqueue_add_sgs(vioch->vqueue, sgs, 1, 1, msg, GFP_ATOMIC);
+	if (rc)
+		dev_err(vioch->cinfo->dev,
+			"failed to add to TX virtqueue (%d)\n", rc);
+	else
+		virtqueue_kick(vioch->vqueue);
+
 	spin_unlock_irqrestore(&vioch->lock, flags);
+
+	if (rc) {
+		/* Ensure order between xfer->priv clear and vq feeding */
+		smp_store_mb(xfer->priv, NULL);
+		scmi_virtio_put_free_msg(vioch, msg);
+	}
+
+	scmi_vio_channel_release(vioch);
 
 	return rc;
 }
@@ -351,10 +514,8 @@ static void virtio_fetch_response(struct scmi_chan_info *cinfo,
 {
 	struct scmi_vio_msg *msg = xfer->priv;
 
-	if (msg) {
+	if (msg)
 		msg_fetch_response(msg->input, msg->rx_len, xfer);
-		xfer->priv = NULL;
-	}
 }
 
 static void virtio_fetch_notification(struct scmi_chan_info *cinfo,
@@ -362,10 +523,173 @@ static void virtio_fetch_notification(struct scmi_chan_info *cinfo,
 {
 	struct scmi_vio_msg *msg = xfer->priv;
 
-	if (msg) {
+	if (msg)
 		msg_fetch_notification(msg->input, msg->rx_len, max_len, xfer);
-		xfer->priv = NULL;
+}
+
+/**
+ * virtio_mark_txdone  - Mark transmission done
+ *
+ * Free only completed polling transfer messages.
+ *
+ * Note that in the SCMI VirtIO transport we never explicitly release timed-out
+ * messages by forcibly re-adding them to the free-list inside the TX code path;
+ * we instead let IRQ/RX callbacks eventually clean up such messages once,
+ * finally, a late reply is received and discarded (if ever).
+ *
+ * This approach was deemed preferable since those pending timed-out buffers are
+ * still effectively owned by the SCMI platform VirtIO device even after timeout
+ * expiration: forcibly freeing and reusing them before they had been returned
+ * explicitly by the SCMI platform could lead to subtle bugs due to message
+ * corruption.
+ * An SCMI platform VirtIO device which never returns message buffers is
+ * anyway broken and it will quickly lead to exhaustion of available messages.
+ *
+ * For this same reason, here, we take care to free only the polled messages
+ * that had been somehow replied and not by chance processed on the IRQ path,
+ * since they won't be freed elsewhere; possible late replies to timed-out
+ * polled messages will be anyway freed by RX callbacks instead.
+ *
+ * @cinfo: SCMI channel info
+ * @ret: Transmission return code
+ * @xfer: Transfer descriptor
+ */
+static void virtio_mark_txdone(struct scmi_chan_info *cinfo, int ret,
+			       struct scmi_xfer *xfer)
+{
+	struct scmi_vio_channel *vioch = cinfo->transport_info;
+	struct scmi_vio_msg *msg = xfer->priv;
+
+	if (!scmi_vio_channel_acquire(vioch))
+		return;
+
+	/* Must be a polled xfer and not already freed on the IRQ path */
+	if (!xfer->hdr.poll_completion || !msg) {
+		scmi_vio_channel_release(vioch);
+		return;
 	}
+
+	/* Ensure msg is unbound from xfer anyway at this point */
+	smp_store_mb(xfer->priv, NULL);
+
+	/* Do not free timedout polled messages */
+	if (ret != -ETIMEDOUT)
+		scmi_virtio_put_free_msg(vioch, msg);
+
+	scmi_vio_channel_release(vioch);
+}
+
+/**
+ * virtio_poll_done  - Provide polling support for VirtIO transport
+ *
+ * @cinfo: SCMI channel info
+ * @xfer: Reference to the transfer being poll for.
+ *
+ * VirtIO core provides a polling mechanism based only on last used indexes:
+ * this means that it is possible to poll the virtqueues waiting for something
+ * new to arrive from the host side, but the only way to check if the freshly
+ * arrived buffer was indeed what we were waiting for is to compare the newly
+ * arrived message descriptor with the one we are polling on.
+ *
+ * As a consequence it can happen to dequeue something different from the buffer
+ * we were poll-waiting for: if that is the case such early fetched buffers are
+ * then added to a the @pending_cmds_list list for later processing by a
+ * dedicated deferred worker.
+ *
+ * So, basically, once something new is spotted we proceed to de-queue all the
+ * freshly received used buffers until we found the one we were polling on, or,
+ * we have 'seemingly' emptied the virtqueue; if some buffers are still pending
+ * in the vqueue at the end of the polling loop (possible due to inherent races
+ * in virtqueues handling mechanisms), we similarly kick the deferred worker
+ * and let it process those, to avoid indefinitely looping in the .poll_done
+ * busy-waiting helper.
+ *
+ * Note that, since we do NOT have per-message suppress notification mechanism,
+ * the message we are polling for could be alternatively delivered via usual
+ * IRQs callbacks on another core which happened to have IRQs enabled while we
+ * are actively polling for it here: in such a case it will be handled as such
+ * by scmi_rx_callback() and the polling loop in the SCMI Core TX path will be
+ * transparently terminated anyway.
+ *
+ * Return: True once polling has successfully completed.
+ */
+static bool virtio_poll_done(struct scmi_chan_info *cinfo,
+			     struct scmi_xfer *xfer)
+{
+	bool pending, ret = false;
+	unsigned int length, any_prefetched = 0;
+	unsigned long flags;
+	struct scmi_vio_msg *next_msg, *msg = xfer->priv;
+	struct scmi_vio_channel *vioch = cinfo->transport_info;
+
+	if (!msg)
+		return true;
+
+	/* Processed already by other polling loop on another CPU ? */
+	if (msg->poll_status == VIO_MSG_POLL_DONE)
+		return true;
+
+	if (!scmi_vio_channel_acquire(vioch))
+		return true;
+
+	/* Has cmdq index moved at all ? */
+	pending = virtqueue_poll(vioch->vqueue, msg->poll_idx);
+	if (!pending) {
+		scmi_vio_channel_release(vioch);
+		return false;
+	}
+
+	spin_lock_irqsave(&vioch->lock, flags);
+	virtqueue_disable_cb(vioch->vqueue);
+
+	/*
+	 * Process all new messages till the polled-for message is found OR
+	 * the vqueue is empty.
+	 */
+	while ((next_msg = virtqueue_get_buf(vioch->vqueue, &length))) {
+		next_msg->rx_len = length;
+		/* Is the message we were polling for ? */
+		if (next_msg == msg) {
+			ret = true;
+			break;
+		}
+
+		if (next_msg->poll_status == VIO_MSG_NOT_POLLED) {
+			any_prefetched++;
+
+			spin_lock(&vioch->pending_lock);
+			list_add_tail(&next_msg->list,
+				      &vioch->pending_cmds_list);
+			spin_unlock(&vioch->pending_lock);
+		} else {
+			/* We picked another currently polled msg */
+			smp_store_mb(next_msg->poll_status, VIO_MSG_POLL_DONE);
+		}
+	}
+
+	/*
+	 * When the polling loop has successfully terminated if something
+	 * else was queued in the meantime, it will be served by a deferred
+	 * worker OR by the normal IRQ/callback OR by other poll loops.
+	 *
+	 * If we are still looking for the polled reply, the polling index has
+	 * to be updated to the current vqueue last used index.
+	 */
+	if (ret) {
+		pending = !virtqueue_enable_cb(vioch->vqueue);
+	} else {
+		msg->poll_idx = virtqueue_enable_cb_prepare(vioch->vqueue);
+		pending = virtqueue_poll(vioch->vqueue, msg->poll_idx);
+	}
+
+	if (vioch->deferred_tx_wq && (any_prefetched || pending))
+		queue_work(vioch->deferred_tx_wq, &vioch->deferred_tx_work);
+
+	spin_unlock_irqrestore(&vioch->lock, flags);
+
+	scmi_vio_channel_release(vioch);
+
+	return ret;
 }
 
 static const struct scmi_transport_ops scmi_virtio_ops = {
@@ -377,6 +701,8 @@ static const struct scmi_transport_ops scmi_virtio_ops = {
 	.send_message = virtio_send_message,
 	.fetch_response = virtio_fetch_response,
 	.fetch_notification = virtio_fetch_notification,
+	.mark_txdone = virtio_mark_txdone,
+	.poll_done = virtio_poll_done,
 };
 
 static int scmi_vio_probe(struct virtio_device *vdev)
@@ -417,8 +743,10 @@ static int scmi_vio_probe(struct virtio_device *vdev)
 		unsigned int sz;
 
 		spin_lock_init(&channels[i].lock);
-		spin_lock_init(&channels[i].ready_lock);
+		spin_lock_init(&channels[i].free_lock);
 		INIT_LIST_HEAD(&channels[i].free_list);
+		spin_lock_init(&channels[i].pending_lock);
+		INIT_LIST_HEAD(&channels[i].pending_cmds_list);
 		channels[i].vqueue = vqs[i];
 
 		sz = virtqueue_get_vring_size(channels[i].vqueue);
@@ -427,10 +755,10 @@ static int scmi_vio_probe(struct virtio_device *vdev)
 			sz /= DESCRIPTORS_PER_TX_MSG;
 
 		if (sz > MSG_TOKEN_MAX) {
-			dev_info_once(dev,
-				      "%s virtqueue could hold %d messages. Only %ld allowed to be pending.\n",
-				      channels[i].is_rx ? "rx" : "tx",
-				      sz, MSG_TOKEN_MAX);
+			dev_info(dev,
+				 "%s virtqueue could hold %d messages. Only %ld allowed to be pending.\n",
+				 channels[i].is_rx ? "rx" : "tx",
+				 sz, MSG_TOKEN_MAX);
 			sz = MSG_TOKEN_MAX;
 		}
 		channels[i].max_msg = sz;
@@ -460,12 +788,13 @@ static void scmi_vio_remove(struct virtio_device *vdev)
 
 static int scmi_vio_validate(struct virtio_device *vdev)
 {
+#ifdef CONFIG_ARM_SCMI_TRANSPORT_VIRTIO_VERSION1_COMPLIANCE
 	if (!virtio_has_feature(vdev, VIRTIO_F_VERSION_1)) {
 		dev_err(&vdev->dev,
 			"device does not comply with spec version 1.x\n");
 		return -EINVAL;
 	}
-
+#endif
 	return 0;
 }
 
@@ -503,7 +832,9 @@ const struct scmi_desc scmi_virtio_desc = {
 	.transport_init = virtio_scmi_init,
 	.transport_exit = virtio_scmi_exit,
 	.ops = &scmi_virtio_ops,
-	.max_rx_timeout_ms = 60000, /* for non-realtime virtio devices */
+	/* for non-realtime virtio devices */
+	.max_rx_timeout_ms = VIRTIO_MAX_RX_TIMEOUT_MS,
 	.max_msg = 0, /* overridden by virtio_get_max_msg() */
 	.max_msg_size = VIRTIO_SCMI_MAX_MSG_SIZE,
+	.atomic_enabled = IS_ENABLED(CONFIG_ARM_SCMI_TRANSPORT_VIRTIO_ATOMIC_ENABLE),
 };
