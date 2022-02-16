@@ -139,9 +139,9 @@ int cifs_try_adding_channels(struct cifs_sb_info *cifs_sb, struct cifs_ses *ses)
 
 	if (left <= 0) {
 		spin_unlock(&ses->chan_lock);
-		cifs_dbg(FYI,
-			 "ses already at max_channels (%zu), nothing to open\n",
-			 ses->chan_max);
+		cifs_dbg(VFS,
+			 "ses already at max_channels (%zu), nothing to open. chan_max %zu\n",
+			 ses->chan_max, ses->chan_count);
 		return 0;
 	}
 

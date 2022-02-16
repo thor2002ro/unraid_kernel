@@ -571,8 +571,8 @@ parse_server_interfaces(struct network_interface_info_ioctl_rsp *buf,
 		info->rdma_capable = le32_to_cpu(p->Capability & RDMA_CAPABLE) ? 1 : 0;
 		info->rss_capable = le32_to_cpu(p->Capability & RSS_CAPABLE) ? 1 : 0;
 
-		cifs_dbg(FYI, "%s: adding iface %zu\n", __func__, *iface_count);
-		cifs_dbg(FYI, "%s: speed %zu bps\n", __func__, info->speed);
+		cifs_dbg(VFS, "%s: adding iface %zu\n", __func__, *iface_count);
+		cifs_dbg(VFS, "%s: speed %zu bps\n", __func__, info->speed);
 		cifs_dbg(FYI, "%s: capabilities 0x%08x\n", __func__,
 			 le32_to_cpu(p->Capability));
 
