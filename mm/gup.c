@@ -1784,23 +1784,23 @@ static long check_and_migrate_movable_pages(unsigned long nr_pages,
 					    unsigned int gup_flags)
 {
 	unsigned long isolation_error_count = 0, i;
-	struct page *prev_head = NULL;
+	struct folio *prev_folio = NULL;
 	LIST_HEAD(movable_page_list);
 	bool drain_allow = true;
 	int ret = 0;
 
 	for (i = 0; i < nr_pages; i++) {
-		struct page *head = compound_head(pages[i]);
+		struct folio *folio = page_folio(pages[i]);
 
-		if (head == prev_head)
+		if (folio == prev_folio)
 			continue;
-		prev_head = head;
+		prev_folio = folio;
 
 		/*
 		 * Device private pages will get faulted in during gup so it
 		 * shouldn't be possible to see one here.
 		 */
-		if (WARN_ON_ONCE(is_device_private_page(head))) {
+		if (WARN_ON_ONCE(folio_is_device_private(folio))) {
 			ret = -EFAULT;
 			goto unpin_pages;
 		}
@@ -1811,19 +1811,20 @@ static long check_and_migrate_movable_pages(unsigned long nr_pages,
 		 * page. So when trying to pin with FOLL_LONGTERM instead try
 		 * to migrate the page out of device memory.
 		 */
-		if (is_device_coherent_page(head)) {
-			WARN_ON_ONCE(PageCompound(head));
+		if (folio_is_device_coherent(folio)) {
+			WARN_ON_ONCE(folio_test_large(folio));
 
 			/*
-			 * Migration will fail if the page is pinned, so convert
-			 * the pin on the source page to a normal reference.
+			 * Migration will fail if the folio is pinned,
+			 * so convert the pin on the source folio to a
+			 * normal reference.
 			 */
 			if (gup_flags & FOLL_PIN) {
-				get_page(head);
-				unpin_user_page(head);
+				folio_get(folio);
+				gup_put_folio(folio, 1, gup_flags);
 			}
 
-			pages[i] = migrate_device_page(head, gup_flags);
+			pages[i] = migrate_device_page(&folio->page, gup_flags);
 			if (!pages[i]) {
 				ret = -EBUSY;
 				goto unpin_pages;
@@ -1831,31 +1832,32 @@ static long check_and_migrate_movable_pages(unsigned long nr_pages,
 			continue;
 		}
 
-		if (is_pinnable_page(head))
+		if (folio_is_pinnable(folio))
 			continue;
 
 		/*
 		 * Try to move out any movable page before pinning the range.
 		 */
-		if (PageHuge(head)) {
-			if (!isolate_huge_page(head, &movable_page_list))
+		if (folio_test_hugetlb(folio)) {
+			if (!isolate_huge_page(&folio->page,
+						&movable_page_list))
 				isolation_error_count++;
 			continue;
 		}
 
-		if (!PageLRU(head) && drain_allow) {
+		if (!folio_test_lru(folio) && drain_allow) {
 			lru_add_drain_all();
 			drain_allow = false;
 		}
 
-		if (isolate_lru_page(head)) {
+		if (folio_isolate_lru(folio)) {
 			isolation_error_count++;
 			continue;
 		}
-		list_add_tail(&head->lru, &movable_page_list);
-		mod_node_page_state(page_pgdat(head),
-				    NR_ISOLATED_ANON + page_is_file_lru(head),
-				    thp_nr_pages(head));
+		list_add_tail(&folio->lru, &movable_page_list);
+		node_stat_mod_folio(folio,
+				    NR_ISOLATED_ANON + folio_is_file_lru(folio),
+				    folio_nr_pages(folio));
 	}
 
 	if (!list_empty(&movable_page_list) || isolation_error_count)
