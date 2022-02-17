@@ -64,13 +64,12 @@ static size_t rng_buffer_size(void)
 static void add_early_randomness(struct hwrng *rng)
 {
 	int bytes_read;
-	size_t size = min_t(size_t, 16, rng_buffer_size());
 
 	mutex_lock(&reading_mutex);
-	bytes_read = rng_get_data(rng, rng_buffer, size, 0);
+	bytes_read = rng_get_data(rng, rng_fillbuf, 32, 0);
 	mutex_unlock(&reading_mutex);
 	if (bytes_read > 0)
-		add_device_randomness(rng_buffer, bytes_read);
+		add_device_randomness(rng_fillbuf, bytes_read);
 }
 
 static inline void cleanup_rng(struct kref *kref)
@@ -336,8 +335,9 @@ static ssize_t rng_current_store(struct device *dev,
 	} else {
 		list_for_each_entry(rng, &rng_list, list) {
 			if (sysfs_streq(rng->name, buf)) {
-				cur_rng_set_by_user = 1;
 				err = set_current_rng(rng);
+				if (!err)
+					cur_rng_set_by_user = 1;
 				break;
 			}
 		}
@@ -424,10 +424,14 @@ static int __init register_miscdev(void)
 
 static int hwrng_fillfn(void *unused)
 {
+	size_t entropy, entropy_credit = 0; /* in 1/1024 of a bit */
 	long rc;
 
 	while (!kthread_should_stop()) {
 		struct hwrng *rng;
+
+		if (!current_quality)
+			break;
 
 		rng = get_current_rng();
 		if (IS_ERR(rng) || !rng)
@@ -442,9 +446,17 @@ static int hwrng_fillfn(void *unused)
 			msleep_interruptible(10000);
 			continue;
 		}
+
+		/* If we cannot credit at least one bit of entropy,
+		 * keep track of the remainder for the next iteration
+		 */
+		entropy = rc * current_quality * 8 + entropy_credit;
+		if ((entropy >> 10) == 0)
+			entropy_credit = entropy;
+
 		/* Outside lock, sure, but y'know: randomness. */
 		add_hwgenerator_randomness((void *)rng_fillbuf, rc,
-					   rc * current_quality * 8 >> 10);
+					   entropy >> 10);
 	}
 	hwrng_fill = NULL;
 	return 0;
@@ -638,7 +650,7 @@ static void __exit hwrng_modexit(void)
 	unregister_miscdev();
 }
 
-module_init(hwrng_modinit);
+fs_initcall(hwrng_modinit); /* depends on misc_register() */
 module_exit(hwrng_modexit);
 
 MODULE_DESCRIPTION("H/W Random Number Generator (RNG) driver");
