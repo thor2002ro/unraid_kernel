@@ -61,6 +61,15 @@ enum rtw89_subband {
 	RTW89_CH_5G_BAND_3 = 3,
 	RTW89_CH_5G_BAND_4 = 4,
 
+	RTW89_CH_6G_BAND_IDX0, /* Low */
+	RTW89_CH_6G_BAND_IDX1, /* Low */
+	RTW89_CH_6G_BAND_IDX2, /* Mid */
+	RTW89_CH_6G_BAND_IDX3, /* Mid */
+	RTW89_CH_6G_BAND_IDX4, /* High */
+	RTW89_CH_6G_BAND_IDX5, /* High */
+	RTW89_CH_6G_BAND_IDX6, /* Ultra-high */
+	RTW89_CH_6G_BAND_IDX7, /* Ultra-high */
+
 	RTW89_SUBBAND_NR,
 };
 
@@ -2209,6 +2218,7 @@ struct rtw89_chip_info {
 	const struct rtw89_dle_mem *dle_mem;
 	u32 rf_base_addr[2];
 	u8 support_bands;
+	bool support_bw160;
 	u8 rf_path_num;
 	u8 tx_nss;
 	u8 rx_nss;
@@ -3148,6 +3158,18 @@ static inline struct ieee80211_sta *rtwsta_to_sta_safe(struct rtw89_sta *rtwsta)
 static inline struct rtw89_sta *sta_to_rtwsta_safe(struct ieee80211_sta *sta)
 {
 	return sta ? (struct rtw89_sta *)sta->drv_priv : NULL;
+}
+
+static inline u8 rtw89_hw_to_rate_info_bw(enum rtw89_bandwidth hw_bw)
+{
+	if (hw_bw == RTW89_CHANNEL_WIDTH_160)
+		return RATE_INFO_BW_160;
+	else if (hw_bw == RTW89_CHANNEL_WIDTH_80)
+		return RATE_INFO_BW_80;
+	else if (hw_bw == RTW89_CHANNEL_WIDTH_40)
+		return RATE_INFO_BW_40;
+	else
+		return RATE_INFO_BW_20;
 }
 
 static inline
