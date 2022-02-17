@@ -34,7 +34,6 @@
 #include <linux/delay.h>
 #include <linux/ratelimit.h>
 #include <linux/pm_runtime.h>
-#include <linux/blk-cgroup.h>
 #include <linux/t10-pi.h>
 #include <linux/debugfs.h>
 #include <linux/bpf.h>
@@ -49,6 +48,7 @@
 #include "blk.h"
 #include "blk-mq-sched.h"
 #include "blk-pm.h"
+#include "blk-cgroup.h"
 #include "blk-throttle.h"
 
 struct dentry *blk_debugfs_root;
@@ -164,6 +164,7 @@ static const struct {
 	[BLK_STS_RESOURCE]	= { -ENOMEM,	"kernel resource" },
 	[BLK_STS_DEV_RESOURCE]	= { -EBUSY,	"device resource" },
 	[BLK_STS_AGAIN]		= { -EAGAIN,	"nonblocking retry" },
+	[BLK_STS_OFFLINE]	= { -ENODEV,	"device offline" },
 
 	/* device mapper special case, should not leak out: */
 	[BLK_STS_DM_REQUEUE]	= { -EREMCHG, "dm internal retry" },
@@ -475,9 +476,6 @@ struct request_queue *blk_alloc_queue(int node_id, bool alloc_srcu)
 	timer_setup(&q->timeout, blk_rq_timed_out_timer, 0);
 	INIT_WORK(&q->timeout_work, blk_timeout_work);
 	INIT_LIST_HEAD(&q->icq_list);
-#ifdef CONFIG_BLK_CGROUP
-	INIT_LIST_HEAD(&q->blkg_list);
-#endif
 
 	kobject_init(&q->kobj, &blk_queue_ktype);
 
@@ -991,8 +989,7 @@ int bio_poll(struct bio *bio, struct io_comp_batch *iob, unsigned int flags)
 	    !test_bit(QUEUE_FLAG_POLL, &q->queue_flags))
 		return 0;
 
-	if (current->plug)
-		blk_flush_plug(current->plug, false);
+	blk_flush_plug(current->plug, false);
 
 	if (blk_queue_enter(q, BLK_MQ_REQ_NOWAIT))
 		return 0;
@@ -1274,7 +1271,7 @@ struct blk_plug_cb *blk_check_plugged(blk_plug_cb_fn unplug, void *data,
 }
 EXPORT_SYMBOL(blk_check_plugged);
 
-void blk_flush_plug(struct blk_plug *plug, bool from_schedule)
+void __blk_flush_plug(struct blk_plug *plug, bool from_schedule)
 {
 	if (!list_empty(&plug->cb_list))
 		flush_plug_callbacks(plug, from_schedule);
@@ -1303,7 +1300,7 @@ void blk_flush_plug(struct blk_plug *plug, bool from_schedule)
 void blk_finish_plug(struct blk_plug *plug)
 {
 	if (plug == current->plug) {
-		blk_flush_plug(plug, false);
+		__blk_flush_plug(plug, false);
 		current->plug = NULL;
 	}
 }
