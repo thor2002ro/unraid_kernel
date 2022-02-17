@@ -1802,13 +1802,6 @@ static struct ctl_table kern_table[] = {
 		.proc_handler	= proc_dointvec,
 	},
 #endif
-	{
-		.procname	= "ctrl-alt-del",
-		.data		= &C_A_D,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
 #ifdef CONFIG_FUNCTION_TRACER
 	{
 		.procname	= "ftrace_enabled",
@@ -2115,13 +2108,6 @@ static struct ctl_table kern_table[] = {
 		.proc_handler	= proc_dointvec,
 	},
 #endif
-	{
-		.procname	= "poweroff_cmd",
-		.data		= &poweroff_cmd,
-		.maxlen		= POWEROFF_CMD_PATH_LEN,
-		.mode		= 0644,
-		.proc_handler	= proc_dostring,
-	},
 #ifdef CONFIG_KEYS
 	{
 		.procname	= "keys",
