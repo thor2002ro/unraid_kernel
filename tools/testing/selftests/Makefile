@@ -21,6 +21,7 @@ TARGETS += ftrace
 TARGETS += futex
 TARGETS += gpio
 TARGETS += intel_pstate
+TARGETS += interpreter
 TARGETS += ipc
 TARGETS += ir
 TARGETS += kcmp
