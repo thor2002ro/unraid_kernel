@@ -80,7 +80,8 @@ static struct ctl_table vm_oom_kill_table[] = {
 		.maxlen		= sizeof(sysctl_oom_dump_tasks),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
-	}
+	},
+	{}
 };
 #endif
 
