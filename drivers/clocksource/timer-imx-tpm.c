@@ -32,8 +32,8 @@
 #define TPM_C0SC_CHF_MASK		(0x1 << 7)
 #define TPM_C0V				0x24
 
-static int counter_width;
-static void __iomem *timer_base;
+static int counter_width __ro_after_init;
+static void __iomem *timer_base __ro_after_init;
 
 static inline void tpm_timer_disable(void)
 {
@@ -127,9 +127,9 @@ static irqreturn_t tpm_timer_interrupt(int irq, void *dev_id)
 static struct timer_of to_tpm = {
 	.flags = TIMER_OF_IRQ | TIMER_OF_BASE | TIMER_OF_CLOCK,
 	.clkevt = {
-		.name			= "i.MX7ULP TPM Timer",
+		.name			= "i.MX TPM Timer",
 		.rating			= 200,
-		.features		= CLOCK_EVT_FEAT_ONESHOT,
+		.features		= CLOCK_EVT_FEAT_ONESHOT | CLOCK_EVT_FEAT_DYNIRQ,
 		.set_state_shutdown	= tpm_set_state_shutdown,
 		.set_state_oneshot	= tpm_set_state_oneshot,
 		.set_next_event		= tpm_set_next_event,
@@ -137,7 +137,7 @@ static struct timer_of to_tpm = {
 	},
 	.of_irq = {
 		.handler		= tpm_timer_interrupt,
-		.flags			= IRQF_TIMER | IRQF_IRQPOLL,
+		.flags			= IRQF_TIMER,
 	},
 	.of_clk = {
 		.name = "per",
