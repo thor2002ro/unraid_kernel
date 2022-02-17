@@ -31,6 +31,7 @@
 static void memfd_tag_pins(struct xa_state *xas)
 {
 	struct page *page;
+	int count = 0;
 	unsigned int tagged = 0;
 
 	lru_add_drain();
@@ -39,8 +40,12 @@ static void memfd_tag_pins(struct xa_state *xas)
 	xas_for_each(xas, page, ULONG_MAX) {
 		if (xa_is_value(page))
 			continue;
+
 		page = find_subpage(page, xas->xa_index);
-		if (page_count(page) - page_mapcount(page) > 1)
+		count = page_count(page);
+		if (PageTransCompound(page))
+			count -= (1 << compound_order(compound_head(page))) - 1;
+		if (count - page_mapcount(page) > 1)
 			xas_set_mark(xas, MEMFD_TAG_PINNED);
 
 		if (++tagged % XA_CHECK_SCHED)
@@ -67,11 +72,12 @@ static int memfd_wait_for_pins(struct address_space *mapping)
 {
 	XA_STATE(xas, &mapping->i_pages, 0);
 	struct page *page;
-	int error, scan;
+	int error, scan, count;
 
 	memfd_tag_pins(&xas);
 
 	error = 0;
+	count = 0;
 	for (scan = 0; scan <= LAST_SCAN; scan++) {
 		unsigned int tagged = 0;
 
@@ -89,8 +95,12 @@ static int memfd_wait_for_pins(struct address_space *mapping)
 			bool clear = true;
 			if (xa_is_value(page))
 				continue;
+
 			page = find_subpage(page, xas.xa_index);
-			if (page_count(page) - page_mapcount(page) != 1) {
+			count = page_count(page);
+			if (PageTransCompound(page))
+				count -= (1 << compound_order(compound_head(page))) - 1;
+			if (count - page_mapcount(page) != 1) {
 				/*
 				 * On the last scan, we clean up all those tags
 				 * we inserted; but make a note that we still

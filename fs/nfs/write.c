@@ -397,33 +397,8 @@ static int wb_priority(struct writeback_control *wbc)
 	return ret;
 }
 
-/*
- * NFS congestion control
- */
-
-int nfs_congestion_kb;
-
-#define NFS_CONGESTION_ON_THRESH 	(nfs_congestion_kb >> (PAGE_SHIFT-10))
-#define NFS_CONGESTION_OFF_THRESH	\
-	(NFS_CONGESTION_ON_THRESH - (NFS_CONGESTION_ON_THRESH >> 2))
-
-static void nfs_set_page_writeback(struct page *page)
-{
-	struct inode *inode = page_file_mapping(page)->host;
-	struct nfs_server *nfss = NFS_SERVER(inode);
-	int ret = test_set_page_writeback(page);
-
-	WARN_ON_ONCE(ret != 0);
-
-	if (atomic_long_inc_return(&nfss->writeback) >
-			NFS_CONGESTION_ON_THRESH)
-		set_bdi_congested(inode_to_bdi(inode), BLK_RW_ASYNC);
-}
-
 static void nfs_end_page_writeback(struct nfs_page *req)
 {
-	struct inode *inode = page_file_mapping(req->wb_page)->host;
-	struct nfs_server *nfss = NFS_SERVER(inode);
 	bool is_done;
 
 	is_done = nfs_page_group_sync_on_bit(req, PG_WB_END);
@@ -432,8 +407,6 @@ static void nfs_end_page_writeback(struct nfs_page *req)
 		return;
 
 	end_page_writeback(req->wb_page);
-	if (atomic_long_dec_return(&nfss->writeback) < NFS_CONGESTION_OFF_THRESH)
-		clear_bdi_congested(inode_to_bdi(inode), BLK_RW_ASYNC);
 }
 
 /*
@@ -617,7 +590,7 @@ static int nfs_page_async_flush(struct nfs_pageio_descriptor *pgio,
 	if (IS_ERR(req))
 		goto out;
 
-	nfs_set_page_writeback(page);
+	set_page_writeback(page);
 	WARN_ON_ONCE(test_bit(PG_CLEAN, &req->wb_flags));
 
 	/* If there is a fatal error that covers this write, just exit */
@@ -1850,7 +1823,6 @@ static void nfs_commit_release_pages(struct nfs_commit_data *data)
 	struct nfs_page	*req;
 	int status = data->task.tk_status;
 	struct nfs_commit_info cinfo;
-	struct nfs_server *nfss;
 
 	while (!list_empty(&data->pages)) {
 		req = nfs_list_entry(data->pages.next);
@@ -1891,9 +1863,6 @@ static void nfs_commit_release_pages(struct nfs_commit_data *data)
 		/* Latency breaker */
 		cond_resched();
 	}
-	nfss = NFS_SERVER(data->inode);
-	if (atomic_long_read(&nfss->writeback) < NFS_CONGESTION_OFF_THRESH)
-		clear_bdi_congested(inode_to_bdi(data->inode), BLK_RW_ASYNC);
 
 	nfs_init_cinfo(&cinfo, data->inode, data->dreq);
 	nfs_commit_end(cinfo.mds);
@@ -2161,26 +2130,6 @@ int __init nfs_init_writepagecache(void)
 						      nfs_cdata_cachep);
 	if (nfs_commit_mempool == NULL)
 		goto out_destroy_commit_cache;
-
-	/*
-	 * NFS congestion size, scale with available memory.
-	 *
-	 *  64MB:    8192k
-	 * 128MB:   11585k
-	 * 256MB:   16384k
-	 * 512MB:   23170k
-	 *   1GB:   32768k
-	 *   2GB:   46340k
-	 *   4GB:   65536k
-	 *   8GB:   92681k
-	 *  16GB:  131072k
-	 *
-	 * This allows larger machines to have larger/more transfers.
-	 * Limit the default to 256M
-	 */
-	nfs_congestion_kb = (16*int_sqrt(totalram_pages())) << (PAGE_SHIFT-10);
-	if (nfs_congestion_kb > 256*1024)
-		nfs_congestion_kb = 256*1024;
 
 	return 0;
 

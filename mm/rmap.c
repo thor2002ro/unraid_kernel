@@ -76,7 +76,9 @@
 
 #include <asm/tlbflush.h>
 
+#define CREATE_TRACE_POINTS
 #include <trace/events/tlb.h>
+#include <trace/events/migrate.h>
 
 #include "internal.h"
 
@@ -89,7 +91,7 @@ static inline struct anon_vma *anon_vma_alloc(void)
 
 	anon_vma = kmem_cache_alloc(anon_vma_cachep, GFP_KERNEL);
 	if (anon_vma) {
-		atomic_set(&anon_vma->refcount, 1);
+		refcount_set(&anon_vma->refcount, 1);
 		anon_vma->degree = 1;	/* Reference for first vma */
 		anon_vma->parent = anon_vma;
 		/*
@@ -104,7 +106,7 @@ static inline struct anon_vma *anon_vma_alloc(void)
 
 static inline void anon_vma_free(struct anon_vma *anon_vma)
 {
-	VM_BUG_ON(atomic_read(&anon_vma->refcount));
+	VM_BUG_ON(refcount_read(&anon_vma->refcount));
 
 	/*
 	 * Synchronize against page_lock_anon_vma_read() such that
@@ -446,7 +448,7 @@ static void anon_vma_ctor(void *data)
 	struct anon_vma *anon_vma = data;
 
 	init_rwsem(&anon_vma->rwsem);
-	atomic_set(&anon_vma->refcount, 0);
+	refcount_set(&anon_vma->refcount, 0);
 	anon_vma->rb_root = RB_ROOT_CACHED;
 }
 
@@ -496,7 +498,7 @@ struct anon_vma *page_get_anon_vma(struct page *page)
 		goto out;
 
 	anon_vma = (struct anon_vma *) (anon_mapping - PAGE_MAPPING_ANON);
-	if (!atomic_inc_not_zero(&anon_vma->refcount)) {
+	if (!refcount_inc_not_zero(&anon_vma->refcount)) {
 		anon_vma = NULL;
 		goto out;
 	}
@@ -555,7 +557,7 @@ struct anon_vma *page_lock_anon_vma_read(struct page *page)
 	}
 
 	/* trylock failed, we got to sleep */
-	if (!atomic_inc_not_zero(&anon_vma->refcount)) {
+	if (!refcount_inc_not_zero(&anon_vma->refcount)) {
 		anon_vma = NULL;
 		goto out;
 	}
@@ -570,7 +572,7 @@ struct anon_vma *page_lock_anon_vma_read(struct page *page)
 	rcu_read_unlock();
 	anon_vma_lock_read(anon_vma);
 
-	if (atomic_dec_and_test(&anon_vma->refcount)) {
+	if (refcount_dec_and_test(&anon_vma->refcount)) {
 		/*
 		 * Oops, we held the last refcount, release the lock
 		 * and bail -- can't simply use put_anon_vma() because
@@ -812,7 +814,10 @@ static bool page_referenced_one(struct page *page, struct vm_area_struct *vma,
 	while (page_vma_mapped_walk(&pvmw)) {
 		address = pvmw.address;
 
-		if (vma->vm_flags & VM_LOCKED) {
+		if ((vma->vm_flags & VM_LOCKED) &&
+		    (!PageTransCompound(page) || !pvmw.pte)) {
+			/* Restore the mlock which got missed */
+			mlock_vma_page(page, vma, !pvmw.pte);
 			page_vma_mapped_walk_done(&pvmw);
 			pra->vm_flags |= VM_LOCKED;
 			return false; /* To break the loop */
@@ -851,7 +856,7 @@ static bool page_referenced_one(struct page *page, struct vm_area_struct *vma,
 
 	if (referenced) {
 		pra->referenced++;
-		pra->vm_flags |= vma->vm_flags;
+		pra->vm_flags |= vma->vm_flags & ~VM_LOCKED;
 	}
 
 	if (!pra->mapcount)
@@ -1181,17 +1186,17 @@ void do_page_add_anon_rmap(struct page *page,
 		__mod_lruvec_page_state(page, NR_ANON_MAPPED, nr);
 	}
 
-	if (unlikely(PageKsm(page))) {
+	if (unlikely(PageKsm(page)))
 		unlock_page_memcg(page);
-		return;
-	}
 
 	/* address might be in next vma when migration races vma_adjust */
-	if (first)
+	else if (first)
 		__page_set_anon_rmap(page, vma, address,
 				flags & RMAP_EXCLUSIVE);
 	else
 		__page_check_anon_rmap(page, vma, address);
+
+	mlock_vma_page(page, vma, compound);
 }
 
 /**
@@ -1232,12 +1237,14 @@ void page_add_new_anon_rmap(struct page *page,
 
 /**
  * page_add_file_rmap - add pte mapping to a file page
- * @page: the page to add the mapping to
- * @compound: charge the page as compound or small page
+ * @page:	the page to add the mapping to
+ * @vma:	the vm area in which the mapping is added
+ * @compound:	charge the page as compound or small page
  *
  * The caller needs to hold the pte lock.
  */
-void page_add_file_rmap(struct page *page, bool compound)
+void page_add_file_rmap(struct page *page,
+	struct vm_area_struct *vma, bool compound)
 {
 	int i, nr = 1;
 
@@ -1260,13 +1267,8 @@ void page_add_file_rmap(struct page *page, bool compound)
 						nr_pages);
 	} else {
 		if (PageTransCompound(page) && page_mapping(page)) {
-			struct page *head = compound_head(page);
-
 			VM_WARN_ON_ONCE(!PageLocked(page));
-
-			SetPageDoubleMap(head);
-			if (PageMlocked(page))
-				clear_page_mlock(head);
+			SetPageDoubleMap(compound_head(page));
 		}
 		if (!atomic_inc_and_test(&page->_mapcount))
 			goto out;
@@ -1274,6 +1276,8 @@ void page_add_file_rmap(struct page *page, bool compound)
 	__mod_lruvec_page_state(page, NR_FILE_MAPPED, nr);
 out:
 	unlock_page_memcg(page);
+
+	mlock_vma_page(page, vma, compound);
 }
 
 static void page_remove_file_rmap(struct page *page, bool compound)
@@ -1316,9 +1320,6 @@ static void page_remove_file_rmap(struct page *page, bool compound)
 	 * pte lock(a spinlock) is held, which implies preemption disabled.
 	 */
 	__mod_lruvec_page_state(page, NR_FILE_MAPPED, -nr);
-
-	if (unlikely(PageMlocked(page)))
-		clear_page_mlock(page);
 }
 
 static void page_remove_anon_compound_rmap(struct page *page)
@@ -1358,9 +1359,6 @@ static void page_remove_anon_compound_rmap(struct page *page)
 		nr = thp_nr_pages(page);
 	}
 
-	if (unlikely(PageMlocked(page)))
-		clear_page_mlock(page);
-
 	if (nr)
 		__mod_lruvec_page_state(page, NR_ANON_MAPPED, -nr);
 }
@@ -1368,11 +1366,13 @@ static void page_remove_anon_compound_rmap(struct page *page)
 /**
  * page_remove_rmap - take down pte mapping from a page
  * @page:	page to remove mapping from
+ * @vma:	the vm area from which the mapping is removed
  * @compound:	uncharge the page as compound or small page
  *
  * The caller needs to hold the pte lock.
  */
-void page_remove_rmap(struct page *page, bool compound)
+void page_remove_rmap(struct page *page,
+	struct vm_area_struct *vma, bool compound)
 {
 	lock_page_memcg(page);
 
@@ -1397,9 +1397,6 @@ void page_remove_rmap(struct page *page, bool compound)
 	 */
 	__dec_lruvec_page_state(page, NR_ANON_MAPPED);
 
-	if (unlikely(PageMlocked(page)))
-		clear_page_mlock(page);
-
 	if (PageTransCompound(page))
 		deferred_split_huge_page(compound_head(page));
 
@@ -1414,6 +1411,8 @@ void page_remove_rmap(struct page *page, bool compound)
 	 */
 out:
 	unlock_page_memcg(page);
+
+	munlock_vma_page(page, vma, compound);
 }
 
 /*
@@ -1469,27 +1468,20 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 	mmu_notifier_invalidate_range_start(&range);
 
 	while (page_vma_mapped_walk(&pvmw)) {
+		/* Unexpected PMD-mapped THP? */
+		VM_BUG_ON_PAGE(!pvmw.pte, page);
+
 		/*
-		 * If the page is mlock()d, we cannot swap it out.
+		 * If the page is in an mlock()d vma, we must not swap it out.
 		 */
 		if (!(flags & TTU_IGNORE_MLOCK) &&
 		    (vma->vm_flags & VM_LOCKED)) {
-			/*
-			 * PTE-mapped THP are never marked as mlocked: so do
-			 * not set it on a DoubleMap THP, nor on an Anon THP
-			 * (which may still be PTE-mapped after DoubleMap was
-			 * cleared).  But stop unmapping even in those cases.
-			 */
-			if (!PageTransCompound(page) || (PageHead(page) &&
-			     !PageDoubleMap(page) && !PageAnon(page)))
-				mlock_vma_page(page);
+			/* Restore the mlock which got missed */
+			mlock_vma_page(page, vma, false);
 			page_vma_mapped_walk_done(&pvmw);
 			ret = false;
 			break;
 		}
-
-		/* Unexpected PMD-mapped THP? */
-		VM_BUG_ON_PAGE(!pvmw.pte, page);
 
 		subpage = page - page_to_pfn(page) + pte_pfn(*pvmw.pte);
 		address = pvmw.address;
@@ -1553,7 +1545,7 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 		/* Update high watermark before we lower rss */
 		update_hiwater_rss(mm);
 
-		if (PageHWPoison(page) && !(flags & TTU_IGNORE_HWPOISON)) {
+		if (PageHWPoison(subpage) && !(flags & TTU_IGNORE_HWPOISON)) {
 			pteval = swp_entry_to_pte(make_hwpoison_entry(subpage));
 			if (PageHuge(page)) {
 				hugetlb_count_sub(compound_nr(page), mm);
@@ -1599,7 +1591,30 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 
 			/* MADV_FREE page check */
 			if (!PageSwapBacked(page)) {
-				if (!PageDirty(page)) {
+				int ref_count, map_count;
+
+				/*
+				 * Synchronize with gup_pte_range():
+				 * - clear PTE; barrier; read refcount
+				 * - inc refcount; barrier; read PTE
+				 */
+				smp_mb();
+
+				ref_count = page_count(page);
+				map_count = page_mapcount(page);
+
+				/*
+				 * Order reads for page refcount and dirty flag;
+				 * see __remove_mapping().
+				 */
+				smp_rmb();
+
+				/*
+				 * The only page refs must be from the isolation
+				 * plus one or more rmap's (dropped by discard:).
+				 */
+				if ((ref_count == 1 + map_count) &&
+				    !PageDirty(page)) {
 					/* Invalidate as we cleared the pte */
 					mmu_notifier_invalidate_range(mm,
 						address, address + PAGE_SIZE);
@@ -1668,7 +1683,9 @@ discard:
 		 *
 		 * See Documentation/vm/mmu_notifier.rst
 		 */
-		page_remove_rmap(subpage, PageHuge(page));
+		page_remove_rmap(subpage, vma, PageHuge(page));
+		if (vma->vm_flags & VM_LOCKED)
+			mlock_page_drain(smp_processor_id());
 		put_page(page);
 	}
 
@@ -1835,7 +1852,7 @@ static bool try_to_migrate_one(struct page *page, struct vm_area_struct *vma,
 		/* Update high watermark before we lower rss */
 		update_hiwater_rss(mm);
 
-		if (is_zone_device_page(page)) {
+		if (is_device_private_page(page)) {
 			unsigned long pfn = page_to_pfn(page);
 			swp_entry_t entry;
 			pte_t swp_pte;
@@ -1861,6 +1878,8 @@ static bool try_to_migrate_one(struct page *page, struct vm_area_struct *vma,
 			if (pte_swp_uffd_wp(pteval))
 				swp_pte = pte_swp_mkuffd_wp(swp_pte);
 			set_pte_at(mm, pvmw.address, pvmw.pte, swp_pte);
+			trace_set_migration_pte(pvmw.address, pte_val(swp_pte),
+						compound_order(page));
 			/*
 			 * No need to invalidate here it will synchronize on
 			 * against the special swap migration pte.
@@ -1873,7 +1892,7 @@ static bool try_to_migrate_one(struct page *page, struct vm_area_struct *vma,
 			 * memory are supported.
 			 */
 			subpage = page;
-		} else if (PageHWPoison(page)) {
+		} else if (PageHWPoison(subpage)) {
 			pteval = swp_entry_to_pte(make_hwpoison_entry(subpage));
 			if (PageHuge(page)) {
 				hugetlb_count_sub(compound_nr(page), mm);
@@ -1929,6 +1948,8 @@ static bool try_to_migrate_one(struct page *page, struct vm_area_struct *vma,
 			if (pte_uffd_wp(pteval))
 				swp_pte = pte_swp_mkuffd_wp(swp_pte);
 			set_pte_at(mm, address, pvmw.pte, swp_pte);
+			trace_set_migration_pte(address, pte_val(swp_pte),
+						compound_order(page));
 			/*
 			 * No need to invalidate here it will synchronize on
 			 * against the special swap migration pte.
@@ -1942,7 +1963,9 @@ static bool try_to_migrate_one(struct page *page, struct vm_area_struct *vma,
 		 *
 		 * See Documentation/vm/mmu_notifier.rst
 		 */
-		page_remove_rmap(subpage, PageHuge(page));
+		page_remove_rmap(subpage, vma, PageHuge(page));
+		if (vma->vm_flags & VM_LOCKED)
+			mlock_page_drain(smp_processor_id());
 		put_page(page);
 	}
 
@@ -1976,7 +1999,8 @@ void try_to_migrate(struct page *page, enum ttu_flags flags)
 					TTU_SYNC)))
 		return;
 
-	if (is_zone_device_page(page) && !is_device_private_page(page))
+	if (is_zone_device_page(page) &&
+	    (!is_device_private_page(page) && !is_device_coherent_page(page)))
 		return;
 
 	/*
@@ -1994,76 +2018,6 @@ void try_to_migrate(struct page *page, enum ttu_flags flags)
 		rmap_walk_locked(page, &rwc);
 	else
 		rmap_walk(page, &rwc);
-}
-
-/*
- * Walks the vma's mapping a page and mlocks the page if any locked vma's are
- * found. Once one is found the page is locked and the scan can be terminated.
- */
-static bool page_mlock_one(struct page *page, struct vm_area_struct *vma,
-				 unsigned long address, void *unused)
-{
-	struct page_vma_mapped_walk pvmw = {
-		.page = page,
-		.vma = vma,
-		.address = address,
-	};
-
-	/* An un-locked vma doesn't have any pages to lock, continue the scan */
-	if (!(vma->vm_flags & VM_LOCKED))
-		return true;
-
-	while (page_vma_mapped_walk(&pvmw)) {
-		/*
-		 * Need to recheck under the ptl to serialise with
-		 * __munlock_pagevec_fill() after VM_LOCKED is cleared in
-		 * munlock_vma_pages_range().
-		 */
-		if (vma->vm_flags & VM_LOCKED) {
-			/*
-			 * PTE-mapped THP are never marked as mlocked; but
-			 * this function is never called on a DoubleMap THP,
-			 * nor on an Anon THP (which may still be PTE-mapped
-			 * after DoubleMap was cleared).
-			 */
-			mlock_vma_page(page);
-			/*
-			 * No need to scan further once the page is marked
-			 * as mlocked.
-			 */
-			page_vma_mapped_walk_done(&pvmw);
-			return false;
-		}
-	}
-
-	return true;
-}
-
-/**
- * page_mlock - try to mlock a page
- * @page: the page to be mlocked
- *
- * Called from munlock code. Checks all of the VMAs mapping the page and mlocks
- * the page if any are found. The page will be returned with PG_mlocked cleared
- * if it is not mapped by any locked vmas.
- */
-void page_mlock(struct page *page)
-{
-	struct rmap_walk_control rwc = {
-		.rmap_one = page_mlock_one,
-		.done = page_not_mapped,
-		.anon_lock = page_lock_anon_vma_read,
-
-	};
-
-	VM_BUG_ON_PAGE(!PageLocked(page) || PageLRU(page), page);
-	VM_BUG_ON_PAGE(PageCompound(page) && PageDoubleMap(page), page);
-
-	/* Anon THP are only marked as mlocked when singly mapped */
-	if (PageTransCompound(page) && PageAnon(page))
-		return;
-
-	rmap_walk(page, &rwc);
 }
 
 #ifdef CONFIG_DEVICE_PRIVATE
@@ -2148,7 +2102,7 @@ static bool page_make_device_exclusive_one(struct page *page,
 		 * There is a reference on the page for the swap entry which has
 		 * been removed, so shouldn't take another.
 		 */
-		page_remove_rmap(subpage, false);
+		page_remove_rmap(subpage, vma, false);
 	}
 
 	mmu_notifier_invalidate_range_end(&range);
@@ -2257,7 +2211,7 @@ void __put_anon_vma(struct anon_vma *anon_vma)
 	struct anon_vma *root = anon_vma->root;
 
 	anon_vma_free(anon_vma);
-	if (root != anon_vma && atomic_dec_and_test(&root->refcount))
+	if (root != anon_vma && refcount_dec_and_test(&root->refcount))
 		anon_vma_free(root);
 }
 
@@ -2291,11 +2245,6 @@ static struct anon_vma *rmap_walk_anon_lock(struct page *page,
  *
  * Find all the mappings of a page using the mapping pointer and the vma chains
  * contained in the anon_vma struct it points to.
- *
- * When called from page_mlock(), the mmap_lock of the mm containing the vma
- * where the page was found will be held for write.  So, we won't recheck
- * vm_flags for that VMA.  That should be OK, because that vma shouldn't be
- * LOCKED.
  */
 static void rmap_walk_anon(struct page *page, struct rmap_walk_control *rwc,
 		bool locked)
@@ -2344,11 +2293,6 @@ static void rmap_walk_anon(struct page *page, struct rmap_walk_control *rwc,
  *
  * Find all the mappings of a page using the mapping pointer and the vma chains
  * contained in the address_space struct it points to.
- *
- * When called from page_mlock(), the mmap_lock of the mm containing the vma
- * where the page was found will be held for write.  So, we won't recheck
- * vm_flags for that VMA.  That should be OK, because that vma shouldn't be
- * LOCKED.
  */
 static void rmap_walk_file(struct page *page, struct rmap_walk_control *rwc,
 		bool locked)

@@ -66,6 +66,7 @@ EXPORT_SYMBOL_GPL(panic_timeout);
 #define PANIC_PRINT_LOCK_INFO		0x00000008
 #define PANIC_PRINT_FTRACE_INFO		0x00000010
 #define PANIC_PRINT_ALL_PRINTK_MSG	0x00000020
+#define PANIC_PRINT_ALL_CPU_BT		0x00000040
 unsigned long panic_print;
 
 ATOMIC_NOTIFIER_HEAD(panic_notifier_list);
@@ -152,6 +153,9 @@ static void panic_print_sys_info(void)
 	if (panic_print & PANIC_PRINT_ALL_PRINTK_MSG)
 		console_flush_on_panic(CONSOLE_REPLAY_ALL);
 
+	if (panic_print & PANIC_PRINT_ALL_CPU_BT)
+		trigger_all_cpu_backtrace();
+
 	if (panic_print & PANIC_PRINT_TASK_INFO)
 		show_state();
 
@@ -184,6 +188,16 @@ void panic(const char *fmt, ...)
 	int state = 0;
 	int old_cpu, this_cpu;
 	bool _crash_kexec_post_notifiers = crash_kexec_post_notifiers;
+
+	if (panic_on_warn) {
+		/*
+		 * This thread may hit another WARN() in the panic path.
+		 * Resetting this prevents additional WARN() from panicking the
+		 * system on this thread.  Other threads are blocked by the
+		 * panic_mutex in panic().
+		 */
+		panic_on_warn = 0;
+	}
 
 	/*
 	 * Disable local interrupts. This will prevent panic_smp_self_stop
@@ -239,6 +253,13 @@ void panic(const char *fmt, ...)
 	 * running on them.
 	 */
 	kgdb_panic(buf);
+
+	/*
+	 * If we have a kdump kernel loaded, give a chance to panic_print
+	 * show some extra information on kernel log if it was set...
+	 */
+	if (kexec_crash_loaded())
+		panic_print_sys_info();
 
 	/*
 	 * If we have crashed and we have a crash kernel loaded let it handle
@@ -576,16 +597,8 @@ void __warn(const char *file, int line, void *caller, unsigned taint,
 	if (regs)
 		show_regs(regs);
 
-	if (panic_on_warn) {
-		/*
-		 * This thread may hit another WARN() in the panic path.
-		 * Resetting this prevents additional WARN() from panicking the
-		 * system on this thread.  Other threads are blocked by the
-		 * panic_mutex in panic().
-		 */
-		panic_on_warn = 0;
+	if (panic_on_warn)
 		panic("panic_on_warn set ...\n");
-	}
 
 	if (!regs)
 		dump_stack();

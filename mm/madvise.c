@@ -70,6 +70,9 @@ static struct anon_vma_name *anon_vma_name_alloc(const char *name)
 	struct anon_vma_name *anon_name;
 	size_t count;
 
+	if (!name)
+		return NULL;
+
 	/* Add 1 for NUL terminator at the end of the anon_name->name */
 	count = strlen(name) + 1;
 	anon_name = kmalloc(struct_size(anon_name, name, count), GFP_KERNEL);
@@ -103,6 +106,23 @@ const char *vma_anon_name(struct vm_area_struct *vma)
 	return vma->anon_name->name;
 }
 
+struct anon_vma_name *vma_anon_name_get(struct vm_area_struct *vma)
+{
+	if (!has_vma_anon_name(vma))
+		return NULL;
+
+	mmap_assert_locked(vma->vm_mm);
+
+	kref_get(&vma->anon_name->kref);
+	return vma->anon_name;
+}
+
+void vma_anon_name_put(struct anon_vma_name *anon_name)
+{
+	if (anon_name)
+		kref_put(&anon_name->kref, vma_anon_name_free);
+}
+
 void dup_vma_anon_name(struct vm_area_struct *orig_vma,
 		       struct vm_area_struct *new_vma)
 {
@@ -126,33 +146,34 @@ void free_vma_anon_name(struct vm_area_struct *vma)
 }
 
 /* mmap_lock should be write-locked */
-static int replace_vma_anon_name(struct vm_area_struct *vma, const char *name)
+static int replace_vma_anon_name(struct vm_area_struct *vma,
+				 struct anon_vma_name *anon_name)
 {
-	const char *anon_name;
+	const char *orig_name;
 
-	if (!name) {
+	if (!anon_name) {
 		free_vma_anon_name(vma);
 		return 0;
 	}
 
-	anon_name = vma_anon_name(vma);
-	if (anon_name) {
+	orig_name = vma_anon_name(vma);
+	if (orig_name) {
 		/* Same name, nothing to do here */
-		if (!strcmp(name, anon_name))
+		if (!strcmp(anon_name->name, orig_name))
 			return 0;
 
 		free_vma_anon_name(vma);
 	}
-	vma->anon_name = anon_vma_name_alloc(name);
-	if (!vma->anon_name)
-		return -ENOMEM;
+	kref_get(&anon_name->kref);
+	vma->anon_name = anon_name;
 
 	return 0;
 }
 #else /* CONFIG_ANON_VMA_NAME */
-static int replace_vma_anon_name(struct vm_area_struct *vma, const char *name)
+static int replace_vma_anon_name(struct vm_area_struct *vma,
+				 struct anon_vma_name *anon_name)
 {
-	if (name)
+	if (anon_name)
 		return -EINVAL;
 
 	return 0;
@@ -161,12 +182,15 @@ static int replace_vma_anon_name(struct vm_area_struct *vma, const char *name)
 /*
  * Update the vm_flags on region of a vma, splitting it or merging it as
  * necessary.  Must be called with mmap_sem held for writing;
+ * Caller should ensure anon_name stability by raising its refcount even when
+ * anon_name belongs to a valid vma because this function might free that vma.
  */
 static int madvise_update_vma(struct vm_area_struct *vma,
 			      struct vm_area_struct **prev, unsigned long start,
 			      unsigned long end, unsigned long new_flags,
-			      const char *name)
+			      struct anon_vma_name *anon_name)
 {
+	const char *name = anon_name ? anon_name->name : NULL;
 	struct mm_struct *mm = vma->vm_mm;
 	int error;
 	pgoff_t pgoff;
@@ -209,7 +233,7 @@ success:
 	 */
 	vma->vm_flags = new_flags;
 	if (!vma->vm_file) {
-		error = replace_vma_anon_name(vma, name);
+		error = replace_vma_anon_name(vma, anon_name);
 		if (error)
 			return error;
 	}
@@ -530,6 +554,16 @@ static void madvise_cold_page_range(struct mmu_gather *tlb,
 	tlb_end_vma(tlb, vma);
 }
 
+static inline bool can_madv_lru_non_huge_vma(struct vm_area_struct *vma)
+{
+	return !(vma->vm_flags & (VM_LOCKED|VM_PFNMAP));
+}
+
+static inline bool can_madv_lru_vma(struct vm_area_struct *vma)
+{
+	return can_madv_lru_non_huge_vma(vma) && !is_vm_hugetlb_page(vma);
+}
+
 static long madvise_cold(struct vm_area_struct *vma,
 			struct vm_area_struct **prev,
 			unsigned long start_addr, unsigned long end_addr)
@@ -800,6 +834,23 @@ static long madvise_dontneed_single_vma(struct vm_area_struct *vma,
 	return 0;
 }
 
+static bool madvise_dontneed_free_valid_vma(struct vm_area_struct *vma,
+					    unsigned long start,
+					    unsigned long *end,
+					    int behavior)
+{
+	if (!is_vm_hugetlb_page(vma))
+		return can_madv_lru_non_huge_vma(vma);
+
+	if (behavior != MADV_DONTNEED)
+		return false;
+	if (start & ~huge_page_mask(hstate_vma(vma)))
+		return false;
+
+	*end = ALIGN(*end, huge_page_size(hstate_vma(vma)));
+	return true;
+}
+
 static long madvise_dontneed_free(struct vm_area_struct *vma,
 				  struct vm_area_struct **prev,
 				  unsigned long start, unsigned long end,
@@ -808,7 +859,7 @@ static long madvise_dontneed_free(struct vm_area_struct *vma,
 	struct mm_struct *mm = vma->vm_mm;
 
 	*prev = vma;
-	if (!can_madv_lru_vma(vma))
+	if (!madvise_dontneed_free_valid_vma(vma, start, &end, behavior))
 		return -EINVAL;
 
 	if (!userfaultfd_remove(vma, start, end)) {
@@ -830,7 +881,12 @@ static long madvise_dontneed_free(struct vm_area_struct *vma,
 			 */
 			return -ENOMEM;
 		}
-		if (!can_madv_lru_vma(vma))
+		/*
+		 * Potential end adjustment for hugetlb vma is OK as
+		 * the check below keeps end within vma.
+		 */
+		if (!madvise_dontneed_free_valid_vma(vma, start, &end,
+						     behavior))
 			return -EINVAL;
 		if (end > vma->vm_end) {
 			/*
@@ -976,6 +1032,7 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 {
 	int error;
 	unsigned long new_flags = vma->vm_flags;
+	struct anon_vma_name *anon_name;
 
 	switch (behavior) {
 	case MADV_REMOVE:
@@ -1040,8 +1097,10 @@ static int madvise_vma_behavior(struct vm_area_struct *vma,
 		break;
 	}
 
+	anon_name = vma_anon_name_get(vma);
 	error = madvise_update_vma(vma, prev, start, end, new_flags,
-				   vma_anon_name(vma));
+				   anon_name);
+	vma_anon_name_put(anon_name);
 
 out:
 	/*
@@ -1225,7 +1284,7 @@ int madvise_walk_vmas(struct mm_struct *mm, unsigned long start,
 static int madvise_vma_anon_name(struct vm_area_struct *vma,
 				 struct vm_area_struct **prev,
 				 unsigned long start, unsigned long end,
-				 unsigned long name)
+				 unsigned long anon_name)
 {
 	int error;
 
@@ -1234,7 +1293,7 @@ static int madvise_vma_anon_name(struct vm_area_struct *vma,
 		return -EBADF;
 
 	error = madvise_update_vma(vma, prev, start, end, vma->vm_flags,
-				   (const char *)name);
+				   (struct anon_vma_name *)anon_name);
 
 	/*
 	 * madvise() returns EAGAIN if kernel resources, such as
@@ -1248,8 +1307,10 @@ static int madvise_vma_anon_name(struct vm_area_struct *vma,
 int madvise_set_anon_name(struct mm_struct *mm, unsigned long start,
 			  unsigned long len_in, const char *name)
 {
+	struct anon_vma_name *anon_name;
 	unsigned long end;
 	unsigned long len;
+	int ret;
 
 	if (start & ~PAGE_MASK)
 		return -EINVAL;
@@ -1266,8 +1327,12 @@ int madvise_set_anon_name(struct mm_struct *mm, unsigned long start,
 	if (end == start)
 		return 0;
 
-	return madvise_walk_vmas(mm, start, end, (unsigned long)name,
+	anon_name = anon_vma_name_alloc(name);
+	ret = madvise_walk_vmas(mm, start, end, (unsigned long)anon_name,
 				 madvise_vma_anon_name);
+	vma_anon_name_put(anon_name);
+
+	return ret;
 }
 #endif /* CONFIG_ANON_VMA_NAME */
 /*
