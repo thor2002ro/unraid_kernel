@@ -254,8 +254,8 @@ struct av_decision {
 #define XPERMS_AUDITALLOW 2
 #define XPERMS_DONTAUDIT 4
 
-#define security_xperm_set(perms, x) (perms[x >> 5] |= 1 << (x & 0x1f))
-#define security_xperm_test(perms, x) (1 & (perms[x >> 5] >> (x & 0x1f)))
+#define security_xperm_set(perms, x) ((perms)[(x) >> 5] |= 1 << ((x) & 0x1f))
+#define security_xperm_test(perms, x) (1 & ((perms)[(x) >> 5] >> ((x) & 0x1f)))
 struct extended_perms_data {
 	u32 p[8];
 };
@@ -386,11 +386,11 @@ int security_get_allow_unknown(struct selinux_state *state);
 int security_fs_use(struct selinux_state *state, struct super_block *sb);
 
 int security_genfs_sid(struct selinux_state *state,
-		       const char *fstype, char *name, u16 sclass,
+		       const char *fstype, const char *path, u16 sclass,
 		       u32 *sid);
 
 int selinux_policy_genfs_sid(struct selinux_policy *policy,
-		       const char *fstype, char *name, u16 sclass,
+		       const char *fstype, const char *path, u16 sclass,
 		       u32 *sid);
 
 #ifdef CONFIG_NETLABEL
