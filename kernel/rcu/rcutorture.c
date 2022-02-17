@@ -86,10 +86,12 @@ torture_param(int, fwd_progress_holdoff, 60,
 torture_param(bool, fwd_progress_need_resched, 1,
 	      "Hide cond_resched() behind need_resched()");
 torture_param(bool, gp_cond, false, "Use conditional/async GP wait primitives");
+torture_param(bool, gp_cond_exp, false, "Use conditional/async expedited GP wait primitives");
 torture_param(bool, gp_exp, false, "Use expedited GP wait primitives");
 torture_param(bool, gp_normal, false,
 	     "Use normal (non-expedited) GP wait primitives");
 torture_param(bool, gp_poll, false, "Use polling GP wait primitives");
+torture_param(bool, gp_poll_exp, false, "Use polling expedited GP wait primitives");
 torture_param(bool, gp_sync, false, "Use synchronous GP wait primitives");
 torture_param(int, irqreader, 1, "Allow RCU readers from irq handlers");
 torture_param(int, leakpointer, 0, "Leak pointer dereferences from readers");
@@ -209,12 +211,16 @@ static int rcu_torture_writer_state;
 #define RTWS_DEF_FREE		3
 #define RTWS_EXP_SYNC		4
 #define RTWS_COND_GET		5
-#define RTWS_COND_SYNC		6
-#define RTWS_POLL_GET		7
-#define RTWS_POLL_WAIT		8
-#define RTWS_SYNC		9
-#define RTWS_STUTTER		10
-#define RTWS_STOPPING		11
+#define RTWS_COND_GET_EXP	6
+#define RTWS_COND_SYNC		7
+#define RTWS_COND_SYNC_EXP	8
+#define RTWS_POLL_GET		9
+#define RTWS_POLL_GET_EXP	10
+#define RTWS_POLL_WAIT		11
+#define RTWS_POLL_WAIT_EXP	12
+#define RTWS_SYNC		13
+#define RTWS_STUTTER		14
+#define RTWS_STOPPING		15
 static const char * const rcu_torture_writer_state_names[] = {
 	"RTWS_FIXED_DELAY",
 	"RTWS_DELAY",
@@ -222,9 +228,13 @@ static const char * const rcu_torture_writer_state_names[] = {
 	"RTWS_DEF_FREE",
 	"RTWS_EXP_SYNC",
 	"RTWS_COND_GET",
+	"RTWS_COND_GET_EXP",
 	"RTWS_COND_SYNC",
+	"RTWS_COND_SYNC_EXP",
 	"RTWS_POLL_GET",
+	"RTWS_POLL_GET_EXP",
 	"RTWS_POLL_WAIT",
+	"RTWS_POLL_WAIT_EXP",
 	"RTWS_SYNC",
 	"RTWS_STUTTER",
 	"RTWS_STOPPING",
@@ -284,7 +294,7 @@ static atomic_t barrier_cbs_invoked;	/* Barrier callbacks invoked. */
 static wait_queue_head_t *barrier_cbs_wq; /* Coordinate barrier testing. */
 static DECLARE_WAIT_QUEUE_HEAD(barrier_wq);
 
-static bool rcu_fwd_cb_nodelay;		/* Short rcu_torture_delay() delays. */
+static atomic_t rcu_fwd_cb_nodelay;	/* Short rcu_torture_delay() delays. */
 
 /*
  * Allocate an element from the rcu_tortures pool.
@@ -337,6 +347,10 @@ struct rcu_torture_ops {
 	void (*deferred_free)(struct rcu_torture *p);
 	void (*sync)(void);
 	void (*exp_sync)(void);
+	unsigned long (*get_gp_state_exp)(void);
+	unsigned long (*start_gp_poll_exp)(void);
+	bool (*poll_gp_state_exp)(unsigned long oldstate);
+	void (*cond_sync_exp)(unsigned long oldstate);
 	unsigned long (*get_gp_state)(void);
 	unsigned long (*start_gp_poll)(void);
 	bool (*poll_gp_state)(unsigned long oldstate);
@@ -387,7 +401,7 @@ rcu_read_delay(struct torture_random_state *rrsp, struct rt_read_seg *rtrsp)
 	 * period, and we want a long delay occasionally to trigger
 	 * force_quiescent_state. */
 
-	if (!READ_ONCE(rcu_fwd_cb_nodelay) &&
+	if (!atomic_read(&rcu_fwd_cb_nodelay) &&
 	    !(torture_random(rrsp) % (nrealreaders * 2000 * longdelay_ms))) {
 		started = cur_ops->get_gp_seq();
 		ts = rcu_trace_clock_local();
@@ -507,6 +521,10 @@ static struct rcu_torture_ops rcu_ops = {
 	.start_gp_poll		= start_poll_synchronize_rcu,
 	.poll_gp_state		= poll_state_synchronize_rcu,
 	.cond_sync		= cond_synchronize_rcu,
+	.get_gp_state_exp	= get_state_synchronize_rcu_expedited,
+	.start_gp_poll_exp	= start_poll_synchronize_rcu_expedited,
+	.poll_gp_state_exp	= poll_state_synchronize_rcu_expedited,
+	.cond_sync_exp		= cond_synchronize_rcu_expedited,
 	.call			= call_rcu,
 	.cb_barrier		= rcu_barrier,
 	.fqs			= rcu_force_quiescent_state,
@@ -674,6 +692,7 @@ static struct rcu_torture_ops srcu_ops = {
 	.call		= srcu_torture_call,
 	.cb_barrier	= srcu_torture_barrier,
 	.stats		= srcu_torture_stats,
+	.cbflood_max	= 50000,
 	.irq_capable	= 1,
 	.no_pi_lock	= IS_ENABLED(CONFIG_TINY_SRCU),
 	.name		= "srcu"
@@ -708,6 +727,7 @@ static struct rcu_torture_ops srcud_ops = {
 	.call		= srcu_torture_call,
 	.cb_barrier	= srcu_torture_barrier,
 	.stats		= srcu_torture_stats,
+	.cbflood_max	= 50000,
 	.irq_capable	= 1,
 	.no_pi_lock	= IS_ENABLED(CONFIG_TINY_SRCU),
 	.name		= "srcud"
@@ -997,7 +1017,7 @@ static int rcu_torture_boost(void *arg)
 			goto checkwait;
 
 		/* Wait for the next test interval. */
-		oldstarttime = boost_starttime;
+		oldstarttime = READ_ONCE(boost_starttime);
 		while (time_before(jiffies, oldstarttime)) {
 			schedule_timeout_interruptible(oldstarttime - jiffies);
 			if (stutter_wait("rcu_torture_boost"))
@@ -1041,10 +1061,11 @@ static int rcu_torture_boost(void *arg)
 		 * interval.  Besides, we are running at RT priority,
 		 * so delays should be relatively rare.
 		 */
-		while (oldstarttime == boost_starttime && !kthread_should_stop()) {
+		while (oldstarttime == READ_ONCE(boost_starttime) && !kthread_should_stop()) {
 			if (mutex_trylock(&boost_mutex)) {
 				if (oldstarttime == boost_starttime) {
-					boost_starttime = jiffies + test_boost_interval * HZ;
+					WRITE_ONCE(boost_starttime,
+						   jiffies + test_boost_interval * HZ);
 					n_rcu_torture_boosts++;
 				}
 				mutex_unlock(&boost_mutex);
@@ -1100,9 +1121,8 @@ rcu_torture_fqs(void *arg)
 	return 0;
 }
 
-// Used by writers to randomly choose from the available grace-period
-// primitives.  The only purpose of the initialization is to size the array.
-static int synctype[] = { RTWS_DEF_FREE, RTWS_EXP_SYNC, RTWS_COND_GET, RTWS_POLL_GET, RTWS_SYNC };
+// Used by writers to randomly choose from the available grace-period primitives.
+static int synctype[ARRAY_SIZE(rcu_torture_writer_state_names)] = { };
 static int nsynctypes;
 
 /*
@@ -1110,17 +1130,26 @@ static int nsynctypes;
  */
 static void rcu_torture_write_types(void)
 {
-	bool gp_cond1 = gp_cond, gp_exp1 = gp_exp, gp_normal1 = gp_normal;
-	bool gp_poll1 = gp_poll, gp_sync1 = gp_sync;
+	bool gp_cond1 = gp_cond, gp_cond_exp1 = gp_cond_exp, gp_exp1 = gp_exp;
+	bool gp_poll_exp1 = gp_poll_exp, gp_normal1 = gp_normal, gp_poll1 = gp_poll;
+	bool gp_sync1 = gp_sync;
 
 	/* Initialize synctype[] array.  If none set, take default. */
-	if (!gp_cond1 && !gp_exp1 && !gp_normal1 && !gp_poll1 && !gp_sync1)
-		gp_cond1 = gp_exp1 = gp_normal1 = gp_poll1 = gp_sync1 = true;
+	if (!gp_cond1 && !gp_cond_exp1 && !gp_exp1 && !gp_poll_exp &&
+	    !gp_normal1 && !gp_poll1 && !gp_sync1)
+		gp_cond1 = gp_cond_exp1 = gp_exp1 = gp_poll_exp1 =
+			   gp_normal1 = gp_poll1 = gp_sync1 = true;
 	if (gp_cond1 && cur_ops->get_gp_state && cur_ops->cond_sync) {
 		synctype[nsynctypes++] = RTWS_COND_GET;
 		pr_info("%s: Testing conditional GPs.\n", __func__);
 	} else if (gp_cond && (!cur_ops->get_gp_state || !cur_ops->cond_sync)) {
 		pr_alert("%s: gp_cond without primitives.\n", __func__);
+	}
+	if (gp_cond_exp1 && cur_ops->get_gp_state_exp && cur_ops->cond_sync_exp) {
+		synctype[nsynctypes++] = RTWS_COND_GET_EXP;
+		pr_info("%s: Testing conditional expedited GPs.\n", __func__);
+	} else if (gp_cond_exp && (!cur_ops->get_gp_state_exp || !cur_ops->cond_sync_exp)) {
+		pr_alert("%s: gp_cond_exp without primitives.\n", __func__);
 	}
 	if (gp_exp1 && cur_ops->exp_sync) {
 		synctype[nsynctypes++] = RTWS_EXP_SYNC;
@@ -1139,6 +1168,12 @@ static void rcu_torture_write_types(void)
 		pr_info("%s: Testing polling GPs.\n", __func__);
 	} else if (gp_poll && (!cur_ops->start_gp_poll || !cur_ops->poll_gp_state)) {
 		pr_alert("%s: gp_poll without primitives.\n", __func__);
+	}
+	if (gp_poll_exp1 && cur_ops->start_gp_poll_exp && cur_ops->poll_gp_state_exp) {
+		synctype[nsynctypes++] = RTWS_POLL_GET_EXP;
+		pr_info("%s: Testing polling expedited GPs.\n", __func__);
+	} else if (gp_poll_exp && (!cur_ops->start_gp_poll_exp || !cur_ops->poll_gp_state_exp)) {
+		pr_alert("%s: gp_poll_exp without primitives.\n", __func__);
 	}
 	if (gp_sync1 && cur_ops->sync) {
 		synctype[nsynctypes++] = RTWS_SYNC;
@@ -1237,11 +1272,28 @@ rcu_torture_writer(void *arg)
 				cur_ops->cond_sync(gp_snap);
 				rcu_torture_pipe_update(old_rp);
 				break;
+			case RTWS_COND_GET_EXP:
+				rcu_torture_writer_state = RTWS_COND_GET_EXP;
+				gp_snap = cur_ops->get_gp_state_exp();
+				torture_hrtimeout_jiffies(torture_random(&rand) % 16, &rand);
+				rcu_torture_writer_state = RTWS_COND_SYNC_EXP;
+				cur_ops->cond_sync_exp(gp_snap);
+				rcu_torture_pipe_update(old_rp);
+				break;
 			case RTWS_POLL_GET:
 				rcu_torture_writer_state = RTWS_POLL_GET;
 				gp_snap = cur_ops->start_gp_poll();
 				rcu_torture_writer_state = RTWS_POLL_WAIT;
 				while (!cur_ops->poll_gp_state(gp_snap))
+					torture_hrtimeout_jiffies(torture_random(&rand) % 16,
+								  &rand);
+				rcu_torture_pipe_update(old_rp);
+				break;
+			case RTWS_POLL_GET_EXP:
+				rcu_torture_writer_state = RTWS_POLL_GET_EXP;
+				gp_snap = cur_ops->start_gp_poll_exp();
+				rcu_torture_writer_state = RTWS_POLL_WAIT_EXP;
+				while (!cur_ops->poll_gp_state_exp(gp_snap))
 					torture_hrtimeout_jiffies(torture_random(&rand) % 16,
 								  &rand);
 				rcu_torture_pipe_update(old_rp);
@@ -1276,7 +1328,7 @@ rcu_torture_writer(void *arg)
 		boot_ended = rcu_inkernel_boot_has_ended();
 		stutter_waited = stutter_wait("rcu_torture_writer");
 		if (stutter_waited &&
-		    !READ_ONCE(rcu_fwd_cb_nodelay) &&
+		    !atomic_read(&rcu_fwd_cb_nodelay) &&
 		    !cur_ops->slow_gps &&
 		    !torture_must_stop() &&
 		    boot_ended)
@@ -1336,9 +1388,21 @@ rcu_torture_fakewriter(void *arg)
 				torture_hrtimeout_jiffies(torture_random(&rand) % 16, &rand);
 				cur_ops->cond_sync(gp_snap);
 				break;
+			case RTWS_COND_GET_EXP:
+				gp_snap = cur_ops->get_gp_state_exp();
+				torture_hrtimeout_jiffies(torture_random(&rand) % 16, &rand);
+				cur_ops->cond_sync_exp(gp_snap);
+				break;
 			case RTWS_POLL_GET:
 				gp_snap = cur_ops->start_gp_poll();
 				while (!cur_ops->poll_gp_state(gp_snap)) {
+					torture_hrtimeout_jiffies(torture_random(&rand) % 16,
+								  &rand);
+				}
+				break;
+			case RTWS_POLL_GET_EXP:
+				gp_snap = cur_ops->start_gp_poll_exp();
+				while (!cur_ops->poll_gp_state_exp(gp_snap)) {
 					torture_hrtimeout_jiffies(torture_random(&rand) % 16,
 								  &rand);
 				}
@@ -2180,7 +2244,6 @@ static void rcu_torture_fwd_cb_hist(struct rcu_fwd *rfp)
 	for (i = ARRAY_SIZE(rfp->n_launders_hist) - 1; i > 0; i--)
 		if (rfp->n_launders_hist[i].n_launders > 0)
 			break;
-	mutex_lock(&rcu_fwd_mutex); // Serialize histograms.
 	pr_alert("%s: Callback-invocation histogram %d (duration %lu jiffies):",
 		 __func__, rfp->rcu_fwd_id, jiffies - rfp->rcu_fwd_startat);
 	gps_old = rfp->rcu_launder_gp_seq_start;
@@ -2193,7 +2256,6 @@ static void rcu_torture_fwd_cb_hist(struct rcu_fwd *rfp)
 		gps_old = gps;
 	}
 	pr_cont("\n");
-	mutex_unlock(&rcu_fwd_mutex);
 }
 
 /* Callback function for continuous-flood RCU callbacks. */
@@ -2281,6 +2343,7 @@ static void rcu_torture_fwd_prog_nr(struct rcu_fwd *rfp,
 	unsigned long stopat;
 	static DEFINE_TORTURE_RANDOM(trs);
 
+	pr_alert("%s: Starting forward-progress test %d\n", __func__, rfp->rcu_fwd_id);
 	if (!cur_ops->sync)
 		return; // Cannot do need_resched() forward progress testing without ->sync.
 	if (cur_ops->call && cur_ops->cb_barrier) {
@@ -2289,7 +2352,7 @@ static void rcu_torture_fwd_prog_nr(struct rcu_fwd *rfp,
 	}
 
 	/* Tight loop containing cond_resched(). */
-	WRITE_ONCE(rcu_fwd_cb_nodelay, true);
+	atomic_inc(&rcu_fwd_cb_nodelay);
 	cur_ops->sync(); /* Later readers see above write. */
 	if  (selfpropcb) {
 		WRITE_ONCE(fcs.stop, 0);
@@ -2325,6 +2388,7 @@ static void rcu_torture_fwd_prog_nr(struct rcu_fwd *rfp,
 	if (selfpropcb) {
 		WRITE_ONCE(fcs.stop, 1);
 		cur_ops->sync(); /* Wait for running CB to complete. */
+		pr_alert("%s: Waiting for CBs: %pS() %d\n", __func__, cur_ops->cb_barrier, rfp->rcu_fwd_id);
 		cur_ops->cb_barrier(); /* Wait for queued callbacks. */
 	}
 
@@ -2333,7 +2397,7 @@ static void rcu_torture_fwd_prog_nr(struct rcu_fwd *rfp,
 		destroy_rcu_head_on_stack(&fcs.rh);
 	}
 	schedule_timeout_uninterruptible(HZ / 10); /* Let kthreads recover. */
-	WRITE_ONCE(rcu_fwd_cb_nodelay, false);
+	atomic_dec(&rcu_fwd_cb_nodelay);
 }
 
 /* Carry out call_rcu() forward-progress testing. */
@@ -2353,13 +2417,14 @@ static void rcu_torture_fwd_prog_cr(struct rcu_fwd *rfp)
 	unsigned long stopat;
 	unsigned long stoppedat;
 
+	pr_alert("%s: Starting forward-progress test %d\n", __func__, rfp->rcu_fwd_id);
 	if (READ_ONCE(rcu_fwd_emergency_stop))
 		return; /* Get out of the way quickly, no GP wait! */
 	if (!cur_ops->call)
 		return; /* Can't do call_rcu() fwd prog without ->call. */
 
 	/* Loop continuously posting RCU callbacks. */
-	WRITE_ONCE(rcu_fwd_cb_nodelay, true);
+	atomic_inc(&rcu_fwd_cb_nodelay);
 	cur_ops->sync(); /* Later readers see above write. */
 	WRITE_ONCE(rfp->rcu_fwd_startat, jiffies);
 	stopat = rfp->rcu_fwd_startat + MAX_FWD_CB_JIFFIES;
@@ -2414,6 +2479,7 @@ static void rcu_torture_fwd_prog_cr(struct rcu_fwd *rfp)
 	n_launders_cb_snap = READ_ONCE(rfp->n_launders_cb);
 	cver = READ_ONCE(rcu_torture_current_version) - cver;
 	gps = rcutorture_seq_diff(cur_ops->get_gp_seq(), gps);
+	pr_alert("%s: Waiting for CBs: %pS() %d\n", __func__, cur_ops->cb_barrier, rfp->rcu_fwd_id);
 	cur_ops->cb_barrier(); /* Wait for callbacks to be invoked. */
 	(void)rcu_torture_fwd_prog_cbfree(rfp);
 
@@ -2427,11 +2493,13 @@ static void rcu_torture_fwd_prog_cr(struct rcu_fwd *rfp)
 			 n_launders, n_launders_sa,
 			 n_max_gps, n_max_cbs, cver, gps);
 		atomic_long_add(n_max_cbs, &rcu_fwd_max_cbs);
+		mutex_lock(&rcu_fwd_mutex); // Serialize histograms.
 		rcu_torture_fwd_cb_hist(rfp);
+		mutex_unlock(&rcu_fwd_mutex);
 	}
 	schedule_timeout_uninterruptible(HZ); /* Let CBs drain. */
 	tick_dep_clear_task(current, TICK_DEP_BIT_RCU);
-	WRITE_ONCE(rcu_fwd_cb_nodelay, false);
+	atomic_dec(&rcu_fwd_cb_nodelay);
 }
 
 
@@ -2511,7 +2579,7 @@ static int rcu_torture_fwd_prog(void *args)
 			firsttime = false;
 			WRITE_ONCE(rcu_fwd_seq, rcu_fwd_seq + 1);
 		} else {
-			while (READ_ONCE(rcu_fwd_seq) == oldseq)
+			while (READ_ONCE(rcu_fwd_seq) == oldseq && !torture_must_stop())
 				schedule_timeout_interruptible(1);
 			oldseq = READ_ONCE(rcu_fwd_seq);
 		}
@@ -2905,12 +2973,16 @@ rcu_torture_cleanup(void)
 	int i;
 
 	if (torture_cleanup_begin()) {
-		if (cur_ops->cb_barrier != NULL)
+		if (cur_ops->cb_barrier != NULL) {
+			pr_info("%s: Invoking %pS().\n", __func__, cur_ops->cb_barrier);
 			cur_ops->cb_barrier();
+		}
+		rcu_gp_slow_unregister(NULL);
 		return;
 	}
 	if (!cur_ops) {
 		torture_cleanup_end();
+		rcu_gp_slow_unregister(NULL);
 		return;
 	}
 
@@ -2961,8 +3033,10 @@ rcu_torture_cleanup(void)
 	 * Wait for all RCU callbacks to fire, then do torture-type-specific
 	 * cleanup operations.
 	 */
-	if (cur_ops->cb_barrier != NULL)
+	if (cur_ops->cb_barrier != NULL) {
+		pr_info("%s: Invoking %pS().\n", __func__, cur_ops->cb_barrier);
 		cur_ops->cb_barrier();
+	}
 	if (cur_ops->cleanup != NULL)
 		cur_ops->cleanup();
 
@@ -3005,6 +3079,7 @@ rcu_torture_cleanup(void)
 	else
 		rcu_torture_print_module_parms(cur_ops, "End of test: SUCCESS");
 	torture_cleanup_end();
+	rcu_gp_slow_unregister(&rcu_fwd_cb_nodelay);
 }
 
 #ifdef CONFIG_DEBUG_OBJECTS_RCU_HEAD
@@ -3309,6 +3384,7 @@ rcu_torture_init(void)
 	if (object_debug)
 		rcu_test_debug_objects();
 	torture_init_end();
+	rcu_gp_slow_register(&rcu_fwd_cb_nodelay);
 	return 0;
 
 unwind:
