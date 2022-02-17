@@ -69,7 +69,7 @@ static struct cmn2asic_msg_mapping vangogh_message_map[SMU_MSG_MAX_COUNT] = {
 	MSG_MAP(PowerUpIspByTile,               PPSMC_MSG_PowerUpIspByTile,		0),
 	MSG_MAP(PowerDownVcn,                   PPSMC_MSG_PowerDownVcn,			0),
 	MSG_MAP(PowerUpVcn,                     PPSMC_MSG_PowerUpVcn,			0),
-	MSG_MAP(RlcPowerNotify,                 PPSMC_MSG_RlcPowerNotify,		0),
+	MSG_MAP(RlcPowerDownNotify,             PPSMC_MSG_RlcPowerDownNotify,		0),
 	MSG_MAP(SetHardMinVcn,                  PPSMC_MSG_SetHardMinVcn,		0),
 	MSG_MAP(SetSoftMinGfxclk,               PPSMC_MSG_SetSoftMinGfxclk,		0),
 	MSG_MAP(ActiveProcessNotify,            PPSMC_MSG_ActiveProcessNotify,		0),
@@ -1384,7 +1384,7 @@ static int vangogh_set_peak_clock_by_device(struct smu_context *smu)
 static int vangogh_set_performance_level(struct smu_context *smu,
 					enum amd_dpm_forced_level level)
 {
-	int ret = 0;
+	int ret = 0, i;
 	uint32_t soc_mask, mclk_mask, fclk_mask;
 	uint32_t vclk_mask = 0, dclk_mask = 0;
 
@@ -1477,6 +1477,24 @@ static int vangogh_set_performance_level(struct smu_context *smu,
 					      smu->gfx_actual_soft_max_freq, NULL);
 	if (ret)
 		return ret;
+
+	if (smu->adev->pm.fw_version >= 0x43f1b00) {
+		for (i = 0; i < smu->cpu_core_num; i++) {
+			ret = smu_cmn_send_smc_msg_with_param(smu, SMU_MSG_SetSoftMinCclk,
+							      ((i << 20)
+							       | smu->cpu_actual_soft_min_freq),
+							      NULL);
+			if (ret)
+				return ret;
+
+			ret = smu_cmn_send_smc_msg_with_param(smu, SMU_MSG_SetSoftMaxCclk,
+							      ((i << 20)
+							       | smu->cpu_actual_soft_max_freq),
+							      NULL);
+			if (ret)
+				return ret;
+		}
+	}
 
 	return ret;
 }
@@ -1950,7 +1968,7 @@ static int vangogh_system_features_control(struct smu_context *smu, bool en)
 	int ret = 0;
 
 	if (adev->pm.fw_version >= 0x43f1700 && !en)
-		ret = smu_cmn_send_smc_msg_with_param(smu, SMU_MSG_RlcPowerNotify,
+		ret = smu_cmn_send_smc_msg_with_param(smu, SMU_MSG_RlcPowerDownNotify,
 						      RLC_STATUS_OFF, NULL);
 
 	return ret;
