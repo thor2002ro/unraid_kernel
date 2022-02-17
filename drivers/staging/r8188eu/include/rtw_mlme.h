@@ -316,7 +316,6 @@ struct mlme_priv {
 
 	u8 *nic_hdl;
 
-	u8 not_indic_disco;
 	struct list_head *pscanned;
 	struct __queue free_bss_pool;
 	struct __queue scanned_queue;
@@ -415,10 +414,6 @@ struct mlme_priv {
 	u32 p2p_assoc_req_ie_len;
 	spinlock_t bcn_update_lock;
 	u8		update_bcn;
-};
-
-struct hostapd_priv {
-	struct adapter *padapter;
 };
 
 int hostapd_mode_init(struct adapter *padapter);
@@ -553,8 +548,6 @@ int rtw_restruct_wmm_ie(struct adapter *adapter, u8 *in_ie, u8 *out_ie,
 void rtw_init_registrypriv_dev_network(struct adapter *adapter);
 
 void rtw_update_registrypriv_dev_network(struct adapter *adapter);
-
-void rtw_get_encrypt_decrypt_from_registrypriv(struct adapter *adapter);
 
 void _rtw_join_timeout_handler(struct adapter *adapter);
 void rtw_scan_timeout_handler(struct adapter *adapter);

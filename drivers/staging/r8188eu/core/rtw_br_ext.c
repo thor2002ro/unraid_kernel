@@ -105,8 +105,7 @@ static int skb_pull_and_merge(struct sk_buff *skb, unsigned char *src, int len)
 	return 0;
 }
 
-static int  __nat25_has_expired(struct adapter *priv,
-				struct nat25_network_db_entry *fdb)
+static int  __nat25_has_expired(struct nat25_network_db_entry *fdb)
 {
 	if (time_before_eq(fdb->ageing_timer, jiffies - NAT25_AGEING_TIME * HZ))
 		return 1;
@@ -319,10 +318,6 @@ static void __nat25_db_network_insert(struct adapter *priv,
 	spin_unlock_bh(&priv->br_ext_lock);
 }
 
-static void __nat25_db_print(struct adapter *priv)
-{
-}
-
 /*
  *	NAT2.5 interface
  */
@@ -367,7 +362,7 @@ void nat25_db_expire(struct adapter *priv)
 			struct nat25_network_db_entry *g;
 			g = f->next_hash;
 
-			if (__nat25_has_expired(priv, f)) {
+			if (__nat25_has_expired(f)) {
 				if (atomic_dec_and_test(&f->use_count)) {
 					if (priv->scdb_entry == f) {
 						memset(priv->scdb_mac, 0, ETH_ALEN);
@@ -422,8 +417,6 @@ int nat25_db_handle(struct adapter *priv, struct sk_buff *skb, int method)
 			__nat25_generate_ipv4_network_addr(networkAddr, &tmp);
 			/* record source IP address and , source mac address into db */
 			__nat25_db_network_insert(priv, skb->data+ETH_ALEN, networkAddr);
-
-			__nat25_db_print(priv);
 			return 0;
 		default:
 			return -1;
@@ -454,7 +447,6 @@ int nat25_db_handle(struct adapter *priv, struct sk_buff *skb, int method)
 			sender = (unsigned int *)arp_ptr;
 			__nat25_generate_ipv4_network_addr(networkAddr, sender);
 			__nat25_db_network_insert(priv, skb->data+ETH_ALEN, networkAddr);
-			__nat25_db_print(priv);
 			return 0;
 		default:
 			return -1;
@@ -535,8 +527,6 @@ int nat25_db_handle(struct adapter *priv, struct sk_buff *skb, int method)
 
 				__nat25_db_network_insert(priv, skb->data+ETH_ALEN, networkAddr);
 
-				__nat25_db_print(priv);
-
 				if (!priv->ethBrExtInfo.addPPPoETag &&
 				    priv->pppoe_connection_in_progress &&
 				    !memcmp(skb->data+ETH_ALEN, priv->pppoe_addr, ETH_ALEN))
@@ -597,7 +587,6 @@ int nat25_db_handle(struct adapter *priv, struct sk_buff *skb, int method)
 			if (memcmp(&iph->saddr, "\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0", 16)) {
 				__nat25_generate_ipv6_network_addr(networkAddr, (unsigned int *)&iph->saddr);
 				__nat25_db_network_insert(priv, skb->data+ETH_ALEN, networkAddr);
-				__nat25_db_print(priv);
 
 				if (iph->nexthdr == IPPROTO_ICMPV6 &&
 						skb->len > (ETH_HLEN +  sizeof(*iph) + 4)) {

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-2.0
+# SPDX-License-Identifier: GPL-2.0-only
 
 # Necessary for CREATE_TRACE_POINTS
 CFLAGS_debug.o = -I$(src)
@@ -20,6 +20,7 @@ wfx-y := \
 	sta.o \
 	debug.o
 wfx-$(CONFIG_SPI) += bus_spi.o
+# When CONFIG_MMC == m, append to 'wfx-y' (and not to 'wfx-m')
 wfx-$(subst m,y,$(CONFIG_MMC)) += bus_sdio.o
 
 obj-$(CONFIG_WFX) += wfx.o

@@ -133,7 +133,7 @@ static struct cmd_obj *_rtw_dequeue_cmd(struct __queue *queue)
 		obj = NULL;
 	} else {
 		obj = container_of((&queue->queue)->next, struct cmd_obj, list);
-		rtw_list_delete(&obj->list);
+		list_del_init(&obj->list);
 	}
 
 	spin_unlock_irqrestore(&queue->lock, flags);
@@ -836,7 +836,7 @@ exit:
 	return res;
 }
 
-u8 rtw_set_chplan_cmd(struct adapter *padapter, u8 chplan, u8 enqueue)
+u8 rtw_set_chplan_cmd(struct adapter *padapter, u8 chplan)
 {
 	struct	cmd_obj *pcmdobj;
 	struct	SetChannelPlan_param *setChannelPlan_param;
@@ -859,24 +859,16 @@ u8 rtw_set_chplan_cmd(struct adapter *padapter, u8 chplan, u8 enqueue)
 	}
 	setChannelPlan_param->channel_plan = chplan;
 
-	if (enqueue) {
-		/* need enqueue, prepare cmd_obj and enqueue */
-		pcmdobj = kzalloc(sizeof(struct	cmd_obj), GFP_KERNEL);
-		if (!pcmdobj) {
-			kfree(setChannelPlan_param);
-			res = _FAIL;
-			goto exit;
-		}
-
-		init_h2fwcmd_w_parm_no_rsp(pcmdobj, setChannelPlan_param, GEN_CMD_CODE(_SetChannelPlan));
-		res = rtw_enqueue_cmd(pcmdpriv, pcmdobj);
-	} else {
-		/* no need to enqueue, do the cmd hdl directly and free cmd parameter */
-		if (H2C_SUCCESS != set_chplan_hdl(padapter, (unsigned char *)setChannelPlan_param))
-			res = _FAIL;
-
+	/* need enqueue, prepare cmd_obj and enqueue */
+	pcmdobj = kzalloc(sizeof(struct	cmd_obj), GFP_KERNEL);
+	if (!pcmdobj) {
 		kfree(setChannelPlan_param);
+		res = _FAIL;
+		goto exit;
 	}
+
+	init_h2fwcmd_w_parm_no_rsp(pcmdobj, setChannelPlan_param, GEN_CMD_CODE(_SetChannelPlan));
+	res = rtw_enqueue_cmd(pcmdpriv, pcmdobj);
 
 	/* do something based on res... */
 	if (res == _SUCCESS)
@@ -952,7 +944,9 @@ static void rtl8188e_sreset_xmit_status_check(struct adapter *padapter)
 
 	txdma_status = rtw_read32(padapter, REG_TXDMA_STATUS);
 	if (txdma_status != 0x00) {
-		DBG_88E("%s REG_TXDMA_STATUS:0x%08x\n", __func__, txdma_status);
+		netdev_dbg(padapter->pnetdev,
+			   "REG_TXDMA_STATUS: 0x%08x\n",
+			   txdma_status);
 		rtw_write32(padapter, REG_TXDMA_STATUS, txdma_status);
 	}
 	/* total xmit irp = 4 */
@@ -1337,7 +1331,7 @@ static void c2h_wk_callback(struct work_struct *work)
 	while (!rtw_cbuf_empty(evtpriv->c2h_queue)) {
 		if ((c2h_evt = (struct c2h_evt_hdr *)rtw_cbuf_pop(evtpriv->c2h_queue)) != NULL) {
 			/* This C2H event is read, clear it */
-			c2h_evt_clear(adapter);
+			rtw_write8(adapter, REG_C2HEVT_CLEAR, C2H_EVT_HOST_CLOSE);
 		} else {
 			c2h_evt = kmalloc(16, GFP_KERNEL);
 			if (c2h_evt) {
@@ -1466,7 +1460,6 @@ void rtw_joinbss_cmd_callback(struct adapter *padapter,  struct cmd_obj *pcmd)
 
 void rtw_createbss_cmd_callback(struct adapter *padapter, struct cmd_obj *pcmd)
 {
-	u8 timer_cancelled;
 	struct sta_info *psta = NULL;
 	struct wlan_network *pwlan = NULL;
 	struct	mlme_priv *pmlmepriv = &padapter->mlmepriv;
@@ -1476,7 +1469,7 @@ void rtw_createbss_cmd_callback(struct adapter *padapter, struct cmd_obj *pcmd)
 	if (pcmd->res != H2C_SUCCESS)
 		_set_timer(&pmlmepriv->assoc_timer, 1);
 
-	_cancel_timer(&pmlmepriv->assoc_timer, &timer_cancelled);
+	del_timer_sync(&pmlmepriv->assoc_timer);
 
 	spin_lock_bh(&pmlmepriv->lock);
 

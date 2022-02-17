@@ -284,14 +284,13 @@ void Switch_DM_Func(struct adapter *padapter, u32 mode, u8 enable)
 		SetHwReg8188EU(padapter, HW_VAR_DM_FUNC_CLR, (u8 *)(&mode));
 }
 
-static void Set_NETYPE0_MSR(struct adapter *padapter, u8 type)
-{
-	SetHwReg8188EU(padapter, HW_VAR_MEDIA_STATUS, (u8 *)(&type));
-}
-
 void Set_MSR(struct adapter *padapter, u8 type)
 {
-	Set_NETYPE0_MSR(padapter, type);
+	u8 val8;
+
+	val8 = rtw_read8(padapter, MSR) & 0x0c;
+	val8 |= type;
+	rtw_write8(padapter, MSR, val8);
 }
 
 inline u8 rtw_get_oper_ch(struct adapter *adapter)
@@ -429,7 +428,7 @@ unsigned int decide_wait_for_beacon_timeout(unsigned int bcn_interval)
 
 void invalidate_cam_all(struct adapter *padapter)
 {
-	SetHwReg8188EU(padapter, HW_VAR_CAM_INVALID_ALL, NULL);
+	rtw_write32(padapter, RWCAM, BIT(31) | BIT(30));
 }
 
 void write_cam(struct adapter *padapter, u8 entry, u16 ctrl, u8 *mac, u8 *key)
@@ -457,7 +456,8 @@ void write_cam(struct adapter *padapter, u8 entry, u16 ctrl, u8 *mac, u8 *key)
 		cam_val[0] = val;
 		cam_val[1] = addr + (unsigned int)j;
 
-		SetHwReg8188EU(padapter, HW_VAR_CAM_WRITE, (u8 *)cam_val);
+		rtw_write32(padapter, WCAMI, cam_val[0]);
+		rtw_write32(padapter, RWCAM, CAM_POLLINIG | CAM_WRITE | cam_val[1]);
 	}
 }
 
@@ -492,7 +492,7 @@ void flush_all_cam_entry(struct adapter *padapter)
 	struct mlme_ext_priv	*pmlmeext = &padapter->mlmeextpriv;
 	struct mlme_ext_info	*pmlmeinfo = &pmlmeext->mlmext_info;
 
-	SetHwReg8188EU(padapter, HW_VAR_CAM_INVALID_ALL, NULL);
+	rtw_write32(padapter, RWCAM, BIT(31) | BIT(30));
 
 	memset((u8 *)(pmlmeinfo->FW_sta_info), 0, sizeof(pmlmeinfo->FW_sta_info));
 }
@@ -558,16 +558,16 @@ void WMMOnAssocRsp(struct adapter *padapter)
 			edca[XMIT_BE_QUEUE] = acParm;
 			break;
 		case 0x1:
-			SetHwReg8188EU(padapter, HW_VAR_AC_PARAM_BK, (u8 *)(&acParm));
+			rtw_write32(padapter, REG_EDCA_BK_PARAM, acParm);
 			edca[XMIT_BK_QUEUE] = acParm;
 			break;
 		case 0x2:
-			SetHwReg8188EU(padapter, HW_VAR_AC_PARAM_VI, (u8 *)(&acParm));
+			rtw_write32(padapter, REG_EDCA_VI_PARAM, acParm);
 			acm_mask |= (ACM ? BIT(2) : 0);
 			edca[XMIT_VI_QUEUE] = acParm;
 			break;
 		case 0x3:
-			SetHwReg8188EU(padapter, HW_VAR_AC_PARAM_VO, (u8 *)(&acParm));
+			rtw_write32(padapter, REG_EDCA_VO_PARAM, acParm);
 			acm_mask |= (ACM ? BIT(3) : 0);
 			edca[XMIT_VO_QUEUE] = acParm;
 			break;
