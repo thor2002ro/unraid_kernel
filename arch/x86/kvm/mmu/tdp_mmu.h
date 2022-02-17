@@ -7,12 +7,8 @@
 
 hpa_t kvm_tdp_mmu_get_vcpu_root_hpa(struct kvm_vcpu *vcpu);
 
-__must_check static inline bool kvm_tdp_mmu_get_root(struct kvm *kvm,
-						     struct kvm_mmu_page *root)
+__must_check static inline bool kvm_tdp_mmu_get_root(struct kvm_mmu_page *root)
 {
-	if (root->role.invalid)
-		return false;
-
 	return refcount_inc_not_zero(&root->tdp_mmu_root_count);
 }
 
@@ -70,6 +66,11 @@ void kvm_tdp_mmu_zap_collapsible_sptes(struct kvm *kvm,
 bool kvm_tdp_mmu_write_protect_gfn(struct kvm *kvm,
 				   struct kvm_memory_slot *slot, gfn_t gfn,
 				   int min_level);
+
+void kvm_tdp_mmu_try_split_huge_pages(struct kvm *kvm,
+				      const struct kvm_memory_slot *slot,
+				      gfn_t start, gfn_t end,
+				      int target_level, bool shared);
 
 static inline void kvm_tdp_mmu_walk_lockless_begin(void)
 {

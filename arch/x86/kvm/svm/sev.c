@@ -1681,7 +1681,7 @@ static int sev_es_migrate_from(struct kvm *dst, struct kvm *src)
 	return 0;
 }
 
-int svm_vm_migrate_from(struct kvm *kvm, unsigned int source_fd)
+int sev_vm_move_enc_context_from(struct kvm *kvm, unsigned int source_fd)
 {
 	struct kvm_sev_info *dst_sev = &to_kvm_svm(kvm)->sev_info;
 	struct kvm_sev_info *src_sev, *cg_cleanup_sev;
@@ -1761,7 +1761,7 @@ out_fput:
 	return ret;
 }
 
-int svm_mem_enc_op(struct kvm *kvm, void __user *argp)
+int sev_mem_enc_ioctl(struct kvm *kvm, void __user *argp)
 {
 	struct kvm_sev_cmd sev_cmd;
 	int r;
@@ -1858,8 +1858,8 @@ out:
 	return r;
 }
 
-int svm_register_enc_region(struct kvm *kvm,
-			    struct kvm_enc_region *range)
+int sev_mem_enc_register_region(struct kvm *kvm,
+				struct kvm_enc_region *range)
 {
 	struct kvm_sev_info *sev = &to_kvm_svm(kvm)->sev_info;
 	struct enc_region *region;
@@ -1932,8 +1932,8 @@ static void __unregister_enc_region_locked(struct kvm *kvm,
 	kfree(region);
 }
 
-int svm_unregister_enc_region(struct kvm *kvm,
-			      struct kvm_enc_region *range)
+int sev_mem_enc_unregister_region(struct kvm *kvm,
+				  struct kvm_enc_region *range)
 {
 	struct enc_region *region;
 	int ret;
@@ -1972,7 +1972,7 @@ failed:
 	return ret;
 }
 
-int svm_vm_copy_asid_from(struct kvm *kvm, unsigned int source_fd)
+int sev_vm_copy_enc_context_from(struct kvm *kvm, unsigned int source_fd)
 {
 	struct file *source_kvm_file;
 	struct kvm *source_kvm;
@@ -2173,7 +2173,7 @@ out:
 #endif
 }
 
-void sev_hardware_teardown(void)
+void sev_hardware_unsetup(void)
 {
 	if (!sev_enabled)
 		return;
@@ -2907,20 +2907,16 @@ void sev_es_vcpu_reset(struct vcpu_svm *svm)
 					    sev_enc_bit));
 }
 
-void sev_es_prepare_guest_switch(struct vcpu_svm *svm, unsigned int cpu)
+void sev_es_prepare_switch_to_guest(struct vmcb_save_area *hostsa)
 {
-	struct svm_cpu_data *sd = per_cpu(svm_data, cpu);
-	struct vmcb_save_area *hostsa;
-
 	/*
 	 * As an SEV-ES guest, hardware will restore the host state on VMEXIT,
-	 * of which one step is to perform a VMLOAD. Since hardware does not
-	 * perform a VMSAVE on VMRUN, the host savearea must be updated.
+	 * of which one step is to perform a VMLOAD.  KVM performs the
+	 * corresponding VMSAVE in svm_prepare_guest_switch for both
+	 * traditional and SEV-ES guests.
 	 */
-	vmsave(__sme_page_pa(sd->save_area));
 
 	/* XCR0 is restored on VMEXIT, save the current host value */
-	hostsa = (struct vmcb_save_area *)(page_address(sd->save_area) + 0x400);
 	hostsa->xcr0 = xgetbv(XCR_XFEATURE_ENABLED_MASK);
 
 	/* PKRU is restored on VMEXIT, save the current host value */
