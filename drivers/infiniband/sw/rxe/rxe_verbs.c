@@ -493,6 +493,11 @@ static int rxe_query_qp(struct ib_qp *ibqp, struct ib_qp_attr *attr,
 static int rxe_destroy_qp(struct ib_qp *ibqp, struct ib_udata *udata)
 {
 	struct rxe_qp *qp = to_rqp(ibqp);
+	int ret;
+
+	ret = rxe_qp_chk_destroy(qp);
+	if (ret)
+		return ret;
 
 	rxe_qp_destroy(qp);
 	rxe_drop_index(qp);
@@ -997,32 +1002,6 @@ static int rxe_map_mr_sg(struct ib_mr *ibmr, struct scatterlist *sg,
 	set->offset = set->iova & set->page_mask;
 
 	return n;
-}
-
-static int rxe_attach_mcast(struct ib_qp *ibqp, union ib_gid *mgid, u16 mlid)
-{
-	int err;
-	struct rxe_dev *rxe = to_rdev(ibqp->device);
-	struct rxe_qp *qp = to_rqp(ibqp);
-	struct rxe_mc_grp *grp;
-
-	/* takes a ref on grp if successful */
-	err = rxe_mcast_get_grp(rxe, mgid, &grp);
-	if (err)
-		return err;
-
-	err = rxe_mcast_add_grp_elem(rxe, qp, grp);
-
-	rxe_drop_ref(grp);
-	return err;
-}
-
-static int rxe_detach_mcast(struct ib_qp *ibqp, union ib_gid *mgid, u16 mlid)
-{
-	struct rxe_dev *rxe = to_rdev(ibqp->device);
-	struct rxe_qp *qp = to_rqp(ibqp);
-
-	return rxe_mcast_drop_grp_elem(rxe, qp, mgid);
 }
 
 static ssize_t parent_show(struct device *device,
