@@ -2744,6 +2744,37 @@ static const struct file_operations gfs2_glstats_fops = {
 
 DEFINE_SEQ_ATTRIBUTE(gfs2_sbstats);
 
+static int gfs2_fault_stats_show(struct seq_file *m, void *p)
+{
+	struct gfs2_sbd *sdp = m->private;
+
+	seq_printf(m,
+		   "read %u %u %u %u\n"
+		   "write %u %u %u %u\n",
+		   atomic_read(&sdp->sd_bread_fault),
+		   atomic_read(&sdp->sd_bread_short),
+		   atomic_read(&sdp->sd_dread_fault),
+		   atomic_read(&sdp->sd_dread_split),
+		   atomic_read(&sdp->sd_bwrite_fault),
+		   atomic_read(&sdp->sd_bwrite_short),
+		   atomic_read(&sdp->sd_dwrite_fault),
+		   atomic_read(&sdp->sd_dwrite_split));
+        return 0;
+}
+
+static int gfs2_fault_stats_open(struct inode *inode, struct file *file)
+{
+        return single_open(file, gfs2_fault_stats_show, inode->i_private);
+}
+
+static const struct file_operations gfs2_fault_stats_fops = {
+        .owner = THIS_MODULE,
+        .open = gfs2_fault_stats_open,
+        .llseek = seq_lseek,
+        .read = seq_read,
+        .release = single_release,
+};
+
 void gfs2_create_debugfs_file(struct gfs2_sbd *sdp)
 {
 	sdp->debugfs_dir = debugfs_create_dir(sdp->sd_table_name, gfs2_root);
@@ -2756,6 +2787,9 @@ void gfs2_create_debugfs_file(struct gfs2_sbd *sdp)
 
 	debugfs_create_file("sbstats", S_IFREG | S_IRUGO, sdp->debugfs_dir, sdp,
 			    &gfs2_sbstats_fops);
+
+	debugfs_create_file("fault_stats", S_IFREG | S_IRUGO, sdp->debugfs_dir, sdp,
+			    &gfs2_fault_stats_fops);
 }
 
 void gfs2_delete_debugfs_file(struct gfs2_sbd *sdp)
