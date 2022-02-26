@@ -665,9 +665,7 @@ static char *escape_string_value(const char *in)
  * kconfig invocation and `defconfig' files. Unset symbol might be omitted by
  * passing a non-NULL argument to the printer.
  */
-enum output_n { OUTPUT_N, OUTPUT_N_AS_UNSET, OUTPUT_N_NONE };
-
-static void __print_symbol(FILE *fp, struct symbol *sym, enum output_n output_n,
+static void __print_symbol(FILE *fp, struct symbol *sym, bool output_n,
 			   bool escape_string)
 {
 	const char *val;
@@ -679,11 +677,8 @@ static void __print_symbol(FILE *fp, struct symbol *sym, enum output_n output_n,
 	val = sym_get_string_value(sym);
 
 	if ((sym->type == S_BOOLEAN || sym->type == S_TRISTATE) &&
-	    output_n != OUTPUT_N && *val == 'n') {
-		if (output_n == OUTPUT_N_AS_UNSET)
-			fprintf(fp, "# %s%s is not set\n", CONFIG_, sym->name);
+	    !output_n && *val == 'n')
 		return;
-	}
 
 	if (sym->type == S_STRING && escape_string) {
 		escaped = escape_string_value(val);
@@ -697,17 +692,17 @@ static void __print_symbol(FILE *fp, struct symbol *sym, enum output_n output_n,
 
 static void print_symbol_for_dotconfig(FILE *fp, struct symbol *sym)
 {
-	__print_symbol(fp, sym, OUTPUT_N_AS_UNSET, true);
+	__print_symbol(fp, sym, true, true);
 }
 
 static void print_symbol_for_autoconf(FILE *fp, struct symbol *sym)
 {
-	__print_symbol(fp, sym, OUTPUT_N_NONE, false);
+	__print_symbol(fp, sym, false, false);
 }
 
 void print_symbol_for_listconfig(struct symbol *sym)
 {
-	__print_symbol(stdout, sym, OUTPUT_N, true);
+	print_symbol_for_dotconfig(stdout, sym);
 }
 
 static void print_symbol_for_c(FILE *fp, struct symbol *sym)
