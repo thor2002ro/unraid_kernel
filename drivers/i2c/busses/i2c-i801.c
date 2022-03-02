@@ -166,7 +166,7 @@
 #define I801_BYTE		0x04
 #define I801_BYTE_DATA		0x08
 #define I801_WORD_DATA		0x0C
-#define I801_PROC_CALL		0x10	/* unimplemented */
+#define I801_PROC_CALL		0x10
 #define I801_BLOCK_DATA		0x14
 #define I801_I2C_BLOCK_DATA	0x18	/* ICH5 and later */
 #define I801_BLOCK_PROC_CALL	0x1C
@@ -792,7 +792,7 @@ static s32 i801_access(struct i2c_adapter *adap, u16 addr,
 {
 	int hwpec;
 	int block = 0;
-	int ret = 0, xact = 0;
+	int ret, xact;
 	struct i801_priv *priv = i2c_get_adapdata(adap);
 
 	mutex_lock(&priv->acpi_lock);
@@ -837,6 +837,14 @@ static s32 i801_access(struct i2c_adapter *adap, u16 addr,
 			outb_p((data->word & 0xff00) >> 8, SMBHSTDAT1(priv));
 		}
 		xact = I801_WORD_DATA;
+		break;
+	case I2C_SMBUS_PROC_CALL:
+		outb_p((addr & 0x7f) << 1, SMBHSTADD(priv));
+		outb_p(command, SMBHSTCMD(priv));
+		outb_p(data->word & 0xff, SMBHSTDAT0(priv));
+		outb_p((data->word & 0xff00) >> 8, SMBHSTDAT1(priv));
+		xact = I801_PROC_CALL;
+		read_write = I2C_SMBUS_READ;
 		break;
 	case I2C_SMBUS_BLOCK_DATA:
 		outb_p(((addr & 0x7f) << 1) | (read_write & 0x01),
@@ -904,12 +912,13 @@ static s32 i801_access(struct i2c_adapter *adap, u16 addr,
 	if ((read_write == I2C_SMBUS_WRITE) || (xact == I801_QUICK))
 		goto out;
 
-	switch (xact & 0x7f) {
+	switch (xact) {
 	case I801_BYTE:	/* Result put in SMBHSTDAT0 */
 	case I801_BYTE_DATA:
 		data->byte = inb_p(SMBHSTDAT0(priv));
 		break;
 	case I801_WORD_DATA:
+	case I801_PROC_CALL:
 		data->word = inb_p(SMBHSTDAT0(priv)) +
 			     (inb_p(SMBHSTDAT1(priv)) << 8);
 		break;
@@ -935,6 +944,7 @@ static u32 i801_func(struct i2c_adapter *adapter)
 
 	return I2C_FUNC_SMBUS_QUICK | I2C_FUNC_SMBUS_BYTE |
 	       I2C_FUNC_SMBUS_BYTE_DATA | I2C_FUNC_SMBUS_WORD_DATA |
+	       I2C_FUNC_SMBUS_PROC_CALL |
 	       I2C_FUNC_SMBUS_BLOCK_DATA | I2C_FUNC_SMBUS_WRITE_I2C_BLOCK |
 	       ((priv->features & FEATURE_SMBUS_PEC) ? I2C_FUNC_SMBUS_PEC : 0) |
 	       ((priv->features & FEATURE_BLOCK_PROC) ?
