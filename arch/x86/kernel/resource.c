@@ -39,6 +39,21 @@ void remove_e820_regions(struct device *dev, struct resource *avail)
 		e820_start = entry->addr;
 		e820_end = entry->addr + entry->size - 1;
 
+		/*
+		 * If an E820 entry covers just part of the resource, we
+		 * assume E820 is telling us about something like host
+		 * bridge register space that is unavailable for PCI
+		 * devices.  But if it covers the *entire* resource, it's
+		 * more likely just telling us that this is MMIO space, and
+		 * that doesn't need to be removed.
+		 */
+		if (e820_start <= avail->start && avail->end <= e820_end) {
+			dev_info(dev, "resource %pR fully covered by e820 entry [mem %#010Lx-%#010Lx]\n",
+				 avail, e820_start, e820_end);
+
+			continue;
+		}
+
 		resource_clip(avail, e820_start, e820_end);
 		if (orig.start != avail->start || orig.end != avail->end) {
 			dev_info(dev, "clipped %pR to %pR for e820 entry [mem %#010Lx-%#010Lx]\n",
