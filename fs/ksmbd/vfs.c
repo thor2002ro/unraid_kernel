@@ -769,8 +769,10 @@ retry:
 		if (parent_fp->daccess & FILE_DELETE_LE) {
 			pr_err("parent dir is opened with delete access\n");
 			err = -ESHARE;
+			ksmbd_fd_put(work, parent_fp);
 			goto out5;
 		}
+		ksmbd_fd_put(work, parent_fp);
 	}
 
 	rd.old_mnt_userns	= mnt_user_ns(old_path->mnt),
