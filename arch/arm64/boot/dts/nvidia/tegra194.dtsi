@@ -1631,7 +1631,7 @@
 			#iommu-cells = <1>;
 
 			nvidia,memory-controller = <&mc>;
-			status = "okay";
+			status = "disabled";
 		};
 
 		smmu: iommu@12000000 {
