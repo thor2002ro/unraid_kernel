@@ -786,7 +786,7 @@ static inline bool should_fault_in_pages(ssize_t ret, struct iov_iter *i,
 		return false;
 
 	if (*prev_count != count || !*window_size) {
-		int pages, nr_dirtied;
+		int nr_dirtied;
 
 		pages = min_t(int, BIO_MAX_VECS, DIV_ROUND_UP(count, PAGE_SIZE));
 		nr_dirtied = max(current->nr_dirtied_pause -
