@@ -15,7 +15,7 @@ arm/soc
 	patch
 		soc: microchip: make mpfs_sys_controller_put static
 		ARM: PXA: fix up decompressor code
-	<no branch> (bba14b329157d914b81ec764b87d60ee97c05e57)
+	mvebu/soc
 		git://git.kernel.org/pub/scm/linux/kernel/git/gclement/mvebu tags/mvebu-arm-5.18-1
 
 arm/dt
@@ -99,6 +99,16 @@ arm/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/gclement/mvebu tags/mvebu-dt64-5.18-1
 	mvebu/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/gclement/mvebu tags/mvebu-dt-5.18-1
+	zynq/dt
+		https://github.com/Xilinx/linux-xlnx tags/zynqmp-dt-for-v5.18
+	at91/dt-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-dt-5.18-2
+	cleanup/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/dt64-cleanup-5.18
+	broadcom/dt
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.18/devicetree
+	broadcom/dt64
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.18/devicetree-arm64
 
 arm/drivers
 	renesas/drivers
@@ -128,6 +138,17 @@ arm/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux-mem-ctrl tags/memory-controller-drv-tegra-5.18
 	mediatek/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.17-next-soc
+	qcom/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-drivers-for-5.18
+	<no branch> (62dc30150c06774a8122c52aedd0eddaceaf5940)
+		git://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.17-next-soc.2
+	at91/drivers-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-soc-5.18-2
+		contains at91/soc
+	drivers/memory-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux-mem-ctrl tags/memory-controller-drv-5.18-2
+	amlogic/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/amlogic/linux tags/amlogic-drivers-for-v5.18
 
 arm/defconfig
 	k3-defconfig
@@ -145,8 +166,18 @@ arm/defconfig
 		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.18-arm64-defconfig
 	qcom/defconfig
 		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-defconfig-for-5.18
-	<no branch> (b5d8378ff0baa69e6ee857dcb7548c10bf16d64e)
+	mediatek/defconfig
 		git://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.17-next-defconfig
+	qcom/defconfig64
+		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-defconfig-for-5.17
+	at91/defconfig-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-defconfig-5.18-2
+	patch
+		arm64: defconfig: enable Layerscape SFP driver
+	broadcom/defconfig-2
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.18/defconfig-arm64
+	patch
+		arm: multi_v5: enable configs for versatile
 
 arm/newsoc
 
@@ -163,4 +194,14 @@ arm/fixes
 		git://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.17-fixes-tag
 	patch
 		ARM: mstar: Select HAVE_ARM_ARCH_TIMER
-
+		arm64: dts: armada-3720-turris-mox: Add missing ethernet0 alias
+	<no branch> (ebea268ea583ba4970df425dfef8c8e21d0a4e12)
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.17-arm64-dt-fixes
+	patch
+		MAINTAINERS: update Krzysztof Kozlowski's email
+	tegra/fixes
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-5.17-arm-dt-fixes-2
+	patch
+		ARM: dts: aspeed: Fix AST2600 quad spi group
+		dt-bindings: drm/bridge: anx7625: Revert DPI support
+		Revert "arm64: dts: mt8183: jacuzzi: Fix bus properties in anx's DSI endpoint"
