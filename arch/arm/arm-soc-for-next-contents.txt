@@ -109,6 +109,10 @@ arm/dt
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.18/devicetree
 	broadcom/dt64
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.18/devicetree-arm64
+	rockchip/dt64-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.18-rockchip-dts64-2
+	rockchip/dt-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v5.18-rockchip-dts32-2
 
 arm/drivers
 	renesas/drivers
@@ -140,7 +144,7 @@ arm/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.17-next-soc
 	qcom/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-drivers-for-5.18
-	<no branch> (62dc30150c06774a8122c52aedd0eddaceaf5940)
+	mediatek/drivers-2
 		git://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v5.17-next-soc.2
 	at91/drivers-2
 		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-soc-5.18-2
@@ -205,3 +209,7 @@ arm/fixes
 		ARM: dts: aspeed: Fix AST2600 quad spi group
 		dt-bindings: drm/bridge: anx7625: Revert DPI support
 		Revert "arm64: dts: mt8183: jacuzzi: Fix bus properties in anx's DSI endpoint"
+	broadcom/soc
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-5.18/maintainers
+	patch
+		MAINTAINERS: Update Jisheng's email address
