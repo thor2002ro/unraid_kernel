@@ -269,6 +269,7 @@ struct io_buffer {
 	__u64 addr;
 	__u32 len;
 	__u16 bid;
+	__u16 bgid;
 };
 
 struct io_restriction {
@@ -1349,6 +1350,36 @@ static inline unsigned int io_put_kbuf(struct io_kiocb *req,
 	}
 
 	return cflags;
+}
+
+static void io_kbuf_recycle(struct io_kiocb *req)
+{
+	struct io_ring_ctx *ctx = req->ctx;
+	struct io_buffer *head, *buf;
+
+	if (likely(!(req->flags & REQ_F_BUFFER_SELECTED)))
+		return;
+
+	lockdep_assert_held(&ctx->uring_lock);
+
+	buf = req->kbuf;
+
+	head = xa_load(&ctx->io_buffers, buf->bgid);
+	if (head) {
+		list_add(&buf->list, &head->list);
+	} else {
+		int ret;
+
+		INIT_LIST_HEAD(&buf->list);
+
+		/* if we fail, just leave buffer attached */
+		ret = xa_insert(&ctx->io_buffers, buf->bgid, buf, GFP_KERNEL);
+		if (unlikely(ret < 0))
+			return;
+	}
+
+	req->flags &= ~REQ_F_BUFFER_SELECTED;
+	req->kbuf = NULL;
 }
 
 static bool io_match_task(struct io_kiocb *head, struct task_struct *task,
@@ -3737,6 +3768,16 @@ static int io_read(struct io_kiocb *req, unsigned int issue_flags)
 		if (unlikely(ret < 0))
 			return ret;
 	} else {
+		/*
+		 * Safe and required to re-import if we're using provided
+		 * buffers, as we dropped the selected one before retry.
+		 */
+		if (req->flags & REQ_F_BUFFER_SELECT) {
+			ret = io_import_iovec(READ, req, &iovec, s, issue_flags);
+			if (unlikely(ret < 0))
+				return ret;
+		}
+
 		rw = req->async_data;
 		s = &rw->s;
 		/*
@@ -3773,6 +3814,9 @@ static int io_read(struct io_kiocb *req, unsigned int issue_flags)
 
 	if (ret == -EAGAIN || (req->flags & REQ_F_REISSUE)) {
 		req->flags &= ~REQ_F_REISSUE;
+		/* if we can poll, just do that */
+		if (req->opcode == IORING_OP_READ && file_can_poll(req->file))
+			return -EAGAIN;
 		/* IOPOLL retry should happen for io-wq threads */
 		if (!force_nonblock && !(req->ctx->flags & IORING_SETUP_IOPOLL))
 			goto done;
@@ -4750,6 +4794,7 @@ static int io_add_buffers(struct io_ring_ctx *ctx, struct io_provide_buf *pbuf,
 		buf->addr = addr;
 		buf->len = min_t(__u32, pbuf->len, MAX_RW_COUNT);
 		buf->bid = bid;
+		buf->bgid = pbuf->bgid;
 		addr += pbuf->len;
 		bid++;
 		if (!*head) {
@@ -7400,7 +7445,11 @@ static void io_queue_sqe_arm_apoll(struct io_kiocb *req)
 		 * Queued up for async execution, worker will release
 		 * submit reference when the iocb is actually submitted.
 		 */
+		io_kbuf_recycle(req);
 		io_queue_async_work(req, NULL);
+		break;
+	case IO_APOLL_OK:
+		io_kbuf_recycle(req);
 		break;
 	}
 
