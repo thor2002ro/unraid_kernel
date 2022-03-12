@@ -1199,6 +1199,7 @@ static void ext4_put_super(struct super_block *sb)
 	int aborted = 0;
 	int i, err;
 
+	flush_scheduled_work();
 	ext4_unregister_li_request(sb);
 	ext4_quota_off_umount(sb);
 
