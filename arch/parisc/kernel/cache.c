@@ -62,12 +62,14 @@ static struct pdc_btlb_info btlb_info __ro_after_init;
 void
 flush_data_cache(void)
 {
-	on_each_cpu(flush_data_cache_local, NULL, 1);
+	if (cache_info.dc_size)
+		on_each_cpu(flush_data_cache_local, NULL, 1);
 }
 void 
 flush_instruction_cache(void)
 {
-	on_each_cpu(flush_instruction_cache_local, NULL, 1);
+	if (cache_info.ic_size)
+		on_each_cpu(flush_instruction_cache_local, NULL, 1);
 }
 #endif
 
@@ -524,7 +526,8 @@ static void cacheflush_h_tmp_function(void *dummy)
 
 void flush_cache_all(void)
 {
-	on_each_cpu(cacheflush_h_tmp_function, NULL, 1);
+	if (cache_info.dc_size | cache_info.ic_size)
+		on_each_cpu(cacheflush_h_tmp_function, NULL, 1);
 }
 
 static inline unsigned long mm_total_size(struct mm_struct *mm)
