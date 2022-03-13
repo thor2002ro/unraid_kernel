@@ -7,7 +7,6 @@
 # (e. g. LC_ALL=C sort Makefile)
 obj-y += allegro-dvt/
 obj-y += allwinner/
-obj-y += am437x/
 obj-y += amlogic/meson-ge2d/
 obj-y += amphion/
 obj-y += aspeed/
@@ -42,6 +41,7 @@ obj-y += stm/sti/delta/
 obj-y += stm/sti/hva/
 obj-y += stm/stm32/
 obj-y += ti-vpe/
+obj-y += ti/am437x/
 obj-y += via/
 obj-y += xilinx/
 
