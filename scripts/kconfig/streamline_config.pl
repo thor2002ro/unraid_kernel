@@ -617,7 +617,7 @@ foreach my $line (@config_file) {
     $_ = $line;
 
     if (/CONFIG_IKCONFIG/) {
-	if (/# CONFIG_IKCONFIG is not set/) {
+	if (/# CONFIG_IKCONFIG is not set/ || /CONFIG_IKCONFIG=n/) {
 	    # enable IKCONFIG at least as a module
 	    print "CONFIG_IKCONFIG=m\n";
 	    # don't ask about PROC
