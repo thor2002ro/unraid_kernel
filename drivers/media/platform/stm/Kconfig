@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+source "drivers/media/platform/stm/sti/Kconfig"
+source "drivers/media/platform/stm/stm32/Kconfig"
