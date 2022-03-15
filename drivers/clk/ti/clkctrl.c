@@ -545,13 +545,8 @@ static void __init _ti_omap4_clkctrl_setup(struct device_node *node)
 		data = omap5_clkctrl_data;
 #endif
 #ifdef CONFIG_SOC_DRA7XX
-	if (of_machine_is_compatible("ti,dra7")) {
-		if (ti_clk_get_features()->flags & TI_CLK_CLKCTRL_COMPAT)
-			data = dra7_clkctrl_compat_data;
-		else
-			data = dra7_clkctrl_data;
-	}
-
+	if (of_machine_is_compatible("ti,dra7"))
+		data = dra7_clkctrl_data;
 	if (of_machine_is_compatible("ti,dra72"))
 		soc_mask = CLKF_SOC_DRA72;
 	if (of_machine_is_compatible("ti,dra74"))
@@ -560,27 +555,15 @@ static void __init _ti_omap4_clkctrl_setup(struct device_node *node)
 		soc_mask = CLKF_SOC_DRA76;
 #endif
 #ifdef CONFIG_SOC_AM33XX
-	if (of_machine_is_compatible("ti,am33xx")) {
-		if (ti_clk_get_features()->flags & TI_CLK_CLKCTRL_COMPAT)
-			data = am3_clkctrl_compat_data;
-		else
-			data = am3_clkctrl_data;
-	}
+	if (of_machine_is_compatible("ti,am33xx"))
+		data = am3_clkctrl_data;
 #endif
 #ifdef CONFIG_SOC_AM43XX
-	if (of_machine_is_compatible("ti,am4372")) {
-		if (ti_clk_get_features()->flags & TI_CLK_CLKCTRL_COMPAT)
-			data = am4_clkctrl_compat_data;
-		else
-			data = am4_clkctrl_data;
-	}
+	if (of_machine_is_compatible("ti,am4372"))
+		data = am4_clkctrl_data;
 
-	if (of_machine_is_compatible("ti,am438x")) {
-		if (ti_clk_get_features()->flags & TI_CLK_CLKCTRL_COMPAT)
-			data = am438x_clkctrl_compat_data;
-		else
-			data = am438x_clkctrl_data;
-	}
+	if (of_machine_is_compatible("ti,am438x"))
+		data = am438x_clkctrl_data;
 #endif
 #ifdef CONFIG_SOC_TI81XX
 	if (of_machine_is_compatible("ti,dm814"))
