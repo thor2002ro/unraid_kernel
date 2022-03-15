@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+source "drivers/media/platform/allwinner/sun4i-csi/Kconfig"
+source "drivers/media/platform/allwinner/sun6i-csi/Kconfig"
+source "drivers/media/platform/allwinner/sun8i-di/Kconfig"
+source "drivers/media/platform/allwinner/sun8i-rotate/Kconfig"
