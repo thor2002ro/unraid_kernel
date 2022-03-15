@@ -666,7 +666,7 @@ void mem_cgroup_flush_stats(void)
 
 void mem_cgroup_flush_stats_delayed(void)
 {
-	if (rstat_flush_time && time_after64(jiffies_64, flush_next_time))
+	if (time_after64(jiffies_64, flush_next_time))
 		mem_cgroup_flush_stats();
 }
 
