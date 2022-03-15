@@ -706,7 +706,7 @@ static int gfs2_release(struct inode *inode, struct file *file)
 
 	if (file->f_mode & FMODE_WRITE) {
 		if (gfs2_rs_active(&ip->i_res))
-			gfs2_rs_delete(ip, &inode->i_writecount);
+			gfs2_rs_delete(ip);
 		gfs2_qa_put(ip);
 	}
 	return 0;
@@ -786,7 +786,7 @@ static inline bool should_fault_in_pages(ssize_t ret, struct iov_iter *i,
 		return false;
 
 	if (*prev_count != count || !*window_size) {
-		int pages, nr_dirtied;
+		int nr_dirtied;
 
 		pages = min_t(int, BIO_MAX_VECS, DIV_ROUND_UP(count, PAGE_SIZE));
 		nr_dirtied = max(current->nr_dirtied_pause -
@@ -1497,7 +1497,6 @@ static int do_flock(struct file *file, int cmd, struct file_lock *fl)
 		if (error != GLR_TRYFAILED)
 			break;
 		fl_gh->gh_flags = LM_FLAG_TRY | GL_EXACT;
-		fl_gh->gh_error = 0;
 		msleep(sleeptime);
 	}
 	if (error) {
