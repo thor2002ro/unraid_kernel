@@ -569,7 +569,7 @@ parse_server_interfaces(struct network_interface_info_ioctl_rsp *buf,
 
 		/* no match. insert the entry in the list */
 		info = kmalloc(sizeof(struct cifs_server_iface),
-			       GFP_KERNEL);
+			       GFP_ATOMIC);
 		if (!info) {
 			rc = -ENOMEM;
 			spin_unlock(&ses->iface_lock);
