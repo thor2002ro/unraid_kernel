@@ -1145,7 +1145,6 @@ static void vmap_tags(struct kunit *test)
 {
 	char *p_ptr, *v_ptr;
 	struct page *p_page, *v_page;
-	size_t order = 1;
 
 	/*
 	 * This test is specifically crafted for the software tag-based mode,
@@ -1155,12 +1154,12 @@ static void vmap_tags(struct kunit *test)
 
 	KASAN_TEST_NEEDS_CONFIG_ON(test, CONFIG_KASAN_VMALLOC);
 
-	p_page = alloc_pages(GFP_KERNEL, order);
+	p_page = alloc_pages(GFP_KERNEL, 1);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, p_page);
 	p_ptr = page_address(p_page);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, p_ptr);
 
-	v_ptr = vmap(&p_page, 1 << order, VM_MAP, PAGE_KERNEL);
+	v_ptr = vmap(&p_page, 1, VM_MAP, PAGE_KERNEL);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, v_ptr);
 
 	/*
@@ -1182,14 +1181,13 @@ static void vmap_tags(struct kunit *test)
 	KUNIT_EXPECT_PTR_EQ(test, p_page, v_page);
 
 	vunmap(v_ptr);
-	free_pages((unsigned long)p_ptr, order);
+	free_pages((unsigned long)p_ptr, 1);
 }
 
 static void vm_map_ram_tags(struct kunit *test)
 {
 	char *p_ptr, *v_ptr;
 	struct page *page;
-	size_t order = 1;
 
 	/*
 	 * This test is specifically crafted for the software tag-based mode,
@@ -1197,12 +1195,12 @@ static void vm_map_ram_tags(struct kunit *test)
 	 */
 	KASAN_TEST_NEEDS_CONFIG_ON(test, CONFIG_KASAN_SW_TAGS);
 
-	page = alloc_pages(GFP_KERNEL, order);
+	page = alloc_pages(GFP_KERNEL, 1);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, page);
 	p_ptr = page_address(page);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, p_ptr);
 
-	v_ptr = vm_map_ram(&page, 1 << order, -1);
+	v_ptr = vm_map_ram(&page, 1, -1);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, v_ptr);
 
 	KUNIT_EXPECT_GE(test, (u8)get_tag(v_ptr), (u8)KASAN_TAG_MIN);
@@ -1212,8 +1210,8 @@ static void vm_map_ram_tags(struct kunit *test)
 	*p_ptr = 0;
 	*v_ptr = 0;
 
-	vm_unmap_ram(v_ptr, 1 << order);
-	free_pages((unsigned long)p_ptr, order);
+	vm_unmap_ram(v_ptr, 1);
+	free_pages((unsigned long)p_ptr, 1);
 }
 
 static void vmalloc_percpu(struct kunit *test)
