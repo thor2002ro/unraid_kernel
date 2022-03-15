@@ -3167,45 +3167,65 @@ static int prot_verify_read(struct scsi_cmnd *scp, sector_t start_sec,
 static inline void
 sdeb_read_lock(struct sdeb_store_info *sip)
 {
-	if (sdebug_no_rwlock)
-		return;
-	if (sip)
-		read_lock(&sip->macc_lck);
-	else
-		read_lock(&sdeb_fake_rw_lck);
+	if (sdebug_no_rwlock) {
+		if (sip)
+			__acquire(&sip->macc_lck);
+		else
+			__acquire(&sdeb_fake_rw_lck);
+	} else {
+		if (sip)
+			read_lock(&sip->macc_lck);
+		else
+			read_lock(&sdeb_fake_rw_lck);
+	}
 }
 
 static inline void
 sdeb_read_unlock(struct sdeb_store_info *sip)
 {
-	if (sdebug_no_rwlock)
-		return;
-	if (sip)
-		read_unlock(&sip->macc_lck);
-	else
-		read_unlock(&sdeb_fake_rw_lck);
+	if (sdebug_no_rwlock) {
+		if (sip)
+			__release(&sip->macc_lck);
+		else
+			__release(&sdeb_fake_rw_lck);
+	} else {
+		if (sip)
+			read_unlock(&sip->macc_lck);
+		else
+			read_unlock(&sdeb_fake_rw_lck);
+	}
 }
 
 static inline void
 sdeb_write_lock(struct sdeb_store_info *sip)
 {
-	if (sdebug_no_rwlock)
-		return;
-	if (sip)
-		write_lock(&sip->macc_lck);
-	else
-		write_lock(&sdeb_fake_rw_lck);
+	if (sdebug_no_rwlock) {
+		if (sip)
+			__acquire(&sip->macc_lck);
+		else
+			__acquire(&sdeb_fake_rw_lck);
+	} else {
+		if (sip)
+			write_lock(&sip->macc_lck);
+		else
+			write_lock(&sdeb_fake_rw_lck);
+	}
 }
 
 static inline void
 sdeb_write_unlock(struct sdeb_store_info *sip)
 {
-	if (sdebug_no_rwlock)
-		return;
-	if (sip)
-		write_unlock(&sip->macc_lck);
-	else
-		write_unlock(&sdeb_fake_rw_lck);
+	if (sdebug_no_rwlock) {
+		if (sip)
+			__release(&sip->macc_lck);
+		else
+			__release(&sdeb_fake_rw_lck);
+	} else {
+		if (sip)
+			write_unlock(&sip->macc_lck);
+		else
+			write_unlock(&sdeb_fake_rw_lck);
+	}
 }
 
 static int resp_read_dt0(struct scsi_cmnd *scp, struct sdebug_dev_info *devip)
@@ -7489,7 +7509,6 @@ static int sdebug_blk_mq_poll(struct Scsi_Host *shost, unsigned int queue_num)
 {
 	bool first;
 	bool retiring = false;
-	bool locked = false;
 	int num_entries = 0;
 	unsigned int qc_idx = 0;
 	unsigned long iflags;
@@ -7505,11 +7524,9 @@ static int sdebug_blk_mq_poll(struct Scsi_Host *shost, unsigned int queue_num)
 	if (qc_idx >= sdebug_max_queue)
 		return 0;
 
+	spin_lock_irqsave(&sqp->qc_lock, iflags);
+
 	for (first = true; first || qc_idx + 1 < sdebug_max_queue; )   {
-		if (!locked) {
-			spin_lock_irqsave(&sqp->qc_lock, iflags);
-			locked = true;
-		}
 		if (first) {
 			first = false;
 			if (!test_bit(qc_idx, sqp->in_use_bm))
@@ -7566,14 +7583,15 @@ static int sdebug_blk_mq_poll(struct Scsi_Host *shost, unsigned int queue_num)
 		}
 		WRITE_ONCE(sd_dp->defer_t, SDEB_DEFER_NONE);
 		spin_unlock_irqrestore(&sqp->qc_lock, iflags);
-		locked = false;
 		scsi_done(scp); /* callback to mid level */
 		num_entries++;
+		spin_lock_irqsave(&sqp->qc_lock, iflags);
 		if (find_first_bit(sqp->in_use_bm, sdebug_max_queue) >= sdebug_max_queue)
-			break;	/* if no more then exit without retaking spinlock */
+			break;
 	}
-	if (locked)
-		spin_unlock_irqrestore(&sqp->qc_lock, iflags);
+
+	spin_unlock_irqrestore(&sqp->qc_lock, iflags);
+
 	if (num_entries > 0)
 		atomic_add(num_entries, &sdeb_mq_poll_count);
 	return num_entries;
