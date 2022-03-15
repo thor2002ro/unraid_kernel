@@ -231,9 +231,6 @@ config ARCH_MAY_HAVE_PC_FDC
 config ARCH_SUPPORTS_UPROBES
 	def_bool y
 
-config ARCH_HAS_DMA_SET_COHERENT_MASK
-	bool
-
 config GENERIC_ISA_DMA
 	bool
 
@@ -277,7 +274,7 @@ config PHYS_OFFSET
 	hex "Physical address of main memory" if MMU
 	depends on !ARM_PATCH_PHYS_VIRT
 	default DRAM_BASE if !MMU
-	default 0x00000000 if ARCH_FOOTBRIDGE || ARCH_IXP4XX
+	default 0x00000000 if ARCH_FOOTBRIDGE
 	default 0x10000000 if ARCH_OMAP1 || ARCH_RPC
 	default 0x30000000 if ARCH_S3C24XX
 	default 0xa0000000 if ARCH_IOP32X || ARCH_PXA
@@ -389,17 +386,15 @@ config ARCH_IOP32X
 config ARCH_IXP4XX
 	bool "IXP4xx-based"
 	depends on MMU
-	select ARCH_HAS_DMA_SET_COHERENT_MASK
 	select ARCH_SUPPORTS_BIG_ENDIAN
+	select ARM_PATCH_PHYS_VIRT
 	select CPU_XSCALE
-	select DMABOUNCE if PCI
 	select GPIO_IXP4XX
 	select GPIOLIB
 	select HAVE_PCI
 	select IXP4XX_IRQ
 	select IXP4XX_TIMER
-	# With the new PCI driver this is not needed
-	select NEED_MACH_IO_H if IXP4XX_PCI_LEGACY
+	select SPARSE_IRQ
 	select USB_EHCI_BIG_ENDIAN_DESC
 	select USB_EHCI_BIG_ENDIAN_MMIO
 	help
@@ -574,6 +569,18 @@ config ARCH_VIRT
 	select ARM_PSCI
 	select HAVE_ARM_ARCH_TIMER
 	select ARCH_SUPPORTS_BIG_ENDIAN
+
+config ARCH_AIROHA
+	bool "Airoha SoC Support"
+	depends on ARCH_MULTI_V7
+	select ARM_AMBA
+	select ARM_GIC
+	select ARM_GIC_V3
+	select ARM_PSCI
+	select HAVE_ARM_ARCH_TIMER
+	select COMMON_CLK
+	help
+	  Support for Airoha EN7523 SoCs
 
 #
 # This is sorted alphabetically by mach-* pathname.  However, plat-*
