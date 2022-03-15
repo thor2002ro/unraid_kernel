@@ -69,7 +69,7 @@
 #include <asm/smp.h>
 #include <asm/vdso_datapage.h>
 #include <asm/firmware.h>
-#include <asm/asm-prototypes.h>
+#include <asm/mce.h>
 
 /* powerpc clocksource/clockevent code */
 
@@ -638,6 +638,7 @@ DEFINE_INTERRUPT_HANDLER_ASYNC(timer_interrupt)
 
 	if (test_irq_work_pending()) {
 		clear_irq_work_pending();
+		mce_run_irq_context_handlers();
 		irq_work_run();
 	}
 
