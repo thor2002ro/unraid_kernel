@@ -550,6 +550,16 @@ static int vsp1_device_init(struct vsp1_device *vsp1)
 	return 0;
 }
 
+static void vsp1_mask_all_interrupts(struct vsp1_device *vsp1)
+{
+	unsigned int i;
+
+	for (i = 0; i < vsp1->info->lif_count; ++i)
+		vsp1_write(vsp1, VI6_DISP_IRQ_ENB(i), 0);
+	for (i = 0; i < vsp1->info->wpf_count; ++i)
+		vsp1_write(vsp1, VI6_WPF_IRQ_ENB(i), 0);
+}
+
 /*
  * vsp1_device_get - Acquire the VSP1 device
  *
@@ -794,9 +804,9 @@ static int vsp1_probe(struct platform_device *pdev)
 {
 	struct vsp1_device *vsp1;
 	struct device_node *fcp_node;
-	struct resource *irq;
 	unsigned int i;
 	int ret;
+	int irq;
 
 	vsp1 = devm_kzalloc(&pdev->dev, sizeof(*vsp1), GFP_KERNEL);
 	if (vsp1 == NULL)
@@ -813,18 +823,9 @@ static int vsp1_probe(struct platform_device *pdev)
 	if (IS_ERR(vsp1->mmio))
 		return PTR_ERR(vsp1->mmio);
 
-	irq = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
-	if (!irq) {
-		dev_err(&pdev->dev, "missing IRQ\n");
-		return -EINVAL;
-	}
-
-	ret = devm_request_irq(&pdev->dev, irq->start, vsp1_irq_handler,
-			      IRQF_SHARED, dev_name(&pdev->dev), vsp1);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "failed to request IRQ\n");
-		return ret;
-	}
+	irq = platform_get_irq(pdev, 0);
+	if (irq < 0)
+		return irq;
 
 	/* FCP (optional). */
 	fcp_node = of_parse_phandle(pdev->dev.of_node, "renesas,fcp", 0);
@@ -855,7 +856,6 @@ static int vsp1_probe(struct platform_device *pdev)
 		goto done;
 
 	vsp1->version = vsp1_read(vsp1, VI6_IP_VERSION);
-	vsp1_device_put(vsp1);
 
 	for (i = 0; i < ARRAY_SIZE(vsp1_device_infos); ++i) {
 		if ((vsp1->version & VI6_IP_VERSION_MODEL_MASK) ==
@@ -868,11 +868,30 @@ static int vsp1_probe(struct platform_device *pdev)
 	if (!vsp1->info) {
 		dev_err(&pdev->dev, "unsupported IP version 0x%08x\n",
 			vsp1->version);
+		vsp1_device_put(vsp1);
 		ret = -ENXIO;
 		goto done;
 	}
 
 	dev_dbg(&pdev->dev, "IP version 0x%08x\n", vsp1->version);
+
+	/*
+	 * Previous use of the hardware (e.g. by the bootloader) could leave
+	 * some interrupts enabled and pending.
+	 *
+	 * TODO: Investigate if this shouldn't be better handled by using the
+	 * device reset provided by the CPG.
+	 */
+	vsp1_mask_all_interrupts(vsp1);
+
+	vsp1_device_put(vsp1);
+
+	ret = devm_request_irq(&pdev->dev, irq, vsp1_irq_handler,
+			       IRQF_SHARED, dev_name(&pdev->dev), vsp1);
+	if (ret < 0) {
+		dev_err(&pdev->dev, "failed to request IRQ\n");
+		goto done;
+	}
 
 	/* Instantiate entities. */
 	ret = vsp1_create_entities(vsp1);

@@ -32,7 +32,6 @@
 #include <media/v4l2-subdev.h>
 
 #define CSIS_DRIVER_NAME			"imx7-mipi-csis"
-#define CSIS_SUBDEV_NAME			CSIS_DRIVER_NAME
 
 #define CSIS_PAD_SINK				0
 #define CSIS_PAD_SOURCE				1
@@ -211,6 +210,8 @@
 #define MIPI_CSIS_DBG_INTR_SRC_CAM_VSYNC_FALL	BIT(4)
 #define MIPI_CSIS_DBG_INTR_SRC_CAM_VSYNC_RISE	BIT(0)
 
+#define MIPI_CSIS_FRAME_COUNTER_CH(n)		(0x0100 + (n) * 4)
+
 /* Non-image packet data buffers */
 #define MIPI_CSIS_PKTDATA_ODD			0x2000
 #define MIPI_CSIS_PKTDATA_EVEN			0x3000
@@ -311,14 +312,13 @@ struct csi_state {
 	struct reset_control *mrst;
 	struct regulator *mipi_phy_regulator;
 	const struct mipi_csis_info *info;
-	u8 index;
 
 	struct v4l2_subdev sd;
 	struct media_pad pads[CSIS_PADS_NUM];
 	struct v4l2_async_notifier notifier;
 	struct v4l2_subdev *src_sd;
 
-	struct v4l2_fwnode_bus_mipi_csi2 bus;
+	struct v4l2_mbus_config_mipi_csi2 bus;
 	u32 clk_frequency;
 	u32 hs_settle;
 	u32 clk_settle;
@@ -331,7 +331,11 @@ struct csi_state {
 	spinlock_t slock;	/* Protect events */
 	struct mipi_csis_event events[MIPI_CSIS_NUM_EVENTS];
 	struct dentry *debugfs_root;
-	bool debug;
+	struct {
+		bool enable;
+		u32 hs_settle;
+		u32 clk_settle;
+	} debug;
 };
 
 /* -----------------------------------------------------------------------------
@@ -541,6 +545,18 @@ static int mipi_csis_calculate_params(struct csi_state *state)
 	dev_dbg(state->dev, "lane rate %u, Tclk_settle %u, Ths_settle %u\n",
 		lane_rate, state->clk_settle, state->hs_settle);
 
+	if (state->debug.hs_settle < 0xff) {
+		dev_dbg(state->dev, "overriding Ths_settle with %u\n",
+			state->debug.hs_settle);
+		state->hs_settle = state->debug.hs_settle;
+	}
+
+	if (state->debug.clk_settle < 4) {
+		dev_dbg(state->dev, "overriding Tclk_settle with %u\n",
+			state->debug.clk_settle);
+		state->clk_settle = state->debug.clk_settle;
+	}
+
 	return 0;
 }
 
@@ -657,7 +673,7 @@ static irqreturn_t mipi_csis_irq_handler(int irq, void *dev_id)
 	spin_lock_irqsave(&state->slock, flags);
 
 	/* Update the event/error counters */
-	if ((status & MIPI_CSIS_INT_SRC_ERRORS) || state->debug) {
+	if ((status & MIPI_CSIS_INT_SRC_ERRORS) || state->debug.enable) {
 		for (i = 0; i < MIPI_CSIS_NUM_EVENTS; i++) {
 			struct mipi_csis_event *event = &state->events[i];
 
@@ -747,7 +763,7 @@ static void mipi_csis_log_counters(struct csi_state *state, bool non_errors)
 	spin_lock_irqsave(&state->slock, flags);
 
 	for (i = 0; i < num_events; ++i) {
-		if (state->events[i].counter > 0 || state->debug)
+		if (state->events[i].counter > 0 || state->debug.enable)
 			dev_info(state->dev, "%s events: %d\n",
 				 state->events[i].name,
 				 state->events[i].counter);
@@ -773,6 +789,7 @@ static int mipi_csis_dump_regs(struct csi_state *state)
 		{ MIPI_CSIS_SDW_CONFIG_CH(0), "SDW_CONFIG_CH0" },
 		{ MIPI_CSIS_SDW_RESOL_CH(0), "SDW_RESOL_CH0" },
 		{ MIPI_CSIS_DBG_CTRL, "DBG_CTRL" },
+		{ MIPI_CSIS_FRAME_COUNTER_CH(0), "FRAME_COUNTER_CH0" },
 	};
 
 	unsigned int i;
@@ -798,12 +815,19 @@ DEFINE_SHOW_ATTRIBUTE(mipi_csis_dump_regs);
 
 static void mipi_csis_debugfs_init(struct csi_state *state)
 {
+	state->debug.hs_settle = UINT_MAX;
+	state->debug.clk_settle = UINT_MAX;
+
 	state->debugfs_root = debugfs_create_dir(dev_name(state->dev), NULL);
 
 	debugfs_create_bool("debug_enable", 0600, state->debugfs_root,
-			    &state->debug);
+			    &state->debug.enable);
 	debugfs_create_file("dump_regs", 0600, state->debugfs_root, state,
 			    &mipi_csis_dump_regs_fops);
+	debugfs_create_u32("tclk_settle", 0600, state->debugfs_root,
+			   &state->debug.clk_settle);
+	debugfs_create_u32("ths_settle", 0600, state->debugfs_root,
+			   &state->debug.hs_settle);
 }
 
 static void mipi_csis_debugfs_exit(struct csi_state *state)
@@ -864,7 +888,7 @@ static int mipi_csis_s_stream(struct v4l2_subdev *sd, int enable)
 			ret = 0;
 		mipi_csis_stop_stream(state);
 		state->state &= ~ST_STREAMING;
-		if (state->debug)
+		if (state->debug.enable)
 			mipi_csis_log_counters(state, true);
 	}
 
@@ -1038,6 +1062,10 @@ static int mipi_csis_set_fmt(struct v4l2_subdev *sd,
 	fmt->code = csis_fmt->code;
 	fmt->width = sdformat->format.width;
 	fmt->height = sdformat->format.height;
+	fmt->colorspace = sdformat->format.colorspace;
+	fmt->quantization = sdformat->format.quantization;
+	fmt->xfer_func = sdformat->format.xfer_func;
+	fmt->ycbcr_enc = sdformat->format.ycbcr_enc;
 
 	sdformat->format = *fmt;
 
@@ -1061,7 +1089,7 @@ static int mipi_csis_log_status(struct v4l2_subdev *sd)
 
 	mutex_lock(&state->lock);
 	mipi_csis_log_counters(state, true);
-	if (state->debug && (state->state & ST_POWERED))
+	if (state->debug.enable && (state->state & ST_POWERED))
 		mipi_csis_dump_regs(state);
 	mutex_unlock(&state->lock);
 
@@ -1303,8 +1331,8 @@ static int mipi_csis_subdev_init(struct csi_state *state)
 
 	v4l2_subdev_init(sd, &mipi_csis_subdev_ops);
 	sd->owner = THIS_MODULE;
-	snprintf(sd->name, sizeof(sd->name), "%s.%d",
-		 CSIS_SUBDEV_NAME, state->index);
+	snprintf(sd->name, sizeof(sd->name), "csis-%s",
+		 dev_name(state->dev));
 
 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	sd->ctrl_handler = NULL;
