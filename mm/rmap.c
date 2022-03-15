@@ -1645,16 +1645,16 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
 				map_count = folio_mapcount(folio);
 
 				/*
-				 * Order reads for page refcount and dirty flag;
-				 * see __remove_mapping().
+				 * Order reads for page refcount and dirty flag
+				 * (see comments in __remove_mapping()).
 				 */
 				smp_rmb();
 
 				/*
-				 * The only page refs must be from the isolation
-				 * plus one or more rmap's (dropped by discard:).
+				 * The only page refs must be one from isolation
+				 * plus the rmap(s) (dropped by discard:).
 				 */
-				if ((ref_count == 1 + map_count) &&
+				if (ref_count == 1 + map_count &&
 				    !folio_test_dirty(folio)) {
 					/* Invalidate as we cleared the pte */
 					mmu_notifier_invalidate_range(mm,
