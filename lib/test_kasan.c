@@ -791,7 +791,7 @@ static void ksize_uaf(struct kunit *test)
 static void kasan_stack_oob(struct kunit *test)
 {
 	char stack_array[10];
-	/* See comment in kasan_global_oob. */
+	/* See comment in kasan_global_oob_right. */
 	char *volatile array = stack_array;
 	char *p = &array[ARRAY_SIZE(stack_array) + OOB_TAG_OFF];
 
@@ -804,7 +804,7 @@ static void kasan_alloca_oob_left(struct kunit *test)
 {
 	volatile int i = 10;
 	char alloca_array[i];
-	/* See comment in kasan_global_oob. */
+	/* See comment in kasan_global_oob_right. */
 	char *volatile array = alloca_array;
 	char *p = array - 1;
 
@@ -819,7 +819,7 @@ static void kasan_alloca_oob_right(struct kunit *test)
 {
 	volatile int i = 10;
 	char alloca_array[i];
-	/* See comment in kasan_global_oob. */
+	/* See comment in kasan_global_oob_right. */
 	char *volatile array = alloca_array;
 	char *p = array + i;
 
