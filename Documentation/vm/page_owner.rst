@@ -107,17 +107,17 @@ Usage
 	 // Detailed stack
 
    By default, ``page_owner_sort`` is sorted according to the times of buf.
-   If you want to sort by the pages nums of buf, use the ``-m`` parameter.
-   The detail parameters are shown as follows:
+   If you want to sort by the page nums of buf, use the ``-m`` parameter.
+   The detailed parameters are:
 
    fundamental function:
 
 	Sort:
-		-a		Sort by memory allocate time.
+		-a		Sort by memory allocation time.
 		-m		Sort by total memory.
 		-p		Sort by pid.
 		-r		Sort by memory release time.
-		-s		Sort by the stack trace.
+		-s		Sort by stack trace.
 		-t		Sort by times (default).
 
    additional function:
