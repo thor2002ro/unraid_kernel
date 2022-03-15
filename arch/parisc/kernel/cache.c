@@ -62,12 +62,14 @@ static struct pdc_btlb_info btlb_info __ro_after_init;
 void
 flush_data_cache(void)
 {
-	on_each_cpu(flush_data_cache_local, NULL, 1);
+	if (cache_info.dc_size)
+		on_each_cpu(flush_data_cache_local, NULL, 1);
 }
 void 
 flush_instruction_cache(void)
 {
-	on_each_cpu(flush_instruction_cache_local, NULL, 1);
+	if (cache_info.ic_size)
+		on_each_cpu(flush_instruction_cache_local, NULL, 1);
 }
 #endif
 
@@ -388,7 +390,7 @@ void __init parisc_setup_cache_timing(void)
 {
 	unsigned long rangetime, alltime;
 	unsigned long size;
-	unsigned long threshold;
+	unsigned long threshold, threshold2;
 
 	alltime = mfctl(16);
 	flush_data_cache();
@@ -403,8 +405,20 @@ void __init parisc_setup_cache_timing(void)
 		alltime, size, rangetime);
 
 	threshold = L1_CACHE_ALIGN(size * alltime / rangetime);
-	if (threshold > cache_info.dc_size)
-		threshold = cache_info.dc_size;
+
+	/*
+	 * The threshold computed above isn't very reliable since the
+	 * flush times depend greatly on the percentage of dirty lines
+	 * in the flush range. Further, the whole cache time doesn't
+	 * include the time to refill lines that aren't in the mm/vma
+	 * being flushed. By timing glibc build and checks on mako cpus,
+	 * the following formula seems to work reasonably well. The
+	 * value from the timing calculation is too small, and increases
+	 * build and check times by almost a factor two.
+	 */
+	threshold2 = cache_info.dc_size * num_online_cpus();
+	if (threshold2 > threshold)
+		threshold = threshold2;
 	if (threshold)
 		parisc_cache_flush_threshold = threshold;
 	printk(KERN_INFO "Cache flush threshold set to %lu KiB\n",
@@ -457,7 +471,7 @@ void flush_kernel_dcache_page_addr(void *addr)
 
 	flush_kernel_dcache_page_asm(addr);
 	purge_tlb_start(flags);
-	pdtlb_kernel(addr);
+	pdtlb(SR_KERNEL, addr);
 	purge_tlb_end(flags);
 }
 EXPORT_SYMBOL(flush_kernel_dcache_page_addr);
@@ -496,9 +510,9 @@ int __flush_tlb_range(unsigned long sid, unsigned long start,
 	   but cause a purge request to be broadcast to other TLBs.  */
 	while (start < end) {
 		purge_tlb_start(flags);
-		mtsp(sid, 1);
-		pdtlb(start);
-		pitlb(start);
+		mtsp(sid, SR_TEMP1);
+		pdtlb(SR_TEMP1, start);
+		pitlb(SR_TEMP1, start);
 		purge_tlb_end(flags);
 		start += PAGE_SIZE;
 	}
@@ -512,7 +526,8 @@ static void cacheflush_h_tmp_function(void *dummy)
 
 void flush_cache_all(void)
 {
-	on_each_cpu(cacheflush_h_tmp_function, NULL, 1);
+	if (cache_info.dc_size | cache_info.ic_size)
+		on_each_cpu(cacheflush_h_tmp_function, NULL, 1);
 }
 
 static inline unsigned long mm_total_size(struct mm_struct *mm)
@@ -558,15 +573,6 @@ static void flush_cache_pages(struct vm_area_struct *vma, struct mm_struct *mm,
 	}
 }
 
-static void flush_user_cache_tlb(struct vm_area_struct *vma,
-				 unsigned long start, unsigned long end)
-{
-	flush_user_dcache_range_asm(start, end);
-	if (vma->vm_flags & VM_EXEC)
-		flush_user_icache_range_asm(start, end);
-	flush_tlb_range(vma, start, end);
-}
-
 void flush_cache_mm(struct mm_struct *mm)
 {
 	struct vm_area_struct *vma;
@@ -575,23 +581,14 @@ void flush_cache_mm(struct mm_struct *mm)
 	   rp3440, etc.  So, avoid it if the mm isn't too big.  */
 	if ((!IS_ENABLED(CONFIG_SMP) || !arch_irqs_disabled()) &&
 	    mm_total_size(mm) >= parisc_cache_flush_threshold) {
-		if (mm->context)
+		if (mm->context.space_id)
 			flush_tlb_all();
 		flush_cache_all();
 		return;
 	}
 
-	preempt_disable();
-	if (mm->context == mfsp(3)) {
-		for (vma = mm->mmap; vma; vma = vma->vm_next)
-			flush_user_cache_tlb(vma, vma->vm_start, vma->vm_end);
-		preempt_enable();
-		return;
-	}
-
 	for (vma = mm->mmap; vma; vma = vma->vm_next)
 		flush_cache_pages(vma, mm, vma->vm_start, vma->vm_end);
-	preempt_enable();
 }
 
 void flush_cache_range(struct vm_area_struct *vma,
@@ -599,28 +596,20 @@ void flush_cache_range(struct vm_area_struct *vma,
 {
 	if ((!IS_ENABLED(CONFIG_SMP) || !arch_irqs_disabled()) &&
 	    end - start >= parisc_cache_flush_threshold) {
-		if (vma->vm_mm->context)
+		if (vma->vm_mm->context.space_id)
 			flush_tlb_range(vma, start, end);
 		flush_cache_all();
 		return;
 	}
 
-	preempt_disable();
-	if (vma->vm_mm->context == mfsp(3)) {
-		flush_user_cache_tlb(vma, start, end);
-		preempt_enable();
-		return;
-	}
-
-	flush_cache_pages(vma, vma->vm_mm, vma->vm_start, vma->vm_end);
-	preempt_enable();
+	flush_cache_pages(vma, vma->vm_mm, start, end);
 }
 
 void
 flush_cache_page(struct vm_area_struct *vma, unsigned long vmaddr, unsigned long pfn)
 {
 	if (pfn_valid(pfn)) {
-		if (likely(vma->vm_mm->context)) {
+		if (likely(vma->vm_mm->context.space_id)) {
 			flush_tlb_page(vma, vmaddr);
 			__flush_cache_page(vma, vmaddr, PFN_PHYS(pfn));
 		} else {
