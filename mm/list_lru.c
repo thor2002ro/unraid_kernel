@@ -480,7 +480,6 @@ int memcg_list_lru_alloc(struct mem_cgroup *memcg, struct list_lru *lru,
 {
 	int i;
 	unsigned long flags;
-	struct list_lru_memcg *mlrus;
 	struct list_lru_memcg_table {
 		struct list_lru_per_memcg *mlru;
 		struct mem_cgroup *memcg;
