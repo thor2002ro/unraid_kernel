@@ -452,8 +452,10 @@ static int damon_sysfs_attrs_add_dirs(struct damon_sysfs_attrs *attrs)
 	attrs->intervals = intervals;
 
 	nr_regions_range = damon_sysfs_ul_range_alloc(10, 1000);
-	if (!nr_regions_range)
+	if (!nr_regions_range) {
+		err = -ENOMEM;
 		goto put_intervals_out;
+	}
 
 	err = kobject_init_and_add(&nr_regions_range->kobj,
 			&damon_sysfs_ul_range_ktype, &attrs->kobj,
