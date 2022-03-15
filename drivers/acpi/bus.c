@@ -26,6 +26,7 @@
 #include <asm/mpspec.h>
 #include <linux/dmi.h>
 #endif
+#include <linux/acpi_agdi.h>
 #include <linux/acpi_iort.h>
 #include <linux/acpi_viot.h>
 #include <linux/pci.h>
@@ -1043,7 +1044,12 @@ struct bus_type acpi_bus_type = {
 	.remove		= acpi_device_remove,
 	.uevent		= acpi_device_uevent,
 };
-EXPORT_SYMBOL_GPL(acpi_bus_type);
+
+int acpi_bus_for_each_dev(int (*fn)(struct device *, void *), void *data)
+{
+	return bus_for_each_dev(&acpi_bus_type, NULL, data, fn);
+}
+EXPORT_SYMBOL_GPL(acpi_bus_for_each_dev);
 
 /* --------------------------------------------------------------------------
                              Initialization/Cleanup
@@ -1331,6 +1337,8 @@ static int __init acpi_init(void)
 
 	pci_mmcfg_late_init();
 	acpi_iort_init();
+	acpi_hest_init();
+	acpi_ghes_init();
 	acpi_scan_init();
 	acpi_ec_init();
 	acpi_debugfs_init();
@@ -1339,6 +1347,7 @@ static int __init acpi_init(void)
 	acpi_debugger_init();
 	acpi_setup_sb_notify_handler();
 	acpi_viot_init();
+	acpi_agdi_init();
 	return 0;
 }
 
