@@ -990,16 +990,13 @@ struct mem_cgroup *mem_cgroup_iter(struct mem_cgroup *root,
 	struct mem_cgroup_reclaim_iter *iter;
 	struct cgroup_subsys_state *css = NULL;
 	struct mem_cgroup *memcg = NULL;
-	struct mem_cgroup *pos = NULL;
+	struct mem_cgroup *pos = prev;
 
 	if (mem_cgroup_disabled())
 		return NULL;
 
 	if (!root)
 		root = root_mem_cgroup;
-
-	if (prev && !reclaim)
-		pos = prev;
 
 	rcu_read_lock();
 
