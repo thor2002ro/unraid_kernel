@@ -234,7 +234,6 @@ config DEBUG_INFO
 choice
 	prompt "Debug information"
 	depends on DEBUG_KERNEL
-	default DEBUG_INFO_NONE if COMPILE_TEST
 	help
 	  Selecting something other than "None" results in a kernel image
 	  that will include debugging info resulting in a larger kernel image.
@@ -244,6 +243,12 @@ choice
 
 	  Choose which version of DWARF debug info to emit. If unsure,
 	  select "Toolchain default".
+
+config DEBUG_INFO_NONE
+	bool "Disable debug information"
+	help
+	  Do not build the kernel with debugging information, which will
+	  result in a faster and smaller build.
 
 config DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT
 	bool "Rely on the toolchain's implicit default DWARF version"
@@ -282,12 +287,6 @@ config DEBUG_INFO_DWARF5
 	  for fission (.dwo/.dwp) files. Users may not want to select this
 	  config if they rely on tooling that has not yet been updated to
 	  support DWARF Version 5.
-
-config DEBUG_INFO_NONE
-	bool "Disable debug information"
-	help
-	  Do not build the kernel with debugging information, which will
-	  result in a faster and smaller build.
 
 endchoice # "Debug information"
 
