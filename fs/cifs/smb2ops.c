@@ -25,6 +25,7 @@
 #include "smb2glob.h"
 #include "cifs_ioctl.h"
 #include "smbdirect.h"
+#include "fscache.h"
 #include "fs_context.h"
 
 /* Change credits for different ops and return the total number of credits */
@@ -508,70 +509,79 @@ smb3_negotiate_rsize(struct cifs_tcon *tcon, struct smb3_fs_context *ctx)
 static int
 parse_server_interfaces(struct network_interface_info_ioctl_rsp *buf,
 			size_t buf_len,
-			struct cifs_server_iface **iface_list,
-			size_t *iface_count)
+			struct cifs_ses *ses)
 {
 	struct network_interface_info_ioctl_rsp *p;
 	struct sockaddr_in *addr4;
 	struct sockaddr_in6 *addr6;
 	struct iface_info_ipv4 *p4;
 	struct iface_info_ipv6 *p6;
-	struct cifs_server_iface *info;
+	struct cifs_server_iface *info = NULL, *iface = NULL, *niface = NULL;
+	struct cifs_server_iface tmp_iface;
 	ssize_t bytes_left;
 	size_t next = 0;
 	int nb_iface = 0;
-	int rc = 0;
-
-	*iface_list = NULL;
-	*iface_count = 0;
-
-	/*
-	 * Fist pass: count and sanity check
-	 */
+	int rc = 0, ret = 0;
+	bool iface_found = false;
 
 	bytes_left = buf_len;
 	p = buf;
+
+	spin_lock(&ses->iface_lock);
+	/*
+	 * Go through iface_list and do kref_put to remove
+	 * any unused ifaces. ifaces in use will be removed
+	 * when the last user calls a kref_put on it
+	 */
+	list_for_each_entry_safe(iface, niface, &ses->iface_list,
+				 iface_head) {
+		iface->is_active = 0;
+		kref_put(&iface->refcount, release_iface);
+	}
+
 	while (bytes_left >= sizeof(*p)) {
-		nb_iface++;
-		next = le32_to_cpu(p->Next);
-		if (!next) {
-			bytes_left -= sizeof(*p);
-			break;
+		memset(&tmp_iface, 0, sizeof(tmp_iface));
+		tmp_iface.speed = le64_to_cpu(p->LinkSpeed);
+		tmp_iface.rdma_capable = le32_to_cpu(p->Capability & RDMA_CAPABLE) ? 1 : 0;
+		tmp_iface.rss_capable = le32_to_cpu(p->Capability & RSS_CAPABLE) ? 1 : 0;
+
+		/*
+		 * The iface_list is assumed to be sorted by speed.
+		 * Check if the new interface exists in that list.
+		 * NEVER change iface. it could be in use.
+		 * Add a new one instead
+		 */
+		iface_found = false;
+		list_for_each_entry_safe(iface, niface, &ses->iface_list,
+					 iface_head) {
+			ret = iface_cmp(iface, &tmp_iface);
+			if (!ret) {
+				/* just get a ref so that it doesn't get picked/freed */
+				iface->is_active = 1;
+				kref_get(&iface->refcount);
+				goto next_iface;
+			} else if (ret > 0) {
+				/* all remaining ifaces are slower */
+				iface_found = true;
+				break;
+			}
 		}
-		p = (struct network_interface_info_ioctl_rsp *)((u8 *)p+next);
-		bytes_left -= next;
-	}
 
-	if (!nb_iface) {
-		cifs_dbg(VFS, "%s: malformed interface info\n", __func__);
-		rc = -EINVAL;
-		goto out;
-	}
+		/* no match. insert the entry in the list */
+		info = kmalloc(sizeof(struct cifs_server_iface),
+			       GFP_ATOMIC);
+		if (!info) {
+			rc = -ENOMEM;
+			spin_unlock(&ses->iface_lock);
+			goto out;
+		}
+		memcpy(info, &tmp_iface, sizeof(tmp_iface));
 
-	/* Azure rounds the buffer size up 8, to a 16 byte boundary */
-	if ((bytes_left > 8) || p->Next)
-		cifs_dbg(VFS, "%s: incomplete interface info\n", __func__);
+		/* add this new entry to the list */
+		kref_init(&info->refcount);
+		info->is_active = 1;
 
-
-	/*
-	 * Second pass: extract info to internal structure
-	 */
-
-	*iface_list = kcalloc(nb_iface, sizeof(**iface_list), GFP_KERNEL);
-	if (!*iface_list) {
-		rc = -ENOMEM;
-		goto out;
-	}
-
-	info = *iface_list;
-	bytes_left = buf_len;
-	p = buf;
-	while (bytes_left >= sizeof(*p)) {
-		info->speed = le64_to_cpu(p->LinkSpeed);
-		info->rdma_capable = le32_to_cpu(p->Capability & RDMA_CAPABLE) ? 1 : 0;
-		info->rss_capable = le32_to_cpu(p->Capability & RSS_CAPABLE) ? 1 : 0;
-
-		cifs_dbg(FYI, "%s: adding iface %zu\n", __func__, *iface_count);
+		cifs_dbg(FYI, "%s: adding iface %zu\n", __func__, ses->iface_count);
 		cifs_dbg(FYI, "%s: speed %zu bps\n", __func__, info->speed);
 		cifs_dbg(FYI, "%s: capabilities 0x%08x\n", __func__,
 			 le32_to_cpu(p->Capability));
@@ -615,36 +625,43 @@ parse_server_interfaces(struct network_interface_info_ioctl_rsp *buf,
 			goto next_iface;
 		}
 
-		(*iface_count)++;
-		info++;
+		if (iface_found)
+			list_add_tail(&info->iface_head, &iface->iface_head);
+		else
+			list_add_tail(&info->iface_head, &ses->iface_list);
+
+		ses->iface_count++;
+		ses->iface_last_update = jiffies;
 next_iface:
+		nb_iface++;
 		next = le32_to_cpu(p->Next);
-		if (!next)
+		if (!next) {
+			bytes_left -= sizeof(*p);
 			break;
+		}
 		p = (struct network_interface_info_ioctl_rsp *)((u8 *)p+next);
 		bytes_left -= next;
 	}
+	spin_unlock(&ses->iface_lock);
 
-	if (!*iface_count) {
+	if (!nb_iface) {
+		cifs_dbg(VFS, "%s: malformed interface info\n", __func__);
+		rc = -EINVAL;
+		goto out;
+	}
+
+	/* Azure rounds the buffer size up 8, to a 16 byte boundary */
+	if ((bytes_left > 8) || p->Next)
+		cifs_dbg(VFS, "%s: incomplete interface info\n", __func__);
+
+
+	if (!ses->iface_count) {
 		rc = -EINVAL;
 		goto out;
 	}
 
 out:
-	if (rc) {
-		kfree(*iface_list);
-		*iface_count = 0;
-		*iface_list = NULL;
-	}
 	return rc;
-}
-
-static int compare_iface(const void *ia, const void *ib)
-{
-	const struct cifs_server_iface *a = (struct cifs_server_iface *)ia;
-	const struct cifs_server_iface *b = (struct cifs_server_iface *)ib;
-
-	return a->speed == b->speed ? 0 : (a->speed > b->speed ? -1 : 1);
 }
 
 static int
@@ -653,8 +670,6 @@ SMB3_request_interfaces(const unsigned int xid, struct cifs_tcon *tcon)
 	int rc;
 	unsigned int ret_data_len = 0;
 	struct network_interface_info_ioctl_rsp *out_buf = NULL;
-	struct cifs_server_iface *iface_list;
-	size_t iface_count;
 	struct cifs_ses *ses = tcon->ses;
 
 	rc = SMB2_ioctl(xid, tcon, NO_FILE_ID, NO_FILE_ID,
@@ -670,20 +685,9 @@ SMB3_request_interfaces(const unsigned int xid, struct cifs_tcon *tcon)
 		goto out;
 	}
 
-	rc = parse_server_interfaces(out_buf, ret_data_len,
-				     &iface_list, &iface_count);
+	rc = parse_server_interfaces(out_buf, ret_data_len, ses);
 	if (rc)
 		goto out;
-
-	/* sort interfaces from fastest to slowest */
-	sort(iface_list, iface_count, sizeof(*iface_list), compare_iface, NULL);
-
-	spin_lock(&ses->iface_lock);
-	kfree(ses->iface_list);
-	ses->iface_list = iface_list;
-	ses->iface_count = iface_count;
-	ses->iface_last_update = jiffies;
-	spin_unlock(&ses->iface_lock);
 
 out:
 	kfree(out_buf);
@@ -3887,29 +3891,38 @@ static long smb3_collapse_range(struct file *file, struct cifs_tcon *tcon,
 {
 	int rc;
 	unsigned int xid;
+	struct inode *inode;
 	struct cifsFileInfo *cfile = file->private_data;
+	struct cifsInodeInfo *cifsi;
 	__le64 eof;
 
 	xid = get_xid();
 
-	if (off >= i_size_read(file->f_inode) ||
-	    off + len >= i_size_read(file->f_inode)) {
+	inode = d_inode(cfile->dentry);
+	cifsi = CIFS_I(inode);
+
+	if (off >= i_size_read(inode) ||
+	    off + len >= i_size_read(inode)) {
 		rc = -EINVAL;
 		goto out;
 	}
 
 	rc = smb2_copychunk_range(xid, cfile, cfile, off + len,
-				  i_size_read(file->f_inode) - off - len, off);
+				  i_size_read(inode) - off - len, off);
 	if (rc < 0)
 		goto out;
 
-	eof = cpu_to_le64(i_size_read(file->f_inode) - len);
+	eof = cpu_to_le64(i_size_read(inode) - len);
 	rc = SMB2_set_eof(xid, tcon, cfile->fid.persistent_fid,
 			  cfile->fid.volatile_fid, cfile->pid, &eof);
 	if (rc < 0)
 		goto out;
 
 	rc = 0;
+
+	cifsi->server_eof = i_size_read(inode) - len;
+	truncate_setsize(inode, cifsi->server_eof);
+	fscache_resize_cookie(cifs_inode_cookie(inode), cifsi->server_eof);
  out:
 	free_xid(xid);
 	return rc;
