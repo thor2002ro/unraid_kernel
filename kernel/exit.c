@@ -735,7 +735,7 @@ void __noreturn do_exit(long code)
 	struct task_struct *tsk = current;
 	int group_dead;
 
-	WARN_ON(blk_needs_flush_plug(tsk));
+	WARN_ON(tsk->plug);
 
 	kcov_task_exit(tsk);
 
