@@ -229,7 +229,8 @@ static const char * const mnt_info_table[] = {
 	"failed srcname match",
 	"failed type match",
 	"failed flags match",
-	"failed data match"
+	"failed data match",
+	"failed perms check"
 };
 
 /*
@@ -284,8 +285,8 @@ static int do_match_mnt(struct aa_dfa *dfa, unsigned int start,
 			return 0;
 	}
 
-	/* failed at end of flags match */
-	return 4;
+	/* failed at perms check, don't confuse with flags match */
+	return 6;
 }
 
 
@@ -303,7 +304,7 @@ static int path_flags(struct aa_profile *profile, const struct path *path)
  * @profile: the confining profile
  * @mntpath: for the mntpnt (NOT NULL)
  * @buffer: buffer to be used to lookup mntpath
- * @devnme: string for the devname/src_name (MAY BE NULL OR ERRPTR)
+ * @devname: string for the devname/src_name (MAY BE NULL OR ERRPTR)
  * @type: string for the dev type (MAYBE NULL)
  * @flags: mount flags to match
  * @data: fs mount data (MAYBE NULL)
@@ -358,7 +359,7 @@ audit:
 /**
  * match_mnt - handle path matching for mount
  * @profile: the confining profile
- * @mntpath: for the mntpnt (NOT NULL)
+ * @path: for the mntpnt (NOT NULL)
  * @buffer: buffer to be used to lookup mntpath
  * @devpath: path devname/src_name (MAYBE NULL)
  * @devbuffer: buffer to be used to lookup devname/src_name
