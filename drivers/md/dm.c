@@ -940,6 +940,21 @@ static void dm_io_complete(struct dm_io *io)
 	}
 }
 
+static inline bool dm_io_wait_for_submission(struct dm_io *io)
+{
+	/* return %false if called from same task that called ->map */
+	if (smp_load_acquire(&io->map_task) == current)
+		return false;
+	/*
+	 * Wait for dm_split_and_process_bio() to store io->orig_bio.
+	 * Any race between deferred IO submission (or clone_endio) and
+	 * dm_split_and_process_bio()'s store is extremely narrow.
+	 */
+	while (unlikely(!smp_load_acquire(&io->orig_bio)))
+		cond_resched();
+	return true;
+}
+
 /*
  * Decrements the number of outstanding ios that a bio has been
  * cloned into, completing the original io if necc.
@@ -1233,17 +1248,11 @@ void dm_submit_bio_remap(struct bio *clone, struct bio *tgt_clone)
 	 * Account io->origin_bio to DM dev on behalf of target
 	 * that took ownership of IO with DM_MAPIO_SUBMITTED.
 	 */
-	if (io->map_task == current) {
+	if (!dm_io_wait_for_submission(io)) {
 		/* Still in target's map function */
 		dm_io_set_flag(io, DM_IO_START_ACCT);
 	} else {
-		/*
-		 * Called by another thread, managed by DM target,
-		 * wait for dm_split_and_process_bio() to store
-		 * io->orig_bio
-		 */
-		while (unlikely(!smp_load_acquire(&io->orig_bio)))
-			msleep(1);
+		/* Called by another thread, managed by DM target */
 		dm_start_io_acct(io, io->orig_bio, clone);
 	}
 
@@ -1592,7 +1601,6 @@ static void dm_split_and_process_bio(struct mapped_device *md,
 	}
 
 	error = __split_and_process_bio(&ci);
-	io->map_task = NULL;
 	if (error || !ci.sector_count)
 		goto out;
 
@@ -1614,6 +1622,7 @@ out:
 	if (dm_io_flagged(io, DM_IO_START_ACCT))
 		dm_start_io_acct(io, orig_bio, NULL);
 	smp_store_release(&io->orig_bio, orig_bio);
+	smp_store_release(&io->map_task, NULL);
 
 	/*
 	 * Drop the extra reference count for non-POLLED bio, and hold one
