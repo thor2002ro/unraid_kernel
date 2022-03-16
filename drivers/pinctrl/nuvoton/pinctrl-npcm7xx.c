@@ -216,7 +216,8 @@ static void npcmgpio_irq_handler(struct irq_desc *desc)
 	struct gpio_chip *gc;
 	struct irq_chip *chip;
 	struct npcm7xx_gpio *bank;
-	u32 sts, en, bit;
+	unsigned long sts, bit;
+	u32 en;
 
 	gc = irq_desc_get_handler_data(desc);
 	bank = gpiochip_get_data(gc);
@@ -225,7 +226,7 @@ static void npcmgpio_irq_handler(struct irq_desc *desc)
 	chained_irq_enter(chip, desc);
 	sts = ioread32(bank->base + NPCM7XX_GP_N_EVST);
 	en  = ioread32(bank->base + NPCM7XX_GP_N_EVEN);
-	dev_dbg(bank->gc.parent, "==> got irq sts %.8x %.8x\n", sts,
+	dev_dbg(bank->gc.parent, "==> got irq sts %.8lx %.8x\n", sts,
 		en);
 
 	sts &= en;
