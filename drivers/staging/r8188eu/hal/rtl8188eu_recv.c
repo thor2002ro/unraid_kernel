@@ -12,22 +12,6 @@
 
 #include "../include/rtl8188e_hal.h"
 
-void rtl8188eu_init_recvbuf(struct recv_buf *precvbuf)
-{
-	precvbuf->transfer_len = 0;
-
-	precvbuf->len = 0;
-
-	precvbuf->ref_cnt = 0;
-
-	if (precvbuf->pbuf) {
-		precvbuf->pdata = precvbuf->pbuf;
-		precvbuf->phead = precvbuf->pbuf;
-		precvbuf->ptail = precvbuf->pbuf;
-		precvbuf->pend = precvbuf->pdata + MAX_RECVBUF_SZ;
-	}
-}
-
 int	rtl8188eu_init_recv_priv(struct adapter *padapter)
 {
 	struct recv_priv	*precvpriv = &padapter->recvpriv;
@@ -54,13 +38,9 @@ int	rtl8188eu_init_recv_priv(struct adapter *padapter)
 	precvbuf = (struct recv_buf *)precvpriv->precv_buf;
 
 	for (i = 0; i < NR_RECVBUFF; i++) {
-		INIT_LIST_HEAD(&precvbuf->list);
-		spin_lock_init(&precvbuf->recvbuf_lock);
-		precvbuf->alloc_sz = MAX_RECVBUF_SZ;
 		res = rtw_os_recvbuf_resource_alloc(padapter, precvbuf);
 		if (res == _FAIL)
 			break;
-		precvbuf->ref_cnt = 0;
 		precvbuf->adapter = padapter;
 		precvbuf++;
 	}
@@ -106,12 +86,7 @@ void rtl8188eu_free_recv_priv(struct adapter *padapter)
 
 	kfree(precvpriv->pallocated_recv_buf);
 
-	if (skb_queue_len(&precvpriv->rx_skb_queue))
-		DBG_88E(KERN_WARNING "rx_skb_queue not empty\n");
 	skb_queue_purge(&precvpriv->rx_skb_queue);
-
-	if (skb_queue_len(&precvpriv->free_recv_skb_queue))
-		DBG_88E(KERN_WARNING "free_recv_skb_queue not empty, %d\n", skb_queue_len(&precvpriv->free_recv_skb_queue));
 
 	skb_queue_purge(&precvpriv->free_recv_skb_queue);
 }
