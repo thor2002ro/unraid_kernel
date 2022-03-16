@@ -120,6 +120,13 @@ static const struct property_entry dwc3_pci_intel_properties[] = {
 	{}
 };
 
+static const struct property_entry dwc3_pci_intel_phy_charger_detect_properties[] = {
+	PROPERTY_ENTRY_STRING("dr_mode", "peripheral"),
+	PROPERTY_ENTRY_BOOL("snps,dis_u2_susphy_quirk"),
+	PROPERTY_ENTRY_BOOL("linux,phy_charger_detect"),
+	{}
+};
+
 static const struct property_entry dwc3_pci_intel_byt_properties[] = {
 	PROPERTY_ENTRY_STRING("dr_mode", "peripheral"),
 	PROPERTY_ENTRY_BOOL("snps,dis_u2_susphy_quirk"),
@@ -169,6 +176,10 @@ static const struct software_node dwc3_pci_intel_swnode = {
 	.properties = dwc3_pci_intel_properties,
 };
 
+static const struct software_node dwc3_pci_intel_phy_charger_detect_swnode = {
+	.properties = dwc3_pci_intel_phy_charger_detect_properties,
+};
+
 static const struct software_node dwc3_pci_intel_byt_swnode = {
 	.properties = dwc3_pci_intel_byt_properties,
 };
@@ -185,7 +196,8 @@ static const struct software_node dwc3_pci_amd_mr_swnode = {
 	.properties = dwc3_pci_mr_properties,
 };
 
-static int dwc3_pci_quirks(struct dwc3_pci *dwc)
+static int dwc3_pci_quirks(struct dwc3_pci *dwc,
+			   const struct software_node *swnode)
 {
 	struct pci_dev			*pdev = dwc->pci;
 
@@ -239,10 +251,30 @@ static int dwc3_pci_quirks(struct dwc3_pci *dwc)
 				gpiod_put(gpio);
 				usleep_range(10000, 11000);
 			}
+
+			/*
+			 * Make the pdev name predictable (only 1 DWC3 on BYT)
+			 * and patch the phy dev-name into the lookup table so
+			 * that the phy-driver can get the GPIOs.
+			 */
+			dwc->dwc3->id = PLATFORM_DEVID_NONE;
+			platform_bytcr_gpios.dev_id = "dwc3.ulpi";
+
+			/*
+			 * Some Android tablets with a Crystal Cove PMIC
+			 * (INT33FD), rely on the TUSB1211 phy for charger
+			 * detection. These can be identified by them _not_
+			 * using the standard ACPI battery and ac drivers.
+			 */
+			if (acpi_dev_present("INT33FD", "1", 2) &&
+			    acpi_quirk_skip_acpi_ac_and_battery()) {
+				dev_info(&pdev->dev, "Using TUSB1211 phy for charger detection\n");
+				swnode = &dwc3_pci_intel_phy_charger_detect_swnode;
+			}
 		}
 	}
 
-	return 0;
+	return device_add_software_node(&dwc->dwc3->dev, swnode);
 }
 
 #ifdef CONFIG_PM
@@ -307,11 +339,7 @@ static int dwc3_pci_probe(struct pci_dev *pci, const struct pci_device_id *id)
 	dwc->dwc3->dev.parent = dev;
 	ACPI_COMPANION_SET(&dwc->dwc3->dev, ACPI_COMPANION(dev));
 
-	ret = device_add_software_node(&dwc->dwc3->dev, (void *)id->driver_data);
-	if (ret < 0)
-		goto err;
-
-	ret = dwc3_pci_quirks(dwc);
+	ret = dwc3_pci_quirks(dwc, (void *)id->driver_data);
 	if (ret)
 		goto err;
 
