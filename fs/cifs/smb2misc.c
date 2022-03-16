@@ -688,10 +688,8 @@ smb2_is_valid_oplock_break(char *buffer, struct TCP_Server_Info *server)
 
 			spin_lock(&tcon->open_file_lock);
 			list_for_each_entry(cfile, &tcon->openFileList, tlist) {
-				if (rsp->PersistentFid !=
-				    cfile->fid.persistent_fid ||
-				    rsp->VolatileFid !=
-				    cfile->fid.volatile_fid)
+				if (le64_to_cpu(rsp->PersistentFid) != cfile->fid.persistent_fid ||
+				    le64_to_cpu(rsp->VolatileFid) != cfile->fid.volatile_fid)
 					continue;
 
 				cifs_dbg(FYI, "file id match, oplock break\n");

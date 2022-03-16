@@ -2107,8 +2107,8 @@ smb2_duplicate_extents(const unsigned int xid,
 	     FILE_SUPPORTS_BLOCK_REFCOUNTING) == 0)
 		return -EOPNOTSUPP;
 
-	dup_ext_buf.VolatileFileHandle = srcfile->fid.volatile_fid;
-	dup_ext_buf.PersistentFileHandle = srcfile->fid.persistent_fid;
+	dup_ext_buf.VolatileFileHandle = cpu_to_le64(srcfile->fid.volatile_fid);
+	dup_ext_buf.PersistentFileHandle = cpu_to_le64(srcfile->fid.persistent_fid);
 	dup_ext_buf.SourceFileOffset = cpu_to_le64(src_off);
 	dup_ext_buf.TargetFileOffset = cpu_to_le64(dest_off);
 	dup_ext_buf.ByteCount = cpu_to_le64(len);
