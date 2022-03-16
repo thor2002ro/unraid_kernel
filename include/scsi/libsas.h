@@ -557,6 +557,18 @@ struct sas_ata_task {
 	int    force_phy_id;
 };
 
+/* LLDDs rely on these values */
+enum sas_internal_abort {
+	SAS_INTERNAL_ABORT_SINGLE	= 0,
+	SAS_INTERNAL_ABORT_DEV		= 1,
+};
+
+struct sas_internal_abort_task {
+	enum sas_internal_abort type;
+	unsigned int qid;
+	u16 tag;
+};
+
 struct sas_smp_task {
 	struct scatterlist smp_req;
 	struct scatterlist smp_resp;
@@ -596,6 +608,7 @@ struct sas_task {
 		struct sas_ata_task ata_task;
 		struct sas_smp_task smp_task;
 		struct sas_ssp_task ssp_task;
+		struct sas_internal_abort_task abort_task;
 	};
 
 	struct scatterlist *scatter;
@@ -630,6 +643,11 @@ extern struct sas_task *sas_alloc_task(gfp_t flags);
 extern struct sas_task *sas_alloc_slow_task(gfp_t flags);
 extern void sas_free_task(struct sas_task *task);
 
+static inline bool sas_is_internal_abort(struct sas_task *task)
+{
+	return task->task_proto == SAS_PROTOCOL_INTERNAL_ABORT;
+}
+
 struct sas_domain_function_template {
 	/* The class calls these to notify the LLDD of an event. */
 	void (*lldd_port_formed)(struct asd_sas_phy *);
@@ -654,6 +672,7 @@ struct sas_domain_function_template {
 	/* Special TMF callbacks */
 	void (*lldd_tmf_exec_complete)(struct domain_device *dev);
 	void (*lldd_tmf_aborted)(struct sas_task *task);
+	bool (*lldd_abort_timeout)(struct sas_task *task, void *data);
 
 	/* Port and Adapter management */
 	int (*lldd_clear_nexus_port)(struct asd_sas_port *);
@@ -683,6 +702,11 @@ extern int sas_slave_configure(struct scsi_device *);
 extern int sas_change_queue_depth(struct scsi_device *, int new_depth);
 extern int sas_bios_param(struct scsi_device *, struct block_device *,
 			  sector_t capacity, int *hsc);
+int sas_execute_internal_abort_single(struct domain_device *device,
+				      u16 tag, unsigned int qid,
+				      void *data);
+int sas_execute_internal_abort_dev(struct domain_device *device,
+				   unsigned int qid, void *data);
 extern struct scsi_transport_template *
 sas_domain_attach_transport(struct sas_domain_function_template *);
 extern struct device_attribute dev_attr_phy_event_threshold;
