@@ -32,7 +32,7 @@
 #include <linux/signal.h>
 #include <linux/signalfd.h>
 #include <linux/ratelimit.h>
-#include <linux/tracehook.h>
+#include <linux/task_work.h>
 #include <linux/capability.h>
 #include <linux/freezer.h>
 #include <linux/pid_namespace.h>
@@ -2385,7 +2385,7 @@ static void ptrace_do_notify(int signr, int exit_code, int why)
 void ptrace_notify(int exit_code)
 {
 	BUG_ON((exit_code & (0x7f | ~0xffff)) != SIGTRAP);
-	if (unlikely(current->task_works))
+	if (unlikely(task_work_pending(current)))
 		task_work_run();
 
 	spin_lock_irq(&current->sighand->siglock);
@@ -2667,20 +2667,12 @@ bool get_signal(struct ksignal *ksig)
 	struct signal_struct *signal = current->signal;
 	int signr;
 
-	if (unlikely(current->task_works))
+	clear_notify_signal();
+	if (unlikely(task_work_pending(current)))
 		task_work_run();
 
-	/*
-	 * For non-generic architectures, check for TIF_NOTIFY_SIGNAL so
-	 * that the arch handlers don't all have to do it. If we get here
-	 * without TIF_SIGPENDING, just exit after running signal work.
-	 */
-	if (!IS_ENABLED(CONFIG_GENERIC_ENTRY)) {
-		if (test_thread_flag(TIF_NOTIFY_SIGNAL))
-			tracehook_notify_signal();
-		if (!task_sigpending(current))
-			return false;
-	}
+	if (!task_sigpending(current))
+		return false;
 
 	if (unlikely(uprobe_deny_signal()))
 		return false;
@@ -2939,7 +2931,8 @@ static void signal_delivered(struct ksignal *ksig, int stepping)
 	set_current_blocked(&blocked);
 	if (current->sas_ss_flags & SS_AUTODISARM)
 		sas_ss_reset(current);
-	tracehook_signal_handler(stepping);
+	if (stepping)
+		ptrace_notify(SIGTRAP);
 }
 
 void signal_setup_done(int failed, struct ksignal *ksig, int stepping)
