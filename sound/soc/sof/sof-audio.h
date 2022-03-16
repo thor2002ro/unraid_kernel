@@ -30,6 +30,18 @@
 
 #define WIDGET_IS_DAI(id) ((id) == snd_soc_dapm_dai_in || (id) == snd_soc_dapm_dai_out)
 
+/** struct snd_sof_tuple - Tuple info
+ * @token:	Token ID
+ * @value:	union of a string or a u32 values
+ */
+struct snd_sof_tuple {
+	u32 token;
+	union {
+		u32 v;
+		const char *s;
+	} value;
+};
+
 /* PCM stream, mapped to FW component  */
 struct snd_sof_pcm_stream {
 	u32 comp_id;
@@ -110,8 +122,10 @@ struct snd_sof_widget {
 	struct list_head list;	/* list in sdev widget list */
 	struct snd_sof_widget *pipe_widget;
 
-	/* extended data for UUID components */
-	struct sof_ipc_comp_ext comp_ext;
+	const guid_t uuid;
+
+	int num_tuples;
+	struct snd_sof_tuple *tuples;
 
 	void *private;		/* core does not touch this */
 };
@@ -134,12 +148,11 @@ struct snd_sof_dai {
 	struct snd_soc_component *scomp;
 	const char *name;
 
-	struct sof_ipc_comp_dai comp_dai;
 	int number_configs;
 	int current_config;
 	bool configured; /* DAI configured during BE hw_params */
-	struct sof_ipc_dai_config *dai_config;
 	struct list_head list;	/* list in sdev dai list */
+	void *private;
 };
 
 /*
@@ -220,10 +233,6 @@ struct snd_sof_pcm *snd_sof_find_spcm_name(struct snd_soc_component *scomp,
 struct snd_sof_pcm *snd_sof_find_spcm_comp(struct snd_soc_component *scomp,
 					   unsigned int comp_id,
 					   int *direction);
-struct snd_sof_pcm *snd_sof_find_spcm_pcm_id(struct snd_soc_component *scomp,
-					     unsigned int pcm_id);
-const struct sof_ipc_pipe_new *snd_sof_pipeline_find(struct snd_sof_dev *sdev,
-						     int pipeline_id);
 void snd_sof_pcm_period_elapsed(struct snd_pcm_substream *substream);
 void snd_sof_pcm_init_elapsed_work(struct work_struct *work);
 
@@ -264,4 +273,9 @@ int sof_pcm_dsp_pcm_free(struct snd_pcm_substream *substream, struct snd_sof_dev
 			 struct snd_sof_pcm *spcm);
 int sof_pcm_stream_free(struct snd_sof_dev *sdev, struct snd_pcm_substream *substream,
 			struct snd_sof_pcm *spcm, int dir, bool free_widget_list);
+int get_token_u32(void *elem, void *object, u32 offset);
+int get_token_u16(void *elem, void *object, u32 offset);
+int get_token_comp_format(void *elem, void *object, u32 offset);
+int get_token_dai_type(void *elem, void *object, u32 offset);
+int get_token_uuid(void *elem, void *object, u32 offset);
 #endif

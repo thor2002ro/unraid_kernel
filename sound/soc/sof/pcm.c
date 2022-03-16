@@ -15,10 +15,8 @@
 #include <sound/sof.h>
 #include "sof-priv.h"
 #include "sof-audio.h"
+#include "sof-utils.h"
 #include "ops.h"
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_PROBES)
-#include "sof-probes.h"
-#endif
 
 /* Create DMA buffer page table for DSP */
 static int create_page_table(struct snd_soc_component *component,
@@ -36,22 +34,6 @@ static int create_page_table(struct snd_soc_component *component,
 
 	return snd_sof_create_page_table(component->dev, dmab,
 		spcm->stream[stream].page_table.area, size);
-}
-
-static int sof_pcm_dsp_params(struct snd_sof_pcm *spcm, struct snd_pcm_substream *substream,
-			      const struct sof_ipc_pcm_params_reply *reply)
-{
-	struct snd_soc_component *scomp = spcm->scomp;
-	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(scomp);
-
-	/* validate offset */
-	int ret = snd_sof_ipc_pcm_params(sdev, substream, reply);
-
-	if (ret < 0)
-		dev_err(scomp->dev, "error: got wrong reply for PCM %d\n",
-			spcm->pcm.pcm_id);
-
-	return ret;
 }
 
 /*
@@ -164,6 +146,8 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_sof_platform_stream_params platform_params = { 0 };
+	struct sof_ipc_fw_version *v = &sdev->fw_ready.version;
 	struct snd_sof_pcm *spcm;
 	struct sof_ipc_pcm_params pcm;
 	struct sof_ipc_pcm_params_reply ipc_params_reply;
@@ -244,10 +228,27 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 	ret = snd_sof_pcm_platform_hw_params(sdev,
 					     substream,
 					     params,
-					     &pcm.params);
+					     &platform_params);
 	if (ret < 0) {
 		dev_err(component->dev, "error: platform hw params failed\n");
 		return ret;
+	}
+
+	/* Update the IPC message with information from the platform */
+	pcm.params.stream_tag = platform_params.stream_tag;
+
+	if (platform_params.use_phy_address)
+		pcm.params.buffer.phy_addr = platform_params.phy_addr;
+
+	if (platform_params.no_ipc_position) {
+		/* For older ABIs set host_period_bytes to zero to inform
+		 * FW we don't want position updates. Newer versions use
+		 * no_stream_position for this purpose.
+		 */
+		if (v->abi_version < SOF_ABI_VER(3, 10, 0))
+			pcm.params.host_period_bytes = 0;
+		else
+			pcm.params.no_stream_position = 1;
 	}
 
 	dev_dbg(component->dev, "stream_tag %d", pcm.params.stream_tag);
@@ -268,9 +269,13 @@ static int sof_pcm_hw_params(struct snd_soc_component *component,
 		return ret;
 	}
 
-	ret = sof_pcm_dsp_params(spcm, substream, &ipc_params_reply);
-	if (ret < 0)
+	ret = snd_sof_set_stream_data_offset(sdev, substream,
+					     ipc_params_reply.posn_offset);
+	if (ret < 0) {
+		dev_err(component->dev, "%s: invalid stream data offset for PCM %d\n",
+			__func__, spcm->pcm.pcm_id);
 		return ret;
+	}
 
 	spcm->prepared[substream->stream] = true;
 
@@ -672,7 +677,9 @@ static void ssp_dai_config_pcm_params_match(struct snd_sof_dev *sdev, const char
 		if (!dai->name || strcmp(link_name, dai->name))
 			continue;
 		for (i = 0; i < dai->number_configs; i++) {
-			config = &dai->dai_config[i];
+			struct sof_dai_private_data *private = dai->private;
+
+			config = &private->dai_config[i];
 			if (config->ssp.fsync_rate == params_rate(params)) {
 				dev_dbg(sdev->dev, "DAI config %d matches pcm hw params\n", i);
 				dai->current_config = i;
@@ -695,6 +702,7 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 	struct snd_sof_dai *dai =
 		snd_sof_find_dai(component, (char *)rtd->dai_link->name);
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct sof_dai_private_data *private = dai->private;
 	struct snd_soc_dpcm *dpcm;
 
 	/* no topology exists for this BE, try a common configuration */
@@ -719,7 +727,7 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 	/* read format from topology */
 	snd_mask_none(fmt);
 
-	switch (dai->comp_dai.config.frame_fmt) {
+	switch (private->comp_dai->config.frame_fmt) {
 	case SOF_IPC_FRAME_S16_LE:
 		snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
 		break;
@@ -735,15 +743,15 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 	}
 
 	/* read rate and channels from topology */
-	switch (dai->dai_config->type) {
+	switch (private->dai_config->type) {
 	case SOF_DAI_INTEL_SSP:
 		/* search for config to pcm params match, if not found use default */
 		ssp_dai_config_pcm_params_match(sdev, (char *)rtd->dai_link->name, params);
 
-		rate->min = dai->dai_config[dai->current_config].ssp.fsync_rate;
-		rate->max = dai->dai_config[dai->current_config].ssp.fsync_rate;
-		channels->min = dai->dai_config[dai->current_config].ssp.tdm_slots;
-		channels->max = dai->dai_config[dai->current_config].ssp.tdm_slots;
+		rate->min = private->dai_config[dai->current_config].ssp.fsync_rate;
+		rate->max = private->dai_config[dai->current_config].ssp.fsync_rate;
+		channels->min = private->dai_config[dai->current_config].ssp.tdm_slots;
+		channels->max = private->dai_config[dai->current_config].ssp.tdm_slots;
 
 		dev_dbg(component->dev,
 			"rate_min: %d rate_max: %d\n", rate->min, rate->max);
@@ -754,11 +762,11 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 		break;
 	case SOF_DAI_INTEL_DMIC:
 		/* DMIC only supports 16 or 32 bit formats */
-		if (dai->comp_dai.config.frame_fmt == SOF_IPC_FRAME_S24_4LE) {
+		if (private->comp_dai->config.frame_fmt == SOF_IPC_FRAME_S24_4LE) {
 			dev_err(component->dev,
 				"error: invalid fmt %d for DAI type %d\n",
-				dai->comp_dai.config.frame_fmt,
-				dai->dai_config->type);
+				private->comp_dai->config.frame_fmt,
+				private->dai_config->type);
 		}
 		break;
 	case SOF_DAI_INTEL_HDA:
@@ -778,14 +786,14 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 		 * Dai could run with different channel count compared with
 		 * front end, so get dai channel count from topology
 		 */
-		channels->min = dai->dai_config->alh.channels;
-		channels->max = dai->dai_config->alh.channels;
+		channels->min = private->dai_config->alh.channels;
+		channels->max = private->dai_config->alh.channels;
 		break;
 	case SOF_DAI_IMX_ESAI:
-		rate->min = dai->dai_config->esai.fsync_rate;
-		rate->max = dai->dai_config->esai.fsync_rate;
-		channels->min = dai->dai_config->esai.tdm_slots;
-		channels->max = dai->dai_config->esai.tdm_slots;
+		rate->min = private->dai_config->esai.fsync_rate;
+		rate->max = private->dai_config->esai.fsync_rate;
+		channels->min = private->dai_config->esai.tdm_slots;
+		channels->max = private->dai_config->esai.tdm_slots;
 
 		dev_dbg(component->dev,
 			"rate_min: %d rate_max: %d\n", rate->min, rate->max);
@@ -794,10 +802,10 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 			channels->min, channels->max);
 		break;
 	case SOF_DAI_MEDIATEK_AFE:
-		rate->min = dai->dai_config->afe.rate;
-		rate->max = dai->dai_config->afe.rate;
-		channels->min = dai->dai_config->afe.channels;
-		channels->max = dai->dai_config->afe.channels;
+		rate->min = private->dai_config->afe.rate;
+		rate->max = private->dai_config->afe.rate;
+		channels->min = private->dai_config->afe.channels;
+		channels->max = private->dai_config->afe.channels;
 
 		dev_dbg(component->dev,
 			"rate_min: %d rate_max: %d\n", rate->min, rate->max);
@@ -806,10 +814,10 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 			channels->min, channels->max);
 		break;
 	case SOF_DAI_IMX_SAI:
-		rate->min = dai->dai_config->sai.fsync_rate;
-		rate->max = dai->dai_config->sai.fsync_rate;
-		channels->min = dai->dai_config->sai.tdm_slots;
-		channels->max = dai->dai_config->sai.tdm_slots;
+		rate->min = private->dai_config->sai.fsync_rate;
+		rate->max = private->dai_config->sai.fsync_rate;
+		channels->min = private->dai_config->sai.tdm_slots;
+		channels->max = private->dai_config->sai.tdm_slots;
 
 		dev_dbg(component->dev,
 			"rate_min: %d rate_max: %d\n", rate->min, rate->max);
@@ -818,10 +826,10 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 			channels->min, channels->max);
 		break;
 	case SOF_DAI_AMD_BT:
-		rate->min = dai->dai_config->acpbt.fsync_rate;
-		rate->max = dai->dai_config->acpbt.fsync_rate;
-		channels->min = dai->dai_config->acpbt.tdm_slots;
-		channels->max = dai->dai_config->acpbt.tdm_slots;
+		rate->min = private->dai_config->acpbt.fsync_rate;
+		rate->max = private->dai_config->acpbt.fsync_rate;
+		channels->min = private->dai_config->acpbt.tdm_slots;
+		channels->max = private->dai_config->acpbt.tdm_slots;
 
 		dev_dbg(component->dev,
 			"AMD_BT rate_min: %d rate_max: %d\n", rate->min, rate->max);
@@ -830,10 +838,10 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 			channels->min, channels->max);
 		break;
 	case SOF_DAI_AMD_SP:
-		rate->min = dai->dai_config->acpsp.fsync_rate;
-		rate->max = dai->dai_config->acpsp.fsync_rate;
-		channels->min = dai->dai_config->acpsp.tdm_slots;
-		channels->max = dai->dai_config->acpsp.tdm_slots;
+		rate->min = private->dai_config->acpsp.fsync_rate;
+		rate->max = private->dai_config->acpsp.fsync_rate;
+		channels->min = private->dai_config->acpsp.tdm_slots;
+		channels->max = private->dai_config->acpsp.tdm_slots;
 
 		dev_dbg(component->dev,
 			"AMD_SP rate_min: %d rate_max: %d\n", rate->min, rate->max);
@@ -842,10 +850,10 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 			channels->min, channels->max);
 		break;
 	case SOF_DAI_AMD_DMIC:
-		rate->min = dai->dai_config->acpdmic.fsync_rate;
-		rate->max = dai->dai_config->acpdmic.fsync_rate;
-		channels->min = dai->dai_config->acpdmic.tdm_slots;
-		channels->max = dai->dai_config->acpdmic.tdm_slots;
+		rate->min = private->dai_config->acpdmic.fsync_rate;
+		rate->max = private->dai_config->acpdmic.fsync_rate;
+		channels->min = private->dai_config->acpdmic.tdm_slots;
+		channels->max = private->dai_config->acpdmic.tdm_slots;
 
 		dev_dbg(component->dev,
 			"AMD_DMIC rate_min: %d rate_max: %d\n", rate->min, rate->max);
@@ -855,7 +863,7 @@ int sof_pcm_dai_link_fixup(struct snd_soc_pcm_runtime *rtd, struct snd_pcm_hw_pa
 		break;
 	default:
 		dev_err(component->dev, "error: invalid DAI type %d\n",
-			dai->dai_config->type);
+			private->dai_config->type);
 		break;
 	}
 
@@ -924,9 +932,10 @@ void snd_sof_new_platform_drv(struct snd_sof_dev *sdev)
 	pd->pointer = sof_pcm_pointer;
 	pd->ack = sof_pcm_ack;
 
-#if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_PROBES)
-	pd->compress_ops = &sof_probe_compressed_ops;
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_COMPRESS)
+	pd->compress_ops = &sof_compressed_ops;
 #endif
+
 	pd->pcm_construct = sof_pcm_new;
 	pd->ignore_machine = drv_name;
 	pd->be_hw_params_fixup = sof_pcm_dai_link_fixup;
