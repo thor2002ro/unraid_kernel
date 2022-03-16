@@ -531,11 +531,9 @@ static void __dm_start_io_acct(struct dm_io *io, struct bio *bio)
 	dm_io_acct(false, io->md, bio, io->start_time, &io->stats_aux);
 }
 
-static void dm_start_io_acct(struct dm_io *io, struct bio *clone)
+static void dm_start_io_acct(struct dm_io *io, struct bio *orig_bio,
+			     struct bio *clone)
 {
-	/* Must account IO to DM device in terms of orig_bio */
-	struct bio *bio = io->orig_bio;
-
 	/*
 	 * Ensure IO accounting is only ever started once.
 	 */
@@ -553,7 +551,8 @@ static void dm_start_io_acct(struct dm_io *io, struct bio *clone)
 		spin_unlock_irqrestore(&io->lock, flags);
 	}
 
-	__dm_start_io_acct(io, bio);
+	/* Must account IO to DM device in terms of orig_bio */
+	__dm_start_io_acct(io, orig_bio);
 }
 
 static void dm_end_io_acct(struct dm_io *io, struct bio *bio)
@@ -1245,7 +1244,7 @@ void dm_submit_bio_remap(struct bio *clone, struct bio *tgt_clone)
 		 */
 		while (unlikely(!smp_load_acquire(&io->orig_bio)))
 			msleep(1);
-		dm_start_io_acct(io, clone);
+		dm_start_io_acct(io, io->orig_bio, clone);
 	}
 
 	__dm_submit_bio_remap(tgt_clone, disk_devt(io->md->disk),
@@ -1612,9 +1611,9 @@ static void dm_split_and_process_bio(struct mapped_device *md,
 out:
 	if (!orig_bio)
 		orig_bio = bio;
-	smp_store_release(&io->orig_bio, orig_bio);
 	if (dm_io_flagged(io, DM_IO_START_ACCT))
-		dm_start_io_acct(io, NULL);
+		dm_start_io_acct(io, orig_bio, NULL);
+	smp_store_release(&io->orig_bio, orig_bio);
 
 	/*
 	 * Drop the extra reference count for non-POLLED bio, and hold one
