@@ -64,11 +64,21 @@ struct mapped_device {
 	struct gendisk *disk;
 	struct dax_device *dax_dev;
 
+	wait_queue_head_t wait;
+	unsigned long __percpu *pending_io;
+
+	/* forced geometry settings */
+	struct hd_geometry geometry;
+
+	/*
+	 * Processing queue (flush)
+	 */
+	struct workqueue_struct *wq;
+
 	/*
 	 * A list of ios that arrived while we were suspended.
 	 */
 	struct work_struct work;
-	wait_queue_head_t wait;
 	spinlock_t deferred_lock;
 	struct bio_list deferred;
 
@@ -83,8 +93,18 @@ struct mapped_device {
 	struct list_head uevent_list;
 	spinlock_t uevent_lock; /* Protect access to uevent_list */
 
+	/* for blk-mq request-based DM support */
+	bool init_tio_pdu:1;
+	struct blk_mq_tag_set *tag_set;
+
+	struct dm_stats stats;
+
 	/* the number of internal suspends */
 	unsigned internal_suspend_count;
+
+	int swap_bios;
+	struct semaphore swap_bios_semaphore;
+	struct mutex swap_bios_lock;
 
 	/*
 	 * io objects are allocated from here.
@@ -92,26 +112,8 @@ struct mapped_device {
 	struct bio_set io_bs;
 	struct bio_set bs;
 
-	/*
-	 * Processing queue (flush)
-	 */
-	struct workqueue_struct *wq;
-
-	/* forced geometry settings */
-	struct hd_geometry geometry;
-
 	/* kobject and completion */
 	struct dm_kobject_holder kobj_holder;
-
-	int swap_bios;
-	struct semaphore swap_bios_semaphore;
-	struct mutex swap_bios_lock;
-
-	struct dm_stats stats;
-
-	/* for blk-mq request-based DM support */
-	struct blk_mq_tag_set *tag_set;
-	bool init_tio_pdu:1;
 
 	struct srcu_struct io_barrier;
 
@@ -209,11 +211,13 @@ struct dm_table {
 #define DM_TIO_MAGIC 7282014
 struct dm_target_io {
 	unsigned int magic;
+	unsigned int target_bio_nr;
 	struct dm_io *io;
 	struct dm_target *ti;
-	unsigned int target_bio_nr;
 	unsigned int *len_ptr;
-	bool inside_dm_io;
+	bool inside_dm_io:1;
+	bool is_duplicate_bio:1;
+	sector_t old_sector;
 	struct bio clone;
 };
 
@@ -224,11 +228,16 @@ struct dm_target_io {
 #define DM_IO_MAGIC 5191977
 struct dm_io {
 	unsigned int magic;
-	struct mapped_device *md;
-	blk_status_t status;
 	atomic_t io_count;
+	struct mapped_device *md;
 	struct bio *orig_bio;
+	blk_status_t status;
+	bool start_io_acct:1;
+	int was_accounted;
 	unsigned long start_time;
+	void *data;
+	struct hlist_node node;
+	struct task_struct *map_task;
 	spinlock_t endio_lock;
 	struct dm_stats_aux stats_aux;
 	/* last member of dm_target_io is 'struct bio' */
