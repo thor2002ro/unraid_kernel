@@ -107,6 +107,26 @@ static unsigned long pfn_len(struct dev_pagemap *pgmap, unsigned long range_id)
 		pfn_first(pgmap, range_id)) >> pgmap->vmemmap_shift;
 }
 
+/*
+ * This returns true if the page is reserved by ZONE_DEVICE driver.
+ */
+bool pfn_zone_device_reserved(unsigned long pfn)
+{
+	struct dev_pagemap *pgmap;
+	struct vmem_altmap *altmap;
+	bool ret = false;
+
+	pgmap = get_dev_pagemap(pfn, NULL);
+	if (!pgmap)
+		return ret;
+	altmap = pgmap_altmap(pgmap);
+	if (altmap && pfn < (altmap->base_pfn + altmap->reserve))
+		ret = true;
+	put_dev_pagemap(pgmap);
+
+	return ret;
+}
+
 static void pageunmap_range(struct dev_pagemap *pgmap, int range_id)
 {
 	struct range *range = &pgmap->ranges[range_id];
@@ -268,7 +288,8 @@ static int pagemap_range(struct dev_pagemap *pgmap, struct mhp_params *params,
 	return 0;
 
 err_add_memory:
-	kasan_remove_zero_shadow(__va(range->start), range_len(range));
+	if (!is_private)
+		kasan_remove_zero_shadow(__va(range->start), range_len(range));
 err_kasan:
 	untrack_pfn(NULL, PHYS_PFN(range->start), range_len(range));
 err_pfn_remap:

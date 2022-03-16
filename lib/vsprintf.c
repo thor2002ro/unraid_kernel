@@ -1005,9 +1005,7 @@ char *symbol_string(char *buf, char *end, void *ptr,
 		    struct printf_spec spec, const char *fmt)
 {
 	unsigned long value;
-#ifdef CONFIG_KALLSYMS
 	char sym[KSYM_SYMBOL_LEN];
-#endif
 
 	if (fmt[1] == 'R')
 		ptr = __builtin_extract_return_addr(ptr);
@@ -1027,6 +1025,9 @@ char *symbol_string(char *buf, char *end, void *ptr,
 
 	return string_nocheck(buf, end, sym, spec);
 #else
+	if (fill_minimal_module_info(sym, KSYM_SYMBOL_LEN, value))
+		return string_nocheck(buf, end, sym, spec);
+
 	return special_hex_number(buf, end, value, sizeof(void *));
 #endif
 }
@@ -2913,13 +2914,15 @@ int vscnprintf(char *buf, size_t size, const char *fmt, va_list args)
 {
 	int i;
 
+	if (unlikely(!size))
+		return 0;
+
 	i = vsnprintf(buf, size, fmt, args);
 
 	if (likely(i < size))
 		return i;
-	if (size != 0)
-		return size - 1;
-	return 0;
+
+	return size - 1;
 }
 EXPORT_SYMBOL(vscnprintf);
 
