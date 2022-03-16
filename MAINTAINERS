@@ -20545,6 +20545,13 @@ L:	kvm@vger.kernel.org
 S:	Maintained
 F:	drivers/vfio/fsl-mc/
 
+VFIO HISILICON PCI DRIVER
+M:	Longfang Liu <liulongfang@huawei.com>
+M:	Shameer Kolothum <shameerali.kolothum.thodi@huawei.com>
+L:	kvm@vger.kernel.org
+S:	Maintained
+F:	drivers/vfio/pci/hisilicon/
+
 VFIO MEDIATED DEVICE DRIVERS
 M:	Kirti Wankhede <kwankhede@nvidia.com>
 L:	kvm@vger.kernel.org
@@ -20559,6 +20566,12 @@ M:	Eric Auger <eric.auger@redhat.com>
 L:	kvm@vger.kernel.org
 S:	Maintained
 F:	drivers/vfio/platform/
+
+VFIO MLX5 PCI DRIVER
+M:	Yishai Hadas <yishaih@nvidia.com>
+L:	kvm@vger.kernel.org
+S:	Maintained
+F:	drivers/vfio/pci/mlx5/
 
 VGA_SWITCHEROO
 R:	Lukas Wunner <lukas@wunner.de>
