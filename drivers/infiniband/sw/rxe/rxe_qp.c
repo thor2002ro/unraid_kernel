@@ -188,9 +188,6 @@ static void rxe_qp_init_misc(struct rxe_dev *rxe, struct rxe_qp *qp,
 		break;
 	}
 
-	INIT_LIST_HEAD(&qp->grp_list);
-
-	spin_lock_init(&qp->grp_lock);
 	spin_lock_init(&qp->state_lock);
 
 	atomic_set(&qp->ssn, 0);
@@ -770,6 +767,20 @@ int rxe_qp_to_attr(struct rxe_qp *qp, struct ib_qp_attr *attr, int mask)
 	return 0;
 }
 
+int rxe_qp_chk_destroy(struct rxe_qp *qp)
+{
+	/* See IBA o10-2.2.3
+	 * An attempt to destroy a QP while attached to a mcast group
+	 * will fail immediately.
+	 */
+	if (atomic_read(&qp->mcg_num)) {
+		pr_debug("Attempt to destroy QP while attached to multicast group\n");
+		return -EBUSY;
+	}
+
+	return 0;
+}
+
 /* called by the destroy qp verb */
 void rxe_qp_destroy(struct rxe_qp *qp)
 {
@@ -797,8 +808,6 @@ void rxe_qp_destroy(struct rxe_qp *qp)
 static void rxe_qp_do_cleanup(struct work_struct *work)
 {
 	struct rxe_qp *qp = container_of(work, typeof(*qp), cleanup_work.work);
-
-	rxe_drop_all_mcast_groups(qp);
 
 	if (qp->sq.queue)
 		rxe_queue_cleanup(qp->sq.queue);

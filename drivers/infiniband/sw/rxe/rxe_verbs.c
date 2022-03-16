@@ -384,8 +384,9 @@ static int rxe_post_srq_recv(struct ib_srq *ibsrq, const struct ib_recv_wr *wr,
 {
 	int err = 0;
 	struct rxe_srq *srq = to_rsrq(ibsrq);
+	unsigned long flags;
 
-	spin_lock_bh(&srq->rq.producer_lock);
+	spin_lock_irqsave(&srq->rq.producer_lock, flags);
 
 	while (wr) {
 		err = post_one_recv(&srq->rq, wr);
@@ -394,7 +395,7 @@ static int rxe_post_srq_recv(struct ib_srq *ibsrq, const struct ib_recv_wr *wr,
 		wr = wr->next;
 	}
 
-	spin_unlock_bh(&srq->rq.producer_lock);
+	spin_unlock_irqrestore(&srq->rq.producer_lock, flags);
 
 	if (err)
 		*bad_wr = wr;
@@ -493,6 +494,11 @@ static int rxe_query_qp(struct ib_qp *ibqp, struct ib_qp_attr *attr,
 static int rxe_destroy_qp(struct ib_qp *ibqp, struct ib_udata *udata)
 {
 	struct rxe_qp *qp = to_rqp(ibqp);
+	int ret;
+
+	ret = rxe_qp_chk_destroy(qp);
+	if (ret)
+		return ret;
 
 	rxe_qp_destroy(qp);
 	rxe_drop_index(qp);
@@ -638,18 +644,19 @@ static int post_one_send(struct rxe_qp *qp, const struct ib_send_wr *ibwr,
 	int err;
 	struct rxe_sq *sq = &qp->sq;
 	struct rxe_send_wqe *send_wqe;
+	unsigned long flags;
 	int full;
 
 	err = validate_send_wr(qp, ibwr, mask, length);
 	if (err)
 		return err;
 
-	spin_lock_bh(&qp->sq.sq_lock);
+	spin_lock_irqsave(&qp->sq.sq_lock, flags);
 
 	full = queue_full(sq->queue, QUEUE_TYPE_TO_DRIVER);
 
 	if (unlikely(full)) {
-		spin_unlock_bh(&qp->sq.sq_lock);
+		spin_unlock_irqrestore(&qp->sq.sq_lock, flags);
 		return -ENOMEM;
 	}
 
@@ -658,7 +665,7 @@ static int post_one_send(struct rxe_qp *qp, const struct ib_send_wr *ibwr,
 
 	queue_advance_producer(sq->queue, QUEUE_TYPE_TO_DRIVER);
 
-	spin_unlock_bh(&qp->sq.sq_lock);
+	spin_unlock_irqrestore(&qp->sq.sq_lock, flags);
 
 	return 0;
 }
@@ -738,6 +745,7 @@ static int rxe_post_recv(struct ib_qp *ibqp, const struct ib_recv_wr *wr,
 	int err = 0;
 	struct rxe_qp *qp = to_rqp(ibqp);
 	struct rxe_rq *rq = &qp->rq;
+	unsigned long flags;
 
 	if (unlikely((qp_state(qp) < IB_QPS_INIT) || !qp->valid)) {
 		*bad_wr = wr;
@@ -751,7 +759,7 @@ static int rxe_post_recv(struct ib_qp *ibqp, const struct ib_recv_wr *wr,
 		goto err1;
 	}
 
-	spin_lock_bh(&rq->producer_lock);
+	spin_lock_irqsave(&rq->producer_lock, flags);
 
 	while (wr) {
 		err = post_one_recv(rq, wr);
@@ -762,7 +770,7 @@ static int rxe_post_recv(struct ib_qp *ibqp, const struct ib_recv_wr *wr,
 		wr = wr->next;
 	}
 
-	spin_unlock_bh(&rq->producer_lock);
+	spin_unlock_irqrestore(&rq->producer_lock, flags);
 
 	if (qp->resp.state == QP_STATE_ERROR)
 		rxe_run_task(&qp->resp.task, 1);
@@ -843,8 +851,9 @@ static int rxe_poll_cq(struct ib_cq *ibcq, int num_entries, struct ib_wc *wc)
 	int i;
 	struct rxe_cq *cq = to_rcq(ibcq);
 	struct rxe_cqe *cqe;
+	unsigned long flags;
 
-	spin_lock_bh(&cq->cq_lock);
+	spin_lock_irqsave(&cq->cq_lock, flags);
 	for (i = 0; i < num_entries; i++) {
 		cqe = queue_head(cq->queue, QUEUE_TYPE_FROM_DRIVER);
 		if (!cqe)
@@ -853,7 +862,7 @@ static int rxe_poll_cq(struct ib_cq *ibcq, int num_entries, struct ib_wc *wc)
 		memcpy(wc++, &cqe->ibwc, sizeof(*wc));
 		queue_advance_consumer(cq->queue, QUEUE_TYPE_FROM_DRIVER);
 	}
-	spin_unlock_bh(&cq->cq_lock);
+	spin_unlock_irqrestore(&cq->cq_lock, flags);
 
 	return i;
 }
@@ -873,8 +882,9 @@ static int rxe_req_notify_cq(struct ib_cq *ibcq, enum ib_cq_notify_flags flags)
 	struct rxe_cq *cq = to_rcq(ibcq);
 	int ret = 0;
 	int empty;
+	unsigned long irq_flags;
 
-	spin_lock_bh(&cq->cq_lock);
+	spin_lock_irqsave(&cq->cq_lock, irq_flags);
 	if (cq->notify != IB_CQ_NEXT_COMP)
 		cq->notify = flags & IB_CQ_SOLICITED_MASK;
 
@@ -883,7 +893,7 @@ static int rxe_req_notify_cq(struct ib_cq *ibcq, enum ib_cq_notify_flags flags)
 	if ((flags & IB_CQ_REPORT_MISSED_EVENTS) && !empty)
 		ret = 1;
 
-	spin_unlock_bh(&cq->cq_lock);
+	spin_unlock_irqrestore(&cq->cq_lock, irq_flags);
 
 	return ret;
 }
@@ -997,32 +1007,6 @@ static int rxe_map_mr_sg(struct ib_mr *ibmr, struct scatterlist *sg,
 	set->offset = set->iova & set->page_mask;
 
 	return n;
-}
-
-static int rxe_attach_mcast(struct ib_qp *ibqp, union ib_gid *mgid, u16 mlid)
-{
-	int err;
-	struct rxe_dev *rxe = to_rdev(ibqp->device);
-	struct rxe_qp *qp = to_rqp(ibqp);
-	struct rxe_mc_grp *grp;
-
-	/* takes a ref on grp if successful */
-	err = rxe_mcast_get_grp(rxe, mgid, &grp);
-	if (err)
-		return err;
-
-	err = rxe_mcast_add_grp_elem(rxe, qp, grp);
-
-	rxe_drop_ref(grp);
-	return err;
-}
-
-static int rxe_detach_mcast(struct ib_qp *ibqp, union ib_gid *mgid, u16 mlid)
-{
-	struct rxe_dev *rxe = to_rdev(ibqp->device);
-	struct rxe_qp *qp = to_rqp(ibqp);
-
-	return rxe_mcast_drop_grp_elem(rxe, qp, mgid);
 }
 
 static ssize_t parent_show(struct device *device,
