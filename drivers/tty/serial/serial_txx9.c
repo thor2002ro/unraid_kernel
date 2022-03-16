@@ -26,9 +26,6 @@
 
 #include <linux/io.h>
 
-static char *serial_version = "1.11";
-static char *serial_name = "TX39/49 Serial driver";
-
 #define PASS_LIMIT	256
 
 #if !defined(CONFIG_SERIAL_TXX9_STDSERIAL)
@@ -879,7 +876,7 @@ static void __init serial_txx9_register_ports(struct uart_driver *drv,
 
 #ifdef CONFIG_SERIAL_TXX9_CONSOLE
 
-static void serial_txx9_console_putchar(struct uart_port *port, int ch)
+static void serial_txx9_console_putchar(struct uart_port *port, unsigned char ch)
 {
 	struct uart_txx9_port *up = to_uart_txx9_port(port);
 
@@ -1254,8 +1251,6 @@ static struct platform_device *serial_txx9_plat_devs;
 static int __init serial_txx9_init(void)
 {
 	int ret;
-
- 	printk(KERN_INFO "%s version %s\n", serial_name, serial_version);
 
 	ret = uart_register_driver(&serial_txx9_reg);
 	if (ret)
