@@ -882,7 +882,7 @@ struct mpi3mr_fwevt {
 	bool pending_at_sml;
 	bool discard;
 	struct kref ref_count;
-	char event_data[0] __aligned(4);
+	char event_data[] __aligned(4);
 };
 
 
