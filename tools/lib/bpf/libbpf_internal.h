@@ -92,6 +92,9 @@
 # define offsetofend(TYPE, FIELD) \
 	(offsetof(TYPE, FIELD) + sizeof(((TYPE *)0)->FIELD))
 #endif
+#ifndef __alias
+#define __alias(symbol) __attribute__((alias(#symbol)))
+#endif
 
 /* Check whether a string `str` has prefix `pfx`, regardless if `pfx` is
  * a string literal known at compilation time or char * pointer known only at
@@ -525,5 +528,14 @@ static inline int ensure_good_fd(int fd)
 	}
 	return fd;
 }
+
+/* The following two functions are exposed to bpftool */
+int bpf_core_add_cands(struct bpf_core_cand *local_cand,
+		       size_t local_essent_len,
+		       const struct btf *targ_btf,
+		       const char *targ_btf_name,
+		       int targ_start_id,
+		       struct bpf_core_cand_list *cands);
+void bpf_core_free_cands(struct bpf_core_cand_list *cands);
 
 #endif /* __LIBBPF_LIBBPF_INTERNAL_H */

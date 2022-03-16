@@ -5,6 +5,7 @@ nfp-objs := \
 	    nfpcore/nfp6000_pcie.o \
 	    nfpcore/nfp_cppcore.o \
 	    nfpcore/nfp_cpplib.o \
+	    nfpcore/nfp_dev.o \
 	    nfpcore/nfp_hwinfo.o \
 	    nfpcore/nfp_mip.o \
 	    nfpcore/nfp_mutex.o \
@@ -31,6 +32,7 @@ nfp-objs := \
 	    nfp_net_main.o \
 	    nfp_net_repr.o \
 	    nfp_net_sriov.o \
+	    nfp_net_xsk.o \
 	    nfp_netvf_main.o \
 	    nfp_port.o \
 	    nfp_shared_buf.o \
