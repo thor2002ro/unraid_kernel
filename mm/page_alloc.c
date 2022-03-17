@@ -8073,12 +8073,16 @@ void __init free_area_init(unsigned long *max_zone_pfn)
 			}
 			arch_refresh_nodedata(nid, pgdat);
 			free_area_init_memoryless_node(nid);
+
 			/*
-			 * not marking this node online because we do not want to
-			 * confuse userspace by sysfs files/directories for node
-			 * without any memory attached to it (see topology_init)
-			 * The pgdat will get fully initialized when a memory is
-			 * hotpluged into it by hotadd_init_pgdat
+			 * We do not want to confuse userspace by sysfs
+			 * files/directories for node without any memory
+			 * attached to it, so this node is not marked as
+			 * N_MEMORY and not marked online so that no sysfs
+			 * hierarchy will be created via register_one_node for
+			 * it. The pgdat will get fully initialized by
+			 * hotadd_init_pgdat() when memory is hotplugged into
+			 * this node.
 			 */
 			continue;
 		}
