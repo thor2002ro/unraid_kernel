@@ -9408,6 +9408,7 @@ bool is_free_buddy_page(struct page *page)
 
 	return order < MAX_ORDER;
 }
+EXPORT_SYMBOL(is_free_buddy_page);
 
 #ifdef CONFIG_MEMORY_FAILURE
 /*
