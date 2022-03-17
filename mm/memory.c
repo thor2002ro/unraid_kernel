@@ -1335,7 +1335,7 @@ zap_skip_check_mapping(struct zap_details *details, struct page *page)
 	if (should_zap_cows(details))
 		return false;
 
-	/* E.g. zero page */
+	/* E.g. the caller passes NULL for the case of a zero page */
 	if (!page)
 		return false;
 
@@ -1421,11 +1421,7 @@ again:
 		}
 
 		if (!non_swap_entry(entry)) {
-			/*
-			 * If this is a genuine swap entry, then it must be an
-			 * private anon page.  If the caller wants to skip
-			 * COWed pages, ignore it.
-			 */
+			/* Genuine swap entry, hence a private anon page */
 			if (!should_zap_cows(details))
 				continue;
 			rss[MM_SWAPENTS]--;
@@ -1437,7 +1433,6 @@ again:
 				continue;
 			rss[mm_counter(page)]--;
 		} else if (is_hwpoison_entry(entry)) {
-			/* If the caller wants to skip COWed pages, ignore it */
 			if (!should_zap_cows(details))
 				continue;
 		} else {
