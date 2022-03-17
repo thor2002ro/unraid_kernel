@@ -1534,7 +1534,7 @@ static int memory_failure_hugetlb(unsigned long pfn, int flags)
 
 	lock_page(head);
 
-	/**
+	/*
 	 * The page could have changed compound pages due to race window.
 	 * If this happens just bail out.
 	 */
