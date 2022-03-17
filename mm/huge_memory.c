@@ -2151,12 +2151,10 @@ void __split_huge_pmd(struct vm_area_struct *vma, pmd_t *pmd,
 			goto out;
 	}
 
-	if (pmd_trans_huge(*pmd)) {
-		if (!folio)
-			folio = page_folio(pmd_page(*pmd));
-	} else if (!(pmd_devmap(*pmd) || is_pmd_migration_entry(*pmd)))
-		goto out;
-	__split_huge_pmd_locked(vma, pmd, range.start, freeze);
+	if (pmd_trans_huge(*pmd) || pmd_devmap(*pmd) ||
+	    is_pmd_migration_entry(*pmd))
+		__split_huge_pmd_locked(vma, pmd, range.start, freeze);
+
 out:
 	spin_unlock(ptl);
 	/*
