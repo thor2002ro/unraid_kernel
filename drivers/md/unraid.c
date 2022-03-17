@@ -372,7 +372,7 @@ static int stripe_limit( unraid_conf_t *conf, int unit, int *activeP)
 	/* throttle back resync process when other I/O is active */
 	queue_limit = ((unit == 0) && (active > 1)) ? md_sync_limit : md_queue_limit;
 
-	return ((conf->num_stripes * md_queue_limit) + (active * 100) / 2) / (active * 100);
+	return ((conf->num_stripes * queue_limit) + (active * 100) / 2) / (active * 100);
 }
 
 /* If requests are coming in at a faster rate than they are being completed, then eventually a thread
