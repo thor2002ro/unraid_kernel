@@ -1046,7 +1046,7 @@ static int do_run(mddev_t *mddev)
 			if (md_restrict & 1)
 				blk_queue_max_hw_sectors(gd->queue, 256);  /* 256 sectors => 128K */
 
-			blk_queue_max_write_same_sectors(gd->queue, 0);
+			//blk_queue_max_write_same_sectors(gd->queue, 0);
 			blk_queue_max_write_zeroes_sectors(gd->queue, 0);
 			blk_queue_flag_clear(QUEUE_FLAG_DISCARD, gd->queue);
 			blk_queue_flag_clear(QUEUE_FLAG_NONROT, gd->queue);
