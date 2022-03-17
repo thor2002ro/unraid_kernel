@@ -167,7 +167,7 @@ static ssize_t metric_store(struct kobject *kobj, struct kobj_attribute *attr,
 			struct damon_sysfs_watermarks, kobj);
 	enum damos_wmark_metric metric;
 
-	for (metric = 0; metric <= NR_DAMOS_WMARK_METRICS; metric++) {
+	for (metric = 0; metric < NR_DAMOS_WMARK_METRICS; metric++) {
 		if (sysfs_streq(buf, damon_sysfs_wmark_metric_strs[metric])) {
 			watermarks->metric = metric;
 			return count;
