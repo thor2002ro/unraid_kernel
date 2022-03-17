@@ -3280,12 +3280,16 @@ void __init migrate_on_reclaim_init(void)
 				      GFP_KERNEL);
 	WARN_ON(!node_demotion);
 
+	hotplug_memory_notifier(migrate_on_reclaim_callback, 100);
 	/*
 	 * At this point, all numa nodes with memory/CPus have their state
 	 * properly set, so we can build the demotion order now.
+	 * Let us hold the cpu_hotplug lock just, as we could possibily have
+	 * CPU hotplug events during boot.
 	 */
+	cpus_read_lock();
 	set_migration_target_nodes();
-	hotplug_memory_notifier(migrate_on_reclaim_callback, 100);
+	cpus_read_unlock();
 }
 #endif /* CONFIG_HOTPLUG_CPU */
 
