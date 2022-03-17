@@ -250,9 +250,8 @@ do {								\
  * kunmap_local - Unmap a page mapped via kmap_local_page().
  * @__addr: An address within the page mapped
  *
- * __addr is often an address returned from kmap_local_page().  However,
- * this address can be any address within the mapped page.  It does not need to
- * be the exact address returned from kmap_local_page()
+ * @__addr can be any address within the mapped page.  Commonly it is the
+ * address return from kmap_local_page(), but it can also include offsets.
  *
  * Unmapping should be done in the reverse order of the mapping.  See
  * kmap_local_page() for details.
