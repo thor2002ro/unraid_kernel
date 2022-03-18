@@ -122,9 +122,6 @@ static unsigned int mwait_substates __initdata;
  * If the local APIC timer is not known to be reliable in the target idle state,
  * enable one-shot tick broadcasting for the target CPU before executing MWAIT.
  *
- * Optionally call leave_mm() for the target CPU upfront to avoid wakeups due to
- * flushing user TLBs.
- *
  * Must be called under local_irq_disable().
  */
 static __cpuidle int intel_idle(struct cpuidle_device *dev,
@@ -784,7 +781,7 @@ static struct cpuidle_state spr_cstates[] __initdata = {
 	{
 		.name = "C1E",
 		.desc = "MWAIT 0x01",
-		.flags = MWAIT2flg(0x01) | CPUIDLE_FLAG_ALWAYS_ENABLE | \
+		.flags = MWAIT2flg(0x01) | CPUIDLE_FLAG_ALWAYS_ENABLE |
 					   CPUIDLE_FLAG_UNUSABLE,
 		.exit_latency = 2,
 		.target_residency = 4,
