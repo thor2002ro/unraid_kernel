@@ -271,8 +271,11 @@ struct dm_io {
  * dm_io flags
  */
 enum {
+	DM_IO_REFFED,
+	DM_IO_ISSUED,
 	DM_IO_START_ACCT,
-	DM_IO_ACCOUNTED
+	DM_IO_ACCOUNTED,
+	DM_IO_COMPLETE_NEEDED
 };
 
 static inline bool dm_io_flagged(struct dm_io *io, unsigned int bit)
@@ -285,11 +288,7 @@ static inline void dm_io_set_flag(struct dm_io *io, unsigned int bit)
 	io->flags |= (1U << bit);
 }
 
-static inline void dm_io_inc_pending(struct dm_io *io)
-{
-	atomic_inc(&io->io_count);
-}
-
+void dm_io_inc_pending(struct dm_io *io);
 void dm_io_dec_pending(struct dm_io *io, blk_status_t error);
 
 static inline struct completion *dm_get_completion_from_kobject(struct kobject *kobj)
