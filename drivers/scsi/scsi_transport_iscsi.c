@@ -2137,7 +2137,11 @@ static int iscsi_iter_destroy_conn_fn(struct device *dev, void *data)
 {
 	if (!iscsi_is_conn_dev(dev))
 		return 0;
-	return iscsi_destroy_conn(iscsi_dev_to_conn(dev));
+
+	iscsi_remove_conn(iscsi_dev_to_conn(dev));
+	iscsi_put_conn(iscsi_dev_to_conn(dev));
+
+	return 0;
 }
 
 void iscsi_remove_session(struct iscsi_cls_session *session)
@@ -2318,27 +2322,16 @@ void iscsi_free_session(struct iscsi_cls_session *session)
 EXPORT_SYMBOL_GPL(iscsi_free_session);
 
 /**
- * iscsi_create_conn - create iscsi class connection
+ * iscsi_alloc_conn - alloc iscsi class connection
  * @session: iscsi cls session
  * @dd_size: private driver data size
  * @cid: connection id
- *
- * This can be called from a LLD or iscsi_transport. The connection
- * is child of the session so cid must be unique for all connections
- * on the session.
- *
- * Since we do not support MCS, cid will normally be zero. In some cases
- * for software iscsi we could be trying to preallocate a connection struct
- * in which case there could be two connection structs and cid would be
- * non-zero.
  */
 struct iscsi_cls_conn *
-iscsi_create_conn(struct iscsi_cls_session *session, int dd_size, uint32_t cid)
+iscsi_alloc_conn(struct iscsi_cls_session *session, int dd_size, uint32_t cid)
 {
 	struct iscsi_transport *transport = session->transport;
 	struct iscsi_cls_conn *conn;
-	unsigned long flags;
-	int err;
 
 	conn = kzalloc(sizeof(*conn) + dd_size, GFP_KERNEL);
 	if (!conn)
@@ -2358,48 +2351,61 @@ iscsi_create_conn(struct iscsi_cls_session *session, int dd_size, uint32_t cid)
 		goto free_conn;
 
 	dev_set_name(&conn->dev, "connection%d:%u", session->sid, cid);
+	device_initialize(&conn->dev);
 	conn->dev.parent = &session->dev;
 	conn->dev.release = iscsi_conn_release;
-	err = device_register(&conn->dev);
+
+	return conn;
+
+free_conn:
+	kfree(conn);
+	return NULL;
+}
+EXPORT_SYMBOL_GPL(iscsi_alloc_conn);
+
+/**
+ * iscsi_add_conn - add iscsi class connection
+ * @conn: iscsi cls connection
+ *
+ * This will expose iscsi_cls_conn to sysfs so make sure the related
+ * resources for sysfs attributes are initialized before calling this.
+ */
+int iscsi_add_conn(struct iscsi_cls_conn *conn)
+{
+	int err;
+	unsigned long flags;
+	struct iscsi_cls_session *session = iscsi_dev_to_session(conn->dev.parent);
+
+	err = device_add(&conn->dev);
 	if (err) {
-		iscsi_cls_session_printk(KERN_ERR, session, "could not "
-					 "register connection's dev\n");
-		goto release_parent_ref;
+		iscsi_cls_session_printk(KERN_ERR, session,
+					 "could not register connection's dev\n");
+		return err;
 	}
 	err = transport_register_device(&conn->dev);
 	if (err) {
-		iscsi_cls_session_printk(KERN_ERR, session, "could not "
-					 "register transport's dev\n");
-		goto release_conn_ref;
+		iscsi_cls_session_printk(KERN_ERR, session,
+					 "could not register transport's dev\n");
+		device_del(&conn->dev);
+		return err;
 	}
 
 	spin_lock_irqsave(&connlock, flags);
 	list_add(&conn->conn_list, &connlist);
 	spin_unlock_irqrestore(&connlock, flags);
 
-	ISCSI_DBG_TRANS_CONN(conn, "Completed conn creation\n");
-	return conn;
-
-release_conn_ref:
-	device_unregister(&conn->dev);
-	put_device(&session->dev);
-	return NULL;
-release_parent_ref:
-	put_device(&session->dev);
-free_conn:
-	kfree(conn);
-	return NULL;
+	return 0;
 }
-
-EXPORT_SYMBOL_GPL(iscsi_create_conn);
+EXPORT_SYMBOL_GPL(iscsi_add_conn);
 
 /**
- * iscsi_destroy_conn - destroy iscsi class connection
- * @conn: iscsi cls session
+ * iscsi_remove_conn - remove iscsi class connection from sysfs
+ * @conn: iscsi cls connection
  *
- * This can be called from a LLD or iscsi_transport.
+ * Remove iscsi_cls_conn from sysfs, and wait for previous
+ * read/write of iscsi_cls_conn's attributes in sysfs to finish.
  */
-int iscsi_destroy_conn(struct iscsi_cls_conn *conn)
+void iscsi_remove_conn(struct iscsi_cls_conn *conn)
 {
 	unsigned long flags;
 
@@ -2408,11 +2414,9 @@ int iscsi_destroy_conn(struct iscsi_cls_conn *conn)
 	spin_unlock_irqrestore(&connlock, flags);
 
 	transport_unregister_device(&conn->dev);
-	ISCSI_DBG_TRANS_CONN(conn, "Completing conn destruction\n");
-	device_unregister(&conn->dev);
-	return 0;
+	device_del(&conn->dev);
 }
-EXPORT_SYMBOL_GPL(iscsi_destroy_conn);
+EXPORT_SYMBOL_GPL(iscsi_remove_conn);
 
 void iscsi_put_conn(struct iscsi_cls_conn *conn)
 {
