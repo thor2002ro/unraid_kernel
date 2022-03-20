@@ -236,7 +236,7 @@ on downward growing arches, it looks like this:
 
 #define start_thread(regs, new_pc, new_sp) do {		\
 	elf_addr_t *sp = (elf_addr_t *)new_sp;		\
-	__u32 spaceid = (__u32)current->mm->context;	\
+	__u32 spaceid = (__u32)current->mm->context.space_id;	\
 	elf_addr_t pc = (elf_addr_t)new_pc | 3;		\
 	elf_caddr_t *argv = (elf_caddr_t *)bprm->exec + 1;	\
 							\
@@ -281,8 +281,9 @@ extern unsigned long __get_wchan(struct task_struct *p);
  * with different data, whether clean or not) to operate
  */
 #ifdef CONFIG_PA8X00
-extern int _parisc_requires_coherency;
-#define parisc_requires_coherency()	_parisc_requires_coherency
+#include <linux/jump_label.h>
+DECLARE_STATIC_KEY_TRUE(_parisc_requires_coherency);
+#define parisc_requires_coherency() static_branch_likely(&_parisc_requires_coherency)
 #else
 #define parisc_requires_coherency()	(0)
 #endif

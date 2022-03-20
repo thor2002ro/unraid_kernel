@@ -32,8 +32,7 @@
 struct system_cpuinfo_parisc boot_cpu_data __ro_after_init;
 EXPORT_SYMBOL(boot_cpu_data);
 #ifdef CONFIG_PA8X00
-int _parisc_requires_coherency __ro_after_init;
-EXPORT_SYMBOL(_parisc_requires_coherency);
+DEFINE_STATIC_KEY_TRUE(_parisc_requires_coherency);
 #endif
 
 DEFINE_PER_CPU(struct cpuinfo_parisc, cpu_data);
@@ -284,8 +283,8 @@ void __init collect_boot_cpu_data(void)
 	boot_cpu_data.family_name = cpu_name_version[boot_cpu_data.cpu_type][1];
 
 #ifdef CONFIG_PA8X00
-	_parisc_requires_coherency = (boot_cpu_data.cpu_type == mako) ||
-				(boot_cpu_data.cpu_type == mako2);
+	if ((boot_cpu_data.cpu_type != mako) && (boot_cpu_data.cpu_type != mako2))
+		static_branch_disable(&_parisc_requires_coherency);
 #endif
 
 	if (pdc_model_platform_info(orig_prod_num, current_prod_num, serial_no) == PDC_OK) {
