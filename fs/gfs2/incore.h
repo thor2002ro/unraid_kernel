@@ -849,6 +849,15 @@ struct gfs2_sbd {
 	unsigned long sd_last_warning;
 	struct dentry *debugfs_dir;    /* debugfs directory */
 	unsigned long sd_glock_dqs_held;
+
+	atomic_t sd_bread_fault;
+	atomic_t sd_bread_short;
+	atomic_t sd_bwrite_fault;
+	atomic_t sd_bwrite_short;
+	atomic_t sd_dread_fault;
+	atomic_t sd_dread_split;
+	atomic_t sd_dwrite_fault;
+	atomic_t sd_dwrite_split;
 };
 
 static inline void gfs2_glstats_inc(struct gfs2_glock *gl, int which)

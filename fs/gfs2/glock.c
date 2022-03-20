@@ -542,7 +542,7 @@ restart:
 			 * some reason. If this holder is the head of the list, it
 			 * means we have a blocked holder at the head, so return 1.
 			 */
-			if (gh->gh_list.prev == &gl->gl_holders)
+			if (list_is_first(&gh->gh_list, &gl->gl_holders))
 				return 1;
 			do_error(gl, 0);
 			break;
@@ -669,6 +669,8 @@ static void finish_xmote(struct gfs2_glock *gl, unsigned int ret)
 
 	/* Check for state != intended state */
 	if (unlikely(state != gl->gl_target)) {
+		if (gh && (ret & LM_OUT_CANCELED))
+			gfs2_holder_wake(gh);
 		if (gh && !test_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags)) {
 			/* move to back of queue and try next entry */
 			if (ret & LM_OUT_CANCELED) {
@@ -1259,7 +1261,6 @@ void __gfs2_holder_init(struct gfs2_glock *gl, unsigned int state, u16 flags,
 	gh->gh_owner_pid = get_pid(task_pid(current));
 	gh->gh_state = state;
 	gh->gh_flags = flags;
-	gh->gh_error = 0;
 	gh->gh_iflags = 0;
 	gfs2_glock_hold(gl);
 }
@@ -1565,6 +1566,7 @@ int gfs2_glock_nq(struct gfs2_holder *gh)
 	if (test_bit(GLF_LRU, &gl->gl_flags))
 		gfs2_glock_remove_from_lru(gl);
 
+	gh->gh_error = 0;
 	spin_lock(&gl->gl_lockref.lock);
 	add_to_queue(gh);
 	if (unlikely((LM_FLAG_NOEXP & gh->gh_flags) &&
@@ -1691,6 +1693,14 @@ void gfs2_glock_dq(struct gfs2_holder *gh)
 	struct gfs2_glock *gl = gh->gh_gl;
 
 	spin_lock(&gl->gl_lockref.lock);
+	if (list_is_first(&gh->gh_list, &gl->gl_holders) &&
+	    !test_bit(HIF_HOLDER, &gh->gh_iflags)) {
+		spin_unlock(&gl->gl_lockref.lock);
+		gl->gl_name.ln_sbd->sd_lockstruct.ls_ops->lm_cancel(gl);
+		wait_on_bit(&gh->gh_iflags, HIF_WAIT, TASK_UNINTERRUPTIBLE);
+		spin_lock(&gl->gl_lockref.lock);
+	}
+
 	__gfs2_glock_dq(gh);
 	spin_unlock(&gl->gl_lockref.lock);
 }
@@ -2734,6 +2744,37 @@ static const struct file_operations gfs2_glstats_fops = {
 
 DEFINE_SEQ_ATTRIBUTE(gfs2_sbstats);
 
+static int gfs2_fault_stats_show(struct seq_file *m, void *p)
+{
+	struct gfs2_sbd *sdp = m->private;
+
+	seq_printf(m,
+		   "read %u %u %u %u\n"
+		   "write %u %u %u %u\n",
+		   atomic_read(&sdp->sd_bread_fault),
+		   atomic_read(&sdp->sd_bread_short),
+		   atomic_read(&sdp->sd_dread_fault),
+		   atomic_read(&sdp->sd_dread_split),
+		   atomic_read(&sdp->sd_bwrite_fault),
+		   atomic_read(&sdp->sd_bwrite_short),
+		   atomic_read(&sdp->sd_dwrite_fault),
+		   atomic_read(&sdp->sd_dwrite_split));
+        return 0;
+}
+
+static int gfs2_fault_stats_open(struct inode *inode, struct file *file)
+{
+        return single_open(file, gfs2_fault_stats_show, inode->i_private);
+}
+
+static const struct file_operations gfs2_fault_stats_fops = {
+        .owner = THIS_MODULE,
+        .open = gfs2_fault_stats_open,
+        .llseek = seq_lseek,
+        .read = seq_read,
+        .release = single_release,
+};
+
 void gfs2_create_debugfs_file(struct gfs2_sbd *sdp)
 {
 	sdp->debugfs_dir = debugfs_create_dir(sdp->sd_table_name, gfs2_root);
@@ -2746,6 +2787,9 @@ void gfs2_create_debugfs_file(struct gfs2_sbd *sdp)
 
 	debugfs_create_file("sbstats", S_IFREG | S_IRUGO, sdp->debugfs_dir, sdp,
 			    &gfs2_sbstats_fops);
+
+	debugfs_create_file("fault_stats", S_IFREG | S_IRUGO, sdp->debugfs_dir, sdp,
+			    &gfs2_fault_stats_fops);
 }
 
 void gfs2_delete_debugfs_file(struct gfs2_sbd *sdp)

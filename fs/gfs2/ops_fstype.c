@@ -140,6 +140,15 @@ static struct gfs2_sbd *init_sbd(struct super_block *sb)
 	atomic_set(&sdp->sd_freeze_state, SFS_UNFROZEN);
 	mutex_init(&sdp->sd_freeze_mutex);
 
+	atomic_set(&sdp->sd_bread_fault, 0);
+	atomic_set(&sdp->sd_bread_short, 0);
+	atomic_set(&sdp->sd_bwrite_fault, 0);
+	atomic_set(&sdp->sd_bwrite_short, 0);
+	atomic_set(&sdp->sd_dread_fault, 0);
+	atomic_set(&sdp->sd_dread_split, 0);
+	atomic_set(&sdp->sd_dwrite_fault, 0);
+	atomic_set(&sdp->sd_dwrite_split, 0);
+
 	return sdp;
 
 fail:
