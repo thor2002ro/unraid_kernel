@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
+#include <linux/dev_printk.h>
 #include <linux/ioport.h>
 #include <asm/e820/api.h>
 
@@ -23,16 +24,42 @@ static void resource_clip(struct resource *res, resource_size_t start,
 		res->start = end + 1;
 }
 
-static void remove_e820_regions(struct resource *avail)
+void remove_e820_regions(struct device *dev, struct resource *avail)
 {
+	struct resource orig = *avail;
 	int i;
 	struct e820_entry *entry;
+	u64 e820_start, e820_end;
+
+	if (!(avail->flags & IORESOURCE_MEM))
+		return;
 
 	for (i = 0; i < e820_table->nr_entries; i++) {
 		entry = &e820_table->entries[i];
+		e820_start = entry->addr;
+		e820_end = entry->addr + entry->size - 1;
 
-		resource_clip(avail, entry->addr,
-			      entry->addr + entry->size - 1);
+		/*
+		 * If an E820 entry covers just part of the resource, we
+		 * assume E820 is telling us about something like host
+		 * bridge register space that is unavailable for PCI
+		 * devices.  But if it covers the *entire* resource, it's
+		 * more likely just telling us that this is MMIO space, and
+		 * that doesn't need to be removed.
+		 */
+		if (e820_start <= avail->start && avail->end <= e820_end) {
+			dev_info(dev, "resource %pR fully covered by e820 entry [mem %#010Lx-%#010Lx]\n",
+				 avail, e820_start, e820_end);
+
+			continue;
+		}
+
+		resource_clip(avail, e820_start, e820_end);
+		if (orig.start != avail->start || orig.end != avail->end) {
+			dev_info(dev, "clipped %pR to %pR for e820 entry [mem %#010Lx-%#010Lx]\n",
+				 &orig, avail, e820_start, e820_end);
+			orig = *avail;
+		}
 	}
 }
 
@@ -43,9 +70,6 @@ void arch_remove_reservations(struct resource *avail)
 	 * the low 1MB unconditionally, as this area is needed for some ISA
 	 * cards requiring a memory range, e.g. the i82365 PCMCIA controller.
 	 */
-	if (avail->flags & IORESOURCE_MEM) {
+	if (avail->flags & IORESOURCE_MEM)
 		resource_clip(avail, BIOS_ROM_BASE, BIOS_ROM_END);
-
-		remove_e820_regions(avail);
-	}
 }
