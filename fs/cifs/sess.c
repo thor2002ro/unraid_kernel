@@ -58,7 +58,7 @@ bool is_ses_using_iface(struct cifs_ses *ses, struct cifs_server_iface *iface)
 
 	spin_lock(&ses->chan_lock);
 	for (i = 0; i < ses->chan_count; i++) {
-		if (is_server_using_iface(ses->chans[i].server, iface)) {
+		if (ses->chans[i].iface == iface) {
 			spin_unlock(&ses->chan_lock);
 			return true;
 		}
@@ -116,16 +116,25 @@ cifs_chan_needs_reconnect(struct cifs_ses *ses,
 	return CIFS_CHAN_NEEDS_RECONNECT(ses, chan_index);
 }
 
+bool
+cifs_chan_is_iface_active(struct cifs_ses *ses,
+			  struct TCP_Server_Info *server)
+{
+	unsigned int chan_index = cifs_ses_get_chan_index(ses, server);
+
+	return ses->chans[chan_index].iface &&
+		ses->chans[chan_index].iface->is_active;
+}
+
 /* returns number of channels added */
 int cifs_try_adding_channels(struct cifs_sb_info *cifs_sb, struct cifs_ses *ses)
 {
 	int old_chan_count, new_chan_count;
 	int left;
-	int i = 0;
 	int rc = 0;
 	int tries = 0;
-	struct cifs_server_iface *ifaces = NULL;
-	size_t iface_count;
+	struct cifs_server_iface *iface = NULL, *niface = NULL;
+	bool iface_found = false;
 
 	spin_lock(&ses->chan_lock);
 
@@ -155,32 +164,11 @@ int cifs_try_adding_channels(struct cifs_sb_info *cifs_sb, struct cifs_ses *ses)
 	spin_unlock(&ses->chan_lock);
 
 	/*
-	 * Make a copy of the iface list at the time and use that
-	 * instead so as to not hold the iface spinlock for opening
-	 * channels
-	 */
-	spin_lock(&ses->iface_lock);
-	iface_count = ses->iface_count;
-	if (iface_count <= 0) {
-		spin_unlock(&ses->iface_lock);
-		cifs_dbg(VFS, "no iface list available to open channels\n");
-		return 0;
-	}
-	ifaces = kmemdup(ses->iface_list, iface_count*sizeof(*ifaces),
-			 GFP_ATOMIC);
-	if (!ifaces) {
-		spin_unlock(&ses->iface_lock);
-		return 0;
-	}
-	spin_unlock(&ses->iface_lock);
-
-	/*
 	 * Keep connecting to same, fastest, iface for all channels as
 	 * long as its RSS. Try next fastest one if not RSS or channel
 	 * creation fails.
 	 */
 	while (left > 0) {
-		struct cifs_server_iface *iface;
 
 		tries++;
 		if (tries > 3*ses->chan_max) {
@@ -189,28 +177,100 @@ int cifs_try_adding_channels(struct cifs_sb_info *cifs_sb, struct cifs_ses *ses)
 			break;
 		}
 
-		iface = &ifaces[i];
-		if (is_ses_using_iface(ses, iface) && !iface->rss_capable) {
-			i = (i+1) % iface_count;
-			continue;
+		spin_lock(&ses->iface_lock);
+		if (!ses->iface_count) {
+			spin_unlock(&ses->iface_lock);
+			break;
 		}
+
+		iface_found = false;
+		list_for_each_entry_safe(iface, niface, &ses->iface_list,
+				    iface_head) {
+			/* skip ifaces that are unusable */
+			if (!iface->is_active ||
+			    (is_ses_using_iface(ses, iface) &&
+			     !iface->rss_capable)) {
+				continue;
+			}
+
+			iface_found = true;
+			kref_get(&iface->refcount);
+			break;
+		}
+		spin_unlock(&ses->iface_lock);
+
+		if (!iface_found)
+			break;
 
 		rc = cifs_ses_add_channel(cifs_sb, ses, iface);
 		if (rc) {
-			cifs_dbg(FYI, "failed to open extra channel on iface#%d rc=%d\n",
-				 i, rc);
-			i = (i+1) % iface_count;
+			cifs_dbg(FYI, "failed to open extra channel on iface:%pIS rc=%d\n",
+				 &iface->sockaddr,
+				 rc);
+			kref_put(&iface->refcount, release_iface);
 			continue;
 		}
 
-		cifs_dbg(FYI, "successfully opened new channel on iface#%d\n",
-			 i);
+		cifs_dbg(FYI, "successfully opened new channel on iface:%pIS\n",
+			 &iface->sockaddr);
 		left--;
 		new_chan_count++;
 	}
 
-	kfree(ifaces);
 	return new_chan_count - old_chan_count;
+}
+
+/*
+ * update the iface for the channel if necessary.
+ * will return 0 when iface is updated. 1 otherwise
+ */
+int
+cifs_chan_update_iface(struct cifs_ses *ses, struct TCP_Server_Info *server)
+{
+	unsigned int chan_index = cifs_ses_get_chan_index(ses, server);
+	struct cifs_server_iface *iface = NULL, *niface = NULL;
+	struct cifs_server_iface *old_iface = NULL;
+	int rc = 0;
+
+	/* primary channel. This can never go away */
+	if (!chan_index)
+		return 0;
+
+	if (ses->chans[chan_index].iface) {
+		old_iface = ses->chans[chan_index].iface;
+		if (old_iface->is_active)
+			return 1;
+	}
+
+	spin_lock(&ses->iface_lock);
+
+	/* then look for a new one */
+	list_for_each_entry_safe_continue(iface, niface, &ses->iface_list,
+					  iface_head) {
+		if (!iface->is_active ||
+		    (is_ses_using_iface(ses, iface) &&
+		     !iface->rss_capable)) {
+			continue;
+		}
+		kref_get(&iface->refcount);
+	}
+
+	if (!iface) {
+		rc = 1;
+		cifs_dbg(FYI, "unable to find a suitable iface. Keeping old one\n");
+		goto exit;
+	}
+
+	/* now drop the ref to the current iface */
+	if (old_iface)
+		kref_put(&old_iface->refcount, release_iface);
+
+	ses->chans[chan_index].iface = iface;
+
+exit:
+	spin_unlock(&ses->iface_lock);
+
+	return rc;
 }
 
 /*
@@ -322,6 +382,7 @@ cifs_ses_add_channel(struct cifs_sb_info *cifs_sb, struct cifs_ses *ses,
 		spin_unlock(&ses->chan_lock);
 		goto out;
 	}
+	chan->iface = iface;
 	ses->chan_count++;
 	atomic_set(&ses->chan_seq, 0);
 

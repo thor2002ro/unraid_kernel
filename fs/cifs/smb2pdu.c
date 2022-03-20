@@ -2033,8 +2033,8 @@ create_reconnect_durable_buf(struct cifs_fid *fid)
 	buf->ccontext.NameOffset = cpu_to_le16(offsetof
 				(struct create_durable, Name));
 	buf->ccontext.NameLength = cpu_to_le16(4);
-	buf->Data.Fid.PersistentFileId = fid->persistent_fid;
-	buf->Data.Fid.VolatileFileId = fid->volatile_fid;
+	buf->Data.Fid.PersistentFileId = cpu_to_le64(fid->persistent_fid);
+	buf->Data.Fid.VolatileFileId = cpu_to_le64(fid->volatile_fid);
 	/* SMB2_CREATE_DURABLE_HANDLE_RECONNECT is "DHnC" */
 	buf->Name[0] = 'D';
 	buf->Name[1] = 'H';
@@ -2227,8 +2227,8 @@ create_reconnect_durable_v2_buf(struct cifs_fid *fid)
 			    Name));
 	buf->ccontext.NameLength = cpu_to_le16(4);
 
-	buf->dcontext.Fid.PersistentFileId = fid->persistent_fid;
-	buf->dcontext.Fid.VolatileFileId = fid->volatile_fid;
+	buf->dcontext.Fid.PersistentFileId = cpu_to_le64(fid->persistent_fid);
+	buf->dcontext.Fid.VolatileFileId = cpu_to_le64(fid->volatile_fid);
 	buf->dcontext.Flags = cpu_to_le32(SMB2_DHANDLE_FLAG_PERSISTENT);
 	memcpy(buf->dcontext.CreateGuid, fid->create_guid, 16);
 
@@ -3074,8 +3074,8 @@ SMB2_ioctl_init(struct cifs_tcon *tcon, struct TCP_Server_Info *server,
 	}
 
 	req->CtlCode = cpu_to_le32(opcode);
-	req->PersistentFileId = persistent_fid;
-	req->VolatileFileId = volatile_fid;
+	req->PersistentFileId = cpu_to_le64(persistent_fid);
+	req->VolatileFileId = cpu_to_le64(volatile_fid);
 
 	iov[0].iov_base = (char *)req;
 	/*
@@ -3491,8 +3491,8 @@ SMB2_query_info_init(struct cifs_tcon *tcon, struct TCP_Server_Info *server,
 
 	req->InfoType = info_type;
 	req->FileInfoClass = info_class;
-	req->PersistentFileId = persistent_fid;
-	req->VolatileFileId = volatile_fid;
+	req->PersistentFileId = cpu_to_le64(persistent_fid);
+	req->VolatileFileId = cpu_to_le64(volatile_fid);
 	req->AdditionalInformation = cpu_to_le32(additional_info);
 
 	req->OutputBufferLength = cpu_to_le32(output_len);
@@ -4851,8 +4851,8 @@ int SMB2_query_directory_init(const unsigned int xid,
 	}
 
 	req->FileIndex = cpu_to_le32(index);
-	req->PersistentFileId = persistent_fid;
-	req->VolatileFileId = volatile_fid;
+	req->PersistentFileId = cpu_to_le64(persistent_fid);
+	req->VolatileFileId = cpu_to_le64(volatile_fid);
 
 	len = 0x2;
 	bufptr = req->Buffer;
@@ -5051,8 +5051,8 @@ SMB2_set_info_init(struct cifs_tcon *tcon, struct TCP_Server_Info *server,
 	req->hdr.Id.SyncId.ProcessId = cpu_to_le32(pid);
 	req->InfoType = info_type;
 	req->FileInfoClass = info_class;
-	req->PersistentFileId = persistent_fid;
-	req->VolatileFileId = volatile_fid;
+	req->PersistentFileId = cpu_to_le64(persistent_fid);
+	req->VolatileFileId = cpu_to_le64(volatile_fid);
 	req->AdditionalInformation = cpu_to_le32(additional_info);
 
 	req->BufferOffset =
@@ -5205,8 +5205,8 @@ SMB2_oplock_break(const unsigned int xid, struct cifs_tcon *tcon,
 	if (smb3_encryption_required(tcon))
 		flags |= CIFS_TRANSFORM_REQ;
 
-	req->VolatileFid = volatile_fid;
-	req->PersistentFid = persistent_fid;
+	req->VolatileFid = cpu_to_le64(volatile_fid);
+	req->PersistentFid = cpu_to_le64(persistent_fid);
 	req->OplockLevel = oplock_level;
 	req->hdr.CreditRequest = cpu_to_le16(1);
 
@@ -5284,8 +5284,8 @@ build_qfs_info_req(struct kvec *iov, struct cifs_tcon *tcon,
 
 	req->InfoType = SMB2_O_INFO_FILESYSTEM;
 	req->FileInfoClass = level;
-	req->PersistentFileId = persistent_fid;
-	req->VolatileFileId = volatile_fid;
+	req->PersistentFileId = cpu_to_le64(persistent_fid);
+	req->VolatileFileId = cpu_to_le64(volatile_fid);
 	/* 1 for pad */
 	req->InputBufferOffset =
 			cpu_to_le16(sizeof(struct smb2_query_info_req) - 1);
@@ -5513,8 +5513,8 @@ smb2_lockv(const unsigned int xid, struct cifs_tcon *tcon,
 	req->hdr.Id.SyncId.ProcessId = cpu_to_le32(pid);
 	req->LockCount = cpu_to_le16(num_lock);
 
-	req->PersistentFileId = persist_fid;
-	req->VolatileFileId = volatile_fid;
+	req->PersistentFileId = cpu_to_le64(persist_fid);
+	req->VolatileFileId = cpu_to_le64(volatile_fid);
 
 	count = num_lock * sizeof(struct smb2_lock_element);
 
