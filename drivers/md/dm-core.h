@@ -224,7 +224,8 @@ struct dm_target_io {
  */
 enum {
 	DM_TIO_INSIDE_DM_IO,
-	DM_TIO_IS_DUPLICATE_BIO
+	DM_TIO_IS_DUPLICATE_BIO,
+	DM_TIO_IS_FREE
 };
 
 static inline bool dm_tio_flagged(struct dm_target_io *tio, unsigned int bit)
@@ -275,6 +276,7 @@ enum {
 	DM_IO_ISSUED,
 	DM_IO_START_ACCT,
 	DM_IO_ACCOUNTED,
+	DM_IO_POLLED,
 	DM_IO_COMPLETE_NEEDED
 };
 

@@ -637,8 +637,12 @@ static struct bio *alloc_tio(struct clone_info *ci, struct dm_target *ti,
 
 static void free_tio(struct bio *clone)
 {
-	if (dm_tio_flagged(clone_to_tio(clone), DM_TIO_INSIDE_DM_IO))
+	struct dm_target_io *tio = clone_to_tio(clone);
+
+	if (dm_tio_flagged(tio, DM_TIO_INSIDE_DM_IO)) {
+		dm_tio_set_flag(tio, DM_TIO_IS_FREE);
 		return;
+	}
 	bio_put(clone);
 }
 
@@ -970,6 +974,9 @@ static void __dm_io_dec_pending(struct dm_io *io)
 			return;
 	} else {
 		BUG_ON(!dm_tio_is_normal(&io->tio));
+		/* Wait for dm_poll_bio() to complete polled IO */
+		if (dm_io_flagged(io, DM_IO_POLLED))
+			return;
 		/*
 		 * Wait for dm_split_and_process_bio() before
 		 * completing normal IO.
@@ -1555,10 +1562,12 @@ static void dm_queue_poll_io(struct bio *bio, struct dm_io *io)
 {
 	struct hlist_head *head = dm_get_bio_hlist_head(bio);
 
+	WARN_ON_ONCE(!dm_tio_is_normal(&io->tio));
 	/*
-	 * Hold one reference for POLLED bio, is released in dm_poll_bio
+	 * Set DM_IO_POLLED to prevent completion until dm_poll_bio(),
+	 * no further IO submission failures allowed in caller once set!
 	 */
-	dm_io_inc_pending(io);
+	dm_io_set_flag(io, DM_IO_POLLED);
 
 	/*
 	 * Add every dm_io instance into the hlist_head which is stored in
@@ -1722,17 +1731,22 @@ out:
 	dm_put_live_table_bio(md, srcu_idx, bio);
 }
 
-static bool dm_poll_dm_io(struct dm_io *io, struct io_comp_batch *iob,
-			  unsigned int flags)
+static int dm_poll_dm_io(struct dm_io *io, struct io_comp_batch *iob,
+			 unsigned int flags)
 {
-	WARN_ON_ONCE(!dm_tio_is_normal(&io->tio));
+	struct dm_target_io *tio = &io->tio;
+
+	WARN_ON_ONCE(!dm_io_flagged(io, DM_IO_POLLED));
+	BUG_ON(dm_io_flagged(io, DM_IO_COMPLETE_NEEDED));
 
 	/* don't poll if the mapped io is done */
-	if (atomic_read(&io->io_count) > 1)
-		bio_poll(&io->tio.clone, iob, flags);
+	if (dm_tio_flagged(tio, DM_TIO_IS_FREE))
+		return 1; /* clone_endio finished */
 
-	/* bio_poll holds the last reference */
-	return atomic_read(&io->io_count) == 1;
+	bio_poll(&tio->clone, iob, flags);
+
+	/* Only complete if clone_endio finished */
+	return (int)dm_tio_flagged(tio, DM_TIO_IS_FREE);
 }
 
 static int dm_poll_bio(struct bio *bio, struct io_comp_batch *iob,
@@ -1769,7 +1783,7 @@ static int dm_poll_bio(struct bio *bio, struct io_comp_batch *iob,
 			 * clone_endio() has already occurred, so no
 			 * error handling is needed here.
 			 */
-			__dm_io_dec_pending(io);
+			dm_io_complete(io);
 		}
 	}
 
