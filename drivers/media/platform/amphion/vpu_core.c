@@ -359,7 +359,7 @@ struct vpu_core *vpu_request_core(struct vpu_dev *vpu, enum vpu_core_type type)
 		goto exit;
 
 	mutex_lock(&core->lock);
-	pm_runtime_get_sync(core->dev);
+	pm_runtime_resume_and_get(core->dev);
 
 	if (core->state == VPU_CORE_DEINIT) {
 		ret = vpu_core_boot(core, true);
@@ -472,7 +472,7 @@ struct vpu_inst *vpu_core_find_instance(struct vpu_core *core, u32 index)
 	struct vpu_inst *tmp;
 
 	mutex_lock(&core->lock);
-	if (!test_bit(index, &core->instance_mask))
+	if (index >= core->supported_instance_count || !test_bit(index, &core->instance_mask))
 		goto exit;
 	list_for_each_entry(tmp, &core->instances, list) {
 		if (tmp->id == index) {
@@ -658,7 +658,7 @@ static int vpu_core_probe(struct platform_device *pdev)
 	vpu_iface_set_log_buf(core, &core->log);
 
 	pm_runtime_enable(dev);
-	ret = pm_runtime_get_sync(dev);
+	ret = pm_runtime_resume_and_get(dev);
 	if (ret) {
 		pm_runtime_put_noidle(dev);
 		pm_runtime_set_suspended(dev);
@@ -690,7 +690,7 @@ static int vpu_core_remove(struct platform_device *pdev)
 	int ret;
 
 	vpu_core_remove_dbgfs_file(core);
-	ret = pm_runtime_get_sync(dev);
+	ret = pm_runtime_resume_and_get(dev);
 	WARN_ON(ret < 0);
 
 	vpu_core_shutdown(core);
@@ -754,7 +754,7 @@ static int __maybe_unused vpu_core_resume(struct device *dev)
 	int ret = 0;
 
 	mutex_lock(&core->lock);
-	pm_runtime_get_sync(dev);
+	pm_runtime_resume_and_get(dev);
 	vpu_core_get_vpu(core);
 	if (core->state != VPU_CORE_SNAPSHOT)
 		goto exit;

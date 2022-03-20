@@ -11,9 +11,6 @@ struct vpu_pair {
 	u32 dst;
 };
 
-#define MAKE_TIMESTAMP(s, ns)		(((s32)(s) * NSEC_PER_SEC) + (ns))
-#define VPU_INVALID_TIMESTAMP		MAKE_TIMESTAMP(-1, 0)
-
 int vpu_helper_find_in_array_u8(const u8 *array, u32 size, u32 x);
 bool vpu_helper_check_type(struct vpu_inst *inst, u32 type);
 const struct vpu_format *vpu_helper_find_format(struct vpu_inst *inst, u32 type, u32 pixelfmt);
@@ -22,11 +19,11 @@ u32 vpu_helper_valid_frame_width(struct vpu_inst *inst, u32 width);
 u32 vpu_helper_valid_frame_height(struct vpu_inst *inst, u32 height);
 u32 vpu_helper_get_plane_size(u32 fmt, u32 width, u32 height, int plane_no,
 			      u32 stride, u32 interlaced, u32 *pbl);
-u32 vpu_helper_copy_from_stream_buffer(struct vpu_buffer *stream_buffer,
+int vpu_helper_copy_from_stream_buffer(struct vpu_buffer *stream_buffer,
 				       u32 *rptr, u32 size, void *dst);
-u32 vpu_helper_copy_to_stream_buffer(struct vpu_buffer *stream_buffer,
+int vpu_helper_copy_to_stream_buffer(struct vpu_buffer *stream_buffer,
 				     u32 *wptr, u32 size, void *src);
-u32 vpu_helper_memset_stream_buffer(struct vpu_buffer *stream_buffer,
+int vpu_helper_memset_stream_buffer(struct vpu_buffer *stream_buffer,
 				    u32 *wptr, u8 val, u32 size);
 u32 vpu_helper_get_free_space(struct vpu_inst *inst);
 u32 vpu_helper_get_used_space(struct vpu_inst *inst);

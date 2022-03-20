@@ -14,6 +14,7 @@
 #include <linux/platform_device.h>
 #include <linux/delay.h>
 #include <linux/rational.h>
+#include <linux/time64.h>
 #include <media/videobuf2-v4l2.h>
 #include <media/videobuf2-dma-contig.h>
 #include <linux/videodev2.h>
@@ -748,14 +749,12 @@ static void vpu_malone_pack_fs_release(struct vpu_rpc_event *pkt,
 static void vpu_malone_pack_timestamp(struct vpu_rpc_event *pkt,
 				      struct vpu_ts_info *info)
 {
+	struct timespec64 ts = ns_to_timespec64(info->timestamp);
+
 	pkt->hdr.num = 3;
-	if (info->timestamp < 0) {
-		pkt->data[0] = (u32)-1;
-		pkt->data[1] = 0;
-	} else {
-		pkt->data[0] = info->timestamp / NSEC_PER_SEC;
-		pkt->data[1] = info->timestamp % NSEC_PER_SEC;
-	}
+
+	pkt->data[0] = ts.tv_sec;
+	pkt->data[1] = ts.tv_nsec;
 	pkt->data[2] = info->size;
 }
 
@@ -916,6 +915,8 @@ static void vpu_malone_unpack_rel_frame(struct vpu_rpc_event *pkt,
 static void vpu_malone_unpack_buff_rdy(struct vpu_rpc_event *pkt,
 				       struct vpu_dec_pic_info *info)
 {
+	struct timespec64 ts = { pkt->data[9], pkt->data[10] };
+
 	info->id = pkt->data[0];
 	info->luma = pkt->data[1];
 	info->stride = pkt->data[3];
@@ -923,7 +924,8 @@ static void vpu_malone_unpack_buff_rdy(struct vpu_rpc_event *pkt,
 		info->skipped = 1;
 	else
 		info->skipped = 0;
-	info->timestamp = MAKE_TIMESTAMP(pkt->data[9], pkt->data[10]);
+
+	info->timestamp = timespec64_to_ns(&ts);
 }
 
 int vpu_malone_unpack_msg_data(struct vpu_rpc_event *pkt, void *data)
@@ -1004,8 +1006,8 @@ static int vpu_malone_add_padding_scode(struct vpu_buffer *stream_buffer,
 					u32 pixelformat, u32 scode_type)
 {
 	u32 wptr;
-	u32 size;
-	u32 total_size = 0;
+	int size;
+	int total_size = 0;
 	const struct malone_padding_scode *ps;
 	const u32 padding_size = 4096;
 	int ret;
@@ -1015,6 +1017,10 @@ static int vpu_malone_add_padding_scode(struct vpu_buffer *stream_buffer,
 		return -EINVAL;
 
 	wptr = readl(&str_buf->wptr);
+	if (wptr < stream_buffer->phys || wptr > stream_buffer->phys + stream_buffer->length)
+		return -EINVAL;
+	if (wptr == stream_buffer->phys + stream_buffer->length)
+		wptr = stream_buffer->phys;
 	size = ALIGN(wptr, 4) - wptr;
 	if (size)
 		vpu_helper_memset_stream_buffer(stream_buffer, &wptr, 0, size);
@@ -1022,7 +1028,7 @@ static int vpu_malone_add_padding_scode(struct vpu_buffer *stream_buffer,
 
 	size = sizeof(ps->data);
 	ret = vpu_helper_copy_to_stream_buffer(stream_buffer, &wptr, size, (void *)ps->data);
-	if (ret < size)
+	if (ret < 0)
 		return -EINVAL;
 	total_size += size;
 
@@ -1232,12 +1238,15 @@ static int vpu_malone_insert_scode_seq(struct malone_scode_t *scode, u32 codec_i
 					       &scode->wptr,
 					       sizeof(hdr),
 					       hdr);
-	return ret;
+	if (ret < 0)
+		return ret;
+	return sizeof(hdr);
 }
 
 static int vpu_malone_insert_scode_pic(struct malone_scode_t *scode, u32 codec_id, u32 ext_size)
 {
 	u8 hdr[MALONE_PAYLOAD_HEADER_SIZE];
+	int ret;
 
 	set_payload_hdr(hdr,
 			SCODE_PICTURE,
@@ -1245,10 +1254,13 @@ static int vpu_malone_insert_scode_pic(struct malone_scode_t *scode, u32 codec_i
 			ext_size + vb2_get_plane_payload(scode->vb, 0),
 			scode->inst->out_format.width,
 			scode->inst->out_format.height);
-	return vpu_helper_copy_to_stream_buffer(&scode->inst->stream_buffer,
-						&scode->wptr,
-						sizeof(hdr),
-						hdr);
+	ret = vpu_helper_copy_to_stream_buffer(&scode->inst->stream_buffer,
+					       &scode->wptr,
+					       sizeof(hdr),
+					       hdr);
+	if (ret < 0)
+		return ret;
+	return sizeof(hdr);
 }
 
 static int vpu_malone_insert_scode_vc1_g_pic(struct malone_scode_t *scode)
@@ -1256,6 +1268,7 @@ static int vpu_malone_insert_scode_vc1_g_pic(struct malone_scode_t *scode)
 	struct vb2_v4l2_buffer *vbuf;
 	u8 nal_hdr[MALONE_VC1_NAL_HEADER_LEN];
 	u32 *data = NULL;
+	int ret;
 
 	vbuf = to_vb2_v4l2_buffer(scode->vb);
 	data = vb2_plane_vaddr(scode->vb, 0);
@@ -1266,10 +1279,13 @@ static int vpu_malone_insert_scode_vc1_g_pic(struct malone_scode_t *scode)
 		return 0;
 
 	create_vc1_nal_pichdr(nal_hdr);
-	return vpu_helper_copy_to_stream_buffer(&scode->inst->stream_buffer,
-						&scode->wptr,
-						sizeof(nal_hdr),
-						nal_hdr);
+	ret = vpu_helper_copy_to_stream_buffer(&scode->inst->stream_buffer,
+					       &scode->wptr,
+					       sizeof(nal_hdr),
+					       nal_hdr);
+	if (ret < 0)
+		return ret;
+	return sizeof(nal_hdr);
 }
 
 static int vpu_malone_insert_scode_vc1_l_seq(struct malone_scode_t *scode)
@@ -1280,8 +1296,7 @@ static int vpu_malone_insert_scode_vc1_l_seq(struct malone_scode_t *scode)
 
 	scode->need_data = 0;
 
-	ret = vpu_malone_insert_scode_seq(scode, MALONE_CODEC_ID_VC1_SIMPLE,
-					  sizeof(rcv_seqhdr));
+	ret = vpu_malone_insert_scode_seq(scode, MALONE_CODEC_ID_VC1_SIMPLE, sizeof(rcv_seqhdr));
 	if (ret < 0)
 		return ret;
 	size = ret;
@@ -1297,7 +1312,7 @@ static int vpu_malone_insert_scode_vc1_l_seq(struct malone_scode_t *scode)
 
 	if (ret < 0)
 		return ret;
-	size += ret;
+	size += sizeof(rcv_seqhdr);
 	return size;
 }
 
@@ -1320,7 +1335,7 @@ static int vpu_malone_insert_scode_vc1_l_pic(struct malone_scode_t *scode)
 					       rcv_pichdr);
 	if (ret < 0)
 		return ret;
-	size += ret;
+	size += sizeof(rcv_pichdr);
 	return size;
 }
 
@@ -1344,7 +1359,7 @@ static int vpu_malone_insert_scode_vp8_seq(struct malone_scode_t *scode)
 					       ivf_hdr);
 	if (ret < 0)
 		return ret;
-	size += ret;
+	size += sizeof(ivf_hdr);
 
 	return size;
 }
@@ -1367,7 +1382,7 @@ static int vpu_malone_insert_scode_vp8_pic(struct malone_scode_t *scode)
 					       ivf_hdr);
 	if (ret < 0)
 		return ret;
-	size += ret;
+	size += sizeof(ivf_hdr);
 
 	return size;
 }
@@ -1468,9 +1483,9 @@ static int vpu_malone_input_frame_data(struct vpu_malone_str_buffer __iomem *str
 					       &wptr,
 					       vb2_get_plane_payload(vb, 0),
 					       vb2_plane_vaddr(vb, 0));
-	if (ret < vb2_get_plane_payload(vb, 0))
+	if (ret < 0)
 		return -ENOMEM;
-	size += ret;
+	size += vb2_get_plane_payload(vb, 0);
 
 	vpu_malone_update_wptr(str_buf, wptr);
 
@@ -1498,7 +1513,7 @@ static int vpu_malone_input_stream_data(struct vpu_malone_str_buffer __iomem *st
 					       &wptr,
 					       vb2_get_plane_payload(vb, 0),
 					       vb2_plane_vaddr(vb, 0));
-	if (ret < vb2_get_plane_payload(vb, 0))
+	if (ret < 0)
 		return -ENOMEM;
 
 	vpu_malone_update_wptr(str_buf, wptr);
@@ -1564,9 +1579,13 @@ static bool vpu_malone_check_ready(struct vpu_shared_addr *shared, u32 instance)
 	u32 size = desc->end - desc->start;
 	u32 rptr = desc->rptr;
 	u32 wptr = desc->wptr;
-	u32 used = (wptr + size - rptr) % size;
+	u32 used;
 
-	if (!size || used < size / 2)
+	if (!size)
+		return true;
+
+	used = (wptr + size - rptr) % size;
+	if (used < (size / 2))
 		return true;
 
 	return false;
