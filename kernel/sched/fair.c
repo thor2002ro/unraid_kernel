@@ -31,6 +31,7 @@
 #include <linux/lockdep_api.h>
 #include <linux/softirq.h>
 #include <linux/refcount_api.h>
+#include <linux/task_work.h>
 #include <linux/topology.h>
 #include <linux/sched/clock.h>
 #include <linux/sched/cond_resched.h>
