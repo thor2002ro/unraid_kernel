@@ -63,9 +63,6 @@
 #define NFP_NET_Q0_BAR		2
 #define NFP_NET_Q1_BAR		4	/* OBSOLETE */
 
-/* Max bits in DMA address */
-#define NFP_NET_MAX_DMA_BITS	40
-
 /* Default size for MTU and freelist buffer sizes */
 #define NFP_NET_DEFAULT_MTU		1500U
 
@@ -85,11 +82,6 @@
 				 NFP_NET_MAX_TX_RINGS : NFP_NET_MAX_RX_RINGS)
 #define NFP_NET_MAX_IRQS	(NFP_NET_NON_Q_VECTORS + NFP_NET_MAX_R_VECS)
 
-#define NFP_NET_MIN_TX_DESCS	256	/* Min. # of Tx descs per ring */
-#define NFP_NET_MIN_RX_DESCS	256	/* Min. # of Rx descs per ring */
-#define NFP_NET_MAX_TX_DESCS	(256 * 1024) /* Max. # of Tx descs per ring */
-#define NFP_NET_MAX_RX_DESCS	(256 * 1024) /* Max. # of Rx descs per ring */
-
 #define NFP_NET_TX_DESCS_DEFAULT 4096	/* Default # of Tx descs per ring */
 #define NFP_NET_RX_DESCS_DEFAULT 4096	/* Default # of Rx descs per ring */
 
@@ -105,10 +97,12 @@
 
 /* Forward declarations */
 struct nfp_cpp;
+struct nfp_dev_info;
 struct nfp_eth_table_port;
 struct nfp_net;
 struct nfp_net_r_vector;
 struct nfp_port;
+struct xsk_buff_pool;
 
 /* Convenience macro for wrapping descriptor index on ring size */
 #define D_IDX(ring, idx)	((idx) & ((ring)->cnt - 1))
@@ -170,11 +164,14 @@ struct nfp_net_tx_desc {
  * struct nfp_net_tx_buf - software TX buffer descriptor
  * @skb:	normal ring, sk_buff associated with this buffer
  * @frag:	XDP ring, page frag associated with this buffer
+ * @xdp:	XSK buffer pool handle (for AF_XDP)
  * @dma_addr:	DMA mapping address of the buffer
  * @fidx:	Fragment index (-1 for the head and [0..nr_frags-1] for frags)
  * @pkt_cnt:	Number of packets to be produced out of the skb associated
  *		with this buffer (valid only on the head's buffer).
  *		Will be 1 for all non-TSO packets.
+ * @is_xsk_tx:	Flag if buffer is a RX buffer after a XDP_TX action and not a
+ *		buffer from the TX queue (for AF_XDP).
  * @real_len:	Number of bytes which to be produced out of the skb (valid only
  *		on the head's buffer). Equal to skb->len for non-TSO packets.
  */
@@ -182,10 +179,18 @@ struct nfp_net_tx_buf {
 	union {
 		struct sk_buff *skb;
 		void *frag;
+		struct xdp_buff *xdp;
 	};
 	dma_addr_t dma_addr;
-	short int fidx;
-	u16 pkt_cnt;
+	union {
+		struct {
+			short int fidx;
+			u16 pkt_cnt;
+		};
+		struct {
+			bool is_xsk_tx;
+		};
+	};
 	u32 real_len;
 };
 
@@ -315,6 +320,16 @@ struct nfp_net_rx_buf {
 };
 
 /**
+ * struct nfp_net_xsk_rx_buf - software RX XSK buffer descriptor
+ * @dma_addr:	DMA mapping address of the buffer
+ * @xdp:	XSK buffer pool handle (for AF_XDP)
+ */
+struct nfp_net_xsk_rx_buf {
+	dma_addr_t dma_addr;
+	struct xdp_buff *xdp;
+};
+
+/**
  * struct nfp_net_rx_ring - RX ring structure
  * @r_vec:      Back pointer to ring vector structure
  * @cnt:        Size of the queue in number of descriptors
@@ -324,6 +339,7 @@ struct nfp_net_rx_buf {
  * @fl_qcidx:   Queue Controller Peripheral (QCP) queue index for the freelist
  * @qcp_fl:     Pointer to base of the QCP freelist queue
  * @rxbufs:     Array of transmitted FL/RX buffers
+ * @xsk_rxbufs: Array of transmitted FL/RX buffers (for AF_XDP)
  * @rxds:       Virtual address of FL/RX ring in host memory
  * @xdp_rxq:    RX-ring info avail for XDP
  * @dma:        DMA address of the FL/RX ring
@@ -342,6 +358,7 @@ struct nfp_net_rx_ring {
 	u8 __iomem *qcp_fl;
 
 	struct nfp_net_rx_buf *rxbufs;
+	struct nfp_net_xsk_rx_buf *xsk_rxbufs;
 	struct nfp_net_rx_desc *rxds;
 
 	struct xdp_rxq_info xdp_rxq;
@@ -360,6 +377,7 @@ struct nfp_net_rx_ring {
  * @tx_ring:        Pointer to TX ring
  * @rx_ring:        Pointer to RX ring
  * @xdp_ring:	    Pointer to an extra TX ring for XDP
+ * @xsk_pool:	    XSK buffer pool active on vector queue pair (for AF_XDP)
  * @irq_entry:      MSI-X table entry (use for talking to the device)
  * @event_ctr:	    Number of interrupt
  * @rx_dim:	    Dynamic interrupt moderation structure for RX
@@ -431,6 +449,7 @@ struct nfp_net_r_vector {
 	u64 rx_replace_buf_alloc_fail;
 
 	struct nfp_net_tx_ring *xdp_ring;
+	struct xsk_buff_pool *xsk_pool;
 
 	struct u64_stats_sync tx_sync;
 	u64 tx_pkts;
@@ -501,6 +520,7 @@ struct nfp_stat_pair {
  * @num_stack_tx_rings:	Number of TX rings used by the stack (not XDP)
  * @num_rx_rings:	Currently configured number of RX rings
  * @mtu:		Device MTU
+ * @xsk_pools:		XSK buffer pools, @max_r_vecs in size (for AF_XDP).
  */
 struct nfp_net_dp {
 	struct device *dev;
@@ -537,11 +557,14 @@ struct nfp_net_dp {
 	unsigned int num_rx_rings;
 
 	unsigned int mtu;
+
+	struct xsk_buff_pool **xsk_pools;
 };
 
 /**
  * struct nfp_net - NFP network device structure
  * @dp:			Datapath structure
+ * @dev_info:		NFP ASIC params
  * @id:			vNIC id within the PF (0 for VFs)
  * @fw_ver:		Firmware version
  * @cap:                Capabilities advertised by the Firmware
@@ -615,6 +638,7 @@ struct nfp_net_dp {
 struct nfp_net {
 	struct nfp_net_dp dp;
 
+	const struct nfp_dev_info *dev_info;
 	struct nfp_net_fw_version fw_ver;
 
 	u32 id;
@@ -767,7 +791,6 @@ static inline void nn_pci_flush(struct nfp_net *nn)
  * either add to a pointer or to read the pointer value.
  */
 #define NFP_QCP_QUEUE_ADDR_SZ			0x800
-#define NFP_QCP_QUEUE_AREA_SZ			0x80000
 #define NFP_QCP_QUEUE_OFF(_x)			((_x) * NFP_QCP_QUEUE_ADDR_SZ)
 #define NFP_QCP_QUEUE_ADD_RPTR			0x0000
 #define NFP_QCP_QUEUE_ADD_WPTR			0x0004
@@ -776,50 +799,21 @@ static inline void nn_pci_flush(struct nfp_net *nn)
 #define NFP_QCP_QUEUE_STS_HI			0x000c
 #define NFP_QCP_QUEUE_STS_HI_WRITEPTR_mask	0x3ffff
 
-/* The offset of a QCP queues in the PCIe Target */
-#define NFP_PCIE_QUEUE(_q) (0x80000 + (NFP_QCP_QUEUE_ADDR_SZ * ((_q) & 0xff)))
-
 /* nfp_qcp_ptr - Read or Write Pointer of a queue */
 enum nfp_qcp_ptr {
 	NFP_QCP_READ_PTR = 0,
 	NFP_QCP_WRITE_PTR
 };
 
-/* There appear to be an *undocumented* upper limit on the value which
- * one can add to a queue and that value is either 0x3f or 0x7f.  We
- * go with 0x3f as a conservative measure.
- */
-#define NFP_QCP_MAX_ADD				0x3f
-
-static inline void _nfp_qcp_ptr_add(u8 __iomem *q,
-				    enum nfp_qcp_ptr ptr, u32 val)
-{
-	u32 off;
-
-	if (ptr == NFP_QCP_READ_PTR)
-		off = NFP_QCP_QUEUE_ADD_RPTR;
-	else
-		off = NFP_QCP_QUEUE_ADD_WPTR;
-
-	while (val > NFP_QCP_MAX_ADD) {
-		writel(NFP_QCP_MAX_ADD, q + off);
-		val -= NFP_QCP_MAX_ADD;
-	}
-
-	writel(val, q + off);
-}
-
 /**
  * nfp_qcp_rd_ptr_add() - Add the value to the read pointer of a queue
  *
  * @q:   Base address for queue structure
  * @val: Value to add to the queue pointer
- *
- * If @val is greater than @NFP_QCP_MAX_ADD multiple writes are performed.
  */
 static inline void nfp_qcp_rd_ptr_add(u8 __iomem *q, u32 val)
 {
-	_nfp_qcp_ptr_add(q, NFP_QCP_READ_PTR, val);
+	writel(val, q + NFP_QCP_QUEUE_ADD_RPTR);
 }
 
 /**
@@ -827,12 +821,10 @@ static inline void nfp_qcp_rd_ptr_add(u8 __iomem *q, u32 val)
  *
  * @q:   Base address for queue structure
  * @val: Value to add to the queue pointer
- *
- * If @val is greater than @NFP_QCP_MAX_ADD multiple writes are performed.
  */
 static inline void nfp_qcp_wr_ptr_add(u8 __iomem *q, u32 val)
 {
-	_nfp_qcp_ptr_add(q, NFP_QCP_WRITE_PTR, val);
+	writel(val, q + NFP_QCP_QUEUE_ADD_WPTR);
 }
 
 static inline u32 _nfp_qcp_read(u8 __iomem *q, enum nfp_qcp_ptr ptr)
@@ -874,6 +866,8 @@ static inline u32 nfp_qcp_wr_ptr_read(u8 __iomem *q)
 {
 	return _nfp_qcp_read(q, NFP_QCP_WRITE_PTR);
 }
+
+u32 nfp_qcp_queue_offset(const struct nfp_dev_info *dev_info, u16 queue);
 
 static inline bool nfp_net_is_data_vnic(struct nfp_net *nn)
 {
@@ -941,7 +935,8 @@ void nfp_net_get_fw_version(struct nfp_net_fw_version *fw_ver,
 			    void __iomem *ctrl_bar);
 
 struct nfp_net *
-nfp_net_alloc(struct pci_dev *pdev, void __iomem *ctrl_bar, bool needs_netdev,
+nfp_net_alloc(struct pci_dev *pdev, const struct nfp_dev_info *dev_info,
+	      void __iomem *ctrl_bar, bool needs_netdev,
 	      unsigned int max_tx_rings, unsigned int max_rx_rings);
 void nfp_net_free(struct nfp_net *nn);
 
@@ -965,6 +960,7 @@ int nfp_net_mbox_reconfig_and_unlock(struct nfp_net *nn, u32 mbox_cmd);
 void nfp_net_mbox_reconfig_post(struct nfp_net *nn, u32 update);
 int nfp_net_mbox_reconfig_wait_posted(struct nfp_net *nn);
 
+void nfp_net_irq_unmask(struct nfp_net *nn, unsigned int entry_nr);
 unsigned int
 nfp_net_irqs_alloc(struct pci_dev *pdev, struct msix_entry *irq_entries,
 		   unsigned int min_irqs, unsigned int want_irqs);
@@ -972,6 +968,19 @@ void nfp_net_irqs_disable(struct pci_dev *pdev);
 void
 nfp_net_irqs_assign(struct nfp_net *nn, struct msix_entry *irq_entries,
 		    unsigned int n);
+
+void nfp_net_tx_xmit_more_flush(struct nfp_net_tx_ring *tx_ring);
+void nfp_net_tx_complete(struct nfp_net_tx_ring *tx_ring, int budget);
+
+bool
+nfp_net_parse_meta(struct net_device *netdev, struct nfp_meta_parsed *meta,
+		   void *data, void *pkt, unsigned int pkt_len, int meta_len);
+
+void nfp_net_rx_csum(const struct nfp_net_dp *dp,
+		     struct nfp_net_r_vector *r_vec,
+		     const struct nfp_net_rx_desc *rxd,
+		     const struct nfp_meta_parsed *meta,
+		     struct sk_buff *skb);
 
 struct nfp_net_dp *nfp_net_clone_dp(struct nfp_net *nn);
 int nfp_net_ring_reconfig(struct nfp_net *nn, struct nfp_net_dp *new,
