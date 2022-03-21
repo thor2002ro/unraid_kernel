@@ -2159,8 +2159,10 @@ static int amdgpu_device_ip_early_init(struct amdgpu_device *adev)
 	    !pci_is_thunderbolt_attached(to_pci_dev(dev->dev)))
 		adev->flags |= AMD_IS_PX;
 
-	parent = pci_upstream_bridge(adev->pdev);
-	adev->has_pr3 = parent ? pci_pr3_present(parent) : false;
+	if (!(adev->flags & AMD_IS_APU)) {
+		parent = pci_upstream_bridge(adev->pdev);
+		adev->has_pr3 = parent ? pci_pr3_present(parent) : false;
+	}
 
 	amdgpu_amdkfd_device_probe(adev);
 
@@ -3664,6 +3666,15 @@ int amdgpu_device_init(struct amdgpu_device *adev,
 	if (amdgpu_mes && adev->asic_type >= CHIP_NAVI10)
 		adev->enable_mes = true;
 
+	/*
+	 * Reset domain needs to be present early, before XGMI hive discovered
+	 * (if any) and intitialized to use reset sem and in_gpu reset flag
+	 * early on during init and before calling to RREG32.
+	 */
+	adev->reset_domain = amdgpu_reset_create_reset_domain(SINGLE_DEVICE, "amdgpu-reset-dev");
+	if (!adev->reset_domain)
+		return -ENOMEM;
+
 	/* detect hw virtualization here */
 	amdgpu_detect_virtualization(adev);
 
@@ -3672,15 +3683,6 @@ int amdgpu_device_init(struct amdgpu_device *adev,
 		dev_err(adev->dev, "invalid lockup_timeout parameter syntax\n");
 		return r;
 	}
-
-	/*
-	 * Reset domain needs to be present early, before XGMI hive discovered
-	 * (if any) and intitialized to use reset sem and in_gpu reset flag
-	 * early on during init.
-	 */
-	adev->reset_domain = amdgpu_reset_create_reset_domain(SINGLE_DEVICE ,"amdgpu-reset-dev");
-	if (!adev->reset_domain)
-		return -ENOMEM;
 
 	/* early init functions */
 	r = amdgpu_device_ip_early_init(adev);
@@ -5731,7 +5733,7 @@ void amdgpu_device_flush_hdp(struct amdgpu_device *adev,
 		struct amdgpu_ring *ring)
 {
 #ifdef CONFIG_X86_64
-	if (adev->flags & AMD_IS_APU)
+	if ((adev->flags & AMD_IS_APU) && !amdgpu_passthrough(adev))
 		return;
 #endif
 	if (adev->gmc.xgmi.connected_to_cpu)
@@ -5747,7 +5749,7 @@ void amdgpu_device_invalidate_hdp(struct amdgpu_device *adev,
 		struct amdgpu_ring *ring)
 {
 #ifdef CONFIG_X86_64
-	if (adev->flags & AMD_IS_APU)
+	if ((adev->flags & AMD_IS_APU) && !amdgpu_passthrough(adev))
 		return;
 #endif
 	if (adev->gmc.xgmi.connected_to_cpu)
