@@ -1,0 +1,149 @@
+// SPDX-License-Identifier: GPL-2.0
+
+//! A kernel read/write mutex.
+//!
+//! This module allows Rust code to use the kernel's [`struct rw_semaphore`].
+//!
+//! C header: [`include/linux/rwsem.h`](../../../../include/linux/rwsem.h)
+
+use super::{mutex::EmptyGuardContext, CreatableLock, Guard, Lock, ReadLock};
+use crate::{bindings, str::CStr, Opaque};
+use core::{cell::UnsafeCell, marker::PhantomPinned, pin::Pin};
+
+/// Safely initialises a [`RwSemaphore`] with the given name, generating a new lock class.
+#[macro_export]
+macro_rules! rwsemaphore_init {
+    ($rwsem:expr, $name:literal) => {
+        $crate::init_with_lockdep!($rwsem, $name)
+    };
+}
+
+/// Exposes the kernel's [`struct rw_semaphore`].
+///
+/// It's a read/write mutex. That is, it allows multiple readers to acquire it concurrently, but
+/// only one writer at a time. On contention, waiters sleep.
+///
+/// A [`RwSemaphore`] must first be initialised with a call to [`RwSemaphore::init_lock`] before it
+/// can be used. The [`rwsemaphore_init`] macro is provided to automatically assign a new lock
+/// class to an [`RwSemaphore`] instance.
+///
+/// Since it may block, [`RwSemaphore`] needs to be used with care in atomic contexts.
+///
+/// [`struct rw_semaphore`]: ../../../include/linux/rwsem.h
+pub struct RwSemaphore<T: ?Sized> {
+    /// The kernel `struct rw_semaphore` object.
+    rwsem: Opaque<bindings::rw_semaphore>,
+
+    /// An rwsem needs to be pinned because it contains a [`struct list_head`] that is
+    /// self-referential, so it cannot be safely moved once it is initialised.
+    _pin: PhantomPinned,
+
+    /// The data protected by the rwsem.
+    data: UnsafeCell<T>,
+}
+
+// SAFETY: `RwSemaphore` can be transferred across thread boundaries iff the data it protects can.
+#[allow(clippy::non_send_fields_in_send_ty)]
+unsafe impl<T: ?Sized + Send> Send for RwSemaphore<T> {}
+
+// SAFETY: `RwSemaphore` requires that the protected type be `Sync` for it to be `Sync` as well
+// because the read mode allows multiple threads to access the protected data concurrently. It
+// requires `Send` because the write lock allows a `&mut T` to be accessible from an arbitrary
+// thread.
+unsafe impl<T: ?Sized + Send + Sync> Sync for RwSemaphore<T> {}
+
+impl<T> RwSemaphore<T> {
+    /// Constructs a new rw semaphore.
+    ///
+    /// # Safety
+    ///
+    /// The caller must call [`RwSemaphore::init_lock`] before using the rw semaphore.
+    pub unsafe fn new(t: T) -> Self {
+        Self {
+            rwsem: Opaque::uninit(),
+            data: UnsafeCell::new(t),
+            _pin: PhantomPinned,
+        }
+    }
+}
+
+impl<T: ?Sized> RwSemaphore<T> {
+    /// Locks the rw semaphore in write (exclusive) mode and gives the caller access to the data
+    /// protected by it. Only one thread at a time is allowed to access the protected data.
+    pub fn write(&self) -> Guard<'_, Self> {
+        let ctx = <Self as Lock>::lock_noguard(self);
+        // SAFETY: The rw semaphore was just acquired in write mode.
+        unsafe { Guard::new(self, ctx) }
+    }
+
+    /// Locks the rw semaphore in read (shared) mode and gives the caller access to the data
+    /// protected by it. Only one thread at a time is allowed to access the protected data.
+    pub fn read(&self) -> Guard<'_, Self, ReadLock> {
+        let ctx = <Self as Lock<ReadLock>>::lock_noguard(self);
+        // SAFETY: The rw semaphore was just acquired in read mode.
+        unsafe { Guard::new(self, ctx) }
+    }
+}
+
+impl<T> CreatableLock for RwSemaphore<T> {
+    type CreateArgType = T;
+
+    unsafe fn new_lock(data: Self::CreateArgType) -> Self {
+        // SAFETY: The safety requirements of `new_lock` also require that `init_lock` be called.
+        unsafe { Self::new(data) }
+    }
+
+    unsafe fn init_lock(
+        self: Pin<&mut Self>,
+        name: &'static CStr,
+        key: *mut bindings::lock_class_key,
+    ) {
+        unsafe { bindings::__init_rwsem(self.rwsem.get(), name.as_char_ptr(), key) };
+    }
+}
+
+// SAFETY: The underlying kernel `struct rw_semaphore` object ensures mutual exclusion because it's
+// acquired in write mode.
+unsafe impl<T: ?Sized> Lock for RwSemaphore<T> {
+    type Inner = T;
+    type GuardContext = EmptyGuardContext;
+
+    fn lock_noguard(&self) -> EmptyGuardContext {
+        // SAFETY: `rwsem` points to valid memory.
+        unsafe { bindings::down_write(self.rwsem.get()) };
+        EmptyGuardContext
+    }
+
+    unsafe fn unlock(&self, _: &mut EmptyGuardContext) {
+        // SAFETY: The safety requirements of the function ensure that the rw semaphore is owned by
+        // the caller.
+        unsafe { bindings::up_write(self.rwsem.get()) };
+    }
+
+    fn locked_data(&self) -> &UnsafeCell<T> {
+        &self.data
+    }
+}
+
+// SAFETY: The underlying kernel `struct rw_semaphore` object ensures that only shared references
+// are accessible from other threads because it's acquired in read mode.
+unsafe impl<T: ?Sized> Lock<ReadLock> for RwSemaphore<T> {
+    type Inner = T;
+    type GuardContext = EmptyGuardContext;
+
+    fn lock_noguard(&self) -> EmptyGuardContext {
+        // SAFETY: `rwsem` points to valid memory.
+        unsafe { bindings::down_read(self.rwsem.get()) };
+        EmptyGuardContext
+    }
+
+    unsafe fn unlock(&self, _: &mut EmptyGuardContext) {
+        // SAFETY: The safety requirements of the function ensure that the rw semaphore is owned by
+        // the caller.
+        unsafe { bindings::up_read(self.rwsem.get()) };
+    }
+
+    fn locked_data(&self) -> &UnsafeCell<T> {
+        &self.data
+    }
+}
