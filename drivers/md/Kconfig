@@ -221,7 +221,8 @@ config MD_UNRAID_PATCHLEVEL_VERSION
 	  17 for unraid 6.9.2, 
 	  18 for unraid 6.10rc1,
 	  19 for unraid 6.10rc2,
-	  21 for unraid 6.10rc3.
+	  21 for unraid 6.10rc3,
+	  22 for unraid 6.10rc4.
 
 source "drivers/md/bcache/Kconfig"
 
