@@ -1039,8 +1039,8 @@ static int do_run(mddev_t *mddev)
 			blk_set_stacking_limits(&gd->queue->limits);
 			blk_queue_write_cache(gd->queue, true, true);
 
-			blk_queue_io_min(gd->queue, PAGE_SIZE);
-			blk_queue_io_opt(gd->queue, 128 * 1024);
+			//blk_queue_io_min(gd->queue, PAGE_SIZE);
+			//blk_queue_io_opt(gd->queue, 128 * 1024);
 			//gd->queue->backing_dev_info->ra_pages = (128*1024)/PAGE_SIZE;
 
 			if (md_restrict & 1)
