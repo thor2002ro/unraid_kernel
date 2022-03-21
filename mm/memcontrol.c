@@ -53,6 +53,7 @@
 #include <linux/fs.h>
 #include <linux/seq_file.h>
 #include <linux/vmpressure.h>
+#include <linux/memremap.h>
 #include <linux/mm_inline.h>
 #include <linux/swap_cgroup.h>
 #include <linux/cpu.h>
@@ -1257,8 +1258,7 @@ struct lruvec *folio_lruvec_lock_irqsave(struct folio *folio,
  * @nr_pages: positive when adding or negative when removing
  *
  * This function must be called under lru_lock, just before a page is added
- * to or just after a page is removed from an lru list (that ordering being
- * so as to allow it to check that lru_size 0 is consistent with list_empty).
+ * to or just after a page is removed from an lru list.
  */
 void mem_cgroup_update_lru_size(struct lruvec *lruvec, enum lru_list lru,
 				int zid, int nr_pages)
@@ -5503,17 +5503,12 @@ static struct page *mc_handle_swap_pte(struct vm_area_struct *vma,
 		return NULL;
 
 	/*
-	 * Handle MEMORY_DEVICE_PRIVATE which are ZONE_DEVICE page belonging to
-	 * a device and because they are not accessible by CPU they are store
-	 * as special swap entry in the CPU page table.
+	 * Handle device private pages that are not accessible by the CPU, but
+	 * stored as special swap entries in the page table.
 	 */
 	if (is_device_private_entry(ent)) {
 		page = pfn_swap_entry_to_page(ent);
-		/*
-		 * MEMORY_DEVICE_PRIVATE means ZONE_DEVICE page and which have
-		 * a refcount of 1 when free (unlike normal page)
-		 */
-		if (!page_ref_add_unless(page, 1, 1))
+		if (!get_page_unless_zero(page))
 			return NULL;
 		return page;
 	}
@@ -5691,8 +5686,8 @@ out:
  *   2(MC_TARGET_SWAP): if the swap entry corresponding to this pte is a
  *     target for charge migration. if @target is not NULL, the entry is stored
  *     in target->ent.
- *   3(MC_TARGET_DEVICE): like MC_TARGET_PAGE  but page is MEMORY_DEVICE_PRIVATE
- *     (so ZONE_DEVICE page and thus not on the lru).
+ *   3(MC_TARGET_DEVICE): like MC_TARGET_PAGE  but page is device memory and
+ *   thus not on the lru.
  *     For now we such page is charge like a regular page would be as for all
  *     intent and purposes it is just special memory taking the place of a
  *     regular page.
@@ -5726,7 +5721,8 @@ static enum mc_target_type get_mctgt_type(struct vm_area_struct *vma,
 		 */
 		if (page_memcg(page) == mc.from) {
 			ret = MC_TARGET_PAGE;
-			if (is_device_private_page(page))
+			if (is_device_private_page(page) ||
+			    is_device_coherent_page(page))
 				ret = MC_TARGET_DEVICE;
 			if (target)
 				target->page = page;
@@ -7121,19 +7117,19 @@ static struct mem_cgroup *mem_cgroup_id_get_online(struct mem_cgroup *memcg)
 
 /**
  * mem_cgroup_swapout - transfer a memsw charge to swap
- * @page: page whose memsw charge to transfer
+ * @folio: folio whose memsw charge to transfer
  * @entry: swap entry to move the charge to
  *
- * Transfer the memsw charge of @page to @entry.
+ * Transfer the memsw charge of @folio to @entry.
  */
-void mem_cgroup_swapout(struct page *page, swp_entry_t entry)
+void mem_cgroup_swapout(struct folio *folio, swp_entry_t entry)
 {
 	struct mem_cgroup *memcg, *swap_memcg;
 	unsigned int nr_entries;
 	unsigned short oldid;
 
-	VM_BUG_ON_PAGE(PageLRU(page), page);
-	VM_BUG_ON_PAGE(page_count(page), page);
+	VM_BUG_ON_FOLIO(folio_test_lru(folio), folio);
+	VM_BUG_ON_FOLIO(folio_ref_count(folio), folio);
 
 	if (mem_cgroup_disabled())
 		return;
@@ -7141,9 +7137,9 @@ void mem_cgroup_swapout(struct page *page, swp_entry_t entry)
 	if (cgroup_subsys_on_dfl(memory_cgrp_subsys))
 		return;
 
-	memcg = page_memcg(page);
+	memcg = folio_memcg(folio);
 
-	VM_WARN_ON_ONCE_PAGE(!memcg, page);
+	VM_WARN_ON_ONCE_FOLIO(!memcg, folio);
 	if (!memcg)
 		return;
 
@@ -7153,16 +7149,16 @@ void mem_cgroup_swapout(struct page *page, swp_entry_t entry)
 	 * ancestor for the swap instead and transfer the memory+swap charge.
 	 */
 	swap_memcg = mem_cgroup_id_get_online(memcg);
-	nr_entries = thp_nr_pages(page);
+	nr_entries = folio_nr_pages(folio);
 	/* Get references for the tail pages, too */
 	if (nr_entries > 1)
 		mem_cgroup_id_get_many(swap_memcg, nr_entries - 1);
 	oldid = swap_cgroup_record(entry, mem_cgroup_id(swap_memcg),
 				   nr_entries);
-	VM_BUG_ON_PAGE(oldid, page);
+	VM_BUG_ON_FOLIO(oldid, folio);
 	mod_memcg_state(swap_memcg, MEMCG_SWAP, nr_entries);
 
-	page->memcg_data = 0;
+	folio->memcg_data = 0;
 
 	if (!mem_cgroup_is_root(memcg))
 		page_counter_uncharge(&memcg->memory, nr_entries);
@@ -7181,7 +7177,7 @@ void mem_cgroup_swapout(struct page *page, swp_entry_t entry)
 	 */
 	VM_BUG_ON(!irqs_disabled());
 	mem_cgroup_charge_statistics(memcg, -nr_entries);
-	memcg_check_events(memcg, page_to_nid(page));
+	memcg_check_events(memcg, folio_nid(folio));
 
 	css_put(&memcg->css);
 }
