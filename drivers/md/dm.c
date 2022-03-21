@@ -1508,7 +1508,7 @@ static bool is_abnormal_io(struct bio *bio)
 }
 
 static bool __process_abnormal_io(struct clone_info *ci, struct dm_target *ti,
-				  int *result)
+				  blk_status_t *status)
 {
 	unsigned num_bios;
 
@@ -1536,10 +1536,10 @@ static bool __process_abnormal_io(struct clone_info *ci, struct dm_target *ti,
 	 * check was performed.
 	 */
 	if (unlikely(!num_bios))
-		*result = -EOPNOTSUPP;
+		*status = BLK_STS_NOTSUPP;
 	else {
 		__send_changing_extent_only(ci, ti, num_bios);
-		*result = 0;
+		*status = BLK_STS_OK;
 	}
 	return true;
 }
@@ -1599,19 +1599,21 @@ static void dm_queue_poll_io(struct bio *bio, struct dm_io *io)
 /*
  * Select the correct strategy for processing a non-flush bio.
  */
-static blk_status_t __split_and_process_bio(struct clone_info *ci)
+static void __split_and_process_bio(struct clone_info *ci)
 {
 	struct bio *clone;
 	struct dm_target *ti;
 	unsigned len;
-	int r;
+	blk_status_t error = BLK_STS_IOERR;
 
 	ti = dm_table_find_target(ci->map, ci->sector);
-	if (!ti)
-		return BLK_STS_IOERR;
-
-	if (__process_abnormal_io(ci, ti, &r))
-		return errno_to_blk_status(r);
+	if (unlikely(!ti || __process_abnormal_io(ci, ti, &error))) {
+		if (error != BLK_STS_OK) {
+			dm_io_set_error_and_defer_complete(ci->io, error);
+			ci->sector_count = 0;
+		}
+		return;
+	}
 
 	/*
 	 * Only support bio polling for normal IO, and the target io is
@@ -1625,8 +1627,6 @@ static blk_status_t __split_and_process_bio(struct clone_info *ci)
 
 	ci->sector += len;
 	ci->sector_count -= len;
-
-	return BLK_STS_OK;
 }
 
 static void init_clone_info(struct clone_info *ci, struct mapped_device *md,
@@ -1653,7 +1653,6 @@ static void dm_split_and_process_bio(struct mapped_device *md,
 	struct clone_info ci;
 	struct dm_io *io;
 	struct bio *orig_bio = NULL;
-	blk_status_t error = BLK_STS_OK;
 
 	init_clone_info(&ci, md, map, bio);
 	io = ci.io;
@@ -1664,12 +1663,9 @@ static void dm_split_and_process_bio(struct mapped_device *md,
 		goto out;
 	}
 
-	error = __split_and_process_bio(&ci);
-	if (error || !ci.sector_count) {
-		if (error)
-			dm_io_set_error_and_defer_complete(io, error);
+	__split_and_process_bio(&ci);
+	if (!ci.sector_count)
 		goto out;
-	}
 
 	/*
 	 * Remainder must be passed to submit_bio_noacct() so it gets handled
