@@ -1419,23 +1419,29 @@ static void __send_changing_extent_only(struct clone_info *ci, struct dm_target 
 
 static bool is_abnormal_io(struct bio *bio)
 {
-	bool r = false;
+	unsigned int op = bio_op(bio);
 
-	switch (bio_op(bio)) {
-	case REQ_OP_DISCARD:
-	case REQ_OP_SECURE_ERASE:
-	case REQ_OP_WRITE_ZEROES:
-		r = true;
-		break;
+	if (op != REQ_OP_READ && op != REQ_OP_WRITE && op != REQ_OP_FLUSH) {
+		switch (op) {
+		case REQ_OP_DISCARD:
+		case REQ_OP_SECURE_ERASE:
+		case REQ_OP_WRITE_ZEROES:
+			return true;
+		default:
+			break;
+		}
 	}
 
-	return r;
+	return false;
 }
 
 static bool __process_abnormal_io(struct clone_info *ci, struct dm_target *ti,
 				  int *result)
 {
-	unsigned num_bios = 0;
+	unsigned num_bios;
+
+	if (!is_abnormal_io(ci->bio))
+		return false;
 
 	switch (bio_op(ci->bio)) {
 	case REQ_OP_DISCARD:
@@ -1457,7 +1463,7 @@ static bool __process_abnormal_io(struct clone_info *ci, struct dm_target *ti,
 	 * reconfiguration might also have changed that since the
 	 * check was performed.
 	 */
-	if (!num_bios)
+	if (unlikely(!num_bios))
 		*result = -EOPNOTSUPP;
 	else {
 		__send_changing_extent_only(ci, ti, num_bios);
