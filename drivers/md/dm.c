@@ -1599,27 +1599,25 @@ static void dm_queue_poll_io(struct bio *bio, struct dm_io *io)
 /*
  * Select the correct strategy for processing a non-flush bio.
  */
-static void __split_and_process_bio(struct clone_info *ci)
+static struct bio *__split_and_process_bio(struct clone_info *ci)
 {
-	struct bio *clone;
+	struct bio *clone, *orig_bio, *bio = ci->bio;
 	struct dm_target *ti;
 	unsigned len;
 	blk_status_t error = BLK_STS_IOERR;
 
 	ti = dm_table_find_target(ci->map, ci->sector);
 	if (unlikely(!ti || __process_abnormal_io(ci, ti, &error))) {
-		if (error != BLK_STS_OK) {
+		if (error != BLK_STS_OK)
 			dm_io_set_error_and_defer_complete(ci->io, error);
-			ci->sector_count = 0;
-		}
-		return;
+		return bio;
 	}
 
 	/*
 	 * Only support bio polling for normal IO, and the target io is
 	 * exactly inside the dm_io instance (verified in dm_poll_dm_io)
 	 */
-	ci->submit_as_polled = ci->bio->bi_opf & REQ_POLLED;
+	ci->submit_as_polled = bio->bi_opf & REQ_POLLED;
 
 	len = min_t(sector_t, max_io_len(ti, ci->sector), ci->sector_count);
 	clone = alloc_tio(ci, ti, 0, &len, GFP_NOIO);
@@ -1627,6 +1625,21 @@ static void __split_and_process_bio(struct clone_info *ci)
 
 	ci->sector += len;
 	ci->sector_count -= len;
+	if (!ci->sector_count)
+		return bio;
+	/*
+	 * Remainder must be passed to submit_bio_noacct() so it gets handled
+	 * *after* bios already submitted have been completely processed.
+	 * We take a clone of the original to store in io->orig_bio to be
+	 * used by dm_end_io_acct() and for dm_io_complete() to use for
+	 * completion handling.
+	 */
+	orig_bio = bio_split(bio, bio_sectors(bio) - ci->sector_count,
+			     GFP_NOIO, &ci->io->md->queue->bio_split);
+	bio_chain(orig_bio, bio);
+	trace_block_split(orig_bio, bio->bi_iter.bi_sector);
+	submit_bio_noacct(bio);
+	return orig_bio;
 }
 
 static void init_clone_info(struct clone_info *ci, struct mapped_device *md,
@@ -1652,7 +1665,7 @@ static void dm_split_and_process_bio(struct mapped_device *md,
 {
 	struct clone_info ci;
 	struct dm_io *io;
-	struct bio *orig_bio = NULL;
+	struct bio *orig_bio;
 
 	init_clone_info(&ci, md, map, bio);
 	io = ci.io;
@@ -1660,28 +1673,10 @@ static void dm_split_and_process_bio(struct mapped_device *md,
 	if (bio->bi_opf & REQ_PREFLUSH) {
 		__send_empty_flush(&ci);
 		/* dm_io_complete submits any data associated with flush */
-		goto out;
-	}
-
-	__split_and_process_bio(&ci);
-	if (!ci.sector_count)
-		goto out;
-
-	/*
-	 * Remainder must be passed to submit_bio_noacct() so it gets handled
-	 * *after* bios already submitted have been completely processed.
-	 * We take a clone of the original to store in io->orig_bio to be
-	 * used by dm_end_io_acct() and for dm_io_complete() to use for
-	 * completion handling.
-	 */
-	orig_bio = bio_split(bio, bio_sectors(bio) - ci.sector_count,
-			     GFP_NOIO, &md->queue->bio_split);
-	bio_chain(orig_bio, bio);
-	trace_block_split(orig_bio, bio->bi_iter.bi_sector);
-	submit_bio_noacct(bio);
-out:
-	if (!orig_bio)
 		orig_bio = bio;
+	} else
+		orig_bio = __split_and_process_bio(&ci);
+
 	if (dm_io_flagged(io, DM_IO_START_ACCT))
 		dm_start_io_acct(io, orig_bio, NULL);
 	smp_store_release(&io->orig_bio, orig_bio);
