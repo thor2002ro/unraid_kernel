@@ -493,24 +493,9 @@ u64 dm_start_time_ns_from_clone(struct bio *bio)
 }
 EXPORT_SYMBOL_GPL(dm_start_time_ns_from_clone);
 
-static bool bio_is_flush_with_data(struct bio *bio)
-{
-	return ((bio->bi_opf & REQ_PREFLUSH) && bio->bi_iter.bi_size);
-}
-
 static void dm_io_acct(bool end, struct mapped_device *md, struct bio *bio,
 		       unsigned long start_time, struct dm_stats_aux *stats_aux)
 {
-	bool is_flush_with_data;
-	unsigned int bi_size;
-
-	/* If REQ_PREFLUSH set save any payload but do not account it */
-	is_flush_with_data = bio_is_flush_with_data(bio);
-	if (is_flush_with_data) {
-		bi_size = bio->bi_iter.bi_size;
-		bio->bi_iter.bi_size = 0;
-	}
-
 	if (!end)
 		bio_start_io_acct_time(bio, start_time);
 	else
@@ -520,10 +505,6 @@ static void dm_io_acct(bool end, struct mapped_device *md, struct bio *bio,
 		dm_stats_account_io(&md->stats, bio_data_dir(bio),
 				    bio->bi_iter.bi_sector, bio_sectors(bio),
 				    end, start_time, stats_aux);
-
-	/* Restore bio's payload so it does get accounted upon requeue */
-	if (is_flush_with_data)
-		bio->bi_iter.bi_size = bi_size;
 }
 
 static void __dm_start_io_acct(struct dm_io *io, struct bio *bio)
@@ -863,6 +844,11 @@ int dm_set_geometry(struct mapped_device *md, struct hd_geometry *geo)
 	return 0;
 }
 
+static bool bio_is_flush_with_data(struct bio *bio)
+{
+	return ((bio->bi_opf & REQ_PREFLUSH) && bio->bi_iter.bi_size);
+}
+
 static int __noflush_suspending(struct mapped_device *md)
 {
 	return test_bit(DMF_NOFLUSH_SUSPENDING, &md->flags);
@@ -871,6 +857,7 @@ static int __noflush_suspending(struct mapped_device *md)
 static void dm_io_complete(struct dm_io *io)
 {
 	blk_status_t io_error;
+	bool is_flush_with_data;
 	struct mapped_device *md = io->md;
 	struct bio *bio = io->orig_bio;
 
@@ -895,9 +882,10 @@ static void dm_io_complete(struct dm_io *io)
 	}
 
 	io_error = io->status;
+	is_flush_with_data = bio_is_flush_with_data(bio);
 	if (dm_io_flagged(io, DM_IO_ACCOUNTED))
 		dm_end_io_acct(io, bio);
-	else if (!io_error) {
+	else if (!io_error && !is_flush_with_data) {
 		/*
 		 * Must handle target that DM_MAPIO_SUBMITTED only to
 		 * then bio_endio() rather than dm_submit_bio_remap()
@@ -929,7 +917,7 @@ static void dm_io_complete(struct dm_io *io)
 		return;
 	}
 
-	if (bio_is_flush_with_data(bio)) {
+	if (is_flush_with_data) {
 		/*
 		 * Preflush done for flush with data, reissue
 		 * without REQ_PREFLUSH.
@@ -1674,11 +1662,12 @@ static void dm_split_and_process_bio(struct mapped_device *md,
 		__send_empty_flush(&ci);
 		/* dm_io_complete submits any data associated with flush */
 		orig_bio = bio;
-	} else
+	} else {
 		orig_bio = __split_and_process_bio(&ci);
+		if (dm_io_flagged(io, DM_IO_START_ACCT))
+			dm_start_io_acct(io, orig_bio, NULL);
+	}
 
-	if (dm_io_flagged(io, DM_IO_START_ACCT))
-		dm_start_io_acct(io, orig_bio, NULL);
 	smp_store_release(&io->orig_bio, orig_bio);
 	smp_store_release(&io->map_task, NULL);
 
