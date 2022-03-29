@@ -26,6 +26,8 @@ ifeq ($(CONFIG_ARCH_RV64I),y)
 	KBUILD_CFLAGS += -mabi=lp64
 	KBUILD_AFLAGS += -mabi=lp64
 
+	KBUILD_RUSTFLAGS += -Ctarget-cpu=generic-rv64
+
 	KBUILD_LDFLAGS += -melf64lriscv
 else
 	BITS := 32
@@ -33,6 +35,9 @@ else
 
 	KBUILD_CFLAGS += -mabi=ilp32
 	KBUILD_AFLAGS += -mabi=ilp32
+
+	KBUILD_RUSTFLAGS += -Ctarget-cpu=generic-rv32
+
 	KBUILD_LDFLAGS += -melf32lriscv
 endif
 
