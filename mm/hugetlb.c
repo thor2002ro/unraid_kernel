@@ -1569,10 +1569,12 @@ static void __update_and_free_page(struct hstate *h, struct page *page)
 }
 
 /*
- * As update_and_free_page() can be called under any context, so we cannot
- * use GFP_KERNEL to allocate vmemmap pages. However, we can defer the
- * actual freeing in a workqueue to prevent from using GFP_ATOMIC to allocate
- * the vmemmap pages.
+ * Freeing hugetlb pages in done in update_and_free_page(). When freeing
+ * a hugetlb page, vmemmap pages may need to be allocated. The routine
+ * alloc_huge_page_vmemmap() can possibly sleep as it uses GFP_KERNEL.
+ * However, update_and_free_page() can be called under any context. To
+ * avoid the possibility of sleeping in a context where sleeping is not
+ * allowed, defer the actual freeing in a workqueue where sleeping is allowed.
  *
  * free_hpage_workfn() locklessly retrieves the linked list of pages to be
  * freed and frees them one-by-one. As the page->mapping pointer is going
@@ -1616,6 +1618,10 @@ static inline void flush_free_hpage_work(struct hstate *h)
 		flush_work(&free_hpage_work);
 }
 
+/*
+ * atomic == true indicates called from a context where sleeping is
+ * not allowed.
+ */
 static void update_and_free_page(struct hstate *h, struct page *page,
 				 bool atomic)
 {
@@ -1625,7 +1631,8 @@ static void update_and_free_page(struct hstate *h, struct page *page,
 	}
 
 	/*
-	 * Defer freeing to avoid using GFP_ATOMIC to allocate vmemmap pages.
+	 * Defer freeing to avoid possible sleeping when allocating
+	 * vmemmap pages.
 	 *
 	 * Only call schedule_work() if hpage_freelist is previously
 	 * empty. Otherwise, schedule_work() had been called but the workfn
@@ -3475,7 +3482,6 @@ static int demote_pool_huge_page(struct hstate *h, nodemask_t *nodes_allowed)
 {
 	int nr_nodes, node;
 	struct page *page;
-	int rc = 0;
 
 	lockdep_assert_held(&hugetlb_lock);
 
@@ -3486,15 +3492,19 @@ static int demote_pool_huge_page(struct hstate *h, nodemask_t *nodes_allowed)
 	}
 
 	for_each_node_mask_to_free(h, nr_nodes, node, nodes_allowed) {
-		if (!list_empty(&h->hugepage_freelists[node])) {
-			page = list_entry(h->hugepage_freelists[node].next,
-					struct page, lru);
-			rc = demote_free_huge_page(h, page);
-			break;
+		list_for_each_entry(page, &h->hugepage_freelists[node], lru) {
+			if (PageHWPoison(page))
+				continue;
+
+			return demote_free_huge_page(h, page);
 		}
 	}
 
-	return rc;
+	/*
+	 * Only way to get here is if all pages on free lists are poisoned.
+	 * Return -EBUSY so that caller will not retry.
+	 */
+	return -EBUSY;
 }
 
 #define HSTATE_ATTR_RO(_name) \
