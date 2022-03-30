@@ -653,3 +653,15 @@ void invalidate_kernel_vmap_range(void *vaddr, int size)
 	flush_tlb_kernel_range(start, end);
 }
 EXPORT_SYMBOL(invalidate_kernel_vmap_range);
+
+void flush_cache_vmap_vunmap(unsigned long start, unsigned long end)
+{
+	WARN_ON(IS_ENABLED(CONFIG_SMP) && arch_irqs_disabled());
+
+	/* Inhibit cache move-in */
+	flush_tlb_all();
+
+	/* Flush the entire cache to remove all aliases */
+	flush_cache_all();
+}
+EXPORT_SYMBOL(flush_cache_vmap_vunmap);

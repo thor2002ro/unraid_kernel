@@ -40,8 +40,9 @@ void flush_kernel_dcache_page_addr(void *addr);
 void flush_kernel_vmap_range(void *vaddr, int size);
 void invalidate_kernel_vmap_range(void *vaddr, int size);
 
-#define flush_cache_vmap(start, end)		flush_cache_all()
-#define flush_cache_vunmap(start, end)		flush_cache_all()
+void flush_cache_vmap_vunmap(unsigned long start, unsigned long end);
+#define flush_cache_vmap(start, end)	flush_cache_vmap_vunmap(start, end)
+#define flush_cache_vunmap(start, end)	flush_cache_vmap_vunmap(start, end)
 
 #define ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE 1
 void flush_dcache_page(struct page *page);
