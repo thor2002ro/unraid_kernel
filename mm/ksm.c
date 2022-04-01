@@ -639,7 +639,6 @@ static void remove_node_from_stable_tree(struct stable_node *stable_node)
 		else
 			ksm_pages_shared--;
 
-		BUG_ON(rmap_item->mm == NULL);
 		rmap_item->mm->ksm_merging_pages--;
 
 		VM_BUG_ON(stable_node->rmap_hlist_len <= 0);
@@ -790,7 +789,6 @@ static void remove_rmap_item_from_tree(struct rmap_item *rmap_item)
 		else
 			ksm_pages_shared--;
 
-		BUG_ON(rmap_item->mm == NULL);
 		rmap_item->mm->ksm_merging_pages--;
 
 		VM_BUG_ON(stable_node->rmap_hlist_len <= 0);
@@ -2027,7 +2025,6 @@ static void stable_tree_append(struct rmap_item *rmap_item,
 	else
 		ksm_pages_shared++;
 
-	BUG_ON(rmap_item->mm == NULL);
 	rmap_item->mm->ksm_merging_pages++;
 }
 
