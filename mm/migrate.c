@@ -2058,7 +2058,7 @@ static int numamigrate_isolate_page(pg_data_t *pgdat, struct page *page)
 		if (!(sysctl_numa_balancing_mode & NUMA_BALANCING_MEMORY_TIERING))
 			return 0;
 		for (z = pgdat->nr_zones - 1; z >= 0; z--) {
-			if (populated_zone(pgdat->node_zones + z))
+			if (managed_zone(pgdat->node_zones + z))
 				break;
 		}
 		wakeup_kswapd(pgdat->node_zones + z, 0, order, ZONE_MOVABLE);
