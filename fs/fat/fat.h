@@ -439,7 +439,7 @@ void __fat_fs_error(struct super_block *sb, int report, const char *fmt, ...);
 do {									\
 	printk_index_subsys_emit(FAT_PRINTK_PREFIX, level, fmt, ##args);\
 	_fat_msg(sb, level, fmt, ##args);				\
-} while(0)
+} while (0)
 __printf(3, 4) __cold
 void _fat_msg(struct super_block *sb, const char *level, const char *fmt, ...);
 #define fat_msg_ratelimit(sb, level, fmt, args...)	\
