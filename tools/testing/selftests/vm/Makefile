@@ -50,6 +50,7 @@ TEST_GEN_FILES += on-fault-limit
 TEST_GEN_FILES += thuge-gen
 TEST_GEN_FILES += transhuge-stress
 TEST_GEN_FILES += userfaultfd
+TEST_GEN_FILES += soft-dirty
 TEST_GEN_FILES += split_huge_page_test
 TEST_GEN_FILES += ksm_tests
 
