@@ -1185,7 +1185,7 @@ static void hotadd_init_pgdat(int nid)
  *
  * Returns:
  * 1 -> The node has been initialized.
- * 0 -> Either the node was already online, or we succesfully registered a new
+ * 0 -> Either the node was already online, or we successfully registered a new
  *      one.
  * -errno -> register_one_node() failed.
  */
