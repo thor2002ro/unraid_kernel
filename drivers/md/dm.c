@@ -1566,7 +1566,6 @@ static void dm_queue_poll_io(struct bio *bio, struct dm_io *io)
 {
 	struct hlist_head *head = dm_get_bio_hlist_head(bio);
 
-	WARN_ON_ONCE(!dm_tio_is_normal(&io->tio));
 	/*
 	 * Set DM_IO_POLLED to prevent completion until dm_poll_bio(),
 	 * no further IO submission failures allowed in caller once set!
@@ -1733,9 +1732,6 @@ static int dm_poll_dm_io(struct dm_io *io, struct io_comp_batch *iob,
 {
 	struct dm_target_io *tio = &io->tio;
 
-	WARN_ON_ONCE(!dm_io_flagged(io, DM_IO_POLLED));
-	BUG_ON(dm_io_flagged(io, DM_IO_COMPLETE_NEEDED));
-
 	/* don't poll if the mapped io is done */
 	if (dm_tio_flagged(tio, DM_TIO_IS_FREE))
 		return 1; /* clone_endio finished */
@@ -1757,8 +1753,6 @@ static int dm_poll_bio(struct bio *bio, struct io_comp_batch *iob,
 	/* Only poll normal bio which was marked as REQ_DM_POLL_LIST */
 	if (!(bio->bi_opf & REQ_DM_POLL_LIST))
 		return 0;
-
-	WARN_ON_ONCE(hlist_empty(head));
 
 	hlist_move_list(head, &tmp);
 
