@@ -1565,7 +1565,7 @@ struct page *alloc_migration_target(struct page *page, unsigned long private)
 
 	new_page = __alloc_pages(gfp_mask, order, nid, mtc->nmask);
 
-	if (new_page && PageTransHuge(new_page))
+	if (new_page && PageTransHuge(page))
 		prep_transhuge_page(new_page);
 
 	return new_page;
