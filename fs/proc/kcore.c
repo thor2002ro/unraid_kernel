@@ -316,7 +316,6 @@ read_kcore(struct file *file, char __user *buffer, size_t buflen, loff_t *fpos)
 	size_t page_offline_frozen = 1;
 	size_t phdrs_len, notes_len;
 	struct kcore_list *m;
-	struct kcore_list *iter;
 	size_t tsz;
 	int nphdr;
 	unsigned long start;
@@ -480,6 +479,8 @@ read_kcore(struct file *file, char __user *buffer, size_t buflen, loff_t *fpos)
 		 * the previous entry, search for a matching entry.
 		 */
 		if (!m || start < m->addr || start >= m->addr + m->size) {
+			struct kcore_list *iter;
+
 			m = NULL;
 			list_for_each_entry(iter, &kclist_head, list) {
 				if (start >= iter->addr &&
