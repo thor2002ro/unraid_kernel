@@ -649,6 +649,14 @@ struct mm_struct {
 #ifdef CONFIG_IOMMU_SVA
 		u32 pasid;
 #endif
+
+#ifdef CONFIG_KSM
+		/*
+		 * Represet how many pages of this process are
+		 * involved in KSM merging.
+		 */
+		unsigned long ksm_merging_pages;
+#endif
 	} __randomize_layout;
 
 	/*
