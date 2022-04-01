@@ -2028,12 +2028,9 @@ static struct page *alloc_misplaced_dst_page_thp(struct page *page,
 
 	newpage = alloc_pages_node(nid, (GFP_TRANSHUGE_LIGHT | __GFP_THISNODE),
 				   HPAGE_PMD_ORDER);
-	if (!newpage)
-		goto out;
+	if (newpage)
+		prep_transhuge_page(newpage);
 
-	prep_transhuge_page(newpage);
-
-out:
 	return newpage;
 }
 
