@@ -1158,33 +1158,24 @@ static void reset_node_present_pages(pg_data_t *pgdat)
 /* we are OK calling __meminit stuff here - we have CONFIG_MEMORY_HOTPLUG */
 static pg_data_t __ref *hotadd_init_pgdat(int nid)
 {
-	struct pglist_data *pgdat;
+	struct pglist_data *pgdat = NODE_DATA(nid);
 
 	/*
-	 * NODE_DATA is preallocated (free_area_init) but its internal
-	 * state is not allocated completely. Add missing pieces.
-	 * Completely offline nodes stay around and they just need
-	 * reintialization.
+	 * NODE_DATA is preallocated (free_area_init), the only thing missing
+	 * is to allocate its per_cpu_nodestats struct and to build node's
+	 * zonelists. The allocation of per_cpu_nodestats only needs to be done
+	 * the very first time this node is brought up, as we reset its state
+	 * when all node's memory goes offline.
 	 */
-	pgdat = NODE_DATA(nid);
-
-	/* init node's zones as empty zones, we don't have any present pages.*/
-	free_area_init_core_hotplug(pgdat);
+	if (pgdat_has_boot_nodestats(pgdat))
+		pgdat->per_cpu_nodestats = alloc_percpu_gfp(struct per_cpu_nodestat,
+							    __GFP_ZERO);
 
 	/*
 	 * The node we allocated has no zone fallback lists. For avoiding
 	 * to access not-initialized zonelist, build here.
 	 */
 	build_all_zonelists(pgdat);
-
-	/*
-	 * When memory is hot-added, all the memory is in offline state. So
-	 * clear all zones' present_pages because they will be updated in
-	 * online_pages() and offline_pages().
-	 * TODO: should be in free_area_init_core_hotplug?
-	 */
-	reset_node_managed_pages(pgdat);
-	reset_node_present_pages(pgdat);
 
 	return pgdat;
 }
@@ -1764,6 +1755,30 @@ static void node_states_clear_node(int node, struct memory_notify *arg)
 		node_clear_state(node, N_MEMORY);
 }
 
+static void node_reset_state(int node)
+{
+	pg_data_t *pgdat = NODE_DATA(node);
+	int cpu;
+
+	kswapd_stop(node);
+	kcompactd_stop(node);
+
+	reset_node_managed_pages(pgdat);
+	reset_node_present_pages(pgdat);
+
+	pgdat->nr_zones = 0;
+	pgdat->kswapd_order = 0;
+	pgdat->kswapd_highest_zoneidx = 0;
+	pgdat->node_start_pfn = 0;
+
+	for_each_online_cpu(cpu) {
+		struct per_cpu_nodestat *p;
+
+		p = per_cpu_ptr(pgdat->per_cpu_nodestats, cpu);
+		memset(p, 0, sizeof(*p));
+	}
+}
+
 static int count_system_ram_pages_cb(unsigned long start_pfn,
 				     unsigned long nr_pages, void *data)
 {
@@ -1923,10 +1938,9 @@ int __ref offline_pages(unsigned long start_pfn, unsigned long nr_pages,
 	}
 
 	node_states_clear_node(node, &arg);
-	if (arg.status_change_nid >= 0) {
-		kswapd_stop(node);
-		kcompactd_stop(node);
-	}
+	if (arg.status_change_nid >= 0)
+		/* Reset node's state as all its memory went offline. */
+		node_reset_state(node);
 
 	writeback_set_ratelimit();
 
