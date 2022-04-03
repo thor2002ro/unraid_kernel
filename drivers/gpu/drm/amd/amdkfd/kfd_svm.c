@@ -1190,7 +1190,7 @@ svm_range_unmap_from_gpu(struct amdgpu_device *adev, struct amdgpu_vm *vm,
 
 	return amdgpu_vm_bo_update_mapping(adev, adev, vm, false, true, NULL,
 					   start, last, init_pte_value, 0,
-					   NULL, NULL, fence, NULL);
+					   NULL, NULL, fence);
 }
 
 static int
@@ -1243,7 +1243,6 @@ svm_range_map_to_gpu(struct kfd_process_device *pdd, struct svm_range *prange,
 {
 	struct amdgpu_device *adev = pdd->dev->adev;
 	struct amdgpu_vm *vm = drm_priv_to_vm(pdd->drm_priv);
-	bool table_freed = false;
 	uint64_t pte_flags;
 	unsigned long last_start;
 	int last_domain;
@@ -1283,8 +1282,7 @@ svm_range_map_to_gpu(struct kfd_process_device *pdd, struct svm_range *prange,
 						prange->start + i, pte_flags,
 						last_start - prange->start,
 						NULL, dma_addr,
-						&vm->last_update,
-						&table_freed);
+						&vm->last_update);
 
 		for (j = last_start - prange->start; j <= i; j++)
 			dma_addr[j] |= last_domain;
@@ -1306,8 +1304,6 @@ svm_range_map_to_gpu(struct kfd_process_device *pdd, struct svm_range *prange,
 	if (fence)
 		*fence = dma_fence_get(vm->last_update);
 
-	if (table_freed)
-		kfd_flush_tlb(pdd, TLB_FLUSH_LEGACY);
 out:
 	return r;
 }
@@ -1363,6 +1359,8 @@ svm_range_map_to_gpus(struct svm_range *prange, unsigned long offset,
 				break;
 			}
 		}
+
+		kfd_flush_tlb(pdd, TLB_FLUSH_LEGACY);
 	}
 
 	return r;
