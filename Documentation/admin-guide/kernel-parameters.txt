@@ -5608,6 +5608,29 @@
 			off:    Disable mitigation and remove
 				performance impact to RDRAND and RDSEED
 
+	srcutree.big_cpu_lim [KNL]
+			Specifies the number of CPUs constituting a
+			large system, such that srcu_struct structures
+			should immediately allocate an srcu_node array.
+			This kernel-boot parameter defaults to 128, but
+			takes effect only when srcutree.convert_to_big
+			is equal to zero.
+
+	srcutree.convert_to_big [KNL]
+			Specifies under what conditions an SRCU tree
+			srcu_struct structure will be converted to big
+			form, that is, with an rcu_node tree:
+
+				   0:  Decide at boot time (default).
+				   1:  Never.
+				   2:  At init_srcu_struct() time.
+				   3:  When rcutorture decides to.
+				0x1X:  Above plus if high contention.
+
+			Either way, the srcu_node tree will be sized based
+			on the actual runtime number of CPUs (nr_cpu_ids)
+			instead of the compile-time CONFIG_NR_CPUS.
+
 	srcutree.counter_wrap_check [KNL]
 			Specifies how frequently to check for
 			grace-period sequence counter wrap for the
@@ -5624,6 +5647,14 @@
 			grace period will be considered for automatic
 			expediting.  Set to zero to disable automatic
 			expediting.
+
+	srcutree.small_contention_lim [KNL]
+			Specifies the number of update-side contention
+			events per jiffy will be tolerated before
+			initiating a conversion of an srcu_struct
+			structure to big form.	Note that the value of
+			srcutree.convert_to_big must have the 0x10 bit
+			set for contention-based conversions to occur.
 
 	ssbd=		[ARM64,HW]
 			Speculative Store Bypass Disable control
