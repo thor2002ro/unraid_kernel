@@ -6,6 +6,7 @@
  * Copyright (C) 2012 Regents of the University of California
  */
 
+#include <linux/compat.h>
 #include <linux/signal.h>
 #include <linux/uaccess.h>
 #include <linux/syscalls.h>
@@ -229,6 +230,11 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
 	return 0;
 }
 
+#ifdef CONFIG_COMPAT
+extern int compat_setup_rt_frame(struct ksignal *ksig, sigset_t *set,
+				 struct pt_regs *regs);
+#endif
+
 static void handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 {
 	sigset_t *oldset = sigmask_to_save();
@@ -260,8 +266,13 @@ static void handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 
 	rseq_signal_deliver(ksig, regs);
 
+#ifdef CONFIG_COMPAT
 	/* Set up the stack frame */
-	ret = setup_rt_frame(ksig, oldset, regs);
+	if (is_compat_task())
+		ret = compat_setup_rt_frame(ksig, oldset, regs);
+	else
+#endif
+		ret = setup_rt_frame(ksig, oldset, regs);
 
 	signal_setup_done(ret, ksig, 0);
 }
