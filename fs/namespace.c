@@ -1760,7 +1760,7 @@ out_unlock:
 /*
  * Is the caller allowed to modify his namespace?
  */
-static inline bool may_mount(void)
+bool may_mount(void)
 {
 	return ns_capable(current->nsproxy->mnt_ns->user_ns, CAP_SYS_ADMIN);
 }
@@ -4197,14 +4197,9 @@ static int build_mount_idmapped(const struct mount_attr *attr, size_t usize,
 	if (attr->userns_fd > INT_MAX)
 		return -EINVAL;
 
-	file = fget(attr->userns_fd);
-	if (!file)
-		return -EBADF;
-
-	if (!proc_ns_file(file)) {
-		err = -EINVAL;
-		goto out_fput;
-	}
+	file = proc_ns_fget(attr->userns_fd);
+	if (IS_ERR(file))
+		return PTR_ERR(file);
 
 	ns = get_proc_ns(file_inode(file));
 	if (ns->ops->type != CLONE_NEWUSER) {
