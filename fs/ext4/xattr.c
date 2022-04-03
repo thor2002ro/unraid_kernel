@@ -1544,6 +1544,31 @@ static int ext4_xattr_inode_lookup_create(handle_t *handle, struct inode *inode,
 	return 0;
 }
 
+struct delayed_iput_work {
+	struct work_struct work;
+	struct inode *inode;
+};
+
+static void delayed_iput_fn(struct work_struct *work)
+{
+	struct delayed_iput_work *diwork;
+
+	diwork = container_of(work, struct delayed_iput_work, work);
+	iput(diwork->inode);
+	kfree(diwork);
+}
+
+static void delayed_iput(struct inode *inode, struct delayed_iput_work *work)
+{
+	if (!work) {
+		iput(inode);
+	} else {
+		INIT_WORK(&work->work, delayed_iput_fn);
+		work->inode = inode;
+		schedule_work(&work->work);
+	}
+}
+
 /*
  * Reserve min(block_size/8, 1024) bytes for xattr entries/names if ea_inode
  * feature is enabled.
@@ -1561,6 +1586,7 @@ static int ext4_xattr_set_entry(struct ext4_xattr_info *i,
 	int in_inode = i->in_inode;
 	struct inode *old_ea_inode = NULL;
 	struct inode *new_ea_inode = NULL;
+	struct delayed_iput_work *diwork = NULL;
 	size_t old_size, new_size;
 	int ret;
 
@@ -1637,7 +1663,11 @@ static int ext4_xattr_set_entry(struct ext4_xattr_info *i,
 	 * Finish that work before doing any modifications to the xattr data.
 	 */
 	if (!s->not_found && here->e_value_inum) {
-		ret = ext4_xattr_inode_iget(inode,
+		diwork = kmalloc(sizeof(*diwork), GFP_NOFS);
+		if (!diwork)
+			ret = -ENOMEM;
+		else
+			ret = ext4_xattr_inode_iget(inode,
 					    le32_to_cpu(here->e_value_inum),
 					    le32_to_cpu(here->e_hash),
 					    &old_ea_inode);
@@ -1790,7 +1820,7 @@ update_hash:
 
 	ret = 0;
 out:
-	iput(old_ea_inode);
+	delayed_iput(old_ea_inode, diwork);
 	iput(new_ea_inode);
 	return ret;
 }
