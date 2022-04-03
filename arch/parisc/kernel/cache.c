@@ -611,8 +611,8 @@ void
 flush_cache_page(struct vm_area_struct *vma, unsigned long vmaddr, unsigned long pfn)
 {
 	if (pfn_valid(pfn)) {
+		flush_tlb_page(vma, vmaddr);
 		if (likely(vma->vm_mm->context.space_id)) {
-			flush_tlb_page(vma, vmaddr);
 			__flush_cache_page(vma, vmaddr, PFN_PHYS(pfn));
 		} else {
 			__purge_cache_page(vma, vmaddr, PFN_PHYS(pfn));
@@ -642,6 +642,9 @@ void invalidate_kernel_vmap_range(void *vaddr, int size)
 	unsigned long start = (unsigned long)vaddr;
 	unsigned long end = start + size;
 
+	/* Ensure DMA is complete */
+	asm_syncdma();
+
 	if ((!IS_ENABLED(CONFIG_SMP) || !arch_irqs_disabled()) &&
 	    (unsigned long)size >= parisc_cache_flush_threshold) {
 		flush_tlb_kernel_range(start, end);
@@ -653,3 +656,15 @@ void invalidate_kernel_vmap_range(void *vaddr, int size)
 	flush_tlb_kernel_range(start, end);
 }
 EXPORT_SYMBOL(invalidate_kernel_vmap_range);
+
+void flush_cache_vmap_vunmap(unsigned long start, unsigned long end)
+{
+	WARN_ON(IS_ENABLED(CONFIG_SMP) && arch_irqs_disabled());
+
+	/* Inhibit cache move-in */
+	flush_tlb_all();
+
+	/* Flush the entire cache to remove all aliases */
+	flush_cache_all();
+}
+EXPORT_SYMBOL(flush_cache_vmap_vunmap);
