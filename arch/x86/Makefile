@@ -21,6 +21,8 @@ ifdef CONFIG_CC_IS_CLANG
 RETPOLINE_CFLAGS	:= -mretpoline-external-thunk
 RETPOLINE_VDSO_CFLAGS	:= -mretpoline
 endif
+RETPOLINE_RUSTFLAGS	:= -Ctarget-feature=+retpoline-external-thunk
+
 export RETPOLINE_CFLAGS
 export RETPOLINE_VDSO_CFLAGS
 
@@ -61,6 +63,8 @@ export BITS
 #    https://gcc.gnu.org/bugzilla/show_bug.cgi?id=53383
 #
 KBUILD_CFLAGS += -mno-sse -mno-mmx -mno-sse2 -mno-3dnow -mno-avx
+KBUILD_RUSTFLAGS += -Ctarget-feature=-mmx,-sse,-sse2,-sse3,-ssse3,-sse4.1,-sse4.2
+KBUILD_RUSTFLAGS += -Ctarget-feature=-3dnow,-3dnowa,-avx,-avx2,+soft-float
 
 ifeq ($(CONFIG_X86_KERNEL_IBT),y)
 #
@@ -148,8 +152,17 @@ else
         cflags-$(CONFIG_GENERIC_CPU)	+= -mtune=generic
         KBUILD_CFLAGS += $(cflags-y)
 
+        rustflags-$(CONFIG_MK8)		+= -Ctarget-cpu=k8
+        rustflags-$(CONFIG_MPSC)	+= -Ctarget-cpu=nocona
+        rustflags-$(CONFIG_MCORE2)	+= -Ctarget-cpu=core2
+        rustflags-$(CONFIG_MATOM)	+= -Ctarget-cpu=atom
+        rustflags-$(CONFIG_GENERIC_CPU)	+= -Ztune-cpu=generic
+        KBUILD_RUSTFLAGS += $(rustflags-y)
+
         KBUILD_CFLAGS += -mno-red-zone
         KBUILD_CFLAGS += -mcmodel=kernel
+        KBUILD_RUSTFLAGS += -Cno-redzone=y
+        KBUILD_RUSTFLAGS += -Ccode-model=kernel
 endif
 
 #
@@ -185,6 +198,7 @@ ifdef CONFIG_RETPOLINE
   ifndef CONFIG_CC_IS_CLANG
     KBUILD_CFLAGS += -fno-jump-tables
   endif
+  KBUILD_RUSTFLAGS += $(RETPOLINE_RUSTFLAGS)
 endif
 
 ifdef CONFIG_SLS
