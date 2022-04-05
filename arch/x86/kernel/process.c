@@ -813,18 +813,33 @@ static void amd_e400_idle(void)
 }
 
 /*
+ * Intel and AMD Zen processors allow MWAIT early on.
+ */
+static inline bool early_mwait_supported(const struct cpuinfo_x86 *c)
+{
+	if (c->x86_vendor == X86_VENDOR_INTEL)
+		return true;
+
+	if (c->x86_vendor == X86_VENDOR_AMD && cpu_has(c, X86_FEATURE_ZEN))
+		return true;
+
+	return false;
+}
+
+/*
  * Intel Core2 and older machines prefer MWAIT over HALT for C1.
  * We can't rely on cpuidle installing MWAIT, because it will not load
  * on systems that support only C1 -- so the boot default must be MWAIT.
  *
- * Some AMD machines are the opposite, they depend on using HALT.
+ * Even AMD Zen processors prefer MWAIT over HALT. But older AMD processors
+ * depend on HALT.
  *
  * So for default C1, which is used during boot until cpuidle loads,
- * use MWAIT-C1 on Intel HW that has it, else use HALT.
+ * use MWAIT-C1 on Intel and AMD HW that have it, else use HALT.
  */
 static int prefer_mwait_c1_over_halt(const struct cpuinfo_x86 *c)
 {
-	if (c->x86_vendor != X86_VENDOR_INTEL)
+	if (!early_mwait_supported(c))
 		return 0;
 
 	if (!cpu_has(c, X86_FEATURE_MWAIT) || boot_cpu_has_bug(X86_BUG_MONITOR))
