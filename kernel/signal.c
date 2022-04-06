@@ -3050,6 +3050,7 @@ void __set_current_blocked(const sigset_t *newset)
 	__set_task_blocked(tsk, newset);
 	spin_unlock_irq(&tsk->sighand->siglock);
 }
+EXPORT_SYMBOL_GPL(__set_current_blocked);
 
 /*
  * This is also useful for kernel threads that want to temporarily
@@ -3113,6 +3114,7 @@ int set_user_sigmask(const sigset_t __user *umask, size_t sigsetsize)
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(set_user_sigmask);
 
 #ifdef CONFIG_COMPAT
 int set_compat_user_sigmask(const compat_sigset_t __user *umask,
@@ -3133,6 +3135,7 @@ int set_compat_user_sigmask(const compat_sigset_t __user *umask,
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(set_compat_user_sigmask);
 #endif
 
 /**
