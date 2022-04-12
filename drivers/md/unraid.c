@@ -21,7 +21,7 @@
  * Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-#include "md_private.h"
+#include "md_unraid.h"
 
 /*
  * The following can be used to debug the driver
@@ -519,7 +519,11 @@ static void end_request(struct bio *bi)
 			break;
 	}
 	if (i == disks) {
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(5,17,0)
 		bio_reset(bi);
+#else
+		bio_reset(bi, NULL, 0);
+#endif
 		BUG();
 		return;
 	}
@@ -561,7 +565,11 @@ static void end_request(struct bio *bi)
 				mark_disk_invalid(col);
 		}
 	}
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(5,17,0)
 	bio_reset(bi);
+#else
+	bio_reset(bi, NULL, 0);
+#endif
 
 	clr_buff_locked(col);
 	spin_lock_irqsave(&conf->device_lock, flags);
@@ -1584,12 +1592,20 @@ static void handle_stripe(struct stripe_head *sh)
 		}
 
 		if (test_and_clear_bit(MD_BUFF_READ, &col->state)) {
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(5,17,0)
 			bio_init(bi, &col->vec, 1);
+#else
+			bio_init(bi, NULL, &col->vec, 1, 0);
+#endif
 			bi->bi_opf = REQ_OP_READ;
 			rdev->reads++;
 		}
 		else if (test_and_clear_bit(MD_BUFF_WRITE, &col->state)) {
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(5,17,0)
 			bio_init(bi, &col->vec, 1);
+#else
+			bio_init(bi, NULL, &col->vec, 1, 0);
+#endif
 			bi->bi_opf = REQ_OP_WRITE | ((i < pd_idx) ? op_flags : pq_flags);
 			rdev->writes++;
 		}
@@ -1648,7 +1664,11 @@ static void submit_flush_data(struct work_struct *ws)
 
 static void submit_flush_bio(flush_stripe_t *flush_stripe, struct bio *bi, mdk_rdev_t *rdev)
 {
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(5,17,0)
 	bio_init(bi, NULL, 0);
+#else
+	bio_init(bi, NULL, NULL, 0, 0);
+#endif
 	bio_set_dev(bi, rdev->bdev);
 	bi->bi_private = flush_stripe;
 	bi->bi_end_io = end_flush;
