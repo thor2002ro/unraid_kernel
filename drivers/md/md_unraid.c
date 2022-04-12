@@ -35,7 +35,7 @@
    (for example /usr/src/linux/COPYING); if not, write to the Free
    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
-#include "md_private.h"
+#include "md_unraid.h"
 #include <linux/seq_file.h>
 #include <linux/sched/signal.h>
 
@@ -1046,7 +1046,9 @@ static int do_run(mddev_t *mddev)
 			if (md_restrict & 1)
 				blk_queue_max_hw_sectors(gd->queue, 256);  /* 256 sectors => 128K */
 
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(5,17,0)
 			blk_queue_max_write_same_sectors(gd->queue, 0);
+#endif
 			blk_queue_max_write_zeroes_sectors(gd->queue, 0);
 			blk_queue_flag_clear(QUEUE_FLAG_DISCARD, gd->queue);
 			blk_queue_flag_clear(QUEUE_FLAG_NONROT, gd->queue);
