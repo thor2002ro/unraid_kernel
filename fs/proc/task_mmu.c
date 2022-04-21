@@ -1063,6 +1063,8 @@ enum clear_refs_types {
 
 struct clear_refs_private {
 	enum clear_refs_types type;
+	unsigned long start, end;
+	bool clear_range;
 };
 
 #ifdef CONFIG_MEM_SOFT_DIRTY
@@ -1083,8 +1085,8 @@ static inline bool pte_is_pinned(struct vm_area_struct *vma, unsigned long addr,
 	return page_maybe_dma_pinned(page);
 }
 
-static inline void clear_soft_dirty(struct vm_area_struct *vma,
-		unsigned long addr, pte_t *pte)
+static inline bool clear_soft_dirty(struct vm_area_struct *vma,
+				    unsigned long addr, pte_t *pte)
 {
 	/*
 	 * The soft-dirty tracker uses #PF-s to catch writes
@@ -1093,37 +1095,46 @@ static inline void clear_soft_dirty(struct vm_area_struct *vma,
 	 * of how soft-dirty works.
 	 */
 	pte_t ptent = *pte;
+	bool ret = false;
 
 	if (pte_present(ptent)) {
 		pte_t old_pte;
 
 		if (pte_is_pinned(vma, addr, ptent))
-			return;
+			return ret;
 		old_pte = ptep_modify_prot_start(vma, addr, pte);
+		ret = pte_soft_dirty(old_pte);
 		ptent = pte_wrprotect(old_pte);
 		ptent = pte_clear_soft_dirty(ptent);
 		ptep_modify_prot_commit(vma, addr, pte, old_pte, ptent);
 	} else if (is_swap_pte(ptent)) {
+		ret = pte_swp_soft_dirty(ptent);
 		ptent = pte_swp_clear_soft_dirty(ptent);
 		set_pte_at(vma->vm_mm, addr, pte, ptent);
 	}
+    return ret;
 }
 #else
-static inline void clear_soft_dirty(struct vm_area_struct *vma,
+static inline bool clear_soft_dirty(struct vm_area_struct *vma,
 		unsigned long addr, pte_t *pte)
 {
+    return false;
 }
 #endif
 
 #if defined(CONFIG_MEM_SOFT_DIRTY) && defined(CONFIG_TRANSPARENT_HUGEPAGE)
-static inline void clear_soft_dirty_pmd(struct vm_area_struct *vma,
+static inline bool clear_soft_dirty_pmd(struct vm_area_struct *vma,
 		unsigned long addr, pmd_t *pmdp)
 {
 	pmd_t old, pmd = *pmdp;
+	bool ret = false;
 
 	if (pmd_present(pmd)) {
 		/* See comment in change_huge_pmd() */
 		old = pmdp_invalidate(vma, addr, pmdp);
+
+		ret = pmd_soft_dirty(old);
+
 		if (pmd_dirty(old))
 			pmd = pmd_mkdirty(pmd);
 		if (pmd_young(old))
@@ -1134,14 +1145,17 @@ static inline void clear_soft_dirty_pmd(struct vm_area_struct *vma,
 
 		set_pmd_at(vma->vm_mm, addr, pmdp, pmd);
 	} else if (is_migration_entry(pmd_to_swp_entry(pmd))) {
+		ret = pmd_swp_soft_dirty(pmd);
 		pmd = pmd_swp_clear_soft_dirty(pmd);
 		set_pmd_at(vma->vm_mm, addr, pmdp, pmd);
 	}
+    return ret;
 }
 #else
-static inline void clear_soft_dirty_pmd(struct vm_area_struct *vma,
+static inline bool clear_soft_dirty_pmd(struct vm_area_struct *vma,
 		unsigned long addr, pmd_t *pmdp)
 {
+    return false;
 }
 #endif
 
@@ -1153,6 +1167,8 @@ static int clear_refs_pte_range(pmd_t *pmd, unsigned long addr,
 	pte_t *pte, ptent;
 	spinlock_t *ptl;
 	struct page *page;
+
+	BUG_ON(addr < cp->start || end > cp->end);
 
 	ptl = pmd_trans_huge_lock(pmd, vma);
 	if (ptl) {
@@ -1210,8 +1226,10 @@ static int clear_refs_test_walk(unsigned long start, unsigned long end,
 	struct clear_refs_private *cp = walk->private;
 	struct vm_area_struct *vma = walk->vma;
 
-	if (vma->vm_flags & VM_PFNMAP)
+	if (!cp->clear_range && (vma->vm_flags & VM_PFNMAP))
 		return 1;
+
+	BUG_ON(start < cp->start || end > cp->end);
 
 	/*
 	 * Writing 1 to /proc/pid/clear_refs affects all pages.
@@ -1235,10 +1253,12 @@ static ssize_t clear_refs_write(struct file *file, const char __user *buf,
 				size_t count, loff_t *ppos)
 {
 	struct task_struct *task;
-	char buffer[PROC_NUMBUF];
+	char buffer[18];
 	struct mm_struct *mm;
 	struct vm_area_struct *vma;
 	enum clear_refs_types type;
+	unsigned long start, end;
+	bool clear_range;
 	int itype;
 	int rv;
 
@@ -1247,12 +1267,34 @@ static ssize_t clear_refs_write(struct file *file, const char __user *buf,
 		count = sizeof(buffer) - 1;
 	if (copy_from_user(buffer, buf, count))
 		return -EFAULT;
-	rv = kstrtoint(strstrip(buffer), 10, &itype);
-	if (rv < 0)
-		return rv;
-	type = (enum clear_refs_types)itype;
-	if (type < CLEAR_REFS_ALL || type >= CLEAR_REFS_LAST)
-		return -EINVAL;
+
+	if (buffer[0] == '6')
+	{
+		static int once;
+
+		if (!once++)
+			printk(KERN_DEBUG "task_mmu: Using POC clear refs range implementation.\n");
+
+		if (count != 17)
+			return -EINVAL;
+
+		type = CLEAR_REFS_SOFT_DIRTY;
+		start = *(unsigned long *)(buffer + 1);
+		end = *(unsigned long *)(buffer + 1 + 8);
+	}
+	else
+	{
+		rv = kstrtoint(strstrip(buffer), 10, &itype);
+		if (rv < 0)
+			return rv;
+		type = (enum clear_refs_types)itype;
+
+		if (type < CLEAR_REFS_ALL || type >= CLEAR_REFS_LAST)
+			return -EINVAL;
+
+		start = 0;
+		end = -1UL;
+	}
 
 	task = get_proc_task(file_inode(file));
 	if (!task)
@@ -1264,41 +1306,87 @@ static ssize_t clear_refs_write(struct file *file, const char __user *buf,
 			.type = type,
 		};
 
-		if (mmap_write_lock_killable(mm)) {
-			count = -EINTR;
-			goto out_mm;
+		if (start || end != -1UL)
+		{
+			start = min(start, mm->highest_vm_end) & PAGE_MASK;
+			end = min(end, mm->highest_vm_end) & PAGE_MASK;
+
+			if (start >= end)
+			{
+				count = -EINVAL;
+				goto out_mm;
+			}
+			clear_range = true;
 		}
+		else
+		{
+			clear_range = false;
+		}
+
+		cp.start = start;
+		cp.end = end;
+		cp.clear_range = clear_range;
+
 		if (type == CLEAR_REFS_MM_HIWATER_RSS) {
+			if (mmap_write_lock_killable(mm)) {
+				count = -EINTR;
+				goto out_mm;
+			}
+
 			/*
 			 * Writing 5 to /proc/pid/clear_refs resets the peak
 			 * resident set size to this mm's current rss value.
 			 */
 			reset_mm_hiwater_rss(mm);
-			goto out_unlock;
+			mmap_write_unlock(mm);
+			goto out_mm;
 		}
 
 		if (type == CLEAR_REFS_SOFT_DIRTY) {
-			for (vma = mm->mmap; vma; vma = vma->vm_next) {
-				if (!(vma->vm_flags & VM_SOFTDIRTY))
-					continue;
-				vma->vm_flags &= ~VM_SOFTDIRTY;
-				vma_set_page_prot(vma);
+			if (mmap_read_lock_killable(mm)) {
+				count = -EINTR;
+				goto out_mm;
 			}
-
+			if (!clear_range)
+				for (vma = mm->mmap; vma; vma = vma->vm_next) {
+				    if (!(vma->vm_flags & VM_SOFTDIRTY))
+					    continue;
+				    mmap_read_unlock(mm);
+				    if (mmap_write_lock_killable(mm)) {
+					    count = -EINTR;
+					    goto out_mm;
+				    }
+				    for (vma = mm->mmap; vma; vma = vma->vm_next) {
+					    vma->vm_flags &= ~VM_SOFTDIRTY;
+					    vma_set_page_prot(vma);
+				    }
+				    mmap_write_downgrade(mm);
+				    break;
+				}
 			inc_tlb_flush_pending(mm);
 			mmu_notifier_range_init(&range, MMU_NOTIFY_SOFT_DIRTY,
-						0, NULL, mm, 0, -1UL);
+						0, NULL, mm, start, end);
 			mmu_notifier_invalidate_range_start(&range);
 		}
-		walk_page_range(mm, 0, mm->highest_vm_end, &clear_refs_walk_ops,
+		else
+		{
+			if (mmap_write_lock_killable(mm)) {
+				count = -EINTR;
+				goto out_mm;
+			}
+		}
+		walk_page_range(mm, start, end == -1UL ? mm->highest_vm_end : end, &clear_refs_walk_ops,
 				&cp);
 		if (type == CLEAR_REFS_SOFT_DIRTY) {
 			mmu_notifier_invalidate_range_end(&range);
 			flush_tlb_mm(mm);
 			dec_tlb_flush_pending(mm);
+			mmap_read_unlock(mm);
 		}
-out_unlock:
-		mmap_write_unlock(mm);
+		else
+		{
+			mmap_write_unlock(mm);
+		}
 out_mm:
 		mmput(mm);
 	}
@@ -1320,6 +1408,7 @@ struct pagemapread {
 	int pos, len;		/* units: PM_ENTRY_BYTES, not bytes */
 	pagemap_entry_t *buffer;
 	bool show_pfn;
+	bool reset;
 };
 
 #define PAGEMAP_WALK_SIZE	(PMD_SIZE)
@@ -1330,6 +1419,7 @@ struct pagemapread {
 #define PM_PFRAME_MASK		GENMASK_ULL(PM_PFRAME_BITS - 1, 0)
 #define PM_SOFT_DIRTY		BIT_ULL(55)
 #define PM_MMAP_EXCLUSIVE	BIT_ULL(56)
+#define PM_SOFT_DIRTY_PAGE	BIT_ULL(57)
 #define PM_UFFD_WP		BIT_ULL(57)
 #define PM_FILE			BIT_ULL(61)
 #define PM_SWAP			BIT_ULL(62)
@@ -1351,12 +1441,23 @@ static int add_to_pagemap(unsigned long addr, pagemap_entry_t *pme,
 	return 0;
 }
 
+static int add_addr_to_pagemap(unsigned long addr, struct pagemapread *pm)
+{
+	((unsigned long *)pm->buffer)[pm->pos++] = addr;
+	if (pm->pos >= pm->len)
+		return PM_END_OF_BUFFER;
+	return 0;
+}
+
 static int pagemap_pte_hole(unsigned long start, unsigned long end,
 			    __always_unused int depth, struct mm_walk *walk)
 {
 	struct pagemapread *pm = walk->private;
 	unsigned long addr = start;
 	int err = 0;
+
+	if (pm->reset)
+		goto out;
 
 	while (addr < end) {
 		struct vm_area_struct *vma = find_vma(walk->mm, addr);
@@ -1392,8 +1493,9 @@ out:
 }
 
 static pagemap_entry_t pte_to_pagemap_entry(struct pagemapread *pm,
-		struct vm_area_struct *vma, unsigned long addr, pte_t pte)
+		struct vm_area_struct *vma, unsigned long addr, pte_t *pte_addr)
 {
+	pte_t pte = *pte_addr;
 	u64 frame = 0, flags = 0;
 	struct page *page = NULL;
 	bool migration = false;
@@ -1404,13 +1506,13 @@ static pagemap_entry_t pte_to_pagemap_entry(struct pagemapread *pm,
 		flags |= PM_PRESENT;
 		page = vm_normal_page(vma, addr, pte);
 		if (pte_soft_dirty(pte))
-			flags |= PM_SOFT_DIRTY;
+			flags |= PM_SOFT_DIRTY | PM_SOFT_DIRTY_PAGE;
 		if (pte_uffd_wp(pte))
 			flags |= PM_UFFD_WP;
 	} else if (is_swap_pte(pte)) {
 		swp_entry_t entry;
 		if (pte_swp_soft_dirty(pte))
-			flags |= PM_SOFT_DIRTY;
+			flags |= PM_SOFT_DIRTY | PM_SOFT_DIRTY_PAGE;
 		if (pte_swp_uffd_wp(pte))
 			flags |= PM_UFFD_WP;
 		entry = pte_to_swp_entry(pte);
@@ -1450,6 +1552,20 @@ static int pagemap_pmd_range(pmd_t *pmdp, unsigned long addr, unsigned long end,
 		pmd_t pmd = *pmdp;
 		struct page *page = NULL;
 
+		if (pm->reset)
+		{
+			if (clear_soft_dirty_pmd(vma, addr, pmdp))
+			{
+				for (; addr != end; addr += PAGE_SIZE)
+				{
+					err = add_addr_to_pagemap(addr, pm);
+					if (err)
+						break;
+				}
+			}
+			goto trans_huge_done;
+		}
+
 		if (vma->vm_flags & VM_SOFTDIRTY)
 			flags |= PM_SOFT_DIRTY;
 
@@ -1458,7 +1574,7 @@ static int pagemap_pmd_range(pmd_t *pmdp, unsigned long addr, unsigned long end,
 
 			flags |= PM_PRESENT;
 			if (pmd_soft_dirty(pmd))
-				flags |= PM_SOFT_DIRTY;
+				flags |= PM_SOFT_DIRTY | PM_SOFT_DIRTY_PAGE;
 			if (pmd_uffd_wp(pmd))
 				flags |= PM_UFFD_WP;
 			if (pm->show_pfn)
@@ -1478,7 +1594,7 @@ static int pagemap_pmd_range(pmd_t *pmdp, unsigned long addr, unsigned long end,
 			}
 			flags |= PM_SWAP;
 			if (pmd_swp_soft_dirty(pmd))
-				flags |= PM_SOFT_DIRTY;
+				flags |= PM_SOFT_DIRTY | PM_SOFT_DIRTY_PAGE;
 			if (pmd_swp_uffd_wp(pmd))
 				flags |= PM_UFFD_WP;
 			VM_BUG_ON(!is_pmd_migration_entry(pmd));
@@ -1503,6 +1619,7 @@ static int pagemap_pmd_range(pmd_t *pmdp, unsigned long addr, unsigned long end,
 					frame += (1 << MAX_SWAPFILES_SHIFT);
 			}
 		}
+trans_huge_done:
 		spin_unlock(ptl);
 		return err;
 	}
@@ -1517,10 +1634,18 @@ static int pagemap_pmd_range(pmd_t *pmdp, unsigned long addr, unsigned long end,
 	 */
 	orig_pte = pte = pte_offset_map_lock(walk->mm, pmdp, addr, &ptl);
 	for (; addr < end; pte++, addr += PAGE_SIZE) {
-		pagemap_entry_t pme;
+		if (pm->reset)
+		{
+			if (clear_soft_dirty(vma, addr, pte))
+			    err = add_addr_to_pagemap(addr, pm);
+		}
+		else
+		{
+			pagemap_entry_t pme;
 
-		pme = pte_to_pagemap_entry(pm, vma, addr, *pte);
-		err = add_to_pagemap(addr, &pme, pm);
+			pme = pte_to_pagemap_entry(pm, vma, addr, pte);
+			err = add_to_pagemap(addr, &pme, pm);
+		}
 		if (err)
 			break;
 	}
@@ -1613,8 +1738,8 @@ static const struct mm_walk_ops pagemap_ops = {
  * determine which areas of memory are actually mapped and llseek to
  * skip over unmapped regions.
  */
-static ssize_t pagemap_read(struct file *file, char __user *buf,
-			    size_t count, loff_t *ppos)
+static ssize_t do_pagemap_read(struct file *file, char __user *buf,
+			    size_t count, loff_t *ppos, bool reset)
 {
 	struct mm_struct *mm = file->private_data;
 	struct pagemapread pm;
@@ -1623,6 +1748,8 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
 	unsigned long start_vaddr;
 	unsigned long end_vaddr;
 	int ret = 0, copied = 0;
+	struct mmu_notifier_range range;
+	size_t buffer_len;
 
 	if (!mm || !mmget_not_zero(mm))
 		goto out;
@@ -1638,19 +1765,38 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
 
 	/* do not disclose physical addresses: attack vector */
 	pm.show_pfn = file_ns_capable(file, &init_user_ns, CAP_SYS_ADMIN);
+	pm.reset = reset;
 
-	pm.len = (PAGEMAP_WALK_SIZE >> PAGE_SHIFT);
-	pm.buffer = kmalloc_array(pm.len, PM_ENTRY_BYTES, GFP_KERNEL);
+	buffer_len = min(PAGEMAP_WALK_SIZE >> PAGE_SHIFT, count / PM_ENTRY_BYTES);
+
+	pm.buffer = kmalloc_array(buffer_len, PM_ENTRY_BYTES, GFP_KERNEL);
 	ret = -ENOMEM;
 	if (!pm.buffer)
 		goto out_mm;
 
 	src = *ppos;
 	svpfn = src / PM_ENTRY_BYTES;
-	end_vaddr = mm->task_size;
+
+	start_vaddr = svpfn << PAGE_SHIFT;
+
+	if (reset)
+	{
+		if (count < sizeof(end_vaddr))
+		{
+			ret = -EINVAL;
+			goto out_mm;
+		}
+		if (copy_from_user(&end_vaddr, buf, sizeof(end_vaddr)))
+			return -EFAULT;
+		end_vaddr = min(end_vaddr, mm->task_size);
+	}
+	else
+	{
+		end_vaddr = mm->task_size;
+		start_vaddr = end_vaddr;
+	}
 
 	/* watch out for wraparound */
-	start_vaddr = end_vaddr;
 	if (svpfn <= (ULONG_MAX >> PAGE_SHIFT))
 		start_vaddr = untagged_addr(svpfn << PAGE_SHIFT);
 
@@ -1670,18 +1816,35 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
 		unsigned long end;
 
 		pm.pos = 0;
-		end = (start_vaddr + PAGEMAP_WALK_SIZE) & PAGEMAP_WALK_MASK;
+		pm.len = min(buffer_len, count / PM_ENTRY_BYTES);
+
+		end = reset ? end_vaddr : (start_vaddr + (pm.len << PAGE_SHIFT));
 		/* overflow ? */
 		if (end < start_vaddr || end > end_vaddr)
 			end = end_vaddr;
+
 		ret = mmap_read_lock_killable(mm);
 		if (ret)
 			goto out_free;
+
+		if (reset)
+		{
+			inc_tlb_flush_pending(mm);
+			mmu_notifier_range_init(&range, MMU_NOTIFY_SOFT_DIRTY,
+						0, NULL, mm, start_vaddr, end);
+			mmu_notifier_invalidate_range_start(&range);
+		}
 		ret = walk_page_range(mm, start_vaddr, end, &pagemap_ops, &pm);
+		if (reset)
+		{
+			mmu_notifier_invalidate_range_end(&range);
+			flush_tlb_mm(mm);
+			dec_tlb_flush_pending(mm);
+		}
 		mmap_read_unlock(mm);
-		start_vaddr = end;
 
 		len = min(count, PM_ENTRY_BYTES * pm.pos);
+		BUG_ON(ret && ret != PM_END_OF_BUFFER);
 		if (copy_to_user(buf, pm.buffer, len)) {
 			ret = -EFAULT;
 			goto out_free;
@@ -1689,6 +1852,8 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
 		copied += len;
 		buf += len;
 		count -= len;
+
+		start_vaddr = reset && pm.pos == pm.len ? ((unsigned long *)pm.buffer)[pm.pos - 1] + PAGE_SIZE : end;
 	}
 	*ppos += copied;
 	if (!ret || ret == PM_END_OF_BUFFER)
@@ -1700,6 +1865,18 @@ out_mm:
 	mmput(mm);
 out:
 	return ret;
+}
+
+static ssize_t pagemap_read(struct file *file, char __user *buf,
+			    size_t count, loff_t *ppos)
+{
+	return do_pagemap_read(file, buf, count, ppos, false);
+}
+
+static ssize_t pagemap_reset_read(struct file *file, char __user *buf,
+			    size_t count, loff_t *ppos)
+{
+	return do_pagemap_read(file, buf, count, ppos, true);
 }
 
 static int pagemap_open(struct inode *inode, struct file *file)
@@ -1728,6 +1905,14 @@ const struct file_operations proc_pagemap_operations = {
 	.open		= pagemap_open,
 	.release	= pagemap_release,
 };
+
+const struct file_operations proc_pagemap_reset_operations = {
+	.llseek		= mem_lseek, /* borrow this */
+	.read		= pagemap_reset_read,
+	.open		= pagemap_open,
+	.release	= pagemap_release,
+};
+
 #endif /* CONFIG_PROC_PAGE_MONITOR */
 
 #ifdef CONFIG_NUMA

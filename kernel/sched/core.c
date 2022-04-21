@@ -142,7 +142,7 @@ __read_mostly int sysctl_resched_latency_warn_once = 1;
 #ifdef CONFIG_PREEMPT_RT
 const_debug unsigned int sysctl_sched_nr_migrate = 8;
 #else
-const_debug unsigned int sysctl_sched_nr_migrate = 32;
+const_debug unsigned int sysctl_sched_nr_migrate = 128;
 #endif
 
 /*
