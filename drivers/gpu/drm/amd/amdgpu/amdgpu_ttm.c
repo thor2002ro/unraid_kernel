@@ -1804,9 +1804,15 @@ int amdgpu_ttm_init(struct amdgpu_device *adev)
 		struct sysinfo si;
 
 		si_meminfo(&si);
-		gtt_size = min(max((AMDGPU_DEFAULT_GTT_SIZE_MB << 20),
-			       adev->gmc.mc_vram_size),
-			       ((uint64_t)si.totalram * si.mem_unit * 3/4));
+		gtt_size = (uint64_t)si.totalram * si.mem_unit * 3/4;
+		/* If we have dedicated memory, limit our GTT size to
+		 * 3GiB or VRAM size, whichever is bigger
+		 */
+		if (!(adev->flags & AMD_IS_APU)) {
+			gtt_size = min(max(AMDGPU_DEFAULT_GTT_SIZE_MB << 20,
+				adev->gmc.mc_vram_size),
+				gtt_size);
+		}
 	}
 	else
 		gtt_size = (uint64_t)amdgpu_gtt_size << 20;

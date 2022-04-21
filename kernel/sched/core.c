@@ -142,7 +142,7 @@ __read_mostly int sysctl_resched_latency_warn_once = 1;
 #ifdef CONFIG_PREEMPT_RT
 const_debug unsigned int sysctl_sched_nr_migrate = 8;
 #else
-const_debug unsigned int sysctl_sched_nr_migrate = 32;
+const_debug unsigned int sysctl_sched_nr_migrate = 128;
 #endif
 
 /*
@@ -446,9 +446,9 @@ sched_core_dequeue(struct rq *rq, struct task_struct *p, int flags) { }
 
 /*
  * part of the period that we allow rt tasks to run in us.
- * default: 0.95s
+ * XanMod default: 0.98s
  */
-int sysctl_sched_rt_runtime = 950000;
+int sysctl_sched_rt_runtime = 980000;
 
 
 /*
