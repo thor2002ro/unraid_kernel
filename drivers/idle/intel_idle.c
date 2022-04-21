@@ -561,7 +561,7 @@ static struct cpuidle_state hsw_cstates[] __initdata = {
 		.desc = "MWAIT 0x01",
 		.flags = MWAIT2flg(0x01) | CPUIDLE_FLAG_ALWAYS_ENABLE,
 		.exit_latency = 10,
-		.target_residency = 20,
+		.target_residency = 120,
 		.enter = &intel_idle,
 		.enter_s2idle = intel_idle_s2idle, },
 	{
@@ -569,7 +569,7 @@ static struct cpuidle_state hsw_cstates[] __initdata = {
 		.desc = "MWAIT 0x10",
 		.flags = MWAIT2flg(0x10) | CPUIDLE_FLAG_TLB_FLUSHED,
 		.exit_latency = 33,
-		.target_residency = 100,
+		.target_residency = 900,
 		.enter = &intel_idle,
 		.enter_s2idle = intel_idle_s2idle, },
 	{
@@ -577,7 +577,7 @@ static struct cpuidle_state hsw_cstates[] __initdata = {
 		.desc = "MWAIT 0x20",
 		.flags = MWAIT2flg(0x20) | CPUIDLE_FLAG_TLB_FLUSHED,
 		.exit_latency = 133,
-		.target_residency = 400,
+		.target_residency = 1000,
 		.enter = &intel_idle,
 		.enter_s2idle = intel_idle_s2idle, },
 	{
@@ -585,7 +585,7 @@ static struct cpuidle_state hsw_cstates[] __initdata = {
 		.desc = "MWAIT 0x32",
 		.flags = MWAIT2flg(0x32) | CPUIDLE_FLAG_TLB_FLUSHED,
 		.exit_latency = 166,
-		.target_residency = 500,
+		.target_residency = 1500,
 		.enter = &intel_idle,
 		.enter_s2idle = intel_idle_s2idle, },
 	{
@@ -593,7 +593,7 @@ static struct cpuidle_state hsw_cstates[] __initdata = {
 		.desc = "MWAIT 0x40",
 		.flags = MWAIT2flg(0x40) | CPUIDLE_FLAG_TLB_FLUSHED,
 		.exit_latency = 300,
-		.target_residency = 900,
+		.target_residency = 2000,
 		.enter = &intel_idle,
 		.enter_s2idle = intel_idle_s2idle, },
 	{
@@ -601,7 +601,7 @@ static struct cpuidle_state hsw_cstates[] __initdata = {
 		.desc = "MWAIT 0x50",
 		.flags = MWAIT2flg(0x50) | CPUIDLE_FLAG_TLB_FLUSHED,
 		.exit_latency = 600,
-		.target_residency = 1800,
+		.target_residency = 5000,
 		.enter = &intel_idle,
 		.enter_s2idle = intel_idle_s2idle, },
 	{
@@ -609,7 +609,7 @@ static struct cpuidle_state hsw_cstates[] __initdata = {
 		.desc = "MWAIT 0x60",
 		.flags = MWAIT2flg(0x60) | CPUIDLE_FLAG_TLB_FLUSHED,
 		.exit_latency = 2600,
-		.target_residency = 7700,
+		.target_residency = 9000,
 		.enter = &intel_idle,
 		.enter_s2idle = intel_idle_s2idle, },
 	{
@@ -629,7 +629,7 @@ static struct cpuidle_state bdw_cstates[] __initdata = {
 		.desc = "MWAIT 0x01",
 		.flags = MWAIT2flg(0x01) | CPUIDLE_FLAG_ALWAYS_ENABLE,
 		.exit_latency = 10,
-		.target_residency = 20,
+		.target_residency = 120,
 		.enter = &intel_idle,
 		.enter_s2idle = intel_idle_s2idle, },
 	{
@@ -637,7 +637,7 @@ static struct cpuidle_state bdw_cstates[] __initdata = {
 		.desc = "MWAIT 0x10",
 		.flags = MWAIT2flg(0x10) | CPUIDLE_FLAG_TLB_FLUSHED,
 		.exit_latency = 40,
-		.target_residency = 100,
+		.target_residency = 1000,
 		.enter = &intel_idle,
 		.enter_s2idle = intel_idle_s2idle, },
 	{
@@ -645,7 +645,7 @@ static struct cpuidle_state bdw_cstates[] __initdata = {
 		.desc = "MWAIT 0x20",
 		.flags = MWAIT2flg(0x20) | CPUIDLE_FLAG_TLB_FLUSHED,
 		.exit_latency = 133,
-		.target_residency = 400,
+		.target_residency = 1000,
 		.enter = &intel_idle,
 		.enter_s2idle = intel_idle_s2idle, },
 	{
@@ -653,7 +653,7 @@ static struct cpuidle_state bdw_cstates[] __initdata = {
 		.desc = "MWAIT 0x32",
 		.flags = MWAIT2flg(0x32) | CPUIDLE_FLAG_TLB_FLUSHED,
 		.exit_latency = 166,
-		.target_residency = 500,
+		.target_residency = 2000,
 		.enter = &intel_idle,
 		.enter_s2idle = intel_idle_s2idle, },
 	{
@@ -661,7 +661,7 @@ static struct cpuidle_state bdw_cstates[] __initdata = {
 		.desc = "MWAIT 0x40",
 		.flags = MWAIT2flg(0x40) | CPUIDLE_FLAG_TLB_FLUSHED,
 		.exit_latency = 300,
-		.target_residency = 900,
+		.target_residency = 4000,
 		.enter = &intel_idle,
 		.enter_s2idle = intel_idle_s2idle, },
 	{
@@ -669,7 +669,7 @@ static struct cpuidle_state bdw_cstates[] __initdata = {
 		.desc = "MWAIT 0x50",
 		.flags = MWAIT2flg(0x50) | CPUIDLE_FLAG_TLB_FLUSHED,
 		.exit_latency = 600,
-		.target_residency = 1800,
+		.target_residency = 7000,
 		.enter = &intel_idle,
 		.enter_s2idle = intel_idle_s2idle, },
 	{
@@ -677,7 +677,7 @@ static struct cpuidle_state bdw_cstates[] __initdata = {
 		.desc = "MWAIT 0x60",
 		.flags = MWAIT2flg(0x60) | CPUIDLE_FLAG_TLB_FLUSHED,
 		.exit_latency = 2600,
-		.target_residency = 7700,
+		.target_residency = 9000,
 		.enter = &intel_idle,
 		.enter_s2idle = intel_idle_s2idle, },
 	{
@@ -698,7 +698,7 @@ static struct cpuidle_state skl_cstates[] __initdata = {
 		.desc = "MWAIT 0x01",
 		.flags = MWAIT2flg(0x01) | CPUIDLE_FLAG_ALWAYS_ENABLE,
 		.exit_latency = 10,
-		.target_residency = 20,
+		.target_residency = 120,
 		.enter = &intel_idle,
 		.enter_s2idle = intel_idle_s2idle, },
 	{
@@ -706,7 +706,7 @@ static struct cpuidle_state skl_cstates[] __initdata = {
 		.desc = "MWAIT 0x10",
 		.flags = MWAIT2flg(0x10) | CPUIDLE_FLAG_TLB_FLUSHED,
 		.exit_latency = 70,
-		.target_residency = 100,
+		.target_residency = 1000,
 		.enter = &intel_idle,
 		.enter_s2idle = intel_idle_s2idle, },
 	{
@@ -714,7 +714,7 @@ static struct cpuidle_state skl_cstates[] __initdata = {
 		.desc = "MWAIT 0x20",
 		.flags = MWAIT2flg(0x20) | CPUIDLE_FLAG_TLB_FLUSHED | CPUIDLE_FLAG_IBRS,
 		.exit_latency = 85,
-		.target_residency = 200,
+		.target_residency = 600,
 		.enter = &intel_idle,
 		.enter_s2idle = intel_idle_s2idle, },
 	{
@@ -722,7 +722,7 @@ static struct cpuidle_state skl_cstates[] __initdata = {
 		.desc = "MWAIT 0x33",
 		.flags = MWAIT2flg(0x33) | CPUIDLE_FLAG_TLB_FLUSHED | CPUIDLE_FLAG_IBRS,
 		.exit_latency = 124,
-		.target_residency = 800,
+		.target_residency = 3000,
 		.enter = &intel_idle,
 		.enter_s2idle = intel_idle_s2idle, },
 	{
@@ -730,7 +730,7 @@ static struct cpuidle_state skl_cstates[] __initdata = {
 		.desc = "MWAIT 0x40",
 		.flags = MWAIT2flg(0x40) | CPUIDLE_FLAG_TLB_FLUSHED | CPUIDLE_FLAG_IBRS,
 		.exit_latency = 200,
-		.target_residency = 800,
+		.target_residency = 3200,
 		.enter = &intel_idle,
 		.enter_s2idle = intel_idle_s2idle, },
 	{
@@ -738,7 +738,7 @@ static struct cpuidle_state skl_cstates[] __initdata = {
 		.desc = "MWAIT 0x50",
 		.flags = MWAIT2flg(0x50) | CPUIDLE_FLAG_TLB_FLUSHED | CPUIDLE_FLAG_IBRS,
 		.exit_latency = 480,
-		.target_residency = 5000,
+		.target_residency = 9000,
 		.enter = &intel_idle,
 		.enter_s2idle = intel_idle_s2idle, },
 	{
@@ -746,7 +746,7 @@ static struct cpuidle_state skl_cstates[] __initdata = {
 		.desc = "MWAIT 0x60",
 		.flags = MWAIT2flg(0x60) | CPUIDLE_FLAG_TLB_FLUSHED | CPUIDLE_FLAG_IBRS,
 		.exit_latency = 890,
-		.target_residency = 5000,
+		.target_residency = 9000,
 		.enter = &intel_idle,
 		.enter_s2idle = intel_idle_s2idle, },
 	{
@@ -767,7 +767,7 @@ static struct cpuidle_state skx_cstates[] __initdata = {
 		.desc = "MWAIT 0x01",
 		.flags = MWAIT2flg(0x01) | CPUIDLE_FLAG_ALWAYS_ENABLE,
 		.exit_latency = 10,
-		.target_residency = 20,
+		.target_residency = 300,
 		.enter = &intel_idle,
 		.enter_s2idle = intel_idle_s2idle, },
 	{
