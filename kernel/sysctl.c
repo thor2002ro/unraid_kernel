@@ -84,6 +84,9 @@
 
 #if defined(CONFIG_SYSCTL)
 
+#ifdef CONFIG_USER_NS
+extern int unprivileged_userns_clone;
+#endif
 /* Constants used for minimum and  maximum */
 
 #ifdef CONFIG_PERF_EVENTS
@@ -1790,6 +1793,15 @@ static struct ctl_table kern_table[] = {
 		.maxlen		= sizeof (int),
 		.mode		= 0644,
 		.proc_handler	= sysrq_sysctl_handler,
+	},
+#endif
+#ifdef CONFIG_USER_NS
+	{
+		.procname	= "unprivileged_userns_clone",
+		.data		= &unprivileged_userns_clone,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
 	},
 #endif
 #ifdef CONFIG_PROC_SYSCTL
