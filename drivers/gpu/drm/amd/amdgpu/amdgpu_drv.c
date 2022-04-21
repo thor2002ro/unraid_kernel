@@ -219,8 +219,9 @@ module_param_named(gartsize, amdgpu_gart_size, uint, 0600);
 
 /**
  * DOC: gttsize (int)
- * Restrict the size of GTT domain in MiB for testing. The default is -1 (It's VRAM size if 3GB < VRAM < 3/4 RAM,
- * otherwise 3/4 RAM size).
+ * Restrict the size of GTT domain in MiB for testing. The default is -1 (On APUs this is 3/4th
+ * of the system memory; on dGPUs this is 3GiB or VRAM sized, whichever is bigger,
+ * with an upper bound of 3/4th of system memory.
  */
 MODULE_PARM_DESC(gttsize, "Size of the GTT domain in megabytes (-1 = auto)");
 module_param_named(gttsize, amdgpu_gtt_size, int, 0600);
