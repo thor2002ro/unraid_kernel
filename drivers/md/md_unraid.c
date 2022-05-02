@@ -56,6 +56,18 @@ int md_trace              = MD_TRACE;          /* command/debug tracing */
 /****************************************************************************/
 /* Module parameters, and other global data */
 
+/*
+	overwrite unraid driver patch level
+	  13 for unraid 6.8.3, 
+	  17 for unraid 6.9.2, 
+	  18 for unraid 6.10rc1,
+	  19 for unraid 6.10rc2,
+	  21 for unraid 6.10rc3,
+	  22 for unraid 6.10rc4.
+*/
+module_param_named(unraid_patch, MD_PATCHLEVEL_VERSION, int, 0);
+
+
 static char *super;                            /* superblock file */
 module_param(super, charp, 0);
 
