@@ -65,7 +65,7 @@ extern void (*raid6_xor_syndrome)(int, int, int, size_t, void **);
  */
 #define MD_MAJOR_VERSION                2
 #define MD_MINOR_VERSION                9
-static int MD_PATCHLEVEL_VERSION = 		17;
+static int MD_PATCHLEVEL_VERSION = 		22;
 //#define MD_PATCHLEVEL_VERSION			17
 
 /****************************************************************************/
