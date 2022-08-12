@@ -193,6 +193,13 @@ static void dump_instr(const char *lvl, struct pt_regs *regs)
 				bad = get_user(val, &((u32 *)addr)[i]);
 		}
 
+		if (IS_ENABLED(CONFIG_CPU_ENDIAN_BE8)) {
+			if (thumb)
+				val = cpu_to_le16(val);
+			else
+				val = cpu_to_le32(val);
+		}
+
 		if (!bad)
 			p += sprintf(p, i == 0 ? "(%0*x) " : "%0*x ",
 					width, val);
