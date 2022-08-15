@@ -2,8 +2,6 @@ DEBUG_CFLAGS	:=
 
 ifdef CONFIG_DEBUG_INFO_SPLIT
 DEBUG_CFLAGS	+= -gsplit-dwarf
-else
-DEBUG_CFLAGS	+= -g
 endif
 
 ifndef CONFIG_AS_IS_LLVM
@@ -14,6 +12,16 @@ ifndef CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT
 dwarf-version-$(CONFIG_DEBUG_INFO_DWARF4) := 4
 dwarf-version-$(CONFIG_DEBUG_INFO_DWARF5) := 5
 DEBUG_CFLAGS	+= -gdwarf-$(dwarf-version-y)
+endif
+
+DEBUG_CFLAGS	+= -g$(CONFIG_DEBUG_INFO_LEVEL)
+ifdef CONFIG_DEBUG_MACRO_DEFINITIONS
+ifdef CONFIG_CC_IS_GCC
+DEBUG_CFLAGS	+= -g3
+endif
+ifdef CONFIG_CC_IS_CLANG
+DEBUG_CFLAGS	+= -fdebug-macro
+endif
 endif
 
 ifdef CONFIG_DEBUG_INFO_REDUCED
