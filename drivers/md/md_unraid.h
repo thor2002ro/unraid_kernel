@@ -49,6 +49,8 @@
 #include <linux/ata.h>
 #include <net/checksum.h>
 #include <linux/raid/xor.h>
+#include <linux/blk-mq.h>
+
 
 /*
  * Here are the raid6 p/q functions. Note: we patched lib/raid6/algos.c to ensure xor_syndrome() function
