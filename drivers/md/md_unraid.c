@@ -952,7 +952,11 @@ static void md_submit_bio(struct bio *bi)
 		return;
 	}
 
+#if LINUX_VERSION_CODE > KERNEL_VERSION(5,19,99)
+	bi = bio_split_to_limits(bi);
+#else 
 	blk_queue_split(&bi);
+#endif
 	bi->bi_opf &= ~REQ_NOMERGE;
 
 	unraid_make_request(mddev, unit, bi);
@@ -1096,7 +1100,9 @@ static int do_stop(mddev_t *mddev)
 			printk("md%d: stopping\n", unit);
 
 			del_gendisk(gd);
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(5,19,99)
 			blk_cleanup_queue(gq);
+#endif
 			put_disk(gd);
 
 			mddev->gendisk[unit] = NULL;
