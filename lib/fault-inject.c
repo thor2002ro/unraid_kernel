@@ -179,6 +179,14 @@ static void debugfs_create_ul(const char *name, umode_t mode,
 
 #ifdef CONFIG_FAULT_INJECTION_STACKTRACE_FILTER
 
+DEFINE_SIMPLE_ATTRIBUTE(fops_xl, debugfs_ul_get, debugfs_ul_set, "0x%llx\n");
+
+static void debugfs_create_xl(const char *name, umode_t mode,
+			      struct dentry *parent, unsigned long *value)
+{
+	debugfs_create_file(name, mode, parent, value, &fops_xl);
+}
+
 static int debugfs_stacktrace_depth_set(void *data, u64 val)
 {
 	*(unsigned long *)data =
@@ -223,10 +231,10 @@ struct dentry *fault_create_debugfs_attr(const char *name,
 #ifdef CONFIG_FAULT_INJECTION_STACKTRACE_FILTER
 	debugfs_create_stacktrace_depth("stacktrace-depth", mode, dir,
 					&attr->stacktrace_depth);
-	debugfs_create_ul("require-start", mode, dir, &attr->require_start);
-	debugfs_create_ul("require-end", mode, dir, &attr->require_end);
-	debugfs_create_ul("reject-start", mode, dir, &attr->reject_start);
-	debugfs_create_ul("reject-end", mode, dir, &attr->reject_end);
+	debugfs_create_xl("require-start", mode, dir, &attr->require_start);
+	debugfs_create_xl("require-end", mode, dir, &attr->require_end);
+	debugfs_create_xl("reject-start", mode, dir, &attr->reject_start);
+	debugfs_create_xl("reject-end", mode, dir, &attr->reject_end);
 #endif /* CONFIG_FAULT_INJECTION_STACKTRACE_FILTER */
 
 	attr->dname = dget(dir);
