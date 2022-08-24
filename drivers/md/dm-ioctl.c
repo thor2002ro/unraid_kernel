@@ -1377,7 +1377,8 @@ static int next_target(struct dm_target_spec *last, uint32_t next, void *end,
 }
 
 static int populate_table(struct dm_table *table,
-			  struct dm_ioctl *param, size_t param_size)
+			  struct dm_ioctl *param, size_t param_size,
+			  char **ti_error)
 {
 	int r;
 	unsigned int i = 0;
@@ -1388,6 +1389,8 @@ static int populate_table(struct dm_table *table,
 
 	if (!param->target_count) {
 		DMERR("populate_table: no targets specified");
+		if (ti_error)
+			*ti_error = "no targets specified";
 		return -EINVAL;
 	}
 
@@ -1396,13 +1399,15 @@ static int populate_table(struct dm_table *table,
 		r = next_target(spec, next, end, &spec, &target_params);
 		if (r) {
 			DMERR("unable to find target");
+			if (ti_error)
+				*ti_error = "unable to find target";
 			return r;
 		}
 
 		r = dm_table_add_target(table, spec->target_type,
 					(sector_t) spec->sector_start,
 					(sector_t) spec->length,
-					target_params);
+					target_params, ti_error);
 		if (r) {
 			DMERR("error adding target to table");
 			return r;
@@ -1430,18 +1435,24 @@ static int table_load(struct file *filp, struct dm_ioctl *param, size_t param_si
 	struct dm_table *t, *old_map = NULL;
 	struct mapped_device *md;
 	struct target_type *immutable_target_type;
+	char *ti_error;
 
 	md = find_device(param);
-	if (!md)
-		return -ENXIO;
+	if (!md) {
+		r = -ENXIO;
+		ti_error = "unable to find device";
+		goto err0;
+	}
 
 	r = dm_table_create(&t, get_mode(param), param->target_count, md);
-	if (r)
+	if (r) {
+		ti_error = "unable to create table";
 		goto err;
+	}
 
 	/* Protect md->type and md->queue against concurrent table loads. */
 	dm_lock_md_type(md);
-	r = populate_table(t, param, param_size);
+	r = populate_table(t, param, param_size, &ti_error);
 	if (r)
 		goto err_unlock_md_type;
 
@@ -1454,6 +1465,7 @@ static int table_load(struct file *filp, struct dm_ioctl *param, size_t param_si
 		DMERR("can't replace immutable target type %s",
 		      immutable_target_type->name);
 		r = -EINVAL;
+		ti_error = "can't replace immutable target";
 		goto err_unlock_md_type;
 	}
 
@@ -1462,6 +1474,7 @@ static int table_load(struct file *filp, struct dm_ioctl *param, size_t param_si
 		r = dm_setup_md_queue(md, t);
 		if (r) {
 			DMERR("unable to set up device queue for new table.");
+			ti_error = "unable to set up device queue for new table";
 			goto err_unlock_md_type;
 		}
 	} else if (!is_valid_type(dm_get_md_type(md), dm_table_get_type(t))) {
@@ -1480,6 +1493,7 @@ static int table_load(struct file *filp, struct dm_ioctl *param, size_t param_si
 		DMERR("device has been removed from the dev hash table.");
 		up_write(&_hash_lock);
 		r = -ENXIO;
+		ti_error = "device has been removed from the dev hash table";
 		goto err_destroy_table;
 	}
 
@@ -1506,7 +1520,13 @@ err_destroy_table:
 	dm_table_destroy(t);
 err:
 	dm_put(md);
-
+err0:
+	if (param->flags & DM_RETURN_ERROR_FLAG) {
+		param->flags &= ~DM_RETURN_ERROR_FLAG;
+		strlcpy(param->name, ti_error, sizeof param->name);
+		param->error = r;
+		return 0;
+	}
 	return r;
 }
 
@@ -1919,6 +1939,9 @@ static int validate_params(uint cmd, struct dm_ioctl *param)
 	param->flags &= ~DM_SECURE_DATA_FLAG;
 	param->flags &= ~DM_DATA_OUT_FLAG;
 
+	if (param->flags & DM_RETURN_ERROR_FLAG)
+		param->error = 0;
+
 	/* Ignores parameters */
 	if (cmd == DM_REMOVE_ALL_CMD ||
 	    cmd == DM_LIST_DEVICES_CMD ||
@@ -2201,7 +2224,7 @@ int __init dm_early_create(struct dm_ioctl *dmi,
 		r = dm_table_add_target(t, spec_array[i]->target_type,
 					(sector_t) spec_array[i]->sector_start,
 					(sector_t) spec_array[i]->length,
-					target_params_array[i]);
+					target_params_array[i], NULL);
 		if (r) {
 			DMERR("error adding target to table");
 			goto err_destroy_table;

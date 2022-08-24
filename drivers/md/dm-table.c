@@ -631,56 +631,58 @@ static int validate_hardware_logical_block_alignment(struct dm_table *t,
 }
 
 int dm_table_add_target(struct dm_table *t, const char *type,
-			sector_t start, sector_t len, char *params)
+			sector_t start, sector_t len, char *params,
+			char **ti_error)
 {
 	int r = -EINVAL, argc;
 	char **argv;
 	struct dm_target *ti;
 
-	if (t->singleton) {
-		DMERR("%s: target type %s must appear alone in table",
-		      dm_device_name(t->md), t->targets->type->name);
-		return -EINVAL;
-	}
-
 	BUG_ON(t->num_targets >= t->num_allocated);
-
 	ti = t->targets + t->num_targets;
 	memset(ti, 0, sizeof(*ti));
 
+	if (t->singleton) {
+		ti->error = "singleton target must appear alone in table";
+		r = -EINVAL;
+		goto bad0;
+	}
+
 	if (!len) {
-		DMERR("%s: zero-length target", dm_device_name(t->md));
-		return -EINVAL;
+		ti->error = "zero-length target";
+		r = -EINVAL;
+		goto bad0;
 	}
 
 	ti->type = dm_get_target_type(type);
 	if (!ti->type) {
-		DMERR("%s: %s: unknown target type", dm_device_name(t->md), type);
-		return -EINVAL;
+		ti->error = "unknown target type";
+		r = -EINVAL;
+		goto bad0;
 	}
 
 	if (dm_target_needs_singleton(ti->type)) {
 		if (t->num_targets) {
 			ti->error = "singleton target type must appear alone in table";
-			goto bad;
+			goto bad1;
 		}
 		t->singleton = true;
 	}
 
 	if (dm_target_always_writeable(ti->type) && !(t->mode & FMODE_WRITE)) {
 		ti->error = "target type may not be included in a read-only table";
-		goto bad;
+		goto bad1;
 	}
 
 	if (t->immutable_target_type) {
 		if (t->immutable_target_type != ti->type) {
 			ti->error = "immutable target type cannot be mixed with other target types";
-			goto bad;
+			goto bad1;
 		}
 	} else if (dm_target_is_immutable(ti->type)) {
 		if (t->num_targets) {
 			ti->error = "immutable target type cannot be mixed with other target types";
-			goto bad;
+			goto bad1;
 		}
 		t->immutable_target_type = ti->type;
 	}
@@ -698,19 +700,19 @@ int dm_table_add_target(struct dm_table *t, const char *type,
 	 */
 	if (!adjoin(t, ti)) {
 		ti->error = "Gap in table";
-		goto bad;
+		goto bad1;
 	}
 
 	r = dm_split_args(&argc, &argv, params);
 	if (r) {
 		ti->error = "couldn't split parameters";
-		goto bad;
+		goto bad1;
 	}
 
 	r = ti->type->ctr(ti, argc, argv);
 	kfree(argv);
 	if (r)
-		goto bad;
+		goto bad1;
 
 	t->highs[t->num_targets++] = ti->begin + ti->len - 1;
 
@@ -723,9 +725,12 @@ int dm_table_add_target(struct dm_table *t, const char *type,
 
 	return 0;
 
- bad:
-	DMERR("%s: %s: %s (%pe)", dm_device_name(t->md), type, ti->error, ERR_PTR(r));
+bad1:
 	dm_put_target_type(ti->type);
+bad0:
+	DMERR("%s: %s: %s (%pe)", dm_device_name(t->md), type, ti->error, ERR_PTR(r));
+	if (ti_error)
+		*ti_error = ti->error;
 	return r;
 }
 

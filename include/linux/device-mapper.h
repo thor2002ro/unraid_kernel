@@ -531,7 +531,8 @@ int dm_table_create(struct dm_table **result, fmode_t mode,
  * Then call this once for each target.
  */
 int dm_table_add_target(struct dm_table *t, const char *type,
-			sector_t start, sector_t len, char *params);
+			sector_t start, sector_t len, char *params,
+			char **ti_error);
 
 /*
  * Target can use this to set the table's type.
