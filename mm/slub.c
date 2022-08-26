@@ -487,9 +487,9 @@ static inline bool __cmpxchg_double_slab(struct kmem_cache *s, struct slab *slab
 #if defined(CONFIG_HAVE_CMPXCHG_DOUBLE) && \
     defined(CONFIG_HAVE_ALIGNED_STRUCT_PAGE)
 	if (s->flags & __CMPXCHG_DOUBLE) {
-		if (cmpxchg_double(&slab->freelist, &slab->counters,
-				   freelist_old, counters_old,
-				   freelist_new, counters_new))
+		if (cmpxchg_double(&slab->counters, &slab->freelist,
+				   counters_old, freelist_old,
+				   counters_new, freelist_new))
 			return true;
 	} else
 #endif
@@ -526,9 +526,9 @@ static inline bool cmpxchg_double_slab(struct kmem_cache *s, struct slab *slab,
 #if defined(CONFIG_HAVE_CMPXCHG_DOUBLE) && \
     defined(CONFIG_HAVE_ALIGNED_STRUCT_PAGE)
 	if (s->flags & __CMPXCHG_DOUBLE) {
-		if (cmpxchg_double(&slab->freelist, &slab->counters,
-				   freelist_old, counters_old,
-				   freelist_new, counters_new))
+		if (cmpxchg_double(&slab->counters, &slab->freelist,
+				   counters_old, freelist_old,
+				   counters_new, freelist_new))
 			return true;
 	} else
 #endif
