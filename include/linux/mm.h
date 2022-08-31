@@ -1177,7 +1177,7 @@ static inline void folio_put_refs(struct folio *folio, int refs)
 		__folio_put(folio);
 }
 
-void release_pages(struct page **pages, int nr);
+void release_pages(struct page **pages, unsigned long npages);
 
 /**
  * folios_put - Decrement the reference count on an array of folios.

@@ -975,15 +975,15 @@ void lru_cache_disable(void)
  * Decrement the reference count on all the pages in @pages.  If it
  * fell to zero, remove the page from the LRU and free it.
  */
-void release_pages(struct page **pages, int nr)
+void release_pages(struct page **pages, unsigned long npages)
 {
-	int i;
+	unsigned long i;
 	LIST_HEAD(pages_to_free);
 	struct lruvec *lruvec = NULL;
 	unsigned long flags = 0;
 	unsigned int lock_batch;
 
-	for (i = 0; i < nr; i++) {
+	for (i = 0; i < npages; i++) {
 		struct folio *folio = page_folio(pages[i]);
 
 		/*
