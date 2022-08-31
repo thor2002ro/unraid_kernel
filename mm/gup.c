@@ -3281,6 +3281,56 @@ long pin_user_pages(unsigned long start, unsigned long nr_pages,
 }
 EXPORT_SYMBOL(pin_user_pages);
 
+/**
+ * pin_user_page() - apply a FOLL_PIN reference to a file-backed page that the
+ * caller already owns.
+ *
+ * @page: the page to be pinned.
+ *
+ * pin_user_page() elevates a page's refcount using FOLL_PIN rules. This means
+ * that the caller must release the page via unpin_user_page().
+ *
+ * pin_user_page() is intended as a drop-in replacement for get_page(). This
+ * provides a way for callers to do a subsequent unpin_user_page() on the
+ * affected page. However, it is only intended for use by callers (file systems,
+ * block/bio) that have a file-backed page. Anonymous pages are not expected nor
+ * supported, and will generate a warning.
+ *
+ * pin_user_page() may also be thought of as an externally-usable version of
+ * try_grab_page(), but with semantics that match get_page(), so that it can act
+ * as a drop-in replacement for get_page().
+ *
+ * IMPORTANT: The caller must release the page via unpin_user_page().
+ *
+ */
+void pin_user_page(struct page *page)
+{
+	struct folio *folio = page_folio(page);
+
+	WARN_ON_ONCE(folio_ref_count(folio) <= 0);
+
+	/*
+	 * This function is only intended for file-backed callers, who already
+	 * have a page reference.
+	 */
+	WARN_ON_ONCE(PageAnon(page));
+
+	/*
+	 * Similar to try_grab_page(): be sure to *also*
+	 * increment the normal page refcount field at least once,
+	 * so that the page really is pinned.
+	 */
+	if (folio_test_large(folio)) {
+		folio_ref_add(folio, 1);
+		atomic_add(1, folio_pincount_ptr(folio));
+	} else {
+		folio_ref_add(folio, GUP_PIN_COUNTING_BIAS);
+	}
+
+	node_stat_mod_folio(folio, NR_FOLL_PIN_ACQUIRED, 1);
+}
+EXPORT_SYMBOL(pin_user_page);
+
 /*
  * pin_user_pages_unlocked() is the FOLL_PIN variant of
  * get_user_pages_unlocked(). Behavior is the same, except that this one sets
