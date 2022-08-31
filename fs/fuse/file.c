@@ -625,14 +625,19 @@ void fuse_read_args_fill(struct fuse_io_args *ia, struct file *file, loff_t pos,
 }
 
 static void fuse_release_user_pages(struct fuse_args_pages *ap,
-				    bool should_dirty)
+				    bool should_dirty, bool is_user_or_bvec)
 {
 	unsigned int i;
 
-	for (i = 0; i < ap->num_pages; i++) {
-		if (should_dirty)
-			set_page_dirty_lock(ap->pages[i]);
-		put_page(ap->pages[i]);
+	if (is_user_or_bvec) {
+		dio_w_unpin_user_pages_dirty_lock(ap->pages, ap->num_pages,
+						  should_dirty);
+	} else {
+		for (i = 0; i < ap->num_pages; i++) {
+			if (should_dirty)
+				set_page_dirty_lock(ap->pages[i]);
+			put_page(ap->pages[i]);
+		}
 	}
 }
 
@@ -733,7 +738,7 @@ static void fuse_aio_complete_req(struct fuse_mount *fm, struct fuse_args *args,
 	struct fuse_io_priv *io = ia->io;
 	ssize_t pos = -1;
 
-	fuse_release_user_pages(&ia->ap, io->should_dirty);
+	fuse_release_user_pages(&ia->ap, io->should_dirty, io->is_user_or_bvec);
 
 	if (err) {
 		/* Nothing */
@@ -1414,10 +1419,10 @@ static int fuse_get_user_pages(struct fuse_args_pages *ap, struct iov_iter *ii,
 	while (nbytes < *nbytesp && ap->num_pages < max_pages) {
 		unsigned npages;
 		size_t start;
-		ret = iov_iter_get_pages2(ii, &ap->pages[ap->num_pages],
-					*nbytesp - nbytes,
-					max_pages - ap->num_pages,
-					&start);
+		ret = dio_w_iov_iter_pin_pages(ii, &ap->pages[ap->num_pages],
+					       *nbytesp - nbytes,
+					       max_pages - ap->num_pages,
+					       &start);
 		if (ret < 0)
 			break;
 
@@ -1483,6 +1488,10 @@ ssize_t fuse_direct_io(struct fuse_io_priv *io, struct iov_iter *iter,
 		fl_owner_t owner = current->files;
 		size_t nbytes = min(count, nmax);
 
+		/* For use in fuse_release_user_pages(): */
+		io->is_user_or_bvec = user_backed_iter(iter) ||
+				      iov_iter_is_bvec(iter);
+
 		err = fuse_get_user_pages(&ia->ap, iter, &nbytes, write,
 					  max_pages);
 		if (err && !nbytes)
@@ -1498,7 +1507,8 @@ ssize_t fuse_direct_io(struct fuse_io_priv *io, struct iov_iter *iter,
 		}
 
 		if (!io->async || nres < 0) {
-			fuse_release_user_pages(&ia->ap, io->should_dirty);
+			fuse_release_user_pages(&ia->ap, io->should_dirty,
+						io->is_user_or_bvec);
 			fuse_io_free(ia);
 		}
 		ia = NULL;
