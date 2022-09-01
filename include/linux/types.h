@@ -198,10 +198,51 @@ struct ustat {
 	char			f_fpack[6];
 };
 
+#ifdef CONFIG_RCU_TRACE_CB
+/*
+ * Debug information that a caller can store within a callback_head.
+ * Its expected to provide at least 12 bytes before BUILD_BUG starts
+ * complaining.
+ */
+enum cb_debug_flags {
+	CB_DEBUG_KFREE,
+	CB_DEBUG_LAZY,
+	CB_DEBUG_BYPASS,
+
+	// A new non-lazy CB showed up and we decided to not use
+	// the bypass list for it. So we flushed the old ones.
+	CB_DEBUG_NON_LAZY_FLUSHED,
+
+	// We decided to use the bypass list but had to flush
+	// the old bypass CBs because they got too old or too big.
+	CB_DEBUG_BYPASS_FLUSHED,
+	CB_DEBUG_BYPASS_LAZY_FLUSHED,
+
+	// The GP thread flushed the bypass CBs if they got old or big.
+	CB_DEBUG_GPTHREAD_FLUSHED,
+
+	// De-offload from NOCB mode.
+	CB_DEBUG_DEOFFLOAD_FLUSHED,
+
+	// rcu_barrier() flushes lazy/bypass CBs for CB exec ordering.
+	CB_DEBUG_BARRIER_FLUSHED
+};
+
+struct cb_debug_info {
+	// 16-bit jiffie deltas can provide about 60 seconds of resolution
+	// at HZ=1000 before wrapping. That's enough for debug.
+	u16 cb_queue_jiff;
+	u16 first_bp_jiff;
+	u16 cb_flush_jiff;
+	enum cb_debug_flags flags:16;
+};
+#endif
+
 /**
  * struct callback_head - callback structure for use with RCU and task_work
  * @next: next update requests in a list
  * @func: actual update function to call after the grace period.
+ * @di: debug information that can be stored.
  *
  * The struct is aligned to size of pointer. On most architectures it happens
  * naturally due ABI requirements, but some architectures (like CRIS) have
@@ -220,6 +261,9 @@ struct ustat {
 struct callback_head {
 	struct callback_head *next;
 	void (*func)(struct callback_head *head);
+#ifdef CONFIG_RCU_TRACE_CB
+	struct cb_debug_info di;
+#endif
 } __attribute__((aligned(sizeof(void *))));
 #define rcu_head callback_head
 

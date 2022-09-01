@@ -225,7 +225,7 @@ static void thread_stack_delayed_free(struct task_struct *tsk)
 	struct vm_stack *vm_stack = tsk->stack;
 
 	vm_stack->stack_vm_area = tsk->stack_vm_area;
-	call_rcu(&vm_stack->rcu, thread_stack_free_rcu);
+	call_rcu_lazy(&vm_stack->rcu, thread_stack_free_rcu);
 }
 
 static int free_vm_stack_cache(unsigned int cpu)
@@ -352,7 +352,7 @@ static void thread_stack_delayed_free(struct task_struct *tsk)
 {
 	struct rcu_head *rh = tsk->stack;
 
-	call_rcu(rh, thread_stack_free_rcu);
+	call_rcu_lazy(rh, thread_stack_free_rcu);
 }
 
 static int alloc_thread_stack_node(struct task_struct *tsk, int node)
@@ -387,7 +387,7 @@ static void thread_stack_delayed_free(struct task_struct *tsk)
 {
 	struct rcu_head *rh = tsk->stack;
 
-	call_rcu(rh, thread_stack_free_rcu);
+	call_rcu_lazy(rh, thread_stack_free_rcu);
 }
 
 static int alloc_thread_stack_node(struct task_struct *tsk, int node)

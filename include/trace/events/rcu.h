@@ -630,24 +630,85 @@ TRACE_EVENT_RCU(rcu_batch_start,
  */
 TRACE_EVENT_RCU(rcu_invoke_callback,
 
-	TP_PROTO(const char *rcuname, struct rcu_head *rhp),
+	TP_PROTO(const char *rcuname, struct rcu_head *rhp
+#ifdef CONFIG_RCU_TRACE_CB
+		, unsigned long jiffies_first
+#endif
+	),
 
-	TP_ARGS(rcuname, rhp),
+	TP_ARGS(rcuname, rhp
+#ifdef CONFIG_RCU_TRACE_CB
+		, jiffies_first
+#endif
+		),
 
 	TP_STRUCT__entry(
 		__field(const char *, rcuname)
 		__field(void *, rhp)
 		__field(void *, func)
+#ifdef CONFIG_RCU_TRACE_CB
+		__field(u16, cb_debug_flags)
+		__field(int, cb_queue_exec_latency)
+		__array(char, bypass_flush_reason, 32)
+		__field(int, cb_bypass_slack)
+		__field(int, cb_queue_flush_latency)
+#endif
 	),
 
 	TP_fast_assign(
 		__entry->rcuname = rcuname;
 		__entry->rhp = rhp;
 		__entry->func = rhp->func;
+#ifdef CONFIG_RCU_TRACE_CB
+		__entry->cb_debug_flags = rhp->di.flags;
+		__entry->cb_queue_exec_latency =
+			(jiffies - jiffies_first) - rhp->di.cb_queue_jiff,
+
+		/* The following 3 fields are valid only for bypass/lazy CBs. */
+		__entry->cb_bypass_slack =
+			(rhp->di.flags & BIT(CB_DEBUG_BYPASS)) ?
+				rhp->di.cb_queue_jiff - rhp->di.first_bp_jiff : 0,
+		__entry->cb_queue_flush_latency =
+			(rhp->di.flags & BIT(CB_DEBUG_BYPASS)) ?
+				rhp->di.cb_flush_jiff - rhp->di.cb_queue_jiff : 0;
+
+
+		if (__entry->cb_debug_flags & BIT(CB_DEBUG_NON_LAZY_FLUSHED))
+			strcpy(__entry->bypass_flush_reason, "non-lazy");
+		else if (__entry->cb_debug_flags & BIT(CB_DEBUG_BYPASS_FLUSHED))
+			strcpy(__entry->bypass_flush_reason, "bypass");
+		else if (__entry->cb_debug_flags & BIT(CB_DEBUG_BYPASS_LAZY_FLUSHED))
+			strcpy(__entry->bypass_flush_reason, "bypass-lazy");
+		else if (__entry->cb_debug_flags & BIT(CB_DEBUG_GPTHREAD_FLUSHED))
+			strcpy(__entry->bypass_flush_reason, "gpthread");
+		else if (__entry->cb_debug_flags & BIT(CB_DEBUG_BARRIER_FLUSHED))
+			strcpy(__entry->bypass_flush_reason, "rcu_barrier");
+		else if (__entry->cb_debug_flags & BIT(CB_DEBUG_DEOFFLOAD_FLUSHED))
+			strcpy(__entry->bypass_flush_reason, "deoffload");
+#endif
 	),
 
-	TP_printk("%s rhp=%p func=%ps",
-		  __entry->rcuname, __entry->rhp, __entry->func)
+	TP_printk("%s rhp=%p func=%ps"
+#ifdef CONFIG_RCU_TRACE_CB
+			" lazy=%d "
+			"bypass=%d "
+			"flush_reason=%s "
+			"queue_exec_latency=%d "
+			"bypass_slack=%d "
+			"queue_flush_latency=%d"
+#endif
+			,
+		  __entry->rcuname, __entry->rhp, __entry->func
+#ifdef CONFIG_RCU_TRACE_CB
+		,
+		!!(__entry->cb_debug_flags & BIT(CB_DEBUG_LAZY)),
+		!!(__entry->cb_debug_flags & BIT(CB_DEBUG_BYPASS)),
+		__entry->bypass_flush_reason,
+		__entry->cb_queue_exec_latency,
+		__entry->cb_bypass_slack,
+		__entry->cb_queue_flush_latency
+#endif
+	 )
 );
 
 /*

@@ -311,4 +311,23 @@ config TASKS_TRACE_RCU_READ_MB
 	  Say N here if you hate read-side memory barriers.
 	  Take the default if you are unsure.
 
+config RCU_LAZY
+	bool "RCU callback lazy invocation functionality"
+	depends on RCU_NOCB_CPU
+	default n
+	help
+	  To save power, batch RCU callbacks and flush after delay, memory
+	  pressure or callback list growing too big.
+
+config RCU_TRACE_CB
+	bool "Enable additional callback tracing"
+	depends on RCU_LAZY
+	default n
+	help
+	  Enable additional callback tracing for RCU. Currently only
+	  tracing for lazy/bypass callbacks is done. In the future, it could be
+	  extended to non-lazy callbacks as well. The trace point contains
+	  detailed information about callback flushing reason and execution
+	  time. This information can be retrieved by BPF tools via tracepoints.
+
 endmenu # "RCU Subsystem"
