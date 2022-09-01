@@ -2017,7 +2017,7 @@ static int khugepaged_scan_file(struct mm_struct *mm, struct file *file,
 	BUILD_BUG();
 }
 
-static void khugepaged_collapse_pte_mapped_thps(struct mm_slot *mm_slot)
+static void khugepaged_collapse_pte_mapped_thps(struct khugepaged_mm_slot *mm_slot)
 {
 }
 #endif
