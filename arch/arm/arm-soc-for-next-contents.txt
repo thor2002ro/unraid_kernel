@@ -1,0 +1,54 @@
+arm/soc
+	patch
+		arm64: Kconfig.platforms: Re-organized Broadcom menu
+		arm64: Kconfig.platforms: Group NXP platforms together
+
+arm/dt
+	<no branch> (f485f6d852696d4cd9a2cc1c8e3dd8dba75a3e17)
+		git://git.kernel.org/pub/scm/linux/kernel/git/linusw/linux-nomadik tags/gemini-dts-v6.1-1
+	at91/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-dt-6.1
+	renesas/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-dt-for-v6.1-tag1
+	renesas/dt-bindings
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-dt-bindings-for-v6.1-tag1
+
+arm/drivers
+	renesas/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-drivers-for-v6.1-tag1
+
+arm/defconfig
+	arm/defconfig-cleanup
+		Merge branch 'arm/defconfig-cleanup' into arm/defconfig
+	patch
+		ARM: configs: replace CONFIG_NO_HZ=y with CONFIG_NO_HZ_IDLE=y
+		arm64: defconfig: Drop ARM_CPUIDLE(generic idle driver) config
+	renesas/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-defconfig-for-v6.1-tag1
+
+arm/late
+
+arm/fixes
+	polarfire/fixes
+		Merge branch 'polarfire/fixes' into arm/fixes
+	<no branch> (8f143b9f3849828870bb2a7f28288095ad9a329d)
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-6.0
+	<no branch> (6c939e28b192075e1d3b9b267100a3dd9d6a7cf7)
+		git://git.kernel.org/pub/scm/linux/kernel/git/linusw/linux-integrator tags/versatile-dts-v6.1
+	<no branch> (eccd7439709810127563e7e3e49b8b44c7b2791d)
+		https://git.linaro.org/people/jens.wiklander/linux-tee tags/tee-fix-for-v6.0
+	patch
+		ARM: ixp4xx: fix typos in comments
+	<no branch> (422ab8fe15e30066d4c8e236b747c77069bfca45)
+		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/juno-fixes-6.0
+	<no branch> (f75fccbdc84fd9066e42c394c870bb6a3af57adc)
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-6.0/devicetree
+	<no branch> (1085f5080647f0c9f357c270a537869191f7f2a1)
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-6.0/drivers-fixes
+	patch
+		soc: fsl: select FSL_GUTS driver for DPIO
+	<no branch> (3d074b750d2b4c91962f10ea1df1c289ce0d3ce8)
+		git://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-fixes-6.0
+	<no branch> (ab2866f12ca18747413ba41409231d44e0c6149b)
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-fixes-for-v6.0-tag1
+
