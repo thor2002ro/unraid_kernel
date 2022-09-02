@@ -3644,7 +3644,7 @@ static int folio_update_gen(struct folio *folio, int gen)
 	do {
 		/* lru_gen_del_folio() has isolated this page? */
 		if (!(old_flags & LRU_GEN_MASK)) {
-			/* for shrink_page_list() */
+			/* for shrink_folio_list() */
 			new_flags = old_flags | BIT(PG_referenced);
 			continue;
 		}
@@ -4571,7 +4571,7 @@ static void lru_gen_age_node(struct pglist_data *pgdat, struct scan_control *sc)
 }
 
 /*
- * This function exploits spatial locality when shrink_page_list() walks the
+ * This function exploits spatial locality when shrink_folio_list() walks the
  * rmap. It scans the adjacent PTEs of a young PTE and promotes hot pages. If
  * the scan was done cacheline efficiently, it adds the PMD entry pointing to
  * the PTE table to the Bloom filter. This forms a feedback loop between the
@@ -4792,7 +4792,7 @@ static bool isolate_folio(struct lruvec *lruvec, struct folio *folio, struct sca
 	if (!folio_test_referenced(folio))
 		set_mask_bits(&folio->flags, LRU_REFS_MASK | LRU_REFS_FLAGS, 0);
 
-	/* for shrink_page_list() */
+	/* for shrink_folio_list() */
 	folio_clear_reclaim(folio);
 	folio_clear_referenced(folio);
 
@@ -4995,7 +4995,7 @@ static int evict_folios(struct lruvec *lruvec, struct scan_control *sc, int swap
 	if (list_empty(&list))
 		return scanned;
 
-	reclaimed = shrink_page_list(&list, pgdat, sc, &stat, false);
+	reclaimed = shrink_folio_list(&list, pgdat, sc, &stat, false);
 
 	list_for_each_entry(folio, &list, lru) {
 		/* restore LRU_REFS_FLAGS cleared by isolate_folio() */
@@ -5012,7 +5012,7 @@ static int evict_folios(struct lruvec *lruvec, struct scan_control *sc, int swap
 
 	spin_lock_irq(&lruvec->lru_lock);
 
-	move_pages_to_lru(lruvec, &list);
+	move_folios_to_lru(lruvec, &list);
 
 	walk = current->reclaim_state->mm_walk;
 	if (walk && walk->batched)
