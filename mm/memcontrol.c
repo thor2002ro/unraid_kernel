@@ -921,7 +921,7 @@ static unsigned long memcg_events_local(struct mem_cgroup *memcg, int event)
 		return 0;
 
 	for_each_possible_cpu(cpu)
-		x += per_cpu(memcg->vmstats_percpu->events[event], cpu);
+		x += per_cpu(memcg->vmstats_percpu->events[index], cpu);
 	return x;
 }
 
