@@ -659,7 +659,7 @@ static unsigned long damon_va_apply_scheme(struct damon_ctx *ctx,
 		return 0;
 	default:
 		/*
-		 * DAMOS actions that not yet supported by 'vaddr'.
+		 * DAMOS actions that are not yet supported by 'vaddr'.
 		 */
 		return 0;
 	}
