@@ -1850,8 +1850,7 @@ int cmd_lock(int argc, const char **argv)
 		NULL
 	};
 	const char *const lock_subcommands[] = { "record", "report", "script",
-						 "info", "contention",
-						 "contention", NULL };
+						 "info", "contention", NULL };
 	const char *lock_usage[] = {
 		NULL,
 		NULL
