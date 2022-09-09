@@ -169,6 +169,27 @@ static bool damon_intersect(struct damon_region *r,
 }
 
 /*
+ * Fill holes in regions with new regions.
+ */
+static void damon_fill_regions_holes(struct damon_region *first,
+		struct damon_region *last, struct damon_target *t)
+{
+	struct damon_region *r = first;
+
+	damon_for_each_region_from(r, t) {
+		struct damon_region *next, *newr;
+
+		if (r == last)
+			break;
+		next = damon_next_region(r);
+		if (r->ar.end != next->ar.start) {
+			newr = damon_new_region(r->ar.end, next->ar.start);
+			damon_insert_region(newr, r, next, t);
+		}
+	}
+}
+
+/*
  * damon_set_regions() - Set regions of a target for given address ranges.
  * @t:		the given target.
  * @ranges:	array of new monitoring target ranges.
@@ -226,6 +247,9 @@ int damon_set_regions(struct damon_target *t, struct damon_addr_range *ranges,
 			first->ar.start = ALIGN_DOWN(range->start,
 					DAMON_MIN_REGION);
 			last->ar.end = ALIGN(range->end, DAMON_MIN_REGION);
+
+			/* fill possible holes in the range */
+			damon_fill_regions_holes(first, last, t);
 		}
 	}
 	return 0;
