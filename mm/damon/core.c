@@ -1289,8 +1289,7 @@ bool damon_find_biggest_system_ram(unsigned long *start, unsigned long *end)
 
 static int __init damon_init(void)
 {
-	damon_region_cache = kmem_cache_create("damon_region_cache", sizeof(struct damon_region),
-		0, 0, NULL);
+	damon_region_cache = KMEM_CACHE(damon_region, 0);
 	if (unlikely(!damon_region_cache)) {
 		pr_err("creating damon_region_cache fails\n");
 		return -ENOMEM;
