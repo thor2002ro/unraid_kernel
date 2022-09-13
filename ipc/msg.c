@@ -1316,10 +1316,10 @@ int msg_init_ns(struct ipc_namespace *ns)
 	ipc_init_ids(&ns->ids[IPC_MSG_IDS]);
 	return 0;
 
-	fail_msg_hdrs:
-		percpu_counter_destroy(&ns->percpu_msg_bytes);
-	fail_msg_bytes:
-		return ret;
+fail_msg_hdrs:
+	percpu_counter_destroy(&ns->percpu_msg_bytes);
+fail_msg_bytes:
+	return ret;
 }
 
 #ifdef CONFIG_IPC_NS
