@@ -90,4 +90,15 @@ static inline void srcu_torture_stats_print(struct srcu_struct *ssp,
 		 data_race(READ_ONCE(ssp->srcu_idx_max)));
 }
 
+static inline int __srcu_read_lock_nmisafe(struct srcu_struct *ssp)
+{
+	BUG();
+	return 0;
+}
+
+static inline void __srcu_read_unlock_nmisafe(struct srcu_struct *ssp, int idx)
+{
+	BUG();
+}
+
 #endif
