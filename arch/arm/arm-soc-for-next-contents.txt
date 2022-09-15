@@ -2,6 +2,10 @@ arm/soc
 	patch
 		arm64: Kconfig.platforms: Re-organized Broadcom menu
 		arm64: Kconfig.platforms: Group NXP platforms together
+	<no branch> (01bf00c52e9ea76862e8a12a0838006be1f2cb8f)
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-6.1/maintainers
+	<no branch> (be7f3f901c619e24c93b8044c074306feedd8ee9)
+		https://git.kernel.org/pub/scm/linux/kernel/git/soc/soc footbridge/cleanup
 
 arm/dt
 	gemini/dt
@@ -22,6 +26,10 @@ arm/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/atorgue/stm32 tags/stm32-dt-for-v6.1-1
 	samsung/dt
 		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-dt64-6.1
+	broadcom/dt
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-6.1/devicetree
+	broadcom/dt64
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-6.1/devicetree-arm64
 
 arm/drivers
 	renesas/drivers
@@ -38,6 +46,10 @@ arm/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v6.1-rockchip-drivers1
 	samsung/drivers
 		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux tags/samsung-drivers-6.1
+	broadcom/drivers
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-6.1/drivers
+	drivers/ffa
+		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/ffa-updates-6.1
 
 arm/defconfig
 	arm/defconfig-cleanup
@@ -53,6 +65,8 @@ arm/defconfig
 		arm64: defconfig: enable ARCH_BCM
 		arm64: defconfig: enable ARCH_NXP
 		ARM: config: ixp4xx: Disable legacy EEPROM driver
+	broadcom/defconfig
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-6.1/defconfig-arm64
 
 arm/late
 
@@ -65,4 +79,8 @@ arm/fixes
 		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v6.0-rockchip-dtsfixes1
 	patch
 		dt-bindings: memory-controllers: fsl,imx8m-ddrc: drop Leonard Crestez
+	<no branch> (f7fc391a5e28216150ab5390df35032309ead7e5)
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-6.0-2
+	at91/fixes-2
+		https://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-fixes-6.0-2
 
