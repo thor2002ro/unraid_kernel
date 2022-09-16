@@ -17,8 +17,10 @@ static void chacha_permute(u32 *x, int nrounds)
 {
 	int i;
 
+#ifndef CHACHA_FOR_VDSO_INCLUDE
 	/* whitelist the allowed round counts */
 	WARN_ON_ONCE(nrounds != 20 && nrounds != 12);
+#endif
 
 	for (i = 0; i < nrounds; i += 2) {
 		x[0]  += x[4];    x[12] = rol32(x[12] ^ x[0],  16);
@@ -87,6 +89,7 @@ void chacha_block_generic(u32 *state, u8 *stream, int nrounds)
 
 	state[12]++;
 }
+#ifndef CHACHA_FOR_VDSO_INCLUDE
 EXPORT_SYMBOL(chacha_block_generic);
 
 /**
@@ -112,3 +115,4 @@ void hchacha_block_generic(const u32 *state, u32 *stream, int nrounds)
 	memcpy(&stream[4], &x[12], 16);
 }
 EXPORT_SYMBOL(hchacha_block_generic);
+#endif
