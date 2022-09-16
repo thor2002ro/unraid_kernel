@@ -8,6 +8,7 @@
  * into roughly six sections, each with a section header:
  *
  *   - Initialization and readiness waiting.
+ *   - VDSO support helpers.
  *   - Fast key erasure RNG, the "crng".
  *   - Entropy accumulation and extraction routines.
  *   - Entropy collection routines.
@@ -39,6 +40,7 @@
 #include <linux/blkdev.h>
 #include <linux/interrupt.h>
 #include <linux/mm.h>
+#include <linux/mman.h>
 #include <linux/nodemask.h>
 #include <linux/spinlock.h>
 #include <linux/kthread.h>
@@ -59,6 +61,8 @@
 #include <asm/irq.h>
 #include <asm/irq_regs.h>
 #include <asm/io.h>
+#include <vdso/datapage.h>
+#include "../../lib/vdso/getrandom.h"
 
 /*********************************************************************
  *
@@ -146,6 +150,63 @@ EXPORT_SYMBOL(wait_for_random_bytes);
 				__func__, (void *)_RET_IP_, crng_init)
 
 
+
+/********************************************************************
+ *
+ * VDSO support helpers.
+ *
+ * The actual vDSO function is defined over in lib/vdso/getrandom.c,
+ * but this section contains the kernel-mode helpers to support that.
+ *
+ ********************************************************************/
+
+/* The shared data page. */
+DEFINE_VVAR_SINGLE(struct vdso_rng_data, _vdso_rng_data);
+
+/*
+ * The vgetrandom() function in userspace requires an opaque state, which this
+ * function provides to userspace. The result is that it maps a certain
+ * number of special pages into the calling process and returns the address.
+ */
+SYSCALL_DEFINE3(vgetrandom_alloc, unsigned long __user *, num,
+		unsigned long __user *, size_per_each, unsigned int, flags)
+{
+	unsigned long alloc_size;
+	unsigned long num_states;
+	unsigned long pages_addr;
+	int ret;
+
+	if (flags)
+		return -EINVAL;
+
+	if (get_user(num_states, num))
+		return -EFAULT;
+
+	alloc_size = size_mul(num_states, sizeof(struct vgetrandom_state));
+	if (alloc_size == SIZE_MAX)
+		return -EOVERFLOW;
+	alloc_size = roundup(alloc_size, PAGE_SIZE);
+
+	if (put_user(alloc_size / sizeof(struct vgetrandom_state), num) ||
+	    put_user(sizeof(struct vgetrandom_state), size_per_each))
+		return -EFAULT;
+
+	pages_addr = vm_mmap(NULL, 0, alloc_size, PROT_READ | PROT_WRITE,
+			     MAP_PRIVATE | MAP_ANONYMOUS | MAP_LOCKED, 0);
+	if (IS_ERR_VALUE(pages_addr))
+		return pages_addr;
+
+	ret = do_madvise(current->mm, pages_addr, alloc_size, MADV_WIPEONFORK);
+	if (ret < 0)
+		goto err_unmap;
+
+	return pages_addr;
+
+err_unmap:
+	vm_munmap(pages_addr, alloc_size);
+	return ret;
+}
+
 /*********************************************************************
  *
  * Fast key erasure RNG, the "crng".
@@ -221,6 +282,7 @@ static void crng_reseed(void)
 		++next_gen;
 	WRITE_ONCE(base_crng.generation, next_gen);
 	WRITE_ONCE(base_crng.birth, jiffies);
+	smp_store_release(&_vdso_rng_data.generation, next_gen + 1);
 	if (!static_branch_likely(&crng_is_ready))
 		crng_init = CRNG_READY;
 	spin_unlock_irqrestore(&base_crng.lock, flags);
@@ -652,6 +714,7 @@ static void __cold _credit_init_bits(size_t bits)
 		crng_reseed(); /* Sets crng_init to CRNG_READY under base_crng.lock. */
 		if (static_key_initialized)
 			execute_in_process_context(crng_set_ready, &set_ready);
+		smp_store_release(&_vdso_rng_data.is_ready, true);
 		wake_up_interruptible(&crng_init_wait);
 		kill_fasync(&fasync, SIGIO, POLL_IN);
 		pr_notice("crng init done\n");
@@ -1563,4 +1626,5 @@ static int __init random_sysctls_init(void)
 	return 0;
 }
 device_initcall(random_sysctls_init);
+
 #endif
