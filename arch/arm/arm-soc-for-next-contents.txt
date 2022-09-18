@@ -2,10 +2,14 @@ arm/soc
 	patch
 		arm64: Kconfig.platforms: Re-organized Broadcom menu
 		arm64: Kconfig.platforms: Group NXP platforms together
-	<no branch> (01bf00c52e9ea76862e8a12a0838006be1f2cb8f)
+	broadcom/maintainers
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-6.1/maintainers
-	<no branch> (be7f3f901c619e24c93b8044c074306feedd8ee9)
+	footbridge/cleanup
 		https://git.kernel.org/pub/scm/linux/kernel/git/soc/soc footbridge/cleanup
+	<no branch> (84fc863606239d8b434e59e6bbbe805f457e5767)
+		https://git.kernel.org/pub/scm/linux/kernel/git/soc/soc arm-multiplatform-cleanup
+	patch
+		ARM: disallow PCI with MMU=n again
 
 arm/dt
 	gemini/dt
@@ -30,6 +34,8 @@ arm/dt
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-6.1/devicetree
 	broadcom/dt64
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-6.1/devicetree-arm64
+	at91/dt-2
+		https://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-dt-6.1-2
 
 arm/drivers
 	renesas/drivers
@@ -50,6 +56,8 @@ arm/drivers
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-6.1/drivers
 	drivers/ffa
 		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/ffa-updates-6.1
+	patch
+		soc: apple: rtkit: Add apple_rtkit_poll
 
 arm/defconfig
 	arm/defconfig-cleanup
