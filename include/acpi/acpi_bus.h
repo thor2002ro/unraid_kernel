@@ -365,7 +365,6 @@ struct acpi_device {
 	int device_type;
 	acpi_handle handle;		/* no handle for fixed hardware */
 	struct fwnode_handle fwnode;
-	struct acpi_device *parent;
 	struct list_head wakeup_list;
 	struct list_head del_list;
 	struct acpi_device_status status;
@@ -458,6 +457,14 @@ static inline void *acpi_driver_data(struct acpi_device *d)
 #define to_acpi_device(d)	container_of(d, struct acpi_device, dev)
 #define to_acpi_driver(d)	container_of(d, struct acpi_driver, drv)
 
+static inline struct acpi_device *acpi_dev_parent(struct acpi_device *adev)
+{
+	if (adev->dev.parent)
+		return to_acpi_device(adev->dev.parent);
+
+	return NULL;
+}
+
 static inline void acpi_set_device_status(struct acpi_device *adev, u32 sta)
 {
 	*((u32 *)&adev->status) = sta;
@@ -512,7 +519,6 @@ extern int unregister_acpi_notifier(struct notifier_block *);
  * External Functions
  */
 
-struct acpi_device *acpi_fetch_acpi_dev(acpi_handle handle);
 acpi_status acpi_bus_get_status_handle(acpi_handle handle,
 				       unsigned long long *sta);
 int acpi_bus_get_status(struct acpi_device *device);
@@ -767,9 +773,10 @@ static inline void acpi_dev_put(struct acpi_device *adev)
 		put_device(&adev->dev);
 }
 
-struct acpi_device *acpi_bus_get_acpi_device(acpi_handle handle);
+struct acpi_device *acpi_fetch_acpi_dev(acpi_handle handle);
+struct acpi_device *acpi_get_acpi_dev(acpi_handle handle);
 
-static inline void acpi_bus_put_acpi_device(struct acpi_device *adev)
+static inline void acpi_put_acpi_dev(struct acpi_device *adev)
 {
 	acpi_dev_put(adev);
 }
