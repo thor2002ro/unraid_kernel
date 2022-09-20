@@ -96,7 +96,9 @@ int vfs_parse_fs_param_source(struct fs_context *fc, struct fs_parameter *param)
 	if (strcmp(param->key, "source") != 0)
 		return -ENOPARAM;
 
-	if (param->type != fs_value_is_string)
+	/* source value may be NULL */
+	if (param->type != fs_value_is_string &&
+	    param->type != fs_value_is_empty)
 		return invalf(fc, "Non-string source");
 
 	if (fc->source)
@@ -175,10 +177,15 @@ int vfs_parse_fs_string(struct fs_context *fc, const char *key,
 	};
 
 	if (value) {
-		param.string = kmemdup_nul(value, v_size, GFP_KERNEL);
-		if (!param.string)
-			return -ENOMEM;
-		param.type = fs_value_is_string;
+		if (!v_size) {
+			param.string = NULL;
+			param.type = fs_value_is_empty;
+		} else {
+			param.string = kmemdup_nul(value, v_size, GFP_KERNEL);
+			if (!param.string)
+				return -ENOMEM;
+			param.type = fs_value_is_string;
+		}
 	}
 
 	ret = vfs_parse_fs_param(fc, &param);
