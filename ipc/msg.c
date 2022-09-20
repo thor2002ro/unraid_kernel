@@ -501,8 +501,8 @@ static int msgctl_info(struct ipc_namespace *ns, int msqid,
 	max_idx = ipc_get_maxidx(&msg_ids(ns));
 	up_read(&msg_ids(ns).rwsem);
 	if (cmd == MSG_INFO) {
-		msginfo->msgmap = percpu_counter_sum(&ns->percpu_msg_hdrs);
-		msginfo->msgtql = percpu_counter_sum(&ns->percpu_msg_bytes);
+		msginfo->msgmap = min(percpu_counter_sum(&ns->percpu_msg_hdrs), INT_MAX);
+		msginfo->msgtql = min(percpu_counter_sum(&ns->percpu_msg_bytes), INT_MAX);
 	} else {
 		msginfo->msgmap = MSGMAP;
 		msginfo->msgpool = MSGPOOL;
