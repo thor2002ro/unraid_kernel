@@ -133,7 +133,7 @@ static inline void rcu_softirq_qs(void)
 		rcu_tasks_qs(current, (preempt)); \
 	} while (0)
 
-static inline int rcu_needs_cpu(void)
+static inline int rcu_needs_cpu(u64 basemono, u64 *nextevt)
 {
 	return 0;
 }
