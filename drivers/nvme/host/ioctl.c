@@ -349,9 +349,15 @@ struct nvme_uring_cmd_pdu {
 		struct bio *bio;
 		struct request *req;
 	};
-	void *meta; /* kernel-resident buffer */
-	void __user *meta_buffer;
 	u32 meta_len;
+	u32 nvme_status;
+	union {
+		struct {
+			void *meta; /* kernel-resident buffer */
+			void __user *meta_buffer;
+		};
+		u64 result;
+	} u;
 };
 
 static inline struct nvme_uring_cmd_pdu *nvme_uring_cmd_pdu(
@@ -360,11 +366,10 @@ static inline struct nvme_uring_cmd_pdu *nvme_uring_cmd_pdu(
 	return (struct nvme_uring_cmd_pdu *)&ioucmd->pdu;
 }
 
-static void nvme_uring_task_cb(struct io_uring_cmd *ioucmd)
+static void nvme_uring_task_meta_cb(struct io_uring_cmd *ioucmd)
 {
 	struct nvme_uring_cmd_pdu *pdu = nvme_uring_cmd_pdu(ioucmd);
 	struct request *req = pdu->req;
-	struct bio *bio = req->bio;
 	int status;
 	u64 result;
 
@@ -375,14 +380,24 @@ static void nvme_uring_task_cb(struct io_uring_cmd *ioucmd)
 
 	result = le64_to_cpu(nvme_req(req)->result.u64);
 
-	if (pdu->meta)
-		status = nvme_finish_user_metadata(req, pdu->meta_buffer,
-					pdu->meta, pdu->meta_len, status);
-	if (bio)
-		blk_rq_unmap_user(bio);
+	if (pdu->meta_len)
+		status = nvme_finish_user_metadata(req, pdu->u.meta_buffer,
+					pdu->u.meta, pdu->meta_len, status);
+	if (req->bio)
+		blk_rq_unmap_user(req->bio);
 	blk_mq_free_request(req);
 
 	io_uring_cmd_done(ioucmd, status, result);
+}
+
+static void nvme_uring_task_cb(struct io_uring_cmd *ioucmd)
+{
+	struct nvme_uring_cmd_pdu *pdu = nvme_uring_cmd_pdu(ioucmd);
+
+	if (pdu->bio)
+		blk_rq_unmap_user(pdu->bio);
+
+	io_uring_cmd_done(ioucmd, pdu->nvme_status, pdu->u.result);
 }
 
 static enum rq_end_io_ret nvme_uring_cmd_end_io(struct request *req,
@@ -390,12 +405,14 @@ static enum rq_end_io_ret nvme_uring_cmd_end_io(struct request *req,
 {
 	struct io_uring_cmd *ioucmd = req->end_io_data;
 	struct nvme_uring_cmd_pdu *pdu = nvme_uring_cmd_pdu(ioucmd);
-	/* extract bio before reusing the same field for request */
-	struct bio *bio = pdu->bio;
 	void *cookie = READ_ONCE(ioucmd->cookie);
 
-	pdu->req = req;
-	req->bio = bio;
+	req->bio = pdu->bio;
+	if (nvme_req(req)->flags & NVME_REQ_CANCELLED)
+		pdu->nvme_status = -EINTR;
+	else
+		pdu->nvme_status = nvme_req(req)->status;
+	pdu->u.result = le64_to_cpu(nvme_req(req)->result.u64);
 
 	/*
 	 * For iopoll, complete it directly.
@@ -405,6 +422,29 @@ static enum rq_end_io_ret nvme_uring_cmd_end_io(struct request *req,
 		nvme_uring_task_cb(ioucmd);
 	else
 		io_uring_cmd_complete_in_task(ioucmd, nvme_uring_task_cb);
+
+	blk_mq_free_request(req);
+	return RQ_END_IO_NONE;
+}
+
+static enum rq_end_io_ret nvme_uring_cmd_end_io_meta(struct request *req,
+						     blk_status_t err)
+{
+	struct io_uring_cmd *ioucmd = req->end_io_data;
+	struct nvme_uring_cmd_pdu *pdu = nvme_uring_cmd_pdu(ioucmd);
+	void *cookie = READ_ONCE(ioucmd->cookie);
+
+	req->bio = pdu->bio;
+	pdu->req = req;
+
+	/*
+	 * For iopoll, complete it directly.
+	 * Otherwise, move the completion to task work.
+	 */
+	if (cookie != NULL && blk_rq_is_poll(req))
+		nvme_uring_task_meta_cb(ioucmd);
+	else
+		io_uring_cmd_complete_in_task(ioucmd, nvme_uring_task_meta_cb);
 
 	return RQ_END_IO_NONE;
 }
@@ -467,8 +507,6 @@ retry:
 			blk_flags);
 	if (IS_ERR(req))
 		return PTR_ERR(req);
-	req->end_io = nvme_uring_cmd_end_io;
-	req->end_io_data = ioucmd;
 
 	if (issue_flags & IO_URING_F_IOPOLL && rq_flags & REQ_POLLED) {
 		if (unlikely(!req->bio)) {
@@ -483,10 +521,15 @@ retry:
 	}
 	/* to free bio on completion, as req->bio will be null at that time */
 	pdu->bio = req->bio;
-	pdu->meta = meta;
-	pdu->meta_buffer = nvme_to_user_ptr(d.metadata);
 	pdu->meta_len = d.metadata_len;
-
+	req->end_io_data = ioucmd;
+	if (pdu->meta_len) {
+		pdu->u.meta = meta;
+		pdu->u.meta_buffer = nvme_to_user_ptr(d.metadata);
+		req->end_io = nvme_uring_cmd_end_io_meta;
+	} else {
+		req->end_io = nvme_uring_cmd_end_io;
+	}
 	blk_execute_rq_nowait(req, false);
 	return -EIOCBQUEUED;
 }
