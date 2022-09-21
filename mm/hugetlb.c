@@ -1957,7 +1957,7 @@ retry:
 	page = __alloc_pages(gfp_mask, order, nid, nmask);
 
 	/* Freeze head page */
-	if (!page_ref_freeze(page, 1)) {
+	if (page && !page_ref_freeze(page, 1)) {
 		__free_pages(page, order);
 		if (retry) {	/* retry once */
 			retry = false;
