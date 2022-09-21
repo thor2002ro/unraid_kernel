@@ -180,6 +180,62 @@ void mana_gd_free_memory(struct gdma_mem_info *gmi)
 			  gmi->dma_handle);
 }
 
+int mana_gd_destroy_doorbell_page(struct gdma_context *gc, int doorbell_page)
+{
+	struct gdma_destroy_resource_range_req req = {};
+	struct gdma_resp_hdr resp = {};
+	int err;
+
+	mana_gd_init_req_hdr(&req.hdr, GDMA_DESTROY_RESOURCE_RANGE,
+			     sizeof(req), sizeof(resp));
+
+	req.resource_type = GDMA_RESOURCE_DOORBELL_PAGE;
+	req.num_resources = 1;
+	req.allocated_resources = doorbell_page;
+
+	err = mana_gd_send_request(gc, sizeof(req), &req, sizeof(resp), &resp);
+	if (err || resp.status) {
+		dev_err(gc->dev,
+			"Failed to destroy doorbell page: ret %d, 0x%x\n",
+			err, resp.status);
+		return err ? err : -EPROTO;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_NS(mana_gd_destroy_doorbell_page, NET_MANA);
+
+int mana_gd_allocate_doorbell_page(struct gdma_context *gc,
+				   int *doorbell_page)
+{
+	struct gdma_allocate_resource_range_req req = {};
+	struct gdma_allocate_resource_range_resp resp = {};
+	int err;
+
+	mana_gd_init_req_hdr(&req.hdr, GDMA_ALLOCATE_RESOURCE_RANGE,
+			     sizeof(req), sizeof(resp));
+
+	req.resource_type = GDMA_RESOURCE_DOORBELL_PAGE;
+	req.num_resources = 1;
+	req.alignment = 1;
+
+	/* Have GDMA start searching from 0 */
+	req.allocated_resources = 0;
+
+	err = mana_gd_send_request(gc, sizeof(req), &req, sizeof(resp), &resp);
+	if (err || resp.hdr.status) {
+		dev_err(gc->dev,
+			"Failed to allocate doorbell page: ret %d, 0x%x\n",
+			err, resp.hdr.status);
+		return err ? err : -EPROTO;
+	}
+
+	*doorbell_page = resp.allocated_resources;
+
+	return 0;
+}
+EXPORT_SYMBOL_NS(mana_gd_allocate_doorbell_page, NET_MANA);
+
 static int mana_gd_create_hw_eq(struct gdma_context *gc,
 				struct gdma_queue *queue)
 {
