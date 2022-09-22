@@ -121,6 +121,15 @@ struct throtl_grp {
 	uint64_t last_bytes_disp[2];
 	unsigned int last_io_disp[2];
 
+	/*
+	 * The following two fields are updated when new configuration is
+	 * submitted while some bios are still throttled, they record how many
+	 * bytes/ios are waited already in previous configuration, and they will
+	 * be used to calculate wait time under new configuration.
+	 */
+	uint64_t carryover_bytes[2];
+	unsigned int carryover_ios[2];
+
 	unsigned long last_check_time;
 
 	unsigned long latency_target; /* us */
@@ -175,7 +184,7 @@ static inline bool blk_throtl_bio(struct bio *bio)
 	struct throtl_grp *tg = blkg_to_tg(bio->bi_blkg);
 
 	/* no need to throttle bps any more if the bio has been throttled */
-	if (bio_flagged(bio, BIO_THROTTLED) &&
+	if (bio_flagged(bio, BIO_BPS_THROTTLED) &&
 	    !(tg->flags & THROTL_TG_HAS_IOPS_LIMIT))
 		return false;
 

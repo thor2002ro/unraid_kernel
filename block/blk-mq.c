@@ -1992,7 +1992,7 @@ out:
 		if (!needs_restart ||
 		    (no_tag && list_empty_careful(&hctx->dispatch_wait.entry)))
 			blk_mq_run_hw_queue(hctx, true);
-		else if (needs_restart && needs_resource)
+		else if (needs_resource)
 			blk_mq_delay_run_hw_queue(hctx, BLK_MQ_RESOURCE_DELAY);
 
 		blk_mq_update_dispatch_busy(hctx, true);
@@ -4191,7 +4191,7 @@ static int blk_mq_alloc_set_map_and_rqs(struct blk_mq_tag_set *set)
 	return 0;
 }
 
-static int blk_mq_update_queue_map(struct blk_mq_tag_set *set)
+static void blk_mq_update_queue_map(struct blk_mq_tag_set *set)
 {
 	/*
 	 * blk_mq_map_queues() and multiple .map_queues() implementations
@@ -4221,10 +4221,10 @@ static int blk_mq_update_queue_map(struct blk_mq_tag_set *set)
 		for (i = 0; i < set->nr_maps; i++)
 			blk_mq_clear_mq_map(&set->map[i]);
 
-		return set->ops->map_queues(set);
+		set->ops->map_queues(set);
 	} else {
 		BUG_ON(set->nr_maps > 1);
-		return blk_mq_map_queues(&set->map[HCTX_TYPE_DEFAULT]);
+		blk_mq_map_queues(&set->map[HCTX_TYPE_DEFAULT]);
 	}
 }
 
@@ -4323,9 +4323,7 @@ int blk_mq_alloc_tag_set(struct blk_mq_tag_set *set)
 		set->map[i].nr_queues = is_kdump_kernel() ? 1 : set->nr_hw_queues;
 	}
 
-	ret = blk_mq_update_queue_map(set);
-	if (ret)
-		goto out_free_mq_map;
+	blk_mq_update_queue_map(set);
 
 	ret = blk_mq_alloc_set_map_and_rqs(set);
 	if (ret)
