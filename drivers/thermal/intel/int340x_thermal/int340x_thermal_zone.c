@@ -219,8 +219,10 @@ struct int34x_thermal_zone *int340x_thermal_zone_add(struct acpi_device *adev,
 
 	int34x_thermal_zone->ops = kmemdup(&int340x_thermal_zone_ops,
 					   sizeof(int340x_thermal_zone_ops), GFP_KERNEL);
-	if (!int34x_thermal_zone->ops)
+	if (!int34x_thermal_zone->ops) {
+		ret = -ENOMEM;
 		goto err_ops_alloc;
+	}
 
 	if (get_temp)
 		int34x_thermal_zone->ops->get_temp = get_temp;
