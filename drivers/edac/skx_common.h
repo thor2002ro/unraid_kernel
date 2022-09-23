@@ -86,6 +86,7 @@ struct skx_dev {
 			struct pci_dev	*edev;
 			u32 retry_rd_err_log_s;
 			u32 retry_rd_err_log_d;
+			u32 retry_rd_err_log_d2;
 			struct skx_dimm {
 				u8 close_pg;
 				u8 bank_xor_enable;
@@ -112,16 +113,19 @@ enum {
 	INDEX_MEMCTRL,
 	INDEX_CHANNEL,
 	INDEX_DIMM,
+	INDEX_CS,
 	INDEX_NM_FIRST,
 	INDEX_NM_MEMCTRL = INDEX_NM_FIRST,
 	INDEX_NM_CHANNEL,
 	INDEX_NM_DIMM,
+	INDEX_NM_CS,
 	INDEX_MAX
 };
 
 #define BIT_NM_MEMCTRL	BIT_ULL(INDEX_NM_MEMCTRL)
 #define BIT_NM_CHANNEL	BIT_ULL(INDEX_NM_CHANNEL)
 #define BIT_NM_DIMM	BIT_ULL(INDEX_NM_DIMM)
+#define BIT_NM_CS	BIT_ULL(INDEX_NM_CS)
 
 struct decoded_addr {
 	struct mce *mce;
@@ -134,6 +138,7 @@ struct decoded_addr {
 	int	sktways;
 	int	chanways;
 	int	dimm;
+	int	cs;
 	int	rank;
 	int	channel_rank;
 	u64	rank_address;
@@ -160,7 +165,12 @@ struct res_config {
 	int sad_all_offset;
 	/* Offsets of retry_rd_err_log registers */
 	u32 *offsets_scrub;
+	u32 *offsets_scrub_hbm0;
+	u32 *offsets_scrub_hbm1;
 	u32 *offsets_demand;
+	u32 *offsets_demand2;
+	u32 *offsets_demand_hbm0;
+	u32 *offsets_demand_hbm1;
 };
 
 typedef int (*get_dimm_config_f)(struct mem_ctl_info *mci,
