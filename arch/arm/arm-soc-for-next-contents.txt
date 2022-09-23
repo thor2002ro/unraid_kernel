@@ -6,7 +6,7 @@ arm/soc
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-6.1/maintainers
 	footbridge/cleanup
 		https://git.kernel.org/pub/scm/linux/kernel/git/soc/soc footbridge/cleanup
-	<no branch> (84fc863606239d8b434e59e6bbbe805f457e5767)
+	multiplatform/cleanup
 		https://git.kernel.org/pub/scm/linux/kernel/git/soc/soc arm-multiplatform-cleanup
 	patch
 		ARM: disallow PCI with MMU=n again
@@ -36,6 +36,30 @@ arm/dt
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-6.1/devicetree-arm64
 	at91/dt-2
 		https://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-dt-6.1-2
+	tegra/dt-bindings
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-6.1-dt-bindings
+	tegra/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-6.1-arm64-dt
+	imx/dt-bindings
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-bindings-6.1
+	imx/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-dt-6.1
+	imx/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-dt64-6.1
+	sunxi/dt
+		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-dt-for-6.1-1
+	patch
+		ARM: dts: integrator: Tag PCI host with device_type
+	mediatek/dt64
+		https://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v6.0-next-dts64
+	renesas/dt-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-dt-for-v6.1-tag2
+	k3/dt
+		https://git.kernel.org/pub/scm/linux/kernel/git/ti/linux tags/ti-k3-dt-for-v6.1
+	qcom/dt
+		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-dts-for-6.1
+	qcom/dt64
+		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-for-6.1
 
 arm/drivers
 	renesas/drivers
@@ -79,16 +103,16 @@ arm/defconfig
 arm/late
 
 arm/fixes
-	scmi/fixes
-		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/scmi-fixes-6.0
 	patch
-		ARM: dts: fix Moxa SDIO 'compatible', remove 'sdhci' misnomer
-	rockchip/dts-fixes
-		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v6.0-rockchip-dtsfixes1
+		ARM: sunplus: fix serial console kconfig and build problems
+	<no branch> (2a906db2824b75444982f5e9df870106982afca8)
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-6.0/fixes-signed
+	<no branch> (90d000288e115ca63452813c423f9dfd9f521c96)
+		https://github.com/Broadcom/stblinux tags/arm-soc/for-6.0/drivers-fixes-v2
+	<no branch> (e3c95edb1bd8b9c2cb0caa6ae382fc8080f6a0ed)
+		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-drivers-fixes-for-6.0-1
 	patch
-		dt-bindings: memory-controllers: fsl,imx8m-ddrc: drop Leonard Crestez
-	<no branch> (f7fc391a5e28216150ab5390df35032309ead7e5)
-		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-fixes-6.0-2
-	at91/fixes-2
-		https://git.kernel.org/pub/scm/linux/kernel/git/at91/linux tags/at91-fixes-6.0-2
+		ARM: dts: integrator: Tag PCI host with device_type
+	<no branch> (40e9541959100e017533e18e44d07eed44f91dc5)
+		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-fixes-for-6.0
 
