@@ -60,6 +60,12 @@ arm/dt
 		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-dts-for-6.1
 	qcom/dt64
 		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-for-6.1
+	mvebu/dt64
+		git://git.kernel.org/pub/scm/linux/kernel/git/gclement/mvebu tags/mvebu-dt64-6.1-1
+	omap/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-6.1/dt-signed
+	mvebu/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/gclement/mvebu tags/mvebu-dt-6.1-1
 
 arm/drivers
 	renesas/drivers
@@ -82,6 +88,23 @@ arm/drivers
 		git://git.kernel.org/pub/scm/linux/kernel/git/sudeep.holla/linux tags/ffa-updates-6.1
 	patch
 		soc: apple: rtkit: Add apple_rtkit_poll
+	tegra/soc-driver
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-6.1-soc
+	tegra/firmware
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-6.1-firmware
+	imx/drivers
+		git://git.kernel.org/pub/scm/linux/kernel/git/shawnguo/linux tags/imx-drivers-6.1
+		contains imx/dt-bindings
+	allwinner/drivers
+		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-drivers-for-6.1-1
+	mediatek/drivers
+		https://git.kernel.org/pub/scm/linux/kernel/git/matthias.bgg/linux tags/v6.0-next-soc
+	qcom/drivers
+		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-drivers-for-6.1
+	hisi/drivers
+		https://github.com/hisilicon/linux-hisi tags/hisi-drivers-for-6.1
+	tegra/cbb
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-6.1-cbb
 
 arm/defconfig
 	arm/defconfig-cleanup
@@ -99,6 +122,16 @@ arm/defconfig
 		ARM: config: ixp4xx: Disable legacy EEPROM driver
 	broadcom/defconfig
 		https://github.com/Broadcom/stblinux tags/arm-soc/for-6.1/defconfig-arm64
+	tegra/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-6.1-arm64-defconfig
+	sunxi/defconfig
+		https://git.kernel.org/pub/scm/linux/kernel/git/sunxi/linux tags/sunxi-config-for-6.1-1
+	patch
+		arm64: configs: Enable all PMUs provided by Arm
+	qcom/defconfig
+		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-defconfig-for-6.1
+	qcom/defconfig32
+		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-defconfig-for-6.1
 
 arm/late
 
@@ -115,4 +148,6 @@ arm/fixes
 		ARM: dts: integrator: Tag PCI host with device_type
 	<no branch> (40e9541959100e017533e18e44d07eed44f91dc5)
 		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-fixes-for-6.0
+	<no branch> (ae358d71d4623ed0a466a7498f8ce25c7fda22d1)
+		git://git.pengutronix.de/pza/linux tags/reset-fixes-for-v6.0
 
