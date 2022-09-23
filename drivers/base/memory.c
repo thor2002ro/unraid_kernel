@@ -183,7 +183,7 @@ static int memory_block_online(struct memory_block *mem)
 	struct zone *zone;
 	int ret;
 
-	if (atomic_long_read(&mem->nr_hwpoison))
+	if (memblk_nr_poison(start_pfn))
 		return -EHWPOISON;
 
 	zone = zone_for_pfn_range(mem->online_type, mem->nid, mem->group,
@@ -867,7 +867,7 @@ void remove_memory_block_devices(unsigned long start, unsigned long size)
 		mem = find_memory_block_by_id(block_id);
 		if (WARN_ON_ONCE(!mem))
 			continue;
-		clear_hwpoisoned_pages(atomic_long_read(&mem->nr_hwpoison));
+		clear_hwpoisoned_pages(memblk_nr_poison(start));
 		unregister_memory_block_under_nodes(mem);
 		remove_memory_block(mem);
 	}
@@ -1199,4 +1199,9 @@ unsigned long memblk_nr_poison(unsigned long pfn)
 	return 0;
 }
 
+#else
+unsigned long memblk_nr_poison(unsigned long pfn)
+{
+	return 0;
+}
 #endif

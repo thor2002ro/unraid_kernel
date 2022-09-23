@@ -3282,7 +3282,6 @@ extern int __get_huge_page_for_hwpoison(unsigned long pfn, int flags);
 extern void num_poisoned_pages_inc(unsigned long pfn);
 extern void memblk_nr_poison_inc(unsigned long pfn);
 extern void memblk_nr_poison_sub(unsigned long pfn, long i);
-extern unsigned long memblk_nr_poison(unsigned long pfn);
 extern void clear_hwpoisoned_pages(long nr_poison);
 #else
 static inline int __get_huge_page_for_hwpoison(unsigned long pfn, int flags)
@@ -3298,6 +3297,7 @@ static inline void clear_hwpoisoned_pages(long nr_poison)
 {
 }
 #endif
+extern unsigned long memblk_nr_poison(unsigned long pfn);
 
 #ifndef arch_memory_failure
 static inline int arch_memory_failure(unsigned long pfn, int flags)
