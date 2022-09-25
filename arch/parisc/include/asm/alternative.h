@@ -9,6 +9,7 @@
 #define ALT_COND_NO_SPLIT_TLB	0x08	/* if split_tlb == 0  */
 #define ALT_COND_NO_IOC_FDC	0x10	/* if I/O cache does not need flushes */
 #define ALT_COND_RUN_ON_QEMU	0x20	/* if running on QEMU */
+#define ALT_COND_RUN_ON_PA1X	0x40	/* if running on PA1.x CPU */
 
 #define INSN_PxTLB	0x02		/* modify pdtlb, pitlb */
 #define INSN_NOP	0x08000240	/* nop */

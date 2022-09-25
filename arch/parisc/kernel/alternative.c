@@ -33,6 +33,7 @@ void __init_or_module apply_alternatives(struct alt_instr *start,
 		((cache_info.dc_size == 0) ? ALT_COND_NO_DCACHE : 0) |
 		((cache_info.ic_size == 0) ? ALT_COND_NO_ICACHE : 0) |
 		(running_on_qemu ? ALT_COND_RUN_ON_QEMU : 0) |
+		((boot_cpu_data.cpu_type < pcxu) ? ALT_COND_RUN_ON_PA1X : 0) |
 		((split_tlb == 0) ? ALT_COND_NO_SPLIT_TLB : 0) |
 		/*
 		 * If the PDC_MODEL capabilities has Non-coherent IO-PDIR bit
