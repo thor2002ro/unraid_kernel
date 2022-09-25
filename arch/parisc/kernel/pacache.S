@@ -31,6 +31,12 @@
 	.section .text.hot
 	.align	16
 
+#ifdef CONFIG_PA20
+#define ALT_COND_PACACHE	ALT_COND_ALWAYS
+#else
+#define ALT_COND_PACACHE	ALT_COND_NO_SMP
+#endif
+
 ENTRY_CFI(flush_tlb_all_local)
 	/*
 	 * The pitlbe and pdtlbe instructions should only be used to
@@ -539,15 +545,10 @@ ENTRY_CFI(copy_user_page_asm)
 
 	/* Purge any old translations */
 
-#ifdef CONFIG_PA20
-	pdtlb,l		%r0(%r28)
-	pdtlb,l		%r0(%r29)
-#else
 0:	pdtlb		%r0(%r28)
 1:	pdtlb		%r0(%r29)
-	ALTERNATIVE(0b, 0b+4, ALT_COND_NO_SMP, INSN_PxTLB)
-	ALTERNATIVE(1b, 1b+4, ALT_COND_NO_SMP, INSN_PxTLB)
-#endif
+	ALTERNATIVE(0b, 0b+4, ALT_COND_PACACHE, INSN_PxTLB)
+	ALTERNATIVE(1b, 1b+4, ALT_COND_PACACHE, INSN_PxTLB)
 
 #ifdef CONFIG_64BIT
 	/* PA8x00 CPUs can consume 2 loads or 1 store per cycle.
@@ -670,12 +671,8 @@ ENTRY_CFI(clear_user_page_asm)
 
 	/* Purge any old translation */
 
-#ifdef CONFIG_PA20
-	pdtlb,l		%r0(%r28)
-#else
 0:	pdtlb		%r0(%r28)
-	ALTERNATIVE(0b, 0b+4, ALT_COND_NO_SMP, INSN_PxTLB)
-#endif
+	ALTERNATIVE(0b, 0b+4, ALT_COND_PACACHE, INSN_PxTLB)
 
 #ifdef CONFIG_64BIT
 	ldi		(PAGE_SIZE / 128), %r1
@@ -736,12 +733,8 @@ ENTRY_CFI(flush_dcache_page_asm)
 
 	/* Purge any old translation */
 
-#ifdef CONFIG_PA20
-	pdtlb,l		%r0(%r28)
-#else
 0:	pdtlb		%r0(%r28)
-	ALTERNATIVE(0b, 0b+4, ALT_COND_NO_SMP, INSN_PxTLB)
-#endif
+	ALTERNATIVE(0b, 0b+4, ALT_COND_PACACHE, INSN_PxTLB)
 
 88:	ldil		L%dcache_stride, %r1
 	ldw		R%dcache_stride(%r1), r31
@@ -785,12 +778,8 @@ ENTRY_CFI(purge_dcache_page_asm)
 
 	/* Purge any old translation */
 
-#ifdef CONFIG_PA20
-	pdtlb,l		%r0(%r28)
-#else
 0:	pdtlb		%r0(%r28)
-	ALTERNATIVE(0b, 0b+4, ALT_COND_NO_SMP, INSN_PxTLB)
-#endif
+	ALTERNATIVE(0b, 0b+4, ALT_COND_PACACHE, INSN_PxTLB)
 
 88:	ldil		L%dcache_stride, %r1
 	ldw		R%dcache_stride(%r1), r31
@@ -837,17 +826,11 @@ ENTRY_CFI(flush_icache_page_asm)
 	 * have a flat address space, it's not clear which TLB will be
 	 * used.  So, we purge both entries.  */
 
-#ifdef CONFIG_PA20
-	pdtlb,l		%r0(%r28)
-1:	pitlb,l         %r0(%sr4,%r28)
-	ALTERNATIVE(1b, 1b+4, ALT_COND_NO_SPLIT_TLB, INSN_NOP)
-#else
 0:	pdtlb		%r0(%r28)
 1:	pitlb           %r0(%sr4,%r28)
-	ALTERNATIVE(0b, 0b+4, ALT_COND_NO_SMP, INSN_PxTLB)
-	ALTERNATIVE(1b, 1b+4, ALT_COND_NO_SMP, INSN_PxTLB)
+	ALTERNATIVE(0b, 0b+4, ALT_COND_PACACHE, INSN_PxTLB)
+	ALTERNATIVE(1b, 1b+4, ALT_COND_PACACHE, INSN_PxTLB)
 	ALTERNATIVE(1b, 1b+4, ALT_COND_NO_SPLIT_TLB, INSN_NOP)
-#endif
 
 88:	ldil		L%icache_stride, %r1
 	ldw		R%icache_stride(%r1), %r31
