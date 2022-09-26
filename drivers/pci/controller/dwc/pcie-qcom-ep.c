@@ -437,6 +437,10 @@ static int qcom_pcie_ep_get_io_resources(struct platform_device *pdev,
 
 	pcie_ep->mmio_res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
 							 "mmio");
+	if (!pcie_ep->mmio_res) {
+		dev_err(dev, "Failed to get mmio resource\n");
+		return -EINVAL;
+	}
 
 	syscon = of_parse_phandle(dev->of_node, "qcom,perst-regs", 0);
 	if (!syscon) {
