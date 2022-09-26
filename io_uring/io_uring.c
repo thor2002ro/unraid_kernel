@@ -2818,6 +2818,9 @@ static __cold void io_ring_ctx_wait_and_kill(struct io_ring_ctx *ctx)
 		io_kill_timeouts(ctx, NULL, true);
 		/* if we failed setting up the ctx, we might not have any rings */
 		io_iopoll_try_reap_events(ctx);
+		/* drop cached put refs after potentially doing completions */
+		if (current->io_uring)
+			io_uring_drop_tctx_refs(current);
 	}
 
 	INIT_WORK(&ctx->exit_work, io_ring_exit_work);
@@ -3352,7 +3355,7 @@ static int io_uring_install_fd(struct io_ring_ctx *ctx, struct file *file)
 	if (fd < 0)
 		return fd;
 
-	ret = __io_uring_add_tctx_node(ctx, false);
+	ret = __io_uring_add_tctx_node(ctx);
 	if (ret) {
 		put_unused_fd(fd);
 		return ret;
@@ -3537,6 +3540,10 @@ static __cold int io_uring_create(unsigned entries, struct io_uring_params *p,
 		ret = -EFAULT;
 		goto err;
 	}
+
+	if (ctx->flags & IORING_SETUP_SINGLE_ISSUER
+	    && !(ctx->flags & IORING_SETUP_R_DISABLED))
+		ctx->submitter_task = get_task_struct(current);
 
 	file = io_uring_get_file(ctx);
 	if (IS_ERR(file)) {
@@ -3728,6 +3735,9 @@ static int io_register_enable_rings(struct io_ring_ctx *ctx)
 {
 	if (!(ctx->flags & IORING_SETUP_R_DISABLED))
 		return -EBADFD;
+
+	if (ctx->flags & IORING_SETUP_SINGLE_ISSUER && !ctx->submitter_task)
+		ctx->submitter_task = get_task_struct(current);
 
 	if (ctx->restrictions.registered)
 		ctx->restricted = 1;
