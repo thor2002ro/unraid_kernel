@@ -76,6 +76,12 @@
  * rcu_read_lock before reading the address, then rcu_read_unlock after
  * taking the spinlock within the structure expected at that address.
  *
+ * Note that it is not possible to acquire a lock within a structure
+ * allocated with SLAB_DESTROY_BY_RCU without first acquiring a reference
+ * as described above.  The reason is that SLAB_DESTROY_BY_RCU pages are
+ * not zeroed before being given to the slab, which means that any locks
+ * must be initialized after each and every kmem_struct_alloc().
+ *
  * Note that SLAB_TYPESAFE_BY_RCU was originally named SLAB_DESTROY_BY_RCU.
  */
 /* Defer freeing slabs to RCU */
