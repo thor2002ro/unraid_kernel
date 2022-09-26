@@ -403,6 +403,7 @@ struct lpfc_trunk_link  {
 				     link1,
 				     link2,
 				     link3;
+	u32 phy_lnk_speed;
 };
 
 /* Format of congestion module parameters */
@@ -1596,10 +1597,11 @@ struct lpfc_hba {
 
 	char os_host_name[MAXHOSTNAMELEN];
 
-	/* SCSI host template information - for physical port */
-	struct scsi_host_template port_template;
-	/* SCSI host template information - for all vports */
-	struct scsi_host_template vport_template;
+	/* LD Signaling */
+	u32 degrade_activate_threshold;
+	u32 degrade_deactivate_threshold;
+	u32 fec_degrade_interval;
+
 	atomic_t dbg_log_idx;
 	atomic_t dbg_log_cnt;
 	atomic_t dbg_log_dmping;
