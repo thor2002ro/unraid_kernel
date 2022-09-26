@@ -162,32 +162,34 @@ static bool __dead_end_function(struct objtool_file *file, struct symbol *func,
 
 	/*
 	 * Unfortunately these have to be hard coded because the noreturn
-	 * attribute isn't provided in ELF data.
+	 * attribute isn't provided in ELF data. Keep 'em sorted.
 	 */
 	static const char * const global_noreturns[] = {
-		"__stack_chk_fail",
-		"panic",
-		"do_exit",
-		"do_task_dead",
-		"kthread_exit",
-		"make_task_dead",
-		"__module_put_and_kthread_exit",
-		"kthread_complete_and_exit",
-		"__reiserfs_panic",
-		"lbug_with_loc",
-		"fortify_panic",
-		"usercopy_abort",
-		"machine_real_restart",
-		"rewind_stack_and_make_dead",
-		"kunit_try_catch_throw",
-		"xen_start_kernel",
-		"cpu_bringup_and_idle",
-		"do_group_exit",
-		"stop_this_cpu",
 		"__invalid_creds",
-		"cpu_startup_entry",
+		"__module_put_and_kthread_exit",
+		"__reiserfs_panic",
+		"__stack_chk_fail",
 		"__ubsan_handle_builtin_unreachable",
+		"cpu_bringup_and_idle",
+		"cpu_startup_entry",
+		"do_exit",
+		"do_group_exit",
+		"do_task_dead",
 		"ex_handler_msr_mce",
+		"fortify_panic",
+		"kthread_complete_and_exit",
+		"kthread_exit",
+		"kunit_try_catch_throw",
+		"lbug_with_loc",
+		"machine_real_restart",
+		"make_task_dead",
+		"panic",
+		"rewind_stack_and_make_dead",
+		"sev_es_terminate",
+		"snp_abort",
+		"stop_this_cpu",
+		"usercopy_abort",
+		"xen_start_kernel",
 	};
 
 	if (!func)
@@ -3314,6 +3316,10 @@ static int validate_branch(struct objtool_file *file, struct symbol *func,
 		next_insn = next_insn_to_validate(file, insn);
 
 		if (func && insn->func && func != insn->func->pfunc) {
+			/* Ignore KCFI type preambles, which always fall through */
+			if (!strncmp(func->name, "__cfi_", 6))
+				return 0;
+
 			WARN("%s() falls through to next function %s()",
 			     func->name, insn->func->name);
 			return 1;
@@ -4111,7 +4117,8 @@ static int validate_ibt(struct objtool_file *file)
 		    !strcmp(sec->name, "__bug_table")			||
 		    !strcmp(sec->name, "__ex_table")			||
 		    !strcmp(sec->name, "__jump_table")			||
-		    !strcmp(sec->name, "__mcount_loc"))
+		    !strcmp(sec->name, "__mcount_loc")			||
+		    !strcmp(sec->name, ".kcfi_traps"))
 			continue;
 
 		list_for_each_entry(reloc, &sec->reloc->reloc_list, list)
