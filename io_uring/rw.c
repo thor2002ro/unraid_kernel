@@ -764,10 +764,12 @@ int io_read(struct io_kiocb *req, unsigned int issue_flags)
 	iov_iter_restore(&s->iter, &s->iter_state);
 
 	ret2 = io_setup_async_rw(req, iovec, s, true);
-	if (ret2)
-		return ret2;
-
 	iovec = NULL;
+	if (ret2) {
+		ret = ret > 0 ? ret : ret2;
+		goto done;
+	}
+
 	io = req->async_data;
 	s = &io->s;
 	/*
@@ -793,6 +795,7 @@ int io_read(struct io_kiocb *req, unsigned int issue_flags)
 			return -EAGAIN;
 		}
 
+		req->cqe.res = iov_iter_count(&s->iter);
 		/*
 		 * Now retry read with the IOCB_WAITQ parts set in the iocb. If
 		 * we get -EIOCBQUEUED, then we'll get a notification when the
