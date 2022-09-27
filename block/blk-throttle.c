@@ -1716,8 +1716,9 @@ struct blkcg_policy blkcg_policy_throtl = {
 	.pd_free_fn		= throtl_pd_free,
 };
 
-void blk_throtl_cancel_bios(struct request_queue *q)
+void blk_throtl_cancel_bios(struct gendisk *disk)
 {
+	struct request_queue *q = disk->queue;
 	struct cgroup_subsys_state *pos_css;
 	struct blkcg_gq *blkg;
 
@@ -2351,8 +2352,9 @@ void blk_throtl_bio_endio(struct bio *bio)
 }
 #endif
 
-int blk_throtl_init(struct request_queue *q)
+int blk_throtl_init(struct gendisk *disk)
 {
+	struct request_queue *q = disk->queue;
 	struct throtl_data *td;
 	int ret;
 
@@ -2394,8 +2396,10 @@ int blk_throtl_init(struct request_queue *q)
 	return ret;
 }
 
-void blk_throtl_exit(struct request_queue *q)
+void blk_throtl_exit(struct gendisk *disk)
 {
+	struct request_queue *q = disk->queue;
+
 	BUG_ON(!q->td);
 	del_timer_sync(&q->td->service_queue.pending_timer);
 	throtl_shutdown_wq(q);
@@ -2405,8 +2409,9 @@ void blk_throtl_exit(struct request_queue *q)
 	kfree(q->td);
 }
 
-void blk_throtl_register_queue(struct request_queue *q)
+void blk_throtl_register(struct gendisk *disk)
 {
+	struct request_queue *q = disk->queue;
 	struct throtl_data *td;
 	int i;
 
