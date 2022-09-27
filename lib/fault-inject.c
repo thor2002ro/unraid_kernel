@@ -74,7 +74,7 @@ static bool fail_stacktrace(struct fault_attr *attr)
 	int n, nr_entries;
 	bool found = (attr->require_start == 0 && attr->require_end == ULONG_MAX);
 
-	if (depth == 0)
+	if (depth == 0 || (found && !attr->reject_start && !attr->reject_end))
 		return found;
 
 	nr_entries = stack_trace_save(entries, depth, 1);
@@ -105,10 +105,16 @@ static inline bool fail_stacktrace(struct fault_attr *attr)
 
 bool should_fail(struct fault_attr *attr, ssize_t size)
 {
+	bool stack_checked = false;
+
 	if (in_task()) {
 		unsigned int fail_nth = READ_ONCE(current->fail_nth);
 
 		if (fail_nth) {
+			if (!fail_stacktrace(attr))
+				return false;
+
+			stack_checked = true;
 			fail_nth--;
 			WRITE_ONCE(current->fail_nth, fail_nth);
 			if (!fail_nth)
@@ -128,6 +134,9 @@ bool should_fail(struct fault_attr *attr, ssize_t size)
 	if (atomic_read(&attr->times) == 0)
 		return false;
 
+	if (!stack_checked && !fail_stacktrace(attr))
+		return false;
+
 	if (atomic_read(&attr->space) > size) {
 		atomic_sub(size, &attr->space);
 		return false;
@@ -140,9 +149,6 @@ bool should_fail(struct fault_attr *attr, ssize_t size)
 	}
 
 	if (attr->probability <= prandom_u32() % 100)
-		return false;
-
-	if (!fail_stacktrace(attr))
 		return false;
 
 fail:
@@ -178,6 +184,14 @@ static void debugfs_create_ul(const char *name, umode_t mode,
 }
 
 #ifdef CONFIG_FAULT_INJECTION_STACKTRACE_FILTER
+
+DEFINE_SIMPLE_ATTRIBUTE(fops_xl, debugfs_ul_get, debugfs_ul_set, "0x%llx\n");
+
+static void debugfs_create_xl(const char *name, umode_t mode,
+			      struct dentry *parent, unsigned long *value)
+{
+	debugfs_create_file(name, mode, parent, value, &fops_xl);
+}
 
 static int debugfs_stacktrace_depth_set(void *data, u64 val)
 {
@@ -223,10 +237,10 @@ struct dentry *fault_create_debugfs_attr(const char *name,
 #ifdef CONFIG_FAULT_INJECTION_STACKTRACE_FILTER
 	debugfs_create_stacktrace_depth("stacktrace-depth", mode, dir,
 					&attr->stacktrace_depth);
-	debugfs_create_ul("require-start", mode, dir, &attr->require_start);
-	debugfs_create_ul("require-end", mode, dir, &attr->require_end);
-	debugfs_create_ul("reject-start", mode, dir, &attr->reject_start);
-	debugfs_create_ul("reject-end", mode, dir, &attr->reject_end);
+	debugfs_create_xl("require-start", mode, dir, &attr->require_start);
+	debugfs_create_xl("require-end", mode, dir, &attr->require_end);
+	debugfs_create_xl("reject-start", mode, dir, &attr->reject_start);
+	debugfs_create_xl("reject-end", mode, dir, &attr->reject_end);
 #endif /* CONFIG_FAULT_INJECTION_STACKTRACE_FILTER */
 
 	attr->dname = dget(dir);
