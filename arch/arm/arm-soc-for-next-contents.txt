@@ -10,6 +10,15 @@ arm/soc
 		https://git.kernel.org/pub/scm/linux/kernel/git/soc/soc arm-multiplatform-cleanup
 	patch
 		ARM: disallow PCI with MMU=n again
+	<no branch> (c2ce1e734282662c0b3117e4f26b831d30370bcb)
+		git://git.kernel.org/pub/scm/linux/kernel/git/geert/renesas-devel tags/renesas-arm-soc-for-v6.1-tag1
+	patch
+		ARM: orion: fix include path
+		pxa: Drop if with an always false condition
+		ARM: s3c: remove orphan declarations from arch/arm/mach-s3c/devs.h
+		ARM: Drop CMDLINE_FORCE dependency on !ARCH_MULTIPLATFORM
+		ARM: Drop CMDLINE_* dependency on ATAGS
+		ARM: aspeed: Kconfig: Fix indentation
 
 arm/dt
 	gemini/dt
@@ -66,6 +75,14 @@ arm/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/tmlind/linux-omap tags/omap-for-6.1/dt-signed
 	mvebu/dt
 		git://git.kernel.org/pub/scm/linux/kernel/git/gclement/mvebu tags/mvebu-dt-6.1-1
+	rockchip/dt64-2
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v6.1-rockchip-dts64-2
+	aspeed/dt
+		git://git.kernel.org/pub/scm/linux/kernel/git/joel/bmc tags/aspeed-6.1-devicetree
+	patch
+		ARM: dts: exynos: correct s5k6a3 reset polarity on Midas family
+	uniphier/dt
+		Merge branch 'uniphier/dt' into arm/dt
 
 arm/drivers
 	renesas/drivers
@@ -105,6 +122,14 @@ arm/drivers
 		https://github.com/hisilicon/linux-hisi tags/hisi-drivers-for-6.1
 	tegra/cbb
 		git://git.kernel.org/pub/scm/linux/kernel/git/tegra/linux tags/tegra-for-6.1-cbb
+	<no branch> (adc4f190260a6c004f950992d8c9ee3aec8da38b)
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v6.1-rockchip-drivers2
+	drivers/memory-2
+		https://git.kernel.org/pub/scm/linux/kernel/git/krzk/linux-mem-ctrl tags/memory-controller-drv-6.1-2
+	patch
+		firmware/psci: Print a warning if PSCI doesn't accept PC mode
+		firmware/psci: Add debugfs support to ease debugging
+		ARM: remove check for CONFIG_DEBUG_LL_SER3
 
 arm/defconfig
 	arm/defconfig-cleanup
@@ -132,6 +157,10 @@ arm/defconfig
 		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-defconfig-for-6.1
 	qcom/defconfig32
 		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-defconfig-for-6.1
+	<no branch> (e0d468427882556b8815e09769bbbc3281478b1e)
+		git://git.kernel.org/pub/scm/linux/kernel/git/joel/bmc tags/aspeed-6.1-defconfig
+	rockchip/defconfig
+		git://git.kernel.org/pub/scm/linux/kernel/git/mmind/linux-rockchip tags/v6.1-rockchip-defconfig64-1
 
 arm/late
 
@@ -150,4 +179,6 @@ arm/fixes
 		https://git.kernel.org/pub/scm/linux/kernel/git/qcom/linux tags/qcom-arm64-fixes-for-6.0
 	<no branch> (ae358d71d4623ed0a466a7498f8ce25c7fda22d1)
 		git://git.pengutronix.de/pza/linux tags/reset-fixes-for-v6.0
+	patch
+		ARM: dts: integrator: Fix DMA ranges
 
