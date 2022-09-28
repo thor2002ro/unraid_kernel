@@ -583,6 +583,39 @@ void mpi3mr_flush_host_io(struct mpi3mr_ioc *mrioc)
 }
 
 /**
+ * mpi3mr_flush_cmds_for_unrecovered_controller - Flush all pending cmds
+ * @mrioc: Adapter instance reference
+ *
+ * This function waits for currently running IO poll threads to
+ * exit and then flushes all host I/Os and any internal pending
+ * cmds. This is executed after controller is marked as
+ * unrecoverable.
+ *
+ * Return: Nothing.
+ */
+void mpi3mr_flush_cmds_for_unrecovered_controller(struct mpi3mr_ioc *mrioc)
+{
+	struct Scsi_Host *shost = mrioc->shost;
+	int i;
+
+	if (!mrioc->unrecoverable)
+		return;
+
+	if (mrioc->op_reply_qinfo) {
+		for (i = 0; i < mrioc->num_queues; i++) {
+			while (atomic_read(&mrioc->op_reply_qinfo[i].in_use))
+				udelay(500);
+			atomic_set(&mrioc->op_reply_qinfo[i].pend_ios, 0);
+		}
+	}
+	mrioc->flush_io_count = 0;
+	blk_mq_tagset_busy_iter(&shost->tag_set,
+	    mpi3mr_flush_scmd, (void *)mrioc);
+	mpi3mr_flush_delayed_cmd_lists(mrioc);
+	mpi3mr_flush_drv_cmds(mrioc);
+}
+
+/**
  * mpi3mr_alloc_tgtdev - target device allocator
  *
  * Allocate target device instance and initialize the reference
@@ -1302,6 +1335,25 @@ out:
 }
 
 /**
+ * mpi3mr_free_enclosure_list - release enclosures
+ * @mrioc: Adapter instance reference
+ *
+ * Free memory allocated during encloure add.
+ *
+ * Return nothing.
+ */
+void mpi3mr_free_enclosure_list(struct mpi3mr_ioc *mrioc)
+{
+	struct mpi3mr_enclosure_node *enclosure_dev, *enclosure_dev_next;
+
+	list_for_each_entry_safe(enclosure_dev,
+	    enclosure_dev_next, &mrioc->enclosure_list, list) {
+		list_del(&enclosure_dev->list);
+		kfree(enclosure_dev);
+	}
+}
+
+/**
  * mpi3mr_enclosure_find_by_handle - enclosure search by handle
  * @mrioc: Adapter instance reference
  * @handle: Firmware device handle of the enclosure
@@ -1814,6 +1866,13 @@ static void mpi3mr_fwevt_bh(struct mpi3mr_ioc *mrioc,
 
 	if (mrioc->stop_drv_processing)
 		goto out;
+
+	if (mrioc->unrecoverable) {
+		dprint_event_bh(mrioc,
+		    "ignoring event(0x%02x) in bottom half handler due to unrecoverable controller\n",
+		    fwevt->event_id);
+		goto out;
+	}
 
 	if (!fwevt->process_evt)
 		goto evt_ack;
@@ -5021,6 +5080,11 @@ static void mpi3mr_remove(struct pci_dev *pdev)
 	while (mrioc->reset_in_progress || mrioc->is_driver_loading)
 		ssleep(1);
 
+	if (!pci_device_is_present(mrioc->pdev)) {
+		mrioc->unrecoverable = 1;
+		mpi3mr_flush_cmds_for_unrecovered_controller(mrioc);
+	}
+
 	mpi3mr_bsg_exit(mrioc);
 	mrioc->stop_drv_processing = 1;
 	mpi3mr_cleanup_fwevt_list(mrioc);
@@ -5091,22 +5155,21 @@ static void mpi3mr_shutdown(struct pci_dev *pdev)
 	mpi3mr_cleanup_resources(mrioc);
 }
 
-#ifdef CONFIG_PM
 /**
  * mpi3mr_suspend - PCI power management suspend callback
- * @pdev: PCI device instance
- * @state: New power state
+ * @dev: Device struct
  *
  * Change the power state to the given value and cleanup the IOC
  * by issuing MUR and shutdown notification
  *
  * Return: 0 always.
  */
-static int mpi3mr_suspend(struct pci_dev *pdev, pm_message_t state)
+static int __maybe_unused
+mpi3mr_suspend(struct device *dev)
 {
+	struct pci_dev *pdev = to_pci_dev(dev);
 	struct Scsi_Host *shost = pci_get_drvdata(pdev);
 	struct mpi3mr_ioc *mrioc;
-	pci_power_t device_state;
 
 	if (!shost)
 		return 0;
@@ -5120,27 +5183,26 @@ static int mpi3mr_suspend(struct pci_dev *pdev, pm_message_t state)
 	mpi3mr_stop_watchdog(mrioc);
 	mpi3mr_cleanup_ioc(mrioc);
 
-	device_state = pci_choose_state(pdev, state);
-	ioc_info(mrioc, "pdev=0x%p, slot=%s, entering operating state [D%d]\n",
-	    pdev, pci_name(pdev), device_state);
-	pci_save_state(pdev);
+	ioc_info(mrioc, "pdev=0x%p, slot=%s, entering operating state\n",
+	    pdev, pci_name(pdev));
 	mpi3mr_cleanup_resources(mrioc);
-	pci_set_power_state(pdev, device_state);
 
 	return 0;
 }
 
 /**
  * mpi3mr_resume - PCI power management resume callback
- * @pdev: PCI device instance
+ * @dev: Device struct
  *
  * Restore the power state to D0 and reinitialize the controller
  * and resume I/O operations to the target devices
  *
  * Return: 0 on success, non-zero on failure
  */
-static int mpi3mr_resume(struct pci_dev *pdev)
+static int __maybe_unused
+mpi3mr_resume(struct device *dev)
 {
+	struct pci_dev *pdev = to_pci_dev(dev);
 	struct Scsi_Host *shost = pci_get_drvdata(pdev);
 	struct mpi3mr_ioc *mrioc;
 	pci_power_t device_state = pdev->current_state;
@@ -5153,9 +5215,6 @@ static int mpi3mr_resume(struct pci_dev *pdev)
 
 	ioc_info(mrioc, "pdev=0x%p, slot=%s, previous operating state [D%d]\n",
 	    pdev, pci_name(pdev), device_state);
-	pci_set_power_state(pdev, PCI_D0);
-	pci_enable_wake(pdev, PCI_D0, 0);
-	pci_restore_state(pdev);
 	mrioc->pdev = pdev;
 	mrioc->cpu_count = num_online_cpus();
 	r = mpi3mr_setup_resources(mrioc);
@@ -5166,18 +5225,21 @@ static int mpi3mr_resume(struct pci_dev *pdev)
 	}
 
 	mrioc->stop_drv_processing = 0;
+	mpi3mr_invalidate_devhandles(mrioc);
+	mpi3mr_free_enclosure_list(mrioc);
 	mpi3mr_memset_buffers(mrioc);
 	r = mpi3mr_reinit_ioc(mrioc, 1);
 	if (r) {
 		ioc_err(mrioc, "resuming controller failed[%d]\n", r);
 		return r;
 	}
+	ssleep(MPI3MR_RESET_TOPOLOGY_SETTLE_TIME);
 	scsi_unblock_requests(shost);
+	mrioc->device_refresh_on = 0;
 	mpi3mr_start_watchdog(mrioc);
 
 	return 0;
 }
-#endif
 
 static const struct pci_device_id mpi3mr_pci_id_table[] = {
 	{
@@ -5188,16 +5250,15 @@ static const struct pci_device_id mpi3mr_pci_id_table[] = {
 };
 MODULE_DEVICE_TABLE(pci, mpi3mr_pci_id_table);
 
+static SIMPLE_DEV_PM_OPS(mpi3mr_pm_ops, mpi3mr_suspend, mpi3mr_resume);
+
 static struct pci_driver mpi3mr_pci_driver = {
 	.name = MPI3MR_DRIVER_NAME,
 	.id_table = mpi3mr_pci_id_table,
 	.probe = mpi3mr_probe,
 	.remove = mpi3mr_remove,
 	.shutdown = mpi3mr_shutdown,
-#ifdef CONFIG_PM
-	.suspend = mpi3mr_suspend,
-	.resume = mpi3mr_resume,
-#endif
+	.driver.pm = &mpi3mr_pm_ops,
 };
 
 static ssize_t event_counter_show(struct device_driver *dd, char *buf)
