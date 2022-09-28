@@ -697,8 +697,8 @@ static int probe_codec(struct hdac_bus *bus, int addr)
 	unsigned int cmd = (addr << 28) | (AC_NODE_ROOT << 20) |
 		(AC_VERB_PARAMETERS << 8) | AC_PAR_VENDOR_ID;
 	unsigned int res = -1;
-	struct skl_dev *skl = bus_to_skl(bus);
 #if IS_ENABLED(CONFIG_SND_SOC_INTEL_SKYLAKE_HDAUDIO_CODEC)
+	struct skl_dev *skl = bus_to_skl(bus);
 	struct hdac_hda_priv *hda_codec;
 	int err;
 #endif
@@ -1127,7 +1127,6 @@ static void skl_remove(struct pci_dev *pci)
 	if (skl->nhlt)
 		intel_nhlt_free(skl->nhlt);
 	skl_free(bus);
-	dev_set_drvdata(&pci->dev, NULL);
 }
 
 /* PCI IDs */
