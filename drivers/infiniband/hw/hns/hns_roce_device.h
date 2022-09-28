@@ -599,7 +599,6 @@ struct hns_roce_qp {
 	struct hns_roce_db	rdb;
 	struct hns_roce_db	sdb;
 	unsigned long		en_flags;
-	u32			doorbell_qpn;
 	enum ib_sig_type	sq_signal_bits;
 	struct hns_roce_wq	sq;
 
@@ -848,11 +847,6 @@ struct hns_roce_caps {
 	enum cong_type	cong_type;
 };
 
-struct hns_roce_dfx_hw {
-	int (*query_cqc_info)(struct hns_roce_dev *hr_dev, u32 cqn,
-			      int *buffer);
-};
-
 enum hns_roce_device_state {
 	HNS_ROCE_DEVICE_STATE_INITED,
 	HNS_ROCE_DEVICE_STATE_RST_DOWN,
@@ -898,6 +892,9 @@ struct hns_roce_hw {
 	int (*init_eq)(struct hns_roce_dev *hr_dev);
 	void (*cleanup_eq)(struct hns_roce_dev *hr_dev);
 	int (*write_srqc)(struct hns_roce_srq *srq, void *mb_buf);
+	int (*query_cqc)(struct hns_roce_dev *hr_dev, u32 cqn, void *buffer);
+	int (*query_qpc)(struct hns_roce_dev *hr_dev, u32 qpn, void *buffer);
+	int (*query_mpt)(struct hns_roce_dev *hr_dev, u32 key, void *buffer);
 	const struct ib_device_ops *hns_roce_dev_ops;
 	const struct ib_device_ops *hns_roce_dev_srq_ops;
 };
@@ -959,7 +956,6 @@ struct hns_roce_dev {
 	void			*priv;
 	struct workqueue_struct *irq_workq;
 	struct work_struct ecc_work;
-	const struct hns_roce_dfx_hw *dfx;
 	u32 func_num;
 	u32 is_vf;
 	u32 cong_algo_tmpl_id;
@@ -1227,8 +1223,12 @@ u8 hns_get_gid_index(struct hns_roce_dev *hr_dev, u32 port, int gid_index);
 void hns_roce_handle_device_err(struct hns_roce_dev *hr_dev);
 int hns_roce_init(struct hns_roce_dev *hr_dev);
 void hns_roce_exit(struct hns_roce_dev *hr_dev);
-int hns_roce_fill_res_cq_entry(struct sk_buff *msg,
-			       struct ib_cq *ib_cq);
+int hns_roce_fill_res_cq_entry(struct sk_buff *msg, struct ib_cq *ib_cq);
+int hns_roce_fill_res_cq_entry_raw(struct sk_buff *msg, struct ib_cq *ib_cq);
+int hns_roce_fill_res_qp_entry(struct sk_buff *msg, struct ib_qp *ib_qp);
+int hns_roce_fill_res_qp_entry_raw(struct sk_buff *msg, struct ib_qp *ib_qp);
+int hns_roce_fill_res_mr_entry(struct sk_buff *msg, struct ib_mr *ib_mr);
+int hns_roce_fill_res_mr_entry_raw(struct sk_buff *msg, struct ib_mr *ib_mr);
 struct hns_user_mmap_entry *
 hns_roce_user_mmap_entry_insert(struct ib_ucontext *ucontext, u64 address,
 				size_t length,

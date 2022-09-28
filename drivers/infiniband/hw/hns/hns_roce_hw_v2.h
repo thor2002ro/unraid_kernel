@@ -758,7 +758,8 @@ struct hns_roce_v2_mpt_entry {
 #define MPT_INNER_PA_VLD MPT_FIELD_LOC(71, 71)
 #define MPT_MW_BIND_QPN MPT_FIELD_LOC(95, 72)
 #define MPT_BOUND_LKEY MPT_FIELD_LOC(127, 96)
-#define MPT_LEN MPT_FIELD_LOC(191, 128)
+#define MPT_LEN_L MPT_FIELD_LOC(159, 128)
+#define MPT_LEN_H MPT_FIELD_LOC(191, 160)
 #define MPT_LKEY MPT_FIELD_LOC(223, 192)
 #define MPT_VA MPT_FIELD_LOC(287, 224)
 #define MPT_PBL_SIZE MPT_FIELD_LOC(319, 288)
@@ -1461,9 +1462,6 @@ struct hns_roce_sccc_clr_done {
 	__le32 clr_done;
 	__le32 rsv[5];
 };
-
-int hns_roce_v2_query_cqc_info(struct hns_roce_dev *hr_dev, u32 cqn,
-			       int *buffer);
 
 static inline void hns_roce_write64(struct hns_roce_dev *hr_dev, __le32 val[2],
 				    void __iomem *dest)

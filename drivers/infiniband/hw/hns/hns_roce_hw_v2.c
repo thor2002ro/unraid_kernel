@@ -637,7 +637,7 @@ static inline void update_sq_db(struct hns_roce_dev *hr_dev,
 	} else {
 		struct hns_roce_v2_db sq_db = {};
 
-		hr_reg_write(&sq_db, DB_TAG, qp->doorbell_qpn);
+		hr_reg_write(&sq_db, DB_TAG, qp->qpn);
 		hr_reg_write(&sq_db, DB_CMD, HNS_ROCE_V2_SQ_DB);
 		hr_reg_write(&sq_db, DB_PI, qp->sq.head);
 		hr_reg_write(&sq_db, DB_SL, qp->sl);
@@ -5306,9 +5306,8 @@ static int to_ib_qp_st(enum hns_roce_v2_qp_state state)
 	return (state < ARRAY_SIZE(map)) ? map[state] : -1;
 }
 
-static int hns_roce_v2_query_qpc(struct hns_roce_dev *hr_dev,
-				 struct hns_roce_qp *hr_qp,
-				 struct hns_roce_v2_qp_context *hr_context)
+static int hns_roce_v2_query_qpc(struct hns_roce_dev *hr_dev, u32 qpn,
+				 void *buffer)
 {
 	struct hns_roce_cmd_mailbox *mailbox;
 	int ret;
@@ -5318,11 +5317,11 @@ static int hns_roce_v2_query_qpc(struct hns_roce_dev *hr_dev,
 		return PTR_ERR(mailbox);
 
 	ret = hns_roce_cmd_mbox(hr_dev, 0, mailbox->dma, HNS_ROCE_CMD_QUERY_QPC,
-				hr_qp->qpn);
+				qpn);
 	if (ret)
 		goto out;
 
-	memcpy(hr_context, mailbox->buf, hr_dev->caps.qpc_sz);
+	memcpy(buffer, mailbox->buf, hr_dev->caps.qpc_sz);
 
 out:
 	hns_roce_free_cmd_mailbox(hr_dev, mailbox);
@@ -5352,7 +5351,7 @@ static int hns_roce_v2_query_qp(struct ib_qp *ibqp, struct ib_qp_attr *qp_attr,
 		goto done;
 	}
 
-	ret = hns_roce_v2_query_qpc(hr_dev, hr_qp, &context);
+	ret = hns_roce_v2_query_qpc(hr_dev, hr_qp->qpn, &context);
 	if (ret) {
 		ibdev_err(ibdev, "failed to query QPC, ret = %d.\n", ret);
 		ret = -EINVAL;
@@ -5769,6 +5768,64 @@ static int hns_roce_v2_modify_cq(struct ib_cq *cq, u16 cq_count, u16 cq_period)
 		ibdev_err(&hr_dev->ib_dev,
 			  "failed to process cmd when modifying CQ, ret = %d.\n",
 			  ret);
+
+	return ret;
+}
+
+static int hns_roce_v2_query_cqc(struct hns_roce_dev *hr_dev, u32 cqn,
+				 void *buffer)
+{
+	struct hns_roce_v2_cq_context *context;
+	struct hns_roce_cmd_mailbox *mailbox;
+	int ret;
+
+	mailbox = hns_roce_alloc_cmd_mailbox(hr_dev);
+	if (IS_ERR(mailbox))
+		return PTR_ERR(mailbox);
+
+	context = mailbox->buf;
+	ret = hns_roce_cmd_mbox(hr_dev, 0, mailbox->dma,
+				HNS_ROCE_CMD_QUERY_CQC, cqn);
+	if (ret) {
+		ibdev_err(&hr_dev->ib_dev,
+			  "failed to process cmd when querying CQ, ret = %d.\n",
+			  ret);
+		goto err_mailbox;
+	}
+
+	memcpy(buffer, context, sizeof(*context));
+
+err_mailbox:
+	hns_roce_free_cmd_mailbox(hr_dev, mailbox);
+
+	return ret;
+}
+
+static int hns_roce_v2_query_mpt(struct hns_roce_dev *hr_dev, u32 key,
+				 void *buffer)
+{
+	struct hns_roce_v2_mpt_entry *context;
+	struct hns_roce_cmd_mailbox *mailbox;
+	int ret;
+
+	mailbox = hns_roce_alloc_cmd_mailbox(hr_dev);
+	if (IS_ERR(mailbox))
+		return PTR_ERR(mailbox);
+
+	context = mailbox->buf;
+	ret = hns_roce_cmd_mbox(hr_dev, 0, mailbox->dma, HNS_ROCE_CMD_QUERY_MPT,
+				key_to_hw_index(key));
+	if (ret) {
+		ibdev_err(&hr_dev->ib_dev,
+			  "failed to process cmd when querying MPT, ret = %d.\n",
+			  ret);
+		goto err_mailbox;
+	}
+
+	memcpy(buffer, context, sizeof(*context));
+
+err_mailbox:
+	hns_roce_free_cmd_mailbox(hr_dev, mailbox);
 
 	return ret;
 }
@@ -6574,10 +6631,6 @@ static void hns_roce_v2_cleanup_eq_table(struct hns_roce_dev *hr_dev)
 	kfree(eq_table->eq);
 }
 
-static const struct hns_roce_dfx_hw hns_roce_dfx_hw_v2 = {
-	.query_cqc_info = hns_roce_v2_query_cqc_info,
-};
-
 static const struct ib_device_ops hns_roce_v2_dev_ops = {
 	.destroy_qp = hns_roce_v2_destroy_qp,
 	.modify_cq = hns_roce_v2_modify_cq,
@@ -6618,6 +6671,9 @@ static const struct hns_roce_hw hns_roce_hw_v2 = {
 	.init_eq = hns_roce_v2_init_eq_table,
 	.cleanup_eq = hns_roce_v2_cleanup_eq_table,
 	.write_srqc = hns_roce_v2_write_srqc,
+	.query_cqc = hns_roce_v2_query_cqc,
+	.query_qpc = hns_roce_v2_query_qpc,
+	.query_mpt = hns_roce_v2_query_mpt,
 	.hns_roce_dev_ops = &hns_roce_v2_dev_ops,
 	.hns_roce_dev_srq_ops = &hns_roce_v2_dev_srq_ops,
 };
@@ -6649,7 +6705,6 @@ static void hns_roce_hw_v2_get_cfg(struct hns_roce_dev *hr_dev,
 	hr_dev->is_vf = id->driver_data;
 	hr_dev->dev = &handle->pdev->dev;
 	hr_dev->hw = &hns_roce_hw_v2;
-	hr_dev->dfx = &hns_roce_dfx_hw_v2;
 	hr_dev->sdb_offset = ROCEE_DB_SQ_L_0_REG;
 	hr_dev->odb_offset = hr_dev->sdb_offset;
 
