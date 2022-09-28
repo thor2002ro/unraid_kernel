@@ -58,13 +58,9 @@ Linux 魔术数
 魔术数名              数字             结构                     文件
 ===================== ================ ======================== ==========================================
 PG_MAGIC              'P'              pg_{read,write}_hdr      ``include/linux/pg.h``
-HDLC_MAGIC            0x239e           n_hdlc                   ``drivers/char/n_hdlc.c``
 APM_BIOS_MAGIC        0x4101           apm_user                 ``arch/x86/kernel/apm_32.c``
 FASYNC_MAGIC          0x4601           fasync_struct            ``include/linux/fs.h``
 SLIP_MAGIC            0x5302           slip                     ``drivers/net/slip.h``
-TTY_MAGIC             0x5401           tty_struct               ``include/linux/tty.h``
-MGSL_MAGIC            0x5401           mgsl_info                ``drivers/char/synclink.c``
-TTY_DRIVER_MAGIC      0x5402           tty_driver               ``include/linux/tty_driver.h``
 MGSLPC_MAGIC          0x5402           mgslpc_info              ``drivers/char/pcmcia/synclink_cs.c``
 BAYCOM_MAGIC          0x19730510       baycom_state             ``drivers/net/baycom_epp.c``
 HDLCDRV_MAGIC         0x5ac6e778       hdlcdrv_state            ``include/linux/hdlcdrv.h``
