@@ -17,6 +17,8 @@
 #define __ASM_PARISC_PREFETCH_H
 
 #ifndef __ASSEMBLY__
+#include <asm/alternative.h>
+
 #ifdef CONFIG_PREFETCH
 
 #define ARCH_HAS_PREFETCH
@@ -35,7 +37,9 @@ static inline void prefetch(const void *addr)
 #define ARCH_HAS_PREFETCHW
 static inline void prefetchw(const void *addr)
 {
-	__asm__("ldd 0(%0), %%r0" : : "r" (addr));
+	__asm__("ldd 0(%0), %%r0"
+		ALTERNATIVE(ALT_COND_RUN_ON_PA1X, INSN_NOP)
+		: : "r" (addr));
 }
 #endif /* CONFIG_PA20 */
 
