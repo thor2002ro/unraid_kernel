@@ -94,6 +94,7 @@ const char *const aa_profile_mode_names[] = {
 	"complain",
 	"kill",
 	"unconfined",
+	"user",
 };
 
 
@@ -192,6 +193,41 @@ static void aa_free_data(void *ptr, void *arg)
 	kfree_sensitive(data);
 }
 
+static void free_attachment(struct aa_attachment *attach)
+{
+	int i;
+
+	for (i = 0; i < attach->xattr_count; i++)
+		kfree_sensitive(attach->xattrs[i]);
+	kfree_sensitive(attach->xattrs);
+	aa_destroy_policydb(&attach->xmatch);
+}
+
+static void free_ruleset(struct aa_ruleset *rules)
+{
+	int i;
+
+	aa_destroy_policydb(&rules->file);
+	aa_destroy_policydb(&rules->policy);
+	aa_free_cap_rules(&rules->caps);
+	aa_free_rlimit_rules(&rules->rlimits);
+
+	for (i = 0; i < rules->secmark_count; i++)
+		kfree_sensitive(rules->secmark[i].label);
+	kfree_sensitive(rules->secmark);
+}
+
+struct aa_ruleset *aa_alloc_ruleset(gfp_t gfp)
+{
+	struct aa_ruleset *rules;
+
+	rules = kzalloc(sizeof(*rules), gfp);
+	if (rules)
+		INIT_LIST_HEAD(&rules->list);
+
+	return rules;
+}
+
 /**
  * aa_free_profile - free a profile
  * @profile: the profile to free  (MAYBE NULL)
@@ -204,8 +240,8 @@ static void aa_free_data(void *ptr, void *arg)
  */
 void aa_free_profile(struct aa_profile *profile)
 {
+	struct aa_ruleset *rule, *tmp;
 	struct rhashtable *rht;
-	int i;
 
 	AA_DEBUG("%s(%p)\n", __func__, profile);
 
@@ -219,19 +255,17 @@ void aa_free_profile(struct aa_profile *profile)
 	aa_put_ns(profile->ns);
 	kfree_sensitive(profile->rename);
 
-	aa_free_file_rules(&profile->file);
-	aa_free_cap_rules(&profile->caps);
-	aa_free_rlimit_rules(&profile->rlimits);
+	free_attachment(&profile->attach);
 
-	for (i = 0; i < profile->xattr_count; i++)
-		kfree_sensitive(profile->xattrs[i]);
-	kfree_sensitive(profile->xattrs);
-	for (i = 0; i < profile->secmark_count; i++)
-		kfree_sensitive(profile->secmark[i].label);
-	kfree_sensitive(profile->secmark);
+	/*
+	 * at this point there are no tasks that can have a reference
+	 * to rules
+	 */
+	list_for_each_entry_safe(rule, tmp, &profile->rules, list) {
+		list_del_init(&rule->list);
+		free_ruleset(rule);
+	}
 	kfree_sensitive(profile->dirname);
-	aa_put_dfa(profile->xmatch);
-	aa_put_dfa(profile->policy.dfa);
 
 	if (profile->data) {
 		rht = profile->data;
@@ -258,6 +292,7 @@ struct aa_profile *aa_alloc_profile(const char *hname, struct aa_proxy *proxy,
 				    gfp_t gfp)
 {
 	struct aa_profile *profile;
+	struct aa_ruleset *rules;
 
 	/* freed by free_profile - usually through aa_put_profile */
 	profile = kzalloc(struct_size(profile, label.vec, 2), gfp);
@@ -268,6 +303,14 @@ struct aa_profile *aa_alloc_profile(const char *hname, struct aa_proxy *proxy,
 		goto fail;
 	if (!aa_label_init(&profile->label, 1, gfp))
 		goto fail;
+
+	INIT_LIST_HEAD(&profile->rules);
+
+	/* allocate the first ruleset, but leave it empty */
+	rules = aa_alloc_ruleset(gfp);
+	if (!rules)
+		goto fail;
+	list_add(&rules->list, &profile->rules);
 
 	/* update being set needed by fs interface */
 	if (!proxy) {
@@ -502,6 +545,7 @@ struct aa_profile *aa_fqlookupn_profile(struct aa_label *base,
 struct aa_profile *aa_new_null_profile(struct aa_profile *parent, bool hat,
 				       const char *base, gfp_t gfp)
 {
+	struct aa_ruleset *rules;
 	struct aa_profile *p, *profile;
 	const char *bname;
 	char *name = NULL;
@@ -544,8 +588,9 @@ name:
 	/* released on free_profile */
 	rcu_assign_pointer(profile->parent, aa_get_profile(parent));
 	profile->ns = aa_get_ns(parent->ns);
-	profile->file.dfa = aa_get_dfa(nulldfa);
-	profile->policy.dfa = aa_get_dfa(nulldfa);
+	rules = list_first_entry(&profile->rules, typeof(*rules), list);
+	rules->file.dfa = aa_get_dfa(nulldfa);
+	rules->policy.dfa = aa_get_dfa(nulldfa);
 
 	mutex_lock_nested(&profile->ns->lock, profile->ns->level);
 	p = __find_child(&parent->base.profiles, bname);
@@ -618,7 +663,7 @@ static int audit_policy(struct aa_label *label, const char *op,
 			const char *ns_name, const char *name,
 			const char *info, int error)
 {
-	DEFINE_AUDIT_DATA(sa, LSM_AUDIT_DATA_NONE, op);
+	DEFINE_AUDIT_DATA(sa, LSM_AUDIT_DATA_NONE, AA_CLASS_NONE, op);
 
 	aad(&sa)->iface.ns = ns_name;
 	aad(&sa)->name = name;
@@ -1170,7 +1215,7 @@ ssize_t aa_remove_profiles(struct aa_ns *policy_ns, struct aa_label *subj,
 
 	if (!name) {
 		/* remove namespace - can only happen if fqname[0] == ':' */
-		mutex_lock_nested(&ns->parent->lock, ns->level);
+		mutex_lock_nested(&ns->parent->lock, ns->parent->level);
 		__aa_bump_ns_revision(ns);
 		__aa_remove_ns(ns);
 		mutex_unlock(&ns->parent->lock);
