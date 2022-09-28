@@ -1599,7 +1599,6 @@ config CMDLINE
 choice
 	prompt "Kernel command line type" if CMDLINE != ""
 	default CMDLINE_FROM_BOOTLOADER
-	depends on ATAGS
 
 config CMDLINE_FROM_BOOTLOADER
 	bool "Use bootloader kernel arguments if available"
@@ -1616,7 +1615,6 @@ config CMDLINE_EXTEND
 
 config CMDLINE_FORCE
 	bool "Always use the default kernel command string"
-	depends on !ARCH_MULTIPLATFORM
 	help
 	  Always use the default kernel command string, even if the boot
 	  loader passes other arguments to the kernel.
