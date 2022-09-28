@@ -181,6 +181,7 @@ static int setup_one_atmu(struct ccsr_pci __iomem *pci,
 static bool is_kdump(void)
 {
 	struct device_node *node;
+	bool ret;
 
 	node = of_find_node_by_type(NULL, "memory");
 	if (!node) {
@@ -188,7 +189,10 @@ static bool is_kdump(void)
 		return false;
 	}
 
-	return of_property_read_bool(node, "linux,usable-memory");
+	ret = of_property_read_bool(node, "linux,usable-memory");
+	of_node_put(node);
+
+	return ret;
 }
 
 /* atmu setup for fsl pci/pcie controller */
@@ -1142,7 +1146,6 @@ void __init fsl_pci_assign_primary(void)
 	for_each_matching_node(np, pci_ids) {
 		if (of_device_is_available(np)) {
 			fsl_pci_primary = np;
-			of_node_put(np);
 			return;
 		}
 	}

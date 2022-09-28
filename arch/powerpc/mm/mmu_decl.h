@@ -92,27 +92,15 @@ extern void mapin_ram(void);
 extern void setbat(int index, unsigned long virt, phys_addr_t phys,
 		   unsigned int size, pgprot_t prot);
 
-extern unsigned int rtas_data, rtas_size;
-
-struct hash_pte;
 extern u8 early_hash[];
 
 #endif /* CONFIG_PPC32 */
 
 extern unsigned long __max_low_memory;
-extern phys_addr_t __initial_memory_limit_addr;
 extern phys_addr_t total_memory;
 extern phys_addr_t total_lowmem;
 extern phys_addr_t memstart_addr;
 extern phys_addr_t lowmem_end_addr;
-
-#ifdef CONFIG_WII
-extern unsigned long wii_hole_start;
-extern unsigned long wii_hole_size;
-
-extern unsigned long wii_mmu_mapin_mem2(unsigned long top);
-extern void wii_memory_fixups(void);
-#endif
 
 /* ...and now those things that may be slightly different between processor
  * architectures.  -- Dan
@@ -126,8 +114,6 @@ unsigned long mmu_mapin_ram(unsigned long base, unsigned long top);
 #ifdef CONFIG_PPC_FSL_BOOK3E
 extern unsigned long map_mem_in_cams(unsigned long ram, int max_cam_idx,
 				     bool dryrun, bool init);
-extern unsigned long calc_cam_sz(unsigned long ram, unsigned long virt,
-				 phys_addr_t phys);
 #ifdef CONFIG_PPC32
 extern void adjust_total_lowmem(void);
 extern int switch_to_as1(void);
