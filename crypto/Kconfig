@@ -1409,7 +1409,7 @@ endif
 if SPARC
 source "arch/sparc/crypto/Kconfig"
 endif
-if X86
+if X86 && !KMSAN
 source "arch/x86/crypto/Kconfig"
 endif
 

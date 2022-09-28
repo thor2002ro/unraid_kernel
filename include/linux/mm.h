@@ -729,7 +729,9 @@ static inline unsigned int compound_order(struct page *page)
  */
 static inline unsigned int folio_order(struct folio *folio)
 {
-	return compound_order(&folio->page);
+	if (!folio_test_large(folio))
+		return 0;
+	return folio->_folio_order;
 }
 
 #include <linux/huge_mm.h>
@@ -1177,7 +1179,7 @@ static inline void folio_put_refs(struct folio *folio, int refs)
 		__folio_put(folio);
 }
 
-void release_pages(struct page **pages, int nr);
+void release_pages(struct page **pages, unsigned long npages);
 
 /**
  * folios_put - Decrement the reference count on an array of folios.
@@ -1659,7 +1661,13 @@ static inline void set_page_links(struct page *page, enum zone_type zone,
  */
 static inline long folio_nr_pages(struct folio *folio)
 {
-	return compound_nr(&folio->page);
+	if (!folio_test_large(folio))
+		return 1;
+#ifdef CONFIG_64BIT
+	return folio->_folio_nr_pages;
+#else
+	return 1L << folio->_folio_order;
+#endif
 }
 
 /**
@@ -1943,6 +1951,7 @@ long pin_user_pages_remote(struct mm_struct *mm,
 long get_user_pages(unsigned long start, unsigned long nr_pages,
 			    unsigned int gup_flags, struct page **pages,
 			    struct vm_area_struct **vmas);
+void pin_user_page(struct page *page);
 long pin_user_pages(unsigned long start, unsigned long nr_pages,
 		    unsigned int gup_flags, struct page **pages,
 		    struct vm_area_struct **vmas);
@@ -3084,7 +3093,7 @@ extern int apply_to_existing_page_range(struct mm_struct *mm,
 				   unsigned long address, unsigned long size,
 				   pte_fn_t fn, void *data);
 
-extern void init_mem_debugging_and_hardening(void);
+extern void __init init_mem_debugging_and_hardening(void);
 #ifdef CONFIG_PAGE_POISONING
 extern void __kernel_poison_pages(struct page *page, int numpages);
 extern void __kernel_unpoison_pages(struct page *page, int numpages);
@@ -3270,12 +3279,25 @@ extern atomic_long_t num_poisoned_pages __read_mostly;
 extern int soft_offline_page(unsigned long pfn, int flags);
 #ifdef CONFIG_MEMORY_FAILURE
 extern int __get_huge_page_for_hwpoison(unsigned long pfn, int flags);
+extern void num_poisoned_pages_inc(unsigned long pfn);
+extern void memblk_nr_poison_inc(unsigned long pfn);
+extern void memblk_nr_poison_sub(unsigned long pfn, long i);
+extern void clear_hwpoisoned_pages(long nr_poison);
 #else
 static inline int __get_huge_page_for_hwpoison(unsigned long pfn, int flags)
 {
 	return 0;
 }
+
+static inline void num_poisoned_pages_inc(unsigned long pfn)
+{
+}
+
+static inline void clear_hwpoisoned_pages(long nr_poison)
+{
+}
 #endif
+extern unsigned long memblk_nr_poison(unsigned long pfn);
 
 #ifndef arch_memory_failure
 static inline int arch_memory_failure(unsigned long pfn, int flags)

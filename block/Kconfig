@@ -48,6 +48,30 @@ config BLK_DEV_BSG_COMMON
 config BLK_ICQ
 	bool
 
+config BLK_USE_PIN_USER_PAGES_FOR_DIO
+	bool "DEVELOPERS ONLY: Enable pin_user_pages() for Direct IO" if EXPERT
+	default n
+
+	help
+	  For Direct IO code, retain the pages via calls to
+	  pin_user_pages_fast(), instead of via get_user_pages_fast().
+	  Likewise, use pin_user_page() instead of get_page(). And then
+	  release such pages via unpin_user_page(), instead of
+	  put_page().
+
+	  This is a temporary setting, which will be deleted once the
+	  conversion is completed, reviewed, and tested. In the meantime,
+	  developers can enable this in order to try out each filesystem.
+	  For that, it's best to monitor these /proc/vmstat items:
+
+		nr_foll_pin_acquired
+		nr_foll_pin_released
+
+	  ...to ensure that they remain equal, when "at rest".
+
+	  Say yes here ONLY if are actively developing or testing the
+	  block layer or filesystems with pin_user_pages_fast().
+
 config BLK_DEV_BSGLIB
 	bool "Block layer SG support v4 helper lib"
 	select BLK_DEV_BSG_COMMON

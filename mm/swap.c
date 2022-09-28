@@ -537,22 +537,21 @@ void folio_add_lru(struct folio *folio)
 EXPORT_SYMBOL(folio_add_lru);
 
 /**
- * lru_cache_add_inactive_or_unevictable
- * @page:  the page to be added to LRU
- * @vma:   vma in which page is mapped for determining reclaimability
+ * folio_add_lru_vma() - Add a folio to the appropate LRU list for this VMA.
+ * @folio: The folio to be added to the LRU.
+ * @vma: VMA in which the folio is mapped.
  *
- * Place @page on the inactive or unevictable LRU list, depending on its
- * evictability.
+ * If the VMA is mlocked, @folio is added to the unevictable list.
+ * Otherwise, it is treated the same way as folio_add_lru().
  */
-void lru_cache_add_inactive_or_unevictable(struct page *page,
-					 struct vm_area_struct *vma)
+void folio_add_lru_vma(struct folio *folio, struct vm_area_struct *vma)
 {
-	VM_BUG_ON_PAGE(PageLRU(page), page);
+	VM_BUG_ON_FOLIO(folio_test_lru(folio), folio);
 
 	if (unlikely((vma->vm_flags & (VM_LOCKED | VM_SPECIAL)) == VM_LOCKED))
-		mlock_new_page(page);
+		mlock_new_page(&folio->page);
 	else
-		lru_cache_add(page);
+		folio_add_lru(folio);
 }
 
 /*
@@ -975,15 +974,15 @@ void lru_cache_disable(void)
  * Decrement the reference count on all the pages in @pages.  If it
  * fell to zero, remove the page from the LRU and free it.
  */
-void release_pages(struct page **pages, int nr)
+void release_pages(struct page **pages, unsigned long npages)
 {
-	int i;
+	unsigned long i;
 	LIST_HEAD(pages_to_free);
 	struct lruvec *lruvec = NULL;
 	unsigned long flags = 0;
 	unsigned int lock_batch;
 
-	for (i = 0; i < nr; i++) {
+	for (i = 0; i < npages; i++) {
 		struct folio *folio = page_folio(pages[i]);
 
 		/*

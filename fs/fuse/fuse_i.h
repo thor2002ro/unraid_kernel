@@ -290,6 +290,7 @@ struct fuse_io_priv {
 	struct kiocb *iocb;
 	struct completion *done;
 	bool blocking;
+	bool is_user_or_bvec;
 };
 
 #define FUSE_IO_PRIV_SYNC(i) \

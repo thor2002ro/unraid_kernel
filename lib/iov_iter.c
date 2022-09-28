@@ -174,13 +174,16 @@ static int copyout(void __user *to, const void *from, size_t n)
 
 static int copyin(void *to, const void __user *from, size_t n)
 {
+	size_t res = n;
+
 	if (should_fail_usercopy())
 		return n;
 	if (access_ok(from, n)) {
-		instrument_copy_from_user(to, from, n);
-		n = raw_copy_from_user(to, from, n);
+		instrument_copy_from_user_before(to, from, n);
+		res = raw_copy_from_user(to, from, n);
+		instrument_copy_from_user_after(to, from, n, res);
 	}
-	return n;
+	return res;
 }
 
 static inline struct pipe_buffer *pipe_buf(const struct pipe_inode_info *pipe,
@@ -1425,9 +1428,31 @@ static struct page *first_bvec_segment(const struct iov_iter *i,
 	return page;
 }
 
+enum pages_alloc_internal_flags {
+	USE_FOLL_GET,
+	MAYBE_USE_FOLL_PIN
+};
+
+/*
+ * Pins pages, either via get_page(), or via pin_user_page*(). The caller is
+ * responsible for tracking which pinning mechanism was used here, and releasing
+ * pages via the appropriate call: put_page() or unpin_user_page().
+ *
+ * The way to figure that out is:
+ *
+ *     a) If how_to_pin == FOLL_GET, then this routine will always pin via
+ *        get_page().
+ *
+ *     b) If how_to_pin == MAYBE_USE_FOLL_PIN, then this routine will pin via
+ *          pin_user_page*() for either user_backed_iter(i) cases, or
+ *          iov_iter_is_bvec(i) cases. However, for the other cases (pipe,
+ *          xarray), pages will be pinned via get_page().
+ */
 static ssize_t __iov_iter_get_pages_alloc(struct iov_iter *i,
 		   struct page ***pages, size_t maxsize,
-		   unsigned int maxpages, size_t *start)
+		   unsigned int maxpages, size_t *start,
+		   enum pages_alloc_internal_flags how_to_pin)
+
 {
 	unsigned int n;
 
@@ -1454,7 +1479,12 @@ static ssize_t __iov_iter_get_pages_alloc(struct iov_iter *i,
 		n = want_pages_array(pages, maxsize, *start, maxpages);
 		if (!n)
 			return -ENOMEM;
-		res = get_user_pages_fast(addr, n, gup_flags, *pages);
+
+		if (how_to_pin == MAYBE_USE_FOLL_PIN)
+			res = pin_user_pages_fast(addr, n, gup_flags, *pages);
+		else
+			res = get_user_pages_fast(addr, n, gup_flags, *pages);
+
 		if (unlikely(res <= 0))
 			return res;
 		maxsize = min_t(size_t, maxsize, res * PAGE_SIZE - *start);
@@ -1470,8 +1500,13 @@ static ssize_t __iov_iter_get_pages_alloc(struct iov_iter *i,
 		if (!n)
 			return -ENOMEM;
 		p = *pages;
-		for (int k = 0; k < n; k++)
-			get_page(p[k] = page + k);
+		for (int k = 0; k < n; k++) {
+			p[k] = page + k;
+			if (how_to_pin == MAYBE_USE_FOLL_PIN)
+				pin_user_page(p[k]);
+			else
+				get_page(p[k]);
+		}
 		maxsize = min_t(size_t, maxsize, n * PAGE_SIZE - *start);
 		i->count -= maxsize;
 		i->iov_offset += maxsize;
@@ -1497,9 +1532,28 @@ ssize_t iov_iter_get_pages2(struct iov_iter *i,
 		return 0;
 	BUG_ON(!pages);
 
-	return __iov_iter_get_pages_alloc(i, &pages, maxsize, maxpages, start);
+	return __iov_iter_get_pages_alloc(i, &pages, maxsize, maxpages, start,
+					  USE_FOLL_GET);
 }
 EXPORT_SYMBOL(iov_iter_get_pages2);
+
+/*
+ * A FOLL_PIN variant that calls pin_user_pages_fast() instead of
+ * get_user_pages_fast().
+ */
+ssize_t iov_iter_pin_pages(struct iov_iter *i,
+		   struct page **pages, size_t maxsize, unsigned int maxpages,
+		   size_t *start)
+{
+	if (!maxpages)
+		return 0;
+	if (WARN_ON_ONCE(!pages))
+		return -EINVAL;
+
+	return __iov_iter_get_pages_alloc(i, &pages, maxsize, maxpages, start,
+					  MAYBE_USE_FOLL_PIN);
+}
+EXPORT_SYMBOL(iov_iter_pin_pages);
 
 ssize_t iov_iter_get_pages_alloc2(struct iov_iter *i,
 		   struct page ***pages, size_t maxsize,
@@ -1509,7 +1563,8 @@ ssize_t iov_iter_get_pages_alloc2(struct iov_iter *i,
 
 	*pages = NULL;
 
-	len = __iov_iter_get_pages_alloc(i, pages, maxsize, ~0U, start);
+	len = __iov_iter_get_pages_alloc(i, pages, maxsize, ~0U, start,
+					 USE_FOLL_GET);
 	if (len <= 0) {
 		kvfree(*pages);
 		*pages = NULL;
@@ -1517,6 +1572,28 @@ ssize_t iov_iter_get_pages_alloc2(struct iov_iter *i,
 	return len;
 }
 EXPORT_SYMBOL(iov_iter_get_pages_alloc2);
+
+/*
+ * A FOLL_PIN variant that calls pin_user_pages_fast() instead of
+ * get_user_pages_fast().
+ */
+ssize_t iov_iter_pin_pages_alloc(struct iov_iter *i,
+		   struct page ***pages, size_t maxsize,
+		   size_t *start)
+{
+	ssize_t len;
+
+	*pages = NULL;
+
+	len = __iov_iter_get_pages_alloc(i, pages, maxsize, ~0U, start,
+					 MAYBE_USE_FOLL_PIN);
+	if (len <= 0) {
+		kvfree(*pages);
+		*pages = NULL;
+	}
+	return len;
+}
+EXPORT_SYMBOL(iov_iter_pin_pages_alloc);
 
 size_t csum_and_copy_from_iter(void *addr, size_t bytes, __wsum *csum,
 			       struct iov_iter *i)

@@ -675,7 +675,12 @@ static void fuse_copy_finish(struct fuse_copy_state *cs)
 			flush_dcache_page(cs->pg);
 			set_page_dirty_lock(cs->pg);
 		}
-		put_page(cs->pg);
+		if (!cs->pipebufs &&
+		    (user_backed_iter(cs->iter) || iov_iter_is_bvec(cs->iter)))
+			dio_w_unpin_user_page(cs->pg);
+
+		else
+			put_page(cs->pg);
 	}
 	cs->pg = NULL;
 }
@@ -730,7 +735,9 @@ static int fuse_copy_fill(struct fuse_copy_state *cs)
 		}
 	} else {
 		size_t off;
-		err = iov_iter_get_pages2(cs->iter, &page, PAGE_SIZE, 1, &off);
+
+		err = dio_w_iov_iter_pin_pages(cs->iter, &page, PAGE_SIZE, 1,
+					       &off);
 		if (err < 0)
 			return err;
 		BUG_ON(!err);
