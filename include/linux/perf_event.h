@@ -1028,8 +1028,6 @@ struct perf_sample_data {
 	 * minimize the cachelines touched.
 	 */
 	u64				sample_flags;
-	u64				addr;
-	struct perf_raw_record		*raw;
 	u64				period;
 
 	/*
@@ -1040,6 +1038,8 @@ struct perf_sample_data {
 	union perf_sample_weight	weight;
 	union  perf_mem_data_src	data_src;
 	u64				txn;
+	u64				addr;
+	struct perf_raw_record		*raw;
 
 	u64				type;
 	u64				ip;
@@ -1078,10 +1078,13 @@ static inline void perf_sample_data_init(struct perf_sample_data *data,
 					 u64 addr, u64 period)
 {
 	/* remaining struct members initialized in perf_prepare_sample() */
-	data->sample_flags = 0;
-	data->addr = addr;
-	data->raw  = NULL;
+	data->sample_flags = PERF_SAMPLE_PERIOD;
 	data->period = period;
+
+	if (addr) {
+		data->addr = addr;
+		data->sample_flags |= PERF_SAMPLE_ADDR;
+	}
 }
 
 /*
