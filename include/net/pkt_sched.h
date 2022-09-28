@@ -100,7 +100,7 @@ struct Qdisc *fifo_create_dflt(struct Qdisc *sch, struct Qdisc_ops *ops,
 			       struct netlink_ext_ack *extack);
 
 int register_qdisc(struct Qdisc_ops *qops);
-int unregister_qdisc(struct Qdisc_ops *qops);
+void unregister_qdisc(struct Qdisc_ops *qops);
 void qdisc_get_default(char *id, size_t len);
 int qdisc_set_default(const char *id);
 
@@ -220,6 +220,19 @@ static inline struct tc_skb_cb *tc_skb_cb(const struct sk_buff *skb)
 
 	BUILD_BUG_ON(sizeof(*cb) > sizeof_field(struct sk_buff, cb));
 	return cb;
+}
+
+static inline bool tc_qdisc_stats_dump(struct Qdisc *sch,
+				       unsigned long cl,
+				       struct qdisc_walker *arg)
+{
+	if (arg->count >= arg->skip && arg->fn(sch, cl, arg) < 0) {
+		arg->stop = 1;
+		return false;
+	}
+
+	arg->count++;
+	return true;
 }
 
 #endif

@@ -488,7 +488,7 @@ static int route4_change(struct net *net, struct sk_buff *in_skb,
 	}
 
 	if (opt == NULL)
-		return handle ? -EINVAL : 0;
+		return -EINVAL;
 
 	err = nla_parse_nested_deprecated(tb, TCA_ROUTE4_MAX, opt,
 					  route4_policy, NULL);
@@ -496,7 +496,7 @@ static int route4_change(struct net *net, struct sk_buff *in_skb,
 		return err;
 
 	fold = *arg;
-	if (fold && handle && fold->handle != handle)
+	if (fold && fold->handle != handle)
 			return -EINVAL;
 
 	err = -ENOBUFS;
@@ -587,15 +587,8 @@ static void route4_walk(struct tcf_proto *tp, struct tcf_walker *arg,
 				for (f = rtnl_dereference(b->ht[h1]);
 				     f;
 				     f = rtnl_dereference(f->next)) {
-					if (arg->count < arg->skip) {
-						arg->count++;
-						continue;
-					}
-					if (arg->fn(tp, f, arg) < 0) {
-						arg->stop = 1;
+					if (!tc_cls_stats_dump(tp, arg, f))
 						return;
-					}
-					arg->count++;
 				}
 			}
 		}

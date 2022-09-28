@@ -1146,9 +1146,9 @@ static void cpsw_get_drvinfo(struct net_device *ndev,
 	struct platform_device *pdev;
 
 	pdev = to_platform_device(cpsw->dev);
-	strlcpy(info->driver, "cpsw-switch", sizeof(info->driver));
-	strlcpy(info->version, "2.0", sizeof(info->version));
-	strlcpy(info->bus_info, pdev->name, sizeof(info->bus_info));
+	strscpy(info->driver, "cpsw-switch", sizeof(info->driver));
+	strscpy(info->version, "2.0", sizeof(info->version));
+	strscpy(info->bus_info, pdev->name, sizeof(info->bus_info));
 }
 
 static int cpsw_set_pauseparam(struct net_device *ndev,
@@ -1288,9 +1288,8 @@ static int cpsw_probe_dt(struct cpsw_common *cpsw)
 		if (of_phy_is_fixed_link(port_np)) {
 			ret = of_phy_register_fixed_link(port_np);
 			if (ret) {
-				if (ret != -EPROBE_DEFER)
-					dev_err(dev, "%pOF failed to register fixed-link phy: %d\n",
-						port_np, ret);
+				dev_err_probe(dev, ret, "%pOF failed to register fixed-link phy\n",
+					      port_np);
 				goto err_node_put;
 			}
 			slave_data->phy_node = of_node_get(port_np);
