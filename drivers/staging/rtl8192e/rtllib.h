@@ -1244,9 +1244,9 @@ enum ips_callback_function {
 };
 
 enum rt_rf_power_state {
-	eRfOn,
-	eRfSleep,
-	eRfOff
+	rf_on,
+	rf_sleep,
+	rf_off
 };
 
 struct rt_pwr_save_ctrl {
@@ -1434,8 +1434,8 @@ struct rtllib_device {
 	bool FirstIe_InScan;
 	bool be_scan_inprogress;
 	bool beinretry;
-	enum rt_rf_power_state eRFPowerState;
-	RT_RF_CHANGE_SOURCE	RfOffReason;
+	enum rt_rf_power_state rf_power_state;
+	RT_RF_CHANGE_SOURCE rf_off_reason;
 	bool is_set_key;
 	bool wx_set_enc;
 	struct rt_hi_throughput *pHTInfo;
@@ -1938,7 +1938,7 @@ int rtllib_encrypt_fragment(
 	struct sk_buff *frag,
 	int hdr_len);
 
-int rtllib_xmit(struct sk_buff *skb,  struct net_device *dev);
+netdev_tx_t rtllib_xmit(struct sk_buff *skb,  struct net_device *dev);
 void rtllib_txb_free(struct rtllib_txb *txb);
 
 /* rtllib_rx.c */
