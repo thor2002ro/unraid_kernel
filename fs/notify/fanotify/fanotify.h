@@ -452,7 +452,7 @@ static inline bool fanotify_is_error_event(u32 mask)
 	return mask & FAN_FS_ERROR;
 }
 
-static inline struct path *fanotify_event_path(struct fanotify_event *event)
+static inline const struct path *fanotify_event_path(struct fanotify_event *event)
 {
 	if (event->type == FANOTIFY_EVENT_TYPE_PATH)
 		return &FANOTIFY_PE(event)->path;
