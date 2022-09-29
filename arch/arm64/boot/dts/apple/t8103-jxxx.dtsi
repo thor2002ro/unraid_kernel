@@ -76,3 +76,7 @@
 		local-mac-address = [00 00 00 00 00 00];
 	};
 };
+
+&nco_clkref {
+	clock-frequency = <900000000>;
+};
