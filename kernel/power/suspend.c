@@ -138,6 +138,9 @@ static void s2idle_loop(void)
 			break;
 		}
 
+		if (s2idle_ops && s2idle_ops->check)
+			s2idle_ops->check();
+
 		s2idle_enter();
 	}
 
