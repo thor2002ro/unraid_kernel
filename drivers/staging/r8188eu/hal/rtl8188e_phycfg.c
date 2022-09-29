@@ -12,26 +12,12 @@
 /*  1. BB register R/W API */
 /*  */
 
-/**
-* Function:	phy_CalculateBitShift
-*
-* OverView:	Get shifted position of the BitMask
-*
-* Input:
-*			u32		BitMask,
-*
-* Output:	none
-* Return:		u32		Return the shift bit bit position of the mask
-*/
-static	u32 phy_CalculateBitShift(u32 BitMask)
+/* Get shifted position of the bit mask */
+static u32 phy_calculate_bit_shift(u32 bitmask)
 {
-	u32 i;
+	u32 i = ffs(bitmask);
 
-	for (i = 0; i <= 31; i++) {
-		if (((BitMask >> i) & 0x1) == 1)
-			break;
-	}
-	return i;
+	return i ? i - 1 : 32;
 }
 
 /**
@@ -62,7 +48,7 @@ rtl8188e_PHY_QueryBBReg(
 	if (res)
 		return 0;
 
-	BitShift = phy_CalculateBitShift(BitMask);
+	BitShift = phy_calculate_bit_shift(BitMask);
 	ReturnValue = (OriginalValue & BitMask) >> BitShift;
 	return ReturnValue;
 }
@@ -95,7 +81,7 @@ void rtl8188e_PHY_SetBBReg(struct adapter *Adapter, u32 RegAddr, u32 BitMask, u3
 		if (res)
 			return;
 
-		BitShift = phy_CalculateBitShift(BitMask);
+		BitShift = phy_calculate_bit_shift(BitMask);
 		Data = ((OriginalValue & (~BitMask)) | (Data << BitShift));
 	}
 
@@ -267,7 +253,7 @@ u32 rtl8188e_PHY_QueryRFReg(struct adapter *Adapter, u32 RegAddr, u32 BitMask)
 
 	Original_Value = phy_RFSerialRead(Adapter, RegAddr);
 
-	BitShift =  phy_CalculateBitShift(BitMask);
+	BitShift =  phy_calculate_bit_shift(BitMask);
 	Readback_Value = (Original_Value & BitMask) >> BitShift;
 	return Readback_Value;
 }
@@ -302,7 +288,7 @@ rtl8188e_PHY_SetRFReg(
 	/*  RF data is 12 bits only */
 	if (BitMask != bRFRegOffsetMask) {
 		Original_Value = phy_RFSerialRead(Adapter, RegAddr);
-		BitShift =  phy_CalculateBitShift(BitMask);
+		BitShift =  phy_calculate_bit_shift(BitMask);
 		Data = ((Original_Value & (~BitMask)) | (Data << BitShift));
 	}
 
