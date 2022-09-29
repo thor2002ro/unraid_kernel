@@ -78,9 +78,11 @@ enum prestera_cmd_type_t {
 	PRESTERA_CMD_TYPE_STP_PORT_SET = 0x1000,
 
 	PRESTERA_CMD_TYPE_SPAN_GET = 0x1100,
-	PRESTERA_CMD_TYPE_SPAN_BIND = 0x1101,
-	PRESTERA_CMD_TYPE_SPAN_UNBIND = 0x1102,
+	PRESTERA_CMD_TYPE_SPAN_INGRESS_BIND = 0x1101,
+	PRESTERA_CMD_TYPE_SPAN_INGRESS_UNBIND = 0x1102,
 	PRESTERA_CMD_TYPE_SPAN_RELEASE = 0x1103,
+	PRESTERA_CMD_TYPE_SPAN_EGRESS_BIND = 0x1104,
+	PRESTERA_CMD_TYPE_SPAN_EGRESS_UNBIND = 0x1105,
 
 	PRESTERA_CMD_TYPE_POLICER_CREATE = 0x1500,
 	PRESTERA_CMD_TYPE_POLICER_RELEASE = 0x1501,
@@ -101,6 +103,7 @@ enum {
 	PRESTERA_CMD_PORT_ATTR_LEARNING = 7,
 	PRESTERA_CMD_PORT_ATTR_FLOOD = 8,
 	PRESTERA_CMD_PORT_ATTR_CAPABILITY = 9,
+	PRESTERA_CMD_PORT_ATTR_LOCKED = 10,
 	PRESTERA_CMD_PORT_ATTR_PHY_MODE = 12,
 	PRESTERA_CMD_PORT_ATTR_TYPE = 13,
 	PRESTERA_CMD_PORT_ATTR_STATS = 17,
@@ -285,6 +288,7 @@ union prestera_msg_port_param {
 	u8 duplex;
 	u8 fec;
 	u8 fc;
+	u8 br_locked;
 	union {
 		struct {
 			u8 admin;
@@ -745,6 +749,7 @@ static void prestera_hw_build_tests(void)
 	BUILD_BUG_ON(sizeof(struct prestera_msg_rif_resp) != 12);
 	BUILD_BUG_ON(sizeof(struct prestera_msg_vr_resp) != 12);
 	BUILD_BUG_ON(sizeof(struct prestera_msg_policer_resp) != 12);
+	BUILD_BUG_ON(sizeof(struct prestera_msg_flood_domain_create_resp) != 12);
 
 	/* check events */
 	BUILD_BUG_ON(sizeof(struct prestera_msg_event_port) != 20);
@@ -1431,27 +1436,39 @@ int prestera_hw_span_get(const struct prestera_port *port, u8 *span_id)
 	return 0;
 }
 
-int prestera_hw_span_bind(const struct prestera_port *port, u8 span_id)
+int prestera_hw_span_bind(const struct prestera_port *port, u8 span_id,
+			  bool ingress)
 {
 	struct prestera_msg_span_req req = {
 		.port = __cpu_to_le32(port->hw_id),
 		.dev = __cpu_to_le32(port->dev_id),
 		.id = span_id,
 	};
+	enum prestera_cmd_type_t cmd_type;
 
-	return prestera_cmd(port->sw, PRESTERA_CMD_TYPE_SPAN_BIND,
-			    &req.cmd, sizeof(req));
+	if (ingress)
+		cmd_type = PRESTERA_CMD_TYPE_SPAN_INGRESS_BIND;
+	else
+		cmd_type = PRESTERA_CMD_TYPE_SPAN_EGRESS_BIND;
+
+	return prestera_cmd(port->sw, cmd_type, &req.cmd, sizeof(req));
+
 }
 
-int prestera_hw_span_unbind(const struct prestera_port *port)
+int prestera_hw_span_unbind(const struct prestera_port *port, bool ingress)
 {
 	struct prestera_msg_span_req req = {
 		.port = __cpu_to_le32(port->hw_id),
 		.dev = __cpu_to_le32(port->dev_id),
 	};
+	enum prestera_cmd_type_t cmd_type;
 
-	return prestera_cmd(port->sw, PRESTERA_CMD_TYPE_SPAN_UNBIND,
-			    &req.cmd, sizeof(req));
+	if (ingress)
+		cmd_type = PRESTERA_CMD_TYPE_SPAN_INGRESS_UNBIND;
+	else
+		cmd_type = PRESTERA_CMD_TYPE_SPAN_EGRESS_UNBIND;
+
+	return prestera_cmd(port->sw, cmd_type, &req.cmd, sizeof(req));
 }
 
 int prestera_hw_span_release(struct prestera_switch *sw, u8 span_id)
@@ -1632,6 +1649,22 @@ int prestera_hw_port_mc_flood_set(const struct prestera_port *port, bool flood)
 				.type = PRESTERA_PORT_FLOOD_TYPE_MC,
 				.enable = flood,
 			}
+		}
+	};
+
+	return prestera_cmd(port->sw, PRESTERA_CMD_TYPE_PORT_ATTR_SET,
+			    &req.cmd, sizeof(req));
+}
+
+int prestera_hw_port_br_locked_set(const struct prestera_port *port,
+				   bool br_locked)
+{
+	struct prestera_msg_port_attr_req req = {
+		.attr = __cpu_to_le32(PRESTERA_CMD_PORT_ATTR_LOCKED),
+		.port = __cpu_to_le32(port->hw_id),
+		.dev = __cpu_to_le32(port->dev_id),
+		.param = {
+			.br_locked = br_locked,
 		}
 	};
 

@@ -851,8 +851,8 @@ static int cpmac_set_ringparam(struct net_device *dev,
 static void cpmac_get_drvinfo(struct net_device *dev,
 			      struct ethtool_drvinfo *info)
 {
-	strlcpy(info->driver, "cpmac", sizeof(info->driver));
-	strlcpy(info->version, CPMAC_VERSION, sizeof(info->version));
+	strscpy(info->driver, "cpmac", sizeof(info->driver));
+	strscpy(info->version, CPMAC_VERSION, sizeof(info->version));
 	snprintf(info->bus_info, sizeof(info->bus_info), "%s", "cpmac");
 }
 
@@ -1109,7 +1109,7 @@ static int cpmac_probe(struct platform_device *pdev)
 	dev->netdev_ops = &cpmac_netdev_ops;
 	dev->ethtool_ops = &cpmac_ethtool_ops;
 
-	netif_napi_add(dev, &priv->napi, cpmac_poll, 64);
+	netif_napi_add(dev, &priv->napi, cpmac_poll);
 
 	spin_lock_init(&priv->lock);
 	spin_lock_init(&priv->rx_lock);

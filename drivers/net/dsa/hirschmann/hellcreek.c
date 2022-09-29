@@ -288,7 +288,7 @@ static void hellcreek_get_strings(struct dsa_switch *ds, int port,
 	for (i = 0; i < ARRAY_SIZE(hellcreek_counter); ++i) {
 		const struct hellcreek_counter *counter = &hellcreek_counter[i];
 
-		strlcpy(data + i * ETH_GSTRING_LEN,
+		strscpy(data + i * ETH_GSTRING_LEN,
 			counter->name, ETH_GSTRING_LEN);
 	}
 }
@@ -1996,7 +1996,6 @@ static int hellcreek_remove(struct platform_device *pdev)
 	hellcreek_hwtstamp_free(hellcreek);
 	hellcreek_ptp_free(hellcreek);
 	dsa_unregister_switch(hellcreek->ds);
-	platform_set_drvdata(pdev, NULL);
 
 	return 0;
 }
