@@ -193,6 +193,13 @@ static void dump_instr(const char *lvl, struct pt_regs *regs)
 				bad = get_user(val, &((u32 *)addr)[i]);
 		}
 
+		if (IS_ENABLED(CONFIG_CPU_ENDIAN_BE8)) {
+			if (thumb)
+				val = cpu_to_le16(val);
+			else
+				val = cpu_to_le32(val);
+		}
+
 		if (!bad)
 			p += sprintf(p, i == 0 ? "(%0*x) " : "%0*x ",
 					width, val);
@@ -205,14 +212,14 @@ static void dump_instr(const char *lvl, struct pt_regs *regs)
 }
 
 #ifdef CONFIG_ARM_UNWIND
-static inline void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk,
-				  const char *loglvl)
+void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk,
+		    const char *loglvl)
 {
 	unwind_backtrace(regs, tsk, loglvl);
 }
 #else
-static void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk,
-			   const char *loglvl)
+void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk,
+		    const char *loglvl)
 {
 	unsigned int fp, mode;
 	int ok = 1;
@@ -487,7 +494,7 @@ asmlinkage void do_undefinstr(struct pt_regs *regs)
 die_sig:
 #ifdef CONFIG_DEBUG_USER
 	if (user_debug & UDBG_UNDEFINED) {
-		pr_info("%s (%d): undefined instruction: pc=%p\n",
+		pr_info("%s (%d): undefined instruction: pc=%px\n",
 			current->comm, task_pid_nr(current), pc);
 		__show_regs(regs);
 		dump_instr(KERN_INFO, regs);
@@ -920,9 +927,9 @@ asmlinkage void handle_bad_stack(struct pt_regs *regs)
 {
 	unsigned long tsk_stk = (unsigned long)current->stack;
 #ifdef CONFIG_IRQSTACKS
-	unsigned long irq_stk = (unsigned long)this_cpu_read(irq_stack_ptr);
+	unsigned long irq_stk = (unsigned long)raw_cpu_read(irq_stack_ptr);
 #endif
-	unsigned long ovf_stk = (unsigned long)this_cpu_read(overflow_stack_ptr);
+	unsigned long ovf_stk = (unsigned long)raw_cpu_read(overflow_stack_ptr);
 
 	console_verbose();
 	pr_emerg("Insufficient stack space to handle exception!");
