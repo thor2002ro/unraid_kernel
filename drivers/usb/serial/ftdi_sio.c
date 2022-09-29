@@ -1108,7 +1108,8 @@ static const char *ftdi_chip_name[] = {
 /* End TIOCMIWAIT */
 
 static void ftdi_set_termios(struct tty_struct *tty,
-			struct usb_serial_port *port, struct ktermios *old);
+			     struct usb_serial_port *port,
+			     const struct ktermios *old_termios);
 static int ftdi_get_modem_status(struct usb_serial_port *port,
 						unsigned char status[2]);
 
@@ -2598,7 +2599,8 @@ static bool ftdi_tx_empty(struct usb_serial_port *port)
  * WARNING: set_termios calls this with old_termios in kernel space
  */
 static void ftdi_set_termios(struct tty_struct *tty,
-		struct usb_serial_port *port, struct ktermios *old_termios)
+		             struct usb_serial_port *port,
+		             const struct ktermios *old_termios)
 {
 	struct usb_device *dev = port->serial->dev;
 	struct device *ddev = &port->dev;
