@@ -39,6 +39,7 @@
 #include <linux/freezer.h>
 #include <linux/oom.h>
 #include <linux/numa.h>
+#include <linux/pagewalk.h>
 
 #include <asm/tlbflush.h>
 #include "internal.h"
@@ -419,6 +420,60 @@ static inline bool ksm_test_exit(struct mm_struct *mm)
 	return atomic_read(&mm->mm_users) == 0;
 }
 
+int break_ksm_pud_entry(pud_t *pud, unsigned long addr, unsigned long next,
+			struct mm_walk *walk)
+{
+	/* We only care about page tables to walk to a single base page. */
+	if (pud_leaf(*pud) || !pud_present(*pud))
+		return 1;
+	return 0;
+}
+
+int break_ksm_pmd_entry(pmd_t *pmd, unsigned long addr, unsigned long next,
+			struct mm_walk *walk)
+{
+	bool *ksm_page = walk->private;
+	struct page *page = NULL;
+	pte_t *pte, ptent;
+	spinlock_t *ptl;
+
+	/* We only care about page tables to walk to a single base page. */
+	if (pmd_leaf(*pmd) || !pmd_present(*pmd))
+		return 1;
+
+	/*
+	 * We only lookup a single page (a) no need to iterate; and (b)
+	 * always return 1 to exit immediately and not iterate in the caller.
+	 */
+	pte = pte_offset_map_lock(walk->mm, pmd, addr, &ptl);
+	ptent = *pte;
+
+	if (pte_none(ptent))
+		return 1;
+	if (!pte_present(ptent)) {
+		swp_entry_t entry = pte_to_swp_entry(ptent);
+
+		/*
+		 * We only care about migration of KSM pages. As KSM pages
+		 * remain KSM pages until freed, no need to wait here for
+		 * migration to end to identify such.
+		 */
+		if (is_migration_entry(entry))
+			page = pfn_swap_entry_to_page(entry);
+	} else {
+		page = vm_normal_page(walk->vma, addr, ptent);
+	}
+	if (page && PageKsm(page))
+		*ksm_page = true;
+	pte_unmap_unlock(pte, ptl);
+	return 1;
+}
+
+static const struct mm_walk_ops break_ksm_ops = {
+	.pud_entry = break_ksm_pud_entry,
+	.pmd_entry = break_ksm_pmd_entry,
+};
+
 /*
  * We use break_ksm to break COW on a ksm page by triggering unsharing,
  * such that the ksm page will get replaced by an exclusive anonymous page.
@@ -434,20 +489,19 @@ static inline bool ksm_test_exit(struct mm_struct *mm)
  */
 static int break_ksm(struct vm_area_struct *vma, unsigned long addr)
 {
-	struct page *page;
 	vm_fault_t ret = 0;
+
+	if (WARN_ON_ONCE(!IS_ALIGNED(addr, PAGE_SIZE)))
+		return -EINVAL;
 
 	do {
 		bool ksm_page = false;
 
 		cond_resched();
-		page = follow_page(vma, addr,
-				FOLL_GET | FOLL_MIGRATION | FOLL_REMOTE);
-		if (IS_ERR_OR_NULL(page))
-			break;
-		if (PageKsm(page))
-			ksm_page = true;
-		put_page(page);
+		ret = walk_page_range_vma(vma, addr, addr + PAGE_SIZE,
+					  &break_ksm_ops, &ksm_page);
+		if (WARN_ON_ONCE(ret < 0))
+			return ret;
 
 		if (!ksm_page)
 			return 0;
