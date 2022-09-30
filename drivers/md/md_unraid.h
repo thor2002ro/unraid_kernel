@@ -65,7 +65,7 @@ extern void (*raid6_xor_syndrome)(int, int, int, size_t, void **);
  */
 #define MD_MAJOR_VERSION                2
 #define MD_MINOR_VERSION                9
-static int MD_PATCHLEVEL_VERSION = 		22;
+static int MD_PATCHLEVEL_VERSION = 		24;
 //#define MD_PATCHLEVEL_VERSION			17
 
 /****************************************************************************/
@@ -314,7 +314,7 @@ extern int unraid_stop(mddev_t *mddev);
 extern int unraid_dump(mddev_t *mddev);
 extern int unraid_sync(mddev_t *mddev, sector_t sector_nr);
 extern int unraid_num_stripes(mddev_t *mddev, int num_stripes);
-extern blk_qc_t unraid_make_request(mddev_t *mddev, int unit, struct bio *bi);
+extern void unraid_make_request(mddev_t *mddev, int unit, struct bio *bi);
 
 /****************************************************************************/
 #endif

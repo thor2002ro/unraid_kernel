@@ -519,11 +519,6 @@ static void end_request(struct bio *bi)
 			break;
 	}
 	if (i == disks) {
-#if LINUX_VERSION_CODE <= KERNEL_VERSION(5,17,99)
-		bio_reset(bi);
-#else
-		bio_reset(bi, NULL, 0);
-#endif
 		BUG();
 		return;
 	}
@@ -565,11 +560,7 @@ static void end_request(struct bio *bi)
 				mark_disk_invalid(col);
 		}
 	}
-#if LINUX_VERSION_CODE <= KERNEL_VERSION(5,17,99)
-	bio_reset(bi);
-#else
-	bio_reset(bi, NULL, 0);
-#endif
+	bio_uninit(bi);
 
 	clr_buff_locked(col);
 	spin_lock_irqsave(&conf->device_lock, flags);
@@ -1583,7 +1574,7 @@ static void handle_stripe(struct stripe_head *sh)
 		column_t *col = &sh->col[i];
 		struct bio *bi = &col->bio;
 		mdk_rdev_t *rdev = conf->rdev[i];
-		int op_flags = 0;
+		unsigned int op_flags = 0;
 
 		/* ensure D op_flags set for P,Q as well */
 		if (col->written_bi) {
@@ -1594,19 +1585,19 @@ static void handle_stripe(struct stripe_head *sh)
 		if (test_and_clear_bit(MD_BUFF_READ, &col->state)) {
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(5,17,99)
 			bio_init(bi, &col->vec, 1);
-#else
-			bio_init(bi, NULL, &col->vec, 1, 0);
-#endif
 			bi->bi_opf = REQ_OP_READ;
+#else
+			bio_init(bi, rdev->bdev, &col->vec, 1, REQ_OP_READ);
+#endif			
 			rdev->reads++;
 		}
 		else if (test_and_clear_bit(MD_BUFF_WRITE, &col->state)) {
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(5,17,99)
 			bio_init(bi, &col->vec, 1);
-#else
-			bio_init(bi, NULL, &col->vec, 1, 0);
-#endif
 			bi->bi_opf = REQ_OP_WRITE | ((i < pd_idx) ? op_flags : pq_flags);
+#else
+			bio_init(bi, rdev->bdev, &col->vec, 1, REQ_OP_WRITE | ((i < pd_idx) ? op_flags : pq_flags));
+#endif			
 			rdev->writes++;
 		}
 		else
@@ -1615,7 +1606,9 @@ static void handle_stripe(struct stripe_head *sh)
 		dprintk("for %llu schedule op %x on col %d\n", (unsigned long long)sh->sector, bi->bi_opf, i);
 		BUG_ON(!buff_locked(col));
 
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(5,17,99)
 		bio_set_dev(bi, rdev->bdev);
+#endif
 		bi->bi_iter.bi_sector = rdev->offset + sh->sector;
 		bi->bi_iter.bi_size = BUFFER_SIZE;
 		bi->bi_iter.bi_idx = 0;
@@ -1666,13 +1659,13 @@ static void submit_flush_bio(flush_stripe_t *flush_stripe, struct bio *bi, mdk_r
 {
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(5,17,99)
 	bio_init(bi, NULL, 0);
-#else
-	bio_init(bi, NULL, NULL, 0, 0);
-#endif
 	bio_set_dev(bi, rdev->bdev);
-	bi->bi_private = flush_stripe;
-	bi->bi_end_io = end_flush;
 	bi->bi_opf = REQ_OP_WRITE | REQ_PREFLUSH;
+#else
+	bio_init(bi, rdev->bdev, NULL, 0, REQ_OP_WRITE | REQ_PREFLUSH);
+#endif	
+	bi->bi_private = flush_stripe;
+	bi->bi_end_io = end_flush;	
 	atomic_inc(&flush_stripe->flush_pending);
 	submit_bio(bi);
 }
@@ -1717,7 +1710,7 @@ static void handle_flush(mddev_t *mddev, int unit, struct bio *bi)
 		queue_work(md_wq, &flush_stripe->flush_work);
 }
 
-blk_qc_t unraid_make_request(mddev_t *mddev, int unit, struct bio *bi)
+void unraid_make_request(mddev_t *mddev, int unit, struct bio *bi)
 {
 	unraid_conf_t *conf = mddev_to_conf(mddev);
 	sector_t stripe_sector, last_sector;
@@ -1733,7 +1726,7 @@ blk_qc_t unraid_make_request(mddev_t *mddev, int unit, struct bio *bi)
 	if (bi->bi_opf & REQ_PREFLUSH) {
 		dprintk("got a flush: disk: %d\n", unit);
 		handle_flush(mddev, unit, bi);
-		return BLK_QC_T_NONE;
+		return;
 	}
 
 	stripe_sector = STRIPE_SECTOR(bi->bi_iter.bi_sector);
@@ -1757,8 +1750,7 @@ blk_qc_t unraid_make_request(mddev_t *mddev, int unit, struct bio *bi)
 	}
 
 	bio_endio(bi);
-
-	return BLK_QC_T_NONE;
+	return;
 }
 
 /* Force reads to ensure only unraidd executes check_parity(). This lets us have

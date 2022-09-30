@@ -63,7 +63,8 @@ int md_trace              = MD_TRACE;          /* command/debug tracing */
 	  18 for unraid 6.10rc1,
 	  19 for unraid 6.10rc2,
 	  21 for unraid 6.10rc3,
-	  22 for unraid 6.10rc4.
+	  22 for unraid 6.10rc4-6.10.3,
+	  24 for unraid 6.11.0,
 */
 module_param_named(unraid_patch, MD_PATCHLEVEL_VERSION, int, 0);
 
