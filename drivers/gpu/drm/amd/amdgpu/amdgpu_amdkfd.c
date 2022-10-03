@@ -74,9 +74,6 @@ void amdgpu_amdkfd_device_probe(struct amdgpu_device *adev)
 		return;
 
 	adev->kfd.dev = kgd2kfd_probe(adev, vf);
-
-	if (adev->kfd.dev)
-		amdgpu_amdkfd_total_mem_size += adev->gmc.real_vram_size;
 }
 
 /**
@@ -198,6 +195,8 @@ void amdgpu_amdkfd_device_init(struct amdgpu_device *adev)
 		adev->kfd.init_complete = kgd2kfd_device_init(adev->kfd.dev,
 						adev_to_drm(adev), &gpu_resources);
 
+		amdgpu_amdkfd_total_mem_size += adev->gmc.real_vram_size;
+
 		INIT_WORK(&adev->kfd.reset_work, amdgpu_amdkfd_reset_work);
 	}
 }
@@ -207,6 +206,7 @@ void amdgpu_amdkfd_device_fini_sw(struct amdgpu_device *adev)
 	if (adev->kfd.dev) {
 		kgd2kfd_device_exit(adev->kfd.dev);
 		adev->kfd.dev = NULL;
+		amdgpu_amdkfd_total_mem_size -= adev->gmc.real_vram_size;
 	}
 }
 
