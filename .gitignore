@@ -40,7 +40,7 @@
 *.mod.c
 *.o
 *.o.*
-*.patch
+#*.patch
 *.pyc
 *.rlib
 *.rmeta
