@@ -65,6 +65,7 @@ int md_trace              = MD_TRACE;          /* command/debug tracing */
 	  21 for unraid 6.10rc3,
 	  22 for unraid 6.10rc4-6.10.3,
 	  24 for unraid 6.11.0,
+	  25 for unraid 6.11.1,
 */
 module_param_named(unraid_patch, MD_PATCHLEVEL_VERSION, int, 0);
 
@@ -1067,6 +1068,8 @@ static int do_run(mddev_t *mddev)
 			blk_queue_max_write_same_sectors(gd->queue, 0);
 #endif
 			blk_queue_max_write_zeroes_sectors(gd->queue, 0);
+			blk_queue_max_discard_sectors(gd->queue, 0);
+
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(5,18,99)
 			blk_queue_flag_clear(QUEUE_FLAG_DISCARD, gd->queue);
 #endif
@@ -1096,13 +1099,12 @@ static int do_stop(mddev_t *mddev)
 
 		if (mddev->gendisk[unit]) {
 			struct gendisk *gd = mddev->gendisk[unit];
-			struct request_queue *gq = gd->queue;
 
 			printk("md%d: stopping\n", unit);
 
 			del_gendisk(gd);
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(5,19,99)
-			blk_cleanup_queue(gq);
+			blk_cleanup_disk(gd);
 #endif
 			put_disk(gd);
 
