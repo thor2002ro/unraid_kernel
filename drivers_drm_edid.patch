@@ -1,0 +1,19 @@
+--- a/drivers/gpu/drm/drm_edid.c-orig	2022-09-27 08:57:29.460691344 -0700
++++ b/drivers/gpu/drm/drm_edid.c	2022-09-27 09:00:45.711664841 -0700
+@@ -1775,10 +1775,14 @@
+ 		pr_debug("EDID block %d pointer is NULL\n", block_num);
+ 		break;
+ 	case EDID_BLOCK_ZERO:
+-		pr_notice("EDID block %d is all zeroes\n", block_num);
++// limetech - avoid filling syslog
++//		pr_notice("EDID block %d is all zeroes\n", block_num);
++		pr_debug("EDID block %d is all zeroes\n", block_num);
+ 		break;
+ 	case EDID_BLOCK_HEADER_CORRUPT:
+-		pr_notice("EDID has corrupt header\n");
++// limetech - avoid filling syslog
++//		pr_notice("EDID has corrupt header\n");
++		pr_debug("EDID has corrupt header\n");
+ 		break;
+ 	case EDID_BLOCK_HEADER_REPAIR:
+ 		pr_debug("EDID corrupt header needs repair\n");
