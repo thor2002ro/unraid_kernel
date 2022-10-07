@@ -1916,10 +1916,14 @@ static void edid_block_status_print(enum edid_block_status status,
 		pr_debug("EDID block %d pointer is NULL\n", block_num);
 		break;
 	case EDID_BLOCK_ZERO:
-		pr_notice("EDID block %d is all zeroes\n", block_num);
+// limetech - avoid filling syslog
+//		pr_notice("EDID block %d is all zeroes\n", block_num);
+		pr_debug("EDID block %d is all zeroes\n", block_num);
 		break;
 	case EDID_BLOCK_HEADER_CORRUPT:
-		pr_notice("EDID has corrupt header\n");
+// limetech - avoid filling syslog
+//		pr_notice("EDID has corrupt header\n");
+		pr_debug("EDID has corrupt header\n");
 		break;
 	case EDID_BLOCK_HEADER_REPAIR:
 		pr_debug("EDID corrupt header needs repair\n");
