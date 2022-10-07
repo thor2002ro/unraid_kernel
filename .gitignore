@@ -36,7 +36,7 @@
 *.mod.c
 *.o
 *.o.*
-*.patch
+#*.patch
 *.rmeta
 *.rsi
 *.s
