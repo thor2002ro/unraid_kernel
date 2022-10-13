@@ -52,8 +52,6 @@ int init_srcu_struct(struct srcu_struct *ssp);
 #else
 /* Dummy definition for things like notifiers.  Actual use gets link error. */
 struct srcu_struct { };
-int __srcu_read_lock_nmisafe(struct srcu_struct *ssp, bool chknmisafe) __acquires(ssp);
-void __srcu_read_unlock_nmisafe(struct srcu_struct *ssp, int idx, bool chknmisafe) __releases(ssp);
 #endif
 
 void call_srcu(struct srcu_struct *ssp, struct rcu_head *head,
@@ -65,6 +63,20 @@ void synchronize_srcu(struct srcu_struct *ssp);
 unsigned long get_state_synchronize_srcu(struct srcu_struct *ssp);
 unsigned long start_poll_synchronize_srcu(struct srcu_struct *ssp);
 bool poll_state_synchronize_srcu(struct srcu_struct *ssp, unsigned long cookie);
+
+#ifdef CONFIG_NEED_SRCU_NMI_SAFE
+int __srcu_read_lock_nmisafe(struct srcu_struct *ssp) __acquires(ssp);
+void __srcu_read_unlock_nmisafe(struct srcu_struct *ssp, int idx) __releases(ssp);
+#else
+static inline int __srcu_read_lock_nmisafe(struct srcu_struct *ssp)
+{
+	return __srcu_read_lock(ssp);
+}
+static inline void __srcu_read_unlock_nmisafe(struct srcu_struct *ssp, int idx)
+{
+	__srcu_read_unlock(ssp, idx);
+}
+#endif /* CONFIG_NEED_SRCU_NMI_SAFE */
 
 #ifdef CONFIG_SRCU
 void srcu_init(void);
@@ -105,6 +117,18 @@ static inline int srcu_read_lock_held(const struct srcu_struct *ssp)
 }
 
 #endif /* #else #ifdef CONFIG_DEBUG_LOCK_ALLOC */
+
+#define SRCU_NMI_UNKNOWN	0x0
+#define SRCU_NMI_UNSAFE		0x1
+#define SRCU_NMI_SAFE		0x2
+
+#if defined(CONFIG_PROVE_RCU) && defined(CONFIG_TREE_SRCU)
+void srcu_check_nmi_safety(struct srcu_struct *ssp, bool nmi_safe);
+#else
+static inline void srcu_check_nmi_safety(struct srcu_struct *ssp,
+					 bool nmi_safe) { }
+#endif
+
 
 /**
  * srcu_dereference_check - fetch SRCU-protected pointer for later dereferencing
@@ -163,6 +187,7 @@ static inline int srcu_read_lock(struct srcu_struct *ssp) __acquires(ssp)
 {
 	int retval;
 
+	srcu_check_nmi_safety(ssp, false);
 	retval = __srcu_read_lock(ssp);
 	rcu_lock_acquire(&(ssp)->dep_map);
 	return retval;
@@ -179,10 +204,8 @@ static inline int srcu_read_lock_nmisafe(struct srcu_struct *ssp) __acquires(ssp
 {
 	int retval;
 
-	if (IS_ENABLED(CONFIG_NEED_SRCU_NMI_SAFE))
-		retval = __srcu_read_lock_nmisafe(ssp, true);
-	else
-		retval = __srcu_read_lock(ssp);
+	srcu_check_nmi_safety(ssp, true);
+	retval = __srcu_read_lock_nmisafe(ssp);
 	rcu_lock_acquire(&(ssp)->dep_map);
 	return retval;
 }
@@ -193,6 +216,7 @@ srcu_read_lock_notrace(struct srcu_struct *ssp) __acquires(ssp)
 {
 	int retval;
 
+	srcu_check_nmi_safety(ssp, false);
 	retval = __srcu_read_lock(ssp);
 	return retval;
 }
@@ -208,6 +232,7 @@ static inline void srcu_read_unlock(struct srcu_struct *ssp, int idx)
 	__releases(ssp)
 {
 	WARN_ON_ONCE(idx & ~0x1);
+	srcu_check_nmi_safety(ssp, false);
 	rcu_lock_release(&(ssp)->dep_map);
 	__srcu_read_unlock(ssp, idx);
 }
@@ -223,17 +248,16 @@ static inline void srcu_read_unlock_nmisafe(struct srcu_struct *ssp, int idx)
 	__releases(ssp)
 {
 	WARN_ON_ONCE(idx & ~0x1);
+	srcu_check_nmi_safety(ssp, true);
 	rcu_lock_release(&(ssp)->dep_map);
-	if (IS_ENABLED(CONFIG_NEED_SRCU_NMI_SAFE))
-		__srcu_read_unlock_nmisafe(ssp, idx, true);
-	else
-		__srcu_read_unlock(ssp, idx);
+	__srcu_read_unlock_nmisafe(ssp, idx);
 }
 
 /* Used by tracing, cannot be traced and cannot call lockdep. */
 static inline notrace void
 srcu_read_unlock_notrace(struct srcu_struct *ssp, int idx) __releases(ssp)
 {
+	srcu_check_nmi_safety(ssp, false);
 	__srcu_read_unlock(ssp, idx);
 }
 

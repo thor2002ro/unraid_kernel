@@ -43,10 +43,6 @@ struct srcu_data {
 	struct srcu_struct *ssp;
 };
 
-#define SRCU_NMI_UNKNOWN	0x0
-#define SRCU_NMI_NMI_UNSAFE	0x1
-#define SRCU_NMI_NMI_SAFE	0x2
-
 /*
  * Node in SRCU combining tree, similar in function to rcu_data.
  */
@@ -158,8 +154,5 @@ struct srcu_struct {
 void synchronize_srcu_expedited(struct srcu_struct *ssp);
 void srcu_barrier(struct srcu_struct *ssp);
 void srcu_torture_stats_print(struct srcu_struct *ssp, char *tt, char *tf);
-
-int __srcu_read_lock_nmisafe(struct srcu_struct *ssp, bool chknmisafe) __acquires(ssp);
-void __srcu_read_unlock_nmisafe(struct srcu_struct *ssp, int idx, bool chknmisafe) __releases(ssp);
 
 #endif
