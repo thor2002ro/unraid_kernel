@@ -190,7 +190,7 @@ trip_point_hyst_show(struct device *dev, struct device_attribute *attr,
 	if (ret)
 		return ret;
 
-	return ret ? ret : sprintf(buf, "%d\n", trip.hysteresis);
+	return sprintf(buf, "%d\n", trip.hysteresis);
 }
 
 static ssize_t
