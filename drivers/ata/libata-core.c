@@ -4090,6 +4090,12 @@ static const struct ata_dev_quirks_entry __ata_dev_quirks[] = {
 	/* Crucial devices with broken LPM support */
 	{ "CT*0BX*00SSD1",		NULL,	ATA_QUIRK_NOLPM },
 
+	/* Crucial BX500 SSD seems to have broken LPM support */
+	{ "CT*BX500*",		NULL,	ATA_QUIRK_NOLPM },
+
+	/* Crucial MX500 SSD seems to have broken LPM support */
+	{ "CT*MX500*",		NULL,	ATA_QUIRK_NOLPM },
+
 	/* 512GB MX100 with MU01 firmware has both queued TRIM and LPM issues */
 	{ "Crucial_CT512MX100*",	"MU01",	ATA_QUIRK_NO_NCQ_TRIM |
 						ATA_QUIRK_ZERO_AFTER_TRIM |
