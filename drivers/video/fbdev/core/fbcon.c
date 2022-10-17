@@ -2884,7 +2884,7 @@ static void fbcon_invert_region(struct vc_data *vc, u16 * p, int cnt)
 
 static void fbcon_scrolldelta(struct vc_data *vc, int lines)
 {
-	struct fb_info *info = registered_fb[con2fb_map[fg_console]];
+	struct fb_info *info = fbcon_info_from_console(fg_console);
 	struct fbcon_ops *ops = info->fbcon_par;
 	struct fbcon_display *disp = &fb_display[fg_console];
 	int offset, limit, scrollback_old;
