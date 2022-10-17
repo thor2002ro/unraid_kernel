@@ -1712,7 +1712,7 @@ void free_huge_page(struct page *page)
 	unsigned long flags;
 
 	VM_BUG_ON_FOLIO(folio_ref_count(folio), folio);
-	VM_BUG_ON_PAGE(folio_mapcount(folio), folio);
+	VM_BUG_ON_FOLIO(folio_mapcount(folio), folio);
 
 	hugetlb_set_folio_subpool(folio, NULL);
 	if (folio_test_anon(folio))
