@@ -52,8 +52,8 @@
 
 #define __careful_clamp(val, lo, hi) ({					\
 	__clamp_input_check(lo, hi) +					\
-	__builtin_choose_expr(__typecheck(val, lo) && __typecheck(val, hi) &&\
-			      __typecheck(hi, lo) && __is_constexpr(val) &&\
+	__builtin_choose_expr(__typecheck(val, lo) && __typecheck(val, hi) && \
+			      __typecheck(hi, lo) && __is_constexpr(val) && \
 			      __is_constexpr(lo) && __is_constexpr(hi),	\
 		__clamp(val, lo, hi),					\
 		__clamp_once(val, lo, hi, __UNIQUE_ID(__val),		\
