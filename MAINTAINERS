@@ -13296,8 +13296,8 @@ L:	linux-mm@kvack.org
 S:	Maintained
 W:	http://www.linux-mm.org
 T:	git://git.kernel.org/pub/scm/linux/kernel/git/akpm/mm
-F:	mm/vmalloc.c
 F:	include/linux/vmalloc.h
+F:	mm/vmalloc.c
 
 MEMORY HOT(UN)PLUG
 M:	David Hildenbrand <david@redhat.com>
