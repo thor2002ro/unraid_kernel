@@ -78,3 +78,18 @@ config ZRAM_MEMORY_TRACKING
 	  /sys/kernel/debug/zram/zramX/block_state.
 
 	  See Documentation/admin-guide/blockdev/zram.rst for more information.
+
+config ZRAM_MULTI_COMP
+	bool "Enable multiple per-CPU compression streams"
+	depends on ZRAM
+	help
+	This will enable per-CPU multi-compression streams, so that ZRAM
+	can re-compress IDLE/huge pages, using a potentially slower but
+	more effective compression algorithm. Note, that IDLE page support
+	requires ZRAM_MEMORY_TRACKING.
+
+          echo TIMEOUT > /sys/block/zramX/idle
+          echo SIZE > /sys/block/zramX/recompress
+
+	SIZE (in bytes) parameter sets the object size watermark: idle
+	objects that are of a smaller size will not get recompressed.
