@@ -44,7 +44,9 @@
 #include <linux/jhash.h>
 #include <linux/string_helpers.h>
 #include <linux/fsnotify.h>
+#include <linux/rhashtable.h>
 #include <linux/nfs_ssc.h>
+
 #include "xdr4.h"
 #include "xdr4cb.h"
 #include "vfs.h"
@@ -84,6 +86,7 @@ static bool check_for_locks(struct nfs4_file *fp, struct nfs4_lockowner *lowner)
 static void nfs4_free_ol_stateid(struct nfs4_stid *stid);
 void nfsd4_end_grace(struct nfsd_net *nn);
 static void _free_cpntf_state_locked(struct nfsd_net *nn, struct nfs4_cpntf_state *cps);
+static void remove_nfs4_file(struct nfs4_file *fi);
 
 /* Locking: */
 
@@ -588,11 +591,8 @@ static void nfsd4_free_file_rcu(struct rcu_head *rcu)
 void
 put_nfs4_file(struct nfs4_file *fi)
 {
-	might_lock(&state_lock);
-
-	if (refcount_dec_and_lock(&fi->fi_ref, &state_lock)) {
-		hlist_del_rcu(&fi->fi_hash);
-		spin_unlock(&state_lock);
+	if (refcount_dec_and_test(&fi->fi_ref)) {
+		remove_nfs4_file(fi);
 		WARN_ON_ONCE(!list_empty(&fi->fi_clnt_odstate));
 		WARN_ON_ONCE(!list_empty(&fi->fi_delegations));
 		call_rcu(&fi->fi_rcu, nfsd4_free_file_rcu);
@@ -706,19 +706,82 @@ static unsigned int ownerstr_hashval(struct xdr_netobj *ownername)
 	return ret & OWNER_HASH_MASK;
 }
 
-/* hash table for nfs4_file */
-#define FILE_HASH_BITS                   8
-#define FILE_HASH_SIZE                  (1 << FILE_HASH_BITS)
+static struct rhltable nfs4_file_rhltable ____cacheline_aligned_in_smp;
 
-static unsigned int file_hashval(struct svc_fh *fh)
+/*
+ * The returned hash value is based solely on the address of an in-code
+ * inode, a pointer to a slab-allocated object. The entropy in such a
+ * pointer is concentrated in its middle bits.
+ */
+static u32 nfs4_file_inode_hash(const struct inode *inode, u32 seed)
 {
-	struct inode *inode = d_inode(fh->fh_dentry);
+	u32 k;
 
-	/* XXX: why not (here & in file cache) use inode? */
-	return (unsigned int)hash_long(inode->i_ino, FILE_HASH_BITS);
+	k = ((unsigned long)inode) >> L1_CACHE_SHIFT;
+	return jhash2(&k, 1, seed);
 }
 
-static struct hlist_head file_hashtbl[FILE_HASH_SIZE];
+/**
+ * nfs4_file_key_hashfn - Compute the hash value of a lookup key
+ * @data: key on which to compute the hash value
+ * @len: rhash table's key_len parameter (unused)
+ * @seed: rhash table's random seed of the day
+ *
+ * Return value:
+ *   Computed 32-bit hash value
+ */
+static u32 nfs4_file_key_hashfn(const void *data, u32 len, u32 seed)
+{
+	const struct svc_fh *fhp = data;
+
+	return nfs4_file_inode_hash(d_inode(fhp->fh_dentry), seed);
+}
+
+/**
+ * nfs4_file_obj_hashfn - Compute the hash value of an nfs4_file object
+ * @data: object on which to compute the hash value
+ * @len: rhash table's key_len parameter (unused)
+ * @seed: rhash table's random seed of the day
+ *
+ * Return value:
+ *   Computed 32-bit hash value
+ */
+static u32 nfs4_file_obj_hashfn(const void *data, u32 len, u32 seed)
+{
+	const struct nfs4_file *fi = data;
+
+	return nfs4_file_inode_hash(fi->fi_inode, seed);
+}
+
+/**
+ * nfs4_file_obj_cmpfn - Match a cache item against search criteria
+ * @arg: search criteria
+ * @ptr: cache item to check
+ *
+ * Return values:
+ *   %0 - Success; item matches search criteria
+ */
+static int nfs4_file_obj_cmpfn(struct rhashtable_compare_arg *arg,
+			       const void *ptr)
+{
+	const struct svc_fh *fhp = arg->key;
+	const struct nfs4_file *fi = ptr;
+
+	return fh_match(&fi->fi_fhandle, &fhp->fh_handle) ? 0 : 1;
+}
+
+static const struct rhashtable_params nfs4_file_rhash_params = {
+	.key_len		= sizeof_field(struct nfs4_file, fi_inode),
+	.key_offset		= offsetof(struct nfs4_file, fi_inode),
+	.head_offset		= offsetof(struct nfs4_file, fi_rhash),
+	.hashfn			= nfs4_file_key_hashfn,
+	.obj_hashfn		= nfs4_file_obj_hashfn,
+	.obj_cmpfn		= nfs4_file_obj_cmpfn,
+
+	/* Reduce resizing churn on light workloads */
+	.min_size		= 512,		/* buckets */
+	.automatic_shrinking	= true,
+};
 
 /*
  * Check if courtesy clients have conflicting access and resolve it if possible
@@ -4260,11 +4323,8 @@ static struct nfs4_file *nfsd4_alloc_file(void)
 }
 
 /* OPEN Share state helper functions */
-static void nfsd4_init_file(struct svc_fh *fh, unsigned int hashval,
-				struct nfs4_file *fp)
+static void init_nfs4_file(const struct svc_fh *fh, struct nfs4_file *fp)
 {
-	lockdep_assert_held(&state_lock);
-
 	refcount_set(&fp->fi_ref, 1);
 	spin_lock_init(&fp->fi_lock);
 	INIT_LIST_HEAD(&fp->fi_stateids);
@@ -4282,7 +4342,6 @@ static void nfsd4_init_file(struct svc_fh *fh, unsigned int hashval,
 	INIT_LIST_HEAD(&fp->fi_lo_states);
 	atomic_set(&fp->fi_lo_recalls, 0);
 #endif
-	hlist_add_head_rcu(&fp->fi_hash, &file_hashtbl[hashval]);
 }
 
 void
@@ -4667,71 +4726,75 @@ move_to_close_lru(struct nfs4_ol_stateid *s, struct net *net)
 		nfs4_put_stid(&last->st_stid);
 }
 
-/* search file_hashtbl[] for file */
-static struct nfs4_file *
-find_file_locked(struct svc_fh *fh, unsigned int hashval)
+static struct nfs4_file *find_nfs4_file(const struct svc_fh *fhp)
 {
-	struct nfs4_file *fp;
+	struct rhlist_head *tmp, *list;
+	struct nfs4_file *fi = NULL;
 
-	hlist_for_each_entry_rcu(fp, &file_hashtbl[hashval], fi_hash,
-				lockdep_is_held(&state_lock)) {
-		if (fh_match(&fp->fi_fhandle, &fh->fh_handle)) {
-			if (refcount_inc_not_zero(&fp->fi_ref))
-				return fp;
+	list = rhltable_lookup(&nfs4_file_rhltable, fhp,
+			       nfs4_file_rhash_params);
+	rhl_for_each_entry_rcu(fi, tmp, list, fi_rhash)
+		if (fh_match(&fi->fi_fhandle, &fhp->fh_handle)) {
+			if (!refcount_inc_not_zero(&fi->fi_ref))
+				fi = NULL;
+			break;
 		}
-	}
-	return NULL;
+	return fi;
 }
 
-static struct nfs4_file *insert_file(struct nfs4_file *new, struct svc_fh *fh,
-				     unsigned int hashval)
+/*
+ * On hash insertion, identify entries with the same inode but
+ * distinct filehandles. They will all be in the same hash bucket
+ * because we hash by the address of the nfs4_file's struct inode.
+ */
+static struct nfs4_file *insert_file(struct nfs4_file *new,
+				     const struct svc_fh *fhp)
 {
-	struct nfs4_file *fp;
-	struct nfs4_file *ret = NULL;
-	bool alias_found = false;
+	struct rhlist_head *tmp, *list;
+	struct nfs4_file *fi;
+	int err;
 
 	spin_lock(&state_lock);
-	hlist_for_each_entry_rcu(fp, &file_hashtbl[hashval], fi_hash,
-				 lockdep_is_held(&state_lock)) {
-		if (fh_match(&fp->fi_fhandle, &fh->fh_handle)) {
-			if (refcount_inc_not_zero(&fp->fi_ref))
-				ret = fp;
-		} else if (d_inode(fh->fh_dentry) == fp->fi_inode)
-			fp->fi_aliased = alias_found = true;
+
+	err = rhltable_insert_key(&nfs4_file_rhltable, fhp,
+				  &new->fi_rhash,
+				  nfs4_file_rhash_params);
+	if (err) {
+		spin_unlock(&state_lock);
+		return NULL;
 	}
-	if (likely(ret == NULL)) {
-		nfsd4_init_file(fh, hashval, new);
-		new->fi_aliased = alias_found;
-		ret = new;
-	}
+
+	list = rhltable_lookup(&nfs4_file_rhltable, fhp,
+			       nfs4_file_rhash_params);
+	rhl_for_each_entry_rcu(fi, tmp, list, fi_rhash)
+		if (fi->fi_inode == d_inode(fhp->fh_dentry) &&
+		    !fh_match(&fi->fi_fhandle, &fhp->fh_handle)) {
+			fi->fi_aliased = true;
+			new->fi_aliased = true;
+		}
+
 	spin_unlock(&state_lock);
-	return ret;
+	return new;
 }
 
-static struct nfs4_file * find_file(struct svc_fh *fh)
+static noinline struct nfs4_file *
+insert_nfs4_file(struct nfs4_file *new, const struct svc_fh *fhp)
 {
-	struct nfs4_file *fp;
-	unsigned int hashval = file_hashval(fh);
+	struct nfs4_file *fi;
 
-	rcu_read_lock();
-	fp = find_file_locked(fh, hashval);
-	rcu_read_unlock();
-	return fp;
+	/* Do not hash the same filehandle more than once */
+	fi = find_nfs4_file(fhp);
+	if (unlikely(fi))
+		return fi;
+
+	init_nfs4_file(fhp, new);
+	return insert_file(new, fhp);
 }
 
-static struct nfs4_file *
-find_or_add_file(struct nfs4_file *new, struct svc_fh *fh)
+static noinline void remove_nfs4_file(struct nfs4_file *fi)
 {
-	struct nfs4_file *fp;
-	unsigned int hashval = file_hashval(fh);
-
-	rcu_read_lock();
-	fp = find_file_locked(fh, hashval);
-	rcu_read_unlock();
-	if (fp)
-		return fp;
-
-	return insert_file(new, fh, hashval);
+	rhltable_remove(&nfs4_file_rhltable, &fi->fi_rhash,
+			nfs4_file_rhash_params);
 }
 
 /*
@@ -4744,9 +4807,12 @@ nfs4_share_conflict(struct svc_fh *current_fh, unsigned int deny_type)
 	struct nfs4_file *fp;
 	__be32 ret = nfs_ok;
 
-	fp = find_file(current_fh);
+	rcu_read_lock();
+	fp = find_nfs4_file(current_fh);
+	rcu_read_unlock();
 	if (!fp)
 		return ret;
+
 	/* Check for conflicting share reservations */
 	spin_lock(&fp->fi_lock);
 	if (fp->fi_share_deny & deny_type)
@@ -5619,7 +5685,11 @@ nfsd4_process_open2(struct svc_rqst *rqstp, struct svc_fh *current_fh, struct nf
 	 * and check for delegations in the process of being recalled.
 	 * If not found, create the nfs4_file struct
 	 */
-	fp = find_or_add_file(open->op_file, current_fh);
+	rcu_read_lock();
+	fp = insert_nfs4_file(open->op_file, current_fh);
+	rcu_read_unlock();
+	if (unlikely(!fp))
+		return nfserr_jukebox;
 	if (fp != open->op_file) {
 		status = nfs4_check_deleg(cl, open, &dp);
 		if (status)
@@ -8033,9 +8103,15 @@ nfs4_state_start(void)
 {
 	int ret;
 
-	ret = nfsd4_create_callback_queue();
+	ret = rhltable_init(&nfs4_file_rhltable, &nfs4_file_rhash_params);
 	if (ret)
 		return ret;
+
+	ret = nfsd4_create_callback_queue();
+	if (ret) {
+		rhltable_destroy(&nfs4_file_rhltable);
+		return ret;
+	}
 
 	set_max_delegations();
 	return 0;
@@ -8067,6 +8143,7 @@ nfs4_state_shutdown_net(struct net *net)
 
 	nfsd4_client_tracking_exit(net);
 	nfs4_state_destroy_net(net);
+	rhltable_destroy(&nfs4_file_rhltable);
 #ifdef CONFIG_NFSD_V4_2_INTER_SSC
 	nfsd4_ssc_shutdown_umount(nn);
 #endif
