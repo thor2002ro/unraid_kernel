@@ -283,7 +283,7 @@ static int proc_readfd_count(struct inode *inode)
 {
 	struct task_struct *p = get_proc_task(inode);
 	struct fdtable *fdt;
-	unsigned int i, size, open_fds = 0;
+	unsigned int open_fds = 0;
 
 	if (!p)
 		return -ENOENT;
@@ -293,10 +293,7 @@ static int proc_readfd_count(struct inode *inode)
 		rcu_read_lock();
 
 		fdt = files_fdtable(p->files);
-		size = fdt->max_fds;
-
-		for (i = size / BITS_PER_LONG; i > 0;)
-			open_fds += hweight64(fdt->open_fds[--i]);
+		open_fds = bitmap_weight(fdt->open_fds, fdt->max_fds);
 
 		rcu_read_unlock();
 	}
