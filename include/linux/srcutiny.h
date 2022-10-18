@@ -89,5 +89,4 @@ static inline void srcu_torture_stats_print(struct srcu_struct *ssp,
 		 data_race(READ_ONCE(ssp->srcu_idx)),
 		 data_race(READ_ONCE(ssp->srcu_idx_max)));
 }
-
 #endif
