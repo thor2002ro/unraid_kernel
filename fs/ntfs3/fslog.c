@@ -2727,6 +2727,9 @@ static inline bool check_attr(const struct MFT_REC *rec,
 			return false;
 		}
 
+		if (run_off > asize)
+			return false;
+
 		if (run_unpack(NULL, sbi, 0, svcn, evcn, svcn,
 			       Add2Ptr(attr, run_off), asize - run_off) < 0) {
 			return false;
@@ -3048,7 +3051,7 @@ static int do_action(struct ntfs_log *log, struct OPEN_ATTR_ENRTY *oe,
 	struct NEW_ATTRIBUTE_SIZES *new_sz;
 	struct ATTR_FILE_NAME *fname;
 	struct OpenAttr *oa, *oa2;
-	u32 nsize, t32, asize, used, esize, bmp_off, bmp_bits;
+	u32 nsize, t32, asize, used, esize, off, bits;
 	u16 id, id2;
 	u32 record_size = sbi->record_size;
 	u64 t64;
@@ -3635,30 +3638,28 @@ move_data:
 		break;
 
 	case SetBitsInNonresidentBitMap:
-		bmp_off =
-			le32_to_cpu(((struct BITMAP_RANGE *)data)->bitmap_off);
-		bmp_bits = le32_to_cpu(((struct BITMAP_RANGE *)data)->bits);
+		off = le32_to_cpu(((struct BITMAP_RANGE *)data)->bitmap_off);
+		bits = le32_to_cpu(((struct BITMAP_RANGE *)data)->bits);
 
-		if (cbo + (bmp_off + 7) / 8 > lco ||
-		    cbo + ((bmp_off + bmp_bits + 7) / 8) > lco) {
+		if (cbo + (off + 7) / 8 > lco ||
+		    cbo + ((off + bits + 7) / 8) > lco) {
 			goto dirty_vol;
 		}
 
-		__bitmap_set(Add2Ptr(buffer_le, roff), bmp_off, bmp_bits);
+		__bitmap_set(Add2Ptr(buffer_le, roff), off, bits);
 		a_dirty = true;
 		break;
 
 	case ClearBitsInNonresidentBitMap:
-		bmp_off =
-			le32_to_cpu(((struct BITMAP_RANGE *)data)->bitmap_off);
-		bmp_bits = le32_to_cpu(((struct BITMAP_RANGE *)data)->bits);
+		off = le32_to_cpu(((struct BITMAP_RANGE *)data)->bitmap_off);
+		bits = le32_to_cpu(((struct BITMAP_RANGE *)data)->bits);
 
-		if (cbo + (bmp_off + 7) / 8 > lco ||
-		    cbo + ((bmp_off + bmp_bits + 7) / 8) > lco) {
+		if (cbo + (off + 7) / 8 > lco ||
+		    cbo + ((off + bits + 7) / 8) > lco) {
 			goto dirty_vol;
 		}
 
-		__bitmap_clear(Add2Ptr(buffer_le, roff), bmp_off, bmp_bits);
+		__bitmap_clear(Add2Ptr(buffer_le, roff), off, bits);
 		a_dirty = true;
 		break;
 
@@ -4770,6 +4771,12 @@ fake_attr:
 	if (attr->non_res) {
 		u16 roff = le16_to_cpu(attr->nres.run_off);
 		CLST svcn = le64_to_cpu(attr->nres.svcn);
+
+		if (roff > t32) {
+			kfree(oa->attr);
+			oa->attr = NULL;
+			goto fake_attr;
+		}
 
 		err = run_unpack(&oa->run0, sbi, inode->i_ino, svcn,
 				 le64_to_cpu(attr->nres.evcn), svcn,

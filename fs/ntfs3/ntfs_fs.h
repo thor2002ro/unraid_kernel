@@ -97,9 +97,11 @@ struct ntfs_mount_options {
 	unsigned sparse : 1; /* Create sparse files. */
 	unsigned showmeta : 1; /* Show meta files. */
 	unsigned nohidden : 1; /* Do not show hidden files. */
+	unsigned hide_dot_files : 1; /* Set hidden flag on dot files. */
 	unsigned force : 1; /* RW mount dirty volume. */
 	unsigned noacsrules : 1; /* Exclude acs rules. */
 	unsigned prealloc : 1; /* Preallocate space when file is growing. */
+	unsigned nocase : 1; /* case insensitive. */
 };
 
 /* Special value to unpack and deallocate. */
@@ -720,6 +722,7 @@ struct dentry *ntfs3_get_parent(struct dentry *child);
 
 extern const struct inode_operations ntfs_dir_inode_operations;
 extern const struct inode_operations ntfs_special_inode_operations;
+extern const struct dentry_operations ntfs_dentry_ops;
 
 /* Globals from record.c */
 int mi_get(struct ntfs_sb_info *sbi, CLST rno, struct mft_inode **mi);
@@ -839,6 +842,8 @@ int ntfs_cmp_names(const __le16 *s1, size_t l1, const __le16 *s2, size_t l2,
 		   const u16 *upcase, bool bothcase);
 int ntfs_cmp_names_cpu(const struct cpu_str *uni1, const struct le_str *uni2,
 		       const u16 *upcase, bool bothcase);
+unsigned long ntfs_names_hash(const u16 *name, size_t len, const u16 *upcase,
+			      unsigned long hash);
 
 /* globals from xattr.c */
 #ifdef CONFIG_NTFS3_FS_POSIX_ACL

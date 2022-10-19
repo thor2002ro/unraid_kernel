@@ -21,6 +21,30 @@
  * https://docs.microsoft.com/en-us/windows/wsl/file-permissions
  * It stores uid/gid/mode/dev in xattr
  *
+ * ntfs allows up to 2^64 clusters per volume.
+ * It means you should use 64 bits lcn to operate with ntfs.
+ * Implementation of ntfs.sys uses only 32 bits lcn.
+ * Default ntfs3 uses 32 bits lcn too.
+ * ntfs3 built with CONFIG_NTFS3_64BIT_CLUSTER (ntfs3_64) uses 64 bits per lcn.
+ *
+ *
+ *     ntfs limits, cluster size is 4K (2^12)
+ * -----------------------------------------------------------------------------
+ * | Volume size   | Clusters | ntfs.sys | ntfs3  | ntfs3_64 | mkntfs | chkdsk |
+ * -----------------------------------------------------------------------------
+ * | < 16T, 2^44   |  < 2^32  |  yes     |  yes   |   yes    |  yes   |  yes   |
+ * | > 16T, 2^44   |  > 2^32  |  no      |  no    |   yes    |  yes   |  yes   |
+ * ----------------------------------------------------------|------------------
+ *
+ * To mount large volumes as ntfs one should use large cluster size (up to 2M)
+ * The maximum volume size in this case is 2^32 * 2^21 = 2^53 = 8P
+ *
+ *     ntfs limits, cluster size is 2M (2^31)
+ * -----------------------------------------------------------------------------
+ * | < 8P, 2^54    |  < 2^32  |  yes     |  yes   |   yes    |  yes   |  yes   |
+ * | > 8P, 2^54    |  > 2^32  |  no      |  no    |   yes    |  yes   |  yes   |
+ * ----------------------------------------------------------|------------------
+ *
  */
 
 #include <linux/blkdev.h>
@@ -223,11 +247,13 @@ enum Opt {
 	Opt_force,
 	Opt_sparse,
 	Opt_nohidden,
+	Opt_hide_dot_files,
 	Opt_showmeta,
 	Opt_acl,
 	Opt_iocharset,
 	Opt_prealloc,
 	Opt_noacsrules,
+	Opt_nocase,
 	Opt_err,
 };
 
@@ -242,10 +268,12 @@ static const struct fs_parameter_spec ntfs_fs_parameters[] = {
 	fsparam_flag_no("force",		Opt_force),
 	fsparam_flag_no("sparse",		Opt_sparse),
 	fsparam_flag_no("hidden",		Opt_nohidden),
+	fsparam_flag_no("hidedotfiles",		Opt_hide_dot_files),
 	fsparam_flag_no("acl",			Opt_acl),
 	fsparam_flag_no("showmeta",		Opt_showmeta),
 	fsparam_flag_no("prealloc",		Opt_prealloc),
 	fsparam_flag_no("acsrules",		Opt_noacsrules),
+	fsparam_flag_no("nocase",		Opt_nocase),
 	fsparam_string("iocharset",		Opt_iocharset),
 	{}
 };
@@ -330,6 +358,9 @@ static int ntfs_fs_parse_param(struct fs_context *fc,
 	case Opt_nohidden:
 		opts->nohidden = result.negated ? 1 : 0;
 		break;
+	case Opt_hide_dot_files:
+		opts->hide_dot_files = result.negated ? 1 : 0;
+		break;
 	case Opt_acl:
 		if (!result.negated)
 #ifdef CONFIG_NTFS3_FS_POSIX_ACL
@@ -353,6 +384,9 @@ static int ntfs_fs_parse_param(struct fs_context *fc,
 		break;
 	case Opt_noacsrules:
 		opts->noacsrules = result.negated ? 1 : 0;
+		break;
+	case Opt_nocase:
+		opts->nocase = result.negated ? 1 : 0;
 		break;
 	default:
 		/* Should not be here unless we forget add case. */
@@ -406,25 +440,16 @@ static struct inode *ntfs_alloc_inode(struct super_block *sb)
 		return NULL;
 
 	memset(ni, 0, offsetof(struct ntfs_inode, vfs_inode));
-
 	mutex_init(&ni->ni_lock);
-
 	return &ni->vfs_inode;
 }
 
-static void ntfs_i_callback(struct rcu_head *head)
+static void ntfs_free_inode(struct inode *inode)
 {
-	struct inode *inode = container_of(head, struct inode, i_rcu);
 	struct ntfs_inode *ni = ntfs_i(inode);
 
 	mutex_destroy(&ni->ni_lock);
-
 	kmem_cache_free(ntfs_inode_cachep, ni);
-}
-
-static void ntfs_destroy_inode(struct inode *inode)
-{
-	call_rcu(&inode->i_rcu, ntfs_i_callback);
 }
 
 static void init_once(void *foo)
@@ -519,9 +544,9 @@ static int ntfs_show_options(struct seq_file *m, struct dentry *root)
 	seq_printf(m, ",gid=%u",
 		  from_kgid_munged(user_ns, opts->fs_gid));
 	if (opts->fmask)
-		seq_printf(m, ",fmask=%04o", ~opts->fs_fmask_inv);
+		seq_printf(m, ",fmask=%04o", opts->fs_fmask_inv ^ 0xffff);
 	if (opts->dmask)
-		seq_printf(m, ",dmask=%04o", ~opts->fs_dmask_inv);
+		seq_printf(m, ",dmask=%04o", opts->fs_dmask_inv ^ 0xffff);
 	if (opts->nls)
 		seq_printf(m, ",iocharset=%s", opts->nls->charset);
 	else
@@ -592,7 +617,7 @@ static int ntfs_sync_fs(struct super_block *sb, int wait)
 
 static const struct super_operations ntfs_sops = {
 	.alloc_inode = ntfs_alloc_inode,
-	.destroy_inode = ntfs_destroy_inode,
+	.free_inode = ntfs_free_inode,
 	.evict_inode = ntfs_evict_inode,
 	.put_super = ntfs_put_super,
 	.statfs = ntfs_statfs,
@@ -672,7 +697,7 @@ static u32 true_sectors_per_clst(const struct NTFS_BOOT *boot)
 	if (boot->sectors_per_clusters <= 0x80)
 		return boot->sectors_per_clusters;
 	if (boot->sectors_per_clusters >= 0xf4) /* limit shift to 2MB max */
-		return 1U << (0 - boot->sectors_per_clusters);
+		return 1U << -(s8)boot->sectors_per_clusters;
 	return -EINVAL;
 }
 
@@ -789,7 +814,7 @@ static int ntfs_init_from_boot(struct super_block *sb, u32 sector_size,
 						 : (u32)boot->record_size
 							   << sbi->cluster_bits;
 
-	if (record_size > MAXIMUM_BYTES_PER_MFT)
+	if (record_size > MAXIMUM_BYTES_PER_MFT || record_size < SECTOR_SIZE)
 		goto out;
 
 	sbi->record_bits = blksize_bits(record_size);
@@ -916,6 +941,7 @@ static int ntfs_fill_super(struct super_block *sb, struct fs_context *fc)
 	sb->s_export_op = &ntfs_export_ops;
 	sb->s_time_gran = NTFS_TIME_GRAN; // 100 nsec
 	sb->s_xattr = ntfs_xattr_handlers;
+	sb->s_d_op = sbi->options->nocase ? &ntfs_dentry_ops : NULL;
 
 	sbi->options->nls = ntfs_load_nls(sbi->options->nls_name);
 	if (IS_ERR(sbi->options->nls)) {
@@ -1260,9 +1286,9 @@ load_root:
 	ref.low = cpu_to_le32(MFT_REC_ROOT);
 	ref.seq = cpu_to_le16(MFT_REC_ROOT);
 	inode = ntfs_iget5(sb, &ref, &NAME_ROOT);
-	if (IS_ERR(inode)) {
+	if (IS_ERR(inode) || !inode->i_op) {
 		ntfs_err(sb, "Failed to load root.");
-		err = PTR_ERR(inode);
+		err = IS_ERR(inode) ? PTR_ERR(inode) : -EINVAL;
 		goto out;
 	}
 
@@ -1281,6 +1307,7 @@ out:
 	 * Free resources here.
 	 * ntfs_fs_free will be called with fc->s_fs_info = NULL
 	 */
+	put_mount_options(sbi->options);
 	put_ntfs(sbi);
 	sb->s_fs_info = NULL;
 
@@ -1488,11 +1515,8 @@ out1:
 
 static void __exit exit_ntfs_fs(void)
 {
-	if (ntfs_inode_cachep) {
-		rcu_barrier();
-		kmem_cache_destroy(ntfs_inode_cachep);
-	}
-
+	rcu_barrier();
+	kmem_cache_destroy(ntfs_inode_cachep);
 	unregister_filesystem(&ntfs_fs_type);
 	ntfs3_exit_bitmap();
 }
