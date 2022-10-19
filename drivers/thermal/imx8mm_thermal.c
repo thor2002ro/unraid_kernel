@@ -23,8 +23,8 @@
 
 #define TER_ADC_PD		BIT(30)
 #define TER_EN			BIT(31)
-#define TRITSR_TEMP0_VAL_MASK	0xff
-#define TRITSR_TEMP1_VAL_MASK	0xff0000
+#define TRITSR_TEMP0_VAL_MASK	GENMASK(7, 0)
+#define TRITSR_TEMP1_VAL_MASK	GENMASK(23, 16)
 
 #define PROBE_SEL_ALL		GENMASK(31, 30)
 
@@ -65,8 +65,14 @@ static int imx8mm_tmu_get_temp(void *data, int *temp)
 	u32 val;
 
 	val = readl_relaxed(tmu->base + TRITSR) & TRITSR_TEMP0_VAL_MASK;
+
+	/*
+	 * Do not validate against the V bit (bit 31) due to errata
+	 * ERR051272: TMU: Bit 31 of registers TMU_TSCR/TMU_TRITSR/TMU_TRATSR invalid
+	 */
+
 	*temp = val * 1000;
-	if (*temp < VER1_TEMP_LOW_LIMIT)
+	if (*temp < VER1_TEMP_LOW_LIMIT || *temp > VER2_TEMP_HIGH_LIMIT)
 		return -EAGAIN;
 
 	return 0;
