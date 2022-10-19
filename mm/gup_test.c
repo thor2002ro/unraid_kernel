@@ -299,7 +299,8 @@ static inline int pin_longterm_test_read(unsigned long arg)
 	for (i = 0; i < pin_longterm_test_nr_pages; i++) {
 		void *addr = page_to_virt(pin_longterm_test_pages[i]);
 
-		if (copy_to_user((void __user *)user_addr, addr, PAGE_SIZE))
+		if (copy_to_user((void __user *)(unsigned long)user_addr, addr,
+				 PAGE_SIZE))
 			return -EFAULT;
 		user_addr += PAGE_SIZE;
 	}
