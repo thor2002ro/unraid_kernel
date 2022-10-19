@@ -439,6 +439,9 @@ static bool amdgpu_mem_visible(struct amdgpu_device *adev,
 	while (cursor.remaining) {
 		amdgpu_res_next(&cursor, cursor.size);
 
+		if (!cursor.remaining)
+			break;
+
 		/* ttm_resource_ioremap only supports contiguous memory */
 		if (end != cursor.start)
 			return false;
@@ -2292,9 +2295,9 @@ static ssize_t amdgpu_iomem_read(struct file *f, char __user *buf,
 		if (p->mapping != adev->mman.bdev.dev_mapping)
 			return -EPERM;
 
-		ptr = kmap(p);
+		ptr = kmap_local_page(p);
 		r = copy_to_user(buf, ptr + off, bytes);
-		kunmap(p);
+		kunmap_local(ptr);
 		if (r)
 			return -EFAULT;
 
@@ -2343,9 +2346,9 @@ static ssize_t amdgpu_iomem_write(struct file *f, const char __user *buf,
 		if (p->mapping != adev->mman.bdev.dev_mapping)
 			return -EPERM;
 
-		ptr = kmap(p);
+		ptr = kmap_local_page(p);
 		r = copy_from_user(ptr + off, buf, bytes);
-		kunmap(p);
+		kunmap_local(ptr);
 		if (r)
 			return -EFAULT;
 
