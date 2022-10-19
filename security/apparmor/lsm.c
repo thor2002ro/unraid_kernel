@@ -21,7 +21,7 @@
 #include <linux/user_namespace.h>
 #include <linux/netfilter_ipv4.h>
 #include <linux/netfilter_ipv6.h>
-#include <linux/zlib.h>
+#include <linux/zstd.h>
 #include <net/sock.h>
 #include <uapi/linux/mount.h>
 
@@ -163,12 +163,15 @@ static int apparmor_capget(struct task_struct *target, kernel_cap_t *effective,
 		struct label_it i;
 
 		label_for_each_confined(i, label, profile) {
+			struct aa_ruleset *rules;
 			if (COMPLAIN_MODE(profile))
 				continue;
+			rules = list_first_entry(&profile->rules,
+						 typeof(*rules), list);
 			*effective = cap_intersect(*effective,
-						   profile->caps.allow);
+						   rules->caps.allow);
 			*permitted = cap_intersect(*permitted,
-						   profile->caps.allow);
+						   rules->caps.allow);
 		}
 	}
 	rcu_read_unlock();
@@ -647,7 +650,8 @@ static int apparmor_setprocattr(const char *name, void *value,
 	char *command, *largs = NULL, *args = value;
 	size_t arg_size;
 	int error;
-	DEFINE_AUDIT_DATA(sa, LSM_AUDIT_DATA_NONE, OP_SETPROCATTR);
+	DEFINE_AUDIT_DATA(sa, LSM_AUDIT_DATA_NONE, AA_CLASS_NONE,
+			  OP_SETPROCATTR);
 
 	if (size == 0)
 		return -EINVAL;
@@ -1361,7 +1365,7 @@ module_param_named(export_binary, aa_g_export_binary, aabool, 0600);
 #endif
 
 /* policy loaddata compression level */
-int aa_g_rawdata_compression_level = Z_DEFAULT_COMPRESSION;
+int aa_g_rawdata_compression_level = AA_DEFAULT_CLEVEL;
 module_param_named(rawdata_compression_level, aa_g_rawdata_compression_level,
 		   aacompressionlevel, 0400);
 
@@ -1543,9 +1547,8 @@ static int param_set_aacompressionlevel(const char *val,
 	error = param_set_int(val, kp);
 
 	aa_g_rawdata_compression_level = clamp(aa_g_rawdata_compression_level,
-					       Z_NO_COMPRESSION,
-					       Z_BEST_COMPRESSION);
-	pr_info("AppArmor: policy rawdata compression level set to %u\n",
+					       AA_MIN_CLEVEL, AA_MAX_CLEVEL);
+	pr_info("AppArmor: policy rawdata compression level set to %d\n",
 		aa_g_rawdata_compression_level);
 
 	return error;
