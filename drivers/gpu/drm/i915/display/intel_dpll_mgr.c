@@ -152,28 +152,6 @@ intel_get_shared_dpll_by_id(struct drm_i915_private *dev_priv,
 	return &dev_priv->display.dpll.shared_dplls[id];
 }
 
-/**
- * intel_get_shared_dpll_id - get the id of a DPLL
- * @dev_priv: i915 device instance
- * @pll: the DPLL
- *
- * Returns:
- * The id of @pll
- */
-enum intel_dpll_id
-intel_get_shared_dpll_id(struct drm_i915_private *dev_priv,
-			 struct intel_shared_dpll *pll)
-{
-	long pll_idx = pll - dev_priv->display.dpll.shared_dplls;
-
-	if (drm_WARN_ON(&dev_priv->drm,
-			pll_idx < 0 ||
-			pll_idx >= dev_priv->display.dpll.num_shared_dpll))
-		return -1;
-
-	return pll_idx;
-}
-
 /* For ILK+ */
 void assert_shared_dpll(struct drm_i915_private *dev_priv,
 			struct intel_shared_dpll *pll,
@@ -384,20 +362,30 @@ intel_reference_shared_dpll(struct intel_atomic_state *state,
 	if (shared_dpll[id].pipe_mask == 0)
 		shared_dpll[id].hw_state = *pll_state;
 
-	drm_dbg(&i915->drm, "using %s for pipe %c\n", pll->info->name,
-		pipe_name(crtc->pipe));
+	drm_WARN_ON(&i915->drm, (shared_dpll[id].pipe_mask & BIT(crtc->pipe)) != 0);
 
 	shared_dpll[id].pipe_mask |= BIT(crtc->pipe);
+
+	drm_dbg_kms(&i915->drm, "[CRTC:%d:%s] reserving %s\n",
+		    crtc->base.base.id, crtc->base.name, pll->info->name);
 }
 
 static void intel_unreference_shared_dpll(struct intel_atomic_state *state,
 					  const struct intel_crtc *crtc,
 					  const struct intel_shared_dpll *pll)
 {
+	struct drm_i915_private *i915 = to_i915(state->base.dev);
 	struct intel_shared_dpll_state *shared_dpll;
+	const enum intel_dpll_id id = pll->info->id;
 
 	shared_dpll = intel_atomic_get_shared_dpll_state(&state->base);
-	shared_dpll[pll->info->id].pipe_mask &= ~BIT(crtc->pipe);
+
+	drm_WARN_ON(&i915->drm, (shared_dpll[id].pipe_mask & BIT(crtc->pipe)) == 0);
+
+	shared_dpll[id].pipe_mask &= ~BIT(crtc->pipe);
+
+	drm_dbg_kms(&i915->drm, "[CRTC:%d:%s] releasing %s\n",
+		    crtc->base.base.id, crtc->base.name, pll->info->name);
 }
 
 static void intel_put_dpll(struct intel_atomic_state *state,
@@ -708,8 +696,6 @@ struct hsw_wrpll_rnp {
 
 static unsigned hsw_wrpll_get_budget_for_freq(int clock)
 {
-	unsigned budget;
-
 	switch (clock) {
 	case 25175000:
 	case 25200000:
@@ -742,21 +728,18 @@ static unsigned hsw_wrpll_get_budget_for_freq(int clock)
 	case 222750000:
 	case 296703000:
 	case 297000000:
-		budget = 0;
-		break;
+		return 0;
 	case 233500000:
 	case 245250000:
 	case 247750000:
 	case 253250000:
 	case 298000000:
-		budget = 1500;
-		break;
+		return 1500;
 	case 169128000:
 	case 169500000:
 	case 179500000:
 	case 202000000:
-		budget = 2000;
-		break;
+		return 2000;
 	case 256250000:
 	case 262500000:
 	case 270000000:
@@ -766,18 +749,13 @@ static unsigned hsw_wrpll_get_budget_for_freq(int clock)
 	case 281250000:
 	case 286000000:
 	case 291750000:
-		budget = 4000;
-		break;
+		return 4000;
 	case 267250000:
 	case 268500000:
-		budget = 5000;
-		break;
+		return 5000;
 	default:
-		budget = 1000;
-		break;
+		return 1000;
 	}
-
-	return budget;
 }
 
 static void hsw_wrpll_update_rnp(u64 freq2k, unsigned int budget,
@@ -4193,6 +4171,8 @@ void intel_shared_dpll_init(struct drm_i915_private *dev_priv)
 	const struct dpll_info *dpll_info;
 	int i;
 
+	mutex_init(&dev_priv->display.dpll.lock);
+
 	if (IS_DG2(dev_priv))
 		/* No shared DPLLs on DG2; port PLLs are part of the PHY */
 		dpll_mgr = NULL;
@@ -4237,7 +4217,6 @@ void intel_shared_dpll_init(struct drm_i915_private *dev_priv)
 
 	dev_priv->display.dpll.mgr = dpll_mgr;
 	dev_priv->display.dpll.num_shared_dpll = i;
-	mutex_init(&dev_priv->display.dpll.lock);
 }
 
 /**
