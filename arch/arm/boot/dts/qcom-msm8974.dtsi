@@ -1056,7 +1056,7 @@
 			reg = <0xfc400000 0x4000>;
 		};
 
-		rpm_msg_ram: memory@fc428000 {
+		rpm_msg_ram: sram@fc428000 {
 			compatible = "qcom,rpm-msg-ram";
 			reg = <0xfc428000 0x4000>;
 		};
@@ -1116,7 +1116,7 @@
 		};
 
 		tsens: thermal-sensor@fc4a9000 {
-			compatible = "qcom,msm8974-tsens";
+			compatible = "qcom,msm8974-tsens", "qcom,tsens-v0_1";
 			reg = <0xfc4a9000 0x1000>, /* TM */
 			      <0xfc4a8000 0x1000>; /* SROT */
 			nvmem-cells = <&tsens_calib>, <&tsens_backup>;
@@ -1194,7 +1194,7 @@
 			resets = <&gcc GCC_MSS_RESTART>;
 			reset-names = "mss_restart";
 
-			qcom,halt-regs = <&tcsr_mutex_block 0x1180 0x1200 0x1280>;
+			qcom,halt-regs = <&tcsr_mutex 0x1180 0x1200 0x1280>;
 
 			qcom,smem-states = <&modem_smp2p_out 0>;
 			qcom,smem-state-names = "stop";
@@ -1233,13 +1233,14 @@
 			};
 		};
 
-		tcsr_mutex_block: syscon@fd484000 {
-			compatible = "syscon";
+		tcsr_mutex: hwlock@fd484000 {
+			compatible = "qcom,msm8974-tcsr-mutex", "qcom,tcsr-mutex", "syscon";
 			reg = <0xfd484000 0x2000>;
+			#hwlock-cells = <1>;
 		};
 
 		tcsr: syscon@fd4a0000 {
-			compatible = "syscon";
+			compatible = "qcom,tcsr-msm8974", "syscon";
 			reg = <0xfd4a0000 0x10000>;
 		};
 
@@ -1571,7 +1572,6 @@
 					      "core_mmss";
 
 				phys = <&dsi0_phy>;
-				phy-names = "dsi-phy";
 
 				status = "disabled";
 
@@ -1597,7 +1597,7 @@
 				};
 			};
 
-			dsi0_phy: dsi-phy@fd922a00 {
+			dsi0_phy: phy@fd922a00 {
 				compatible = "qcom,dsi-phy-28nm-hpm";
 				reg = <0xfd922a00 0xd4>,
 				      <0xfd922b00 0x280>,
@@ -1703,8 +1703,6 @@
 				qcom,ipc = <&apcs 8 8>;
 				qcom,smd-edge = <1>;
 				label = "lpass";
-				#address-cells = <1>;
-				#size-cells = <0>;
 			};
 		};
 
@@ -1717,13 +1715,6 @@
 				offset = <0x65c>;
 			};
 		};
-	};
-
-	tcsr_mutex: tcsr-mutex {
-		compatible = "qcom,tcsr-mutex";
-		syscon = <&tcsr_mutex_block 0 0x80>;
-
-		#hwlock-cells = <1>;
 	};
 
 	thermal-zones {

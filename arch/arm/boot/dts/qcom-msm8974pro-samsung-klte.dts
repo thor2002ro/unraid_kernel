@@ -8,6 +8,7 @@
 / {
 	model = "Samsung Galaxy S5";
 	compatible = "samsung,klte", "qcom,msm8974";
+	chassis-type = "handset";
 
 	aliases {
 		serial0 = &blsp1_uart1;
@@ -470,7 +471,7 @@
 };
 
 &rpm_requests {
-	pma8084-regulators {
+	regulators-0 {
 		compatible = "qcom,rpm-pma8084-regulators";
 
 		pma8084_s1: s1 {

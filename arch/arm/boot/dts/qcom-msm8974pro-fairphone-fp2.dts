@@ -9,6 +9,7 @@
 / {
 	model = "Fairphone 2";
 	compatible = "fairphone,fp2", "qcom,msm8974";
+	chassis-type = "handset";
 
 	aliases {
 		mmc0 = &sdhc_1;
@@ -190,7 +191,7 @@
 };
 
 &rpm_requests {
-	pm8841-regulators {
+	regulators-0 {
 		compatible = "qcom,rpm-pm8841-regulators";
 
 		pm8841_s1: s1 {
@@ -209,7 +210,7 @@
 		};
 	};
 
-	pm8941-regulators {
+	regulators-1 {
 		compatible = "qcom,rpm-pm8941-regulators";
 
 		vdd_l1_l3-supply = <&pm8941_s1>;

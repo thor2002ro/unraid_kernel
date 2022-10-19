@@ -9,6 +9,7 @@
 / {
 	model = "Sony Xperia Z2 Tablet";
 	compatible = "sony,xperia-castor", "qcom,msm8974";
+	chassis-type = "tablet";
 
 	aliases {
 		serial0 = &blsp1_uart2;
@@ -294,7 +295,7 @@
 
 	qcom,power-source = <1>;
 
-	rgb-led {
+	multi-led {
 		color = <LED_COLOR_ID_RGB>;
 		function = LED_FUNCTION_STATUS;
 
@@ -319,7 +320,7 @@
 };
 
 &rpm_requests {
-	pm8941-regulators {
+	regulators-0 {
 		compatible = "qcom,rpm-pm8941-regulators";
 
 		vdd_l1_l3-supply = <&pm8941_s1>;

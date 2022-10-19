@@ -8,6 +8,7 @@
 /dts-v1/;
 
 #include "sc7280-herobrine.dtsi"
+#include "sc7280-herobrine-audio-rt5682.dtsi"
 #include "sc7280-herobrine-lte-sku.dtsi"
 
 / {
@@ -357,7 +358,6 @@ ts_i2c: &i2c13 {
 			  "",				/* 170 */
 			  "MOS_BLE_UART_TX",
 			  "MOS_BLE_UART_RX",
-			  "",
 			  "",
 			  "";
 };

@@ -662,6 +662,7 @@
 			#clock-cells = <1>;
 			#reset-cells = <1>;
 			#power-domain-cells = <1>;
+			power-domains = <&rpmhpd SC7180_CX>;
 		};
 
 		qfprom: efuse@784000 {
@@ -2775,12 +2776,15 @@
 					  "dm_hs_phy_irq", "dp_hs_phy_irq";
 
 			power-domains = <&gcc USB30_PRIM_GDSC>;
+			required-opps = <&rpmhpd_opp_nom>;
 
 			resets = <&gcc GCC_USB30_PRIM_BCR>;
 
 			interconnects = <&aggre2_noc MASTER_USB3 0 &mc_virt SLAVE_EBI1 0>,
 					<&gem_noc MASTER_APPSS_PROC 0 &config_noc SLAVE_USB3 0>;
 			interconnect-names = "usb-ddr", "apps-usb";
+
+			wakeup-source;
 
 			usb_1_dwc3: usb@a600000 {
 				compatible = "snps,dwc3";
@@ -3012,7 +3016,6 @@
 				power-domains = <&rpmhpd SC7180_CX>;
 
 				phys = <&dsi_phy>;
-				phy-names = "dsi";
 
 				#address-cells = <1>;
 				#size-cells = <0>;
@@ -3057,7 +3060,7 @@
 				};
 			};
 
-			dsi_phy: dsi-phy@ae94400 {
+			dsi_phy: phy@ae94400 {
 				compatible = "qcom,dsi-phy-10nm";
 				reg = <0 0x0ae94400 0 0x200>,
 				      <0 0x0ae94600 0 0x280>,
