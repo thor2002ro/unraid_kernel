@@ -1392,7 +1392,7 @@ static int ata_eh_read_log_10h(struct ata_device *dev,
 	tf->hob_lbah = buf[10];
 	tf->nsect = buf[12];
 	tf->hob_nsect = buf[13];
-	if (dev->class == ATA_DEV_ZAC && ata_id_has_ncq_autosense(dev->id))
+	if (ata_id_has_ncq_autosense(dev->id) && (tf->status & ATA_SENSE))
 		tf->auxiliary = buf[14] << 16 | buf[15] << 8 | buf[16];
 
 	return 0;
@@ -1420,7 +1420,7 @@ void ata_eh_analyze_ncq_error(struct ata_link *link)
 	int tag, rc;
 
 	/* if frozen, we can't do much */
-	if (ap->pflags & ATA_PFLAG_FROZEN)
+	if (ata_port_is_frozen(ap))
 		return;
 
 	/* is it NCQ device error? */
@@ -1456,17 +1456,24 @@ void ata_eh_analyze_ncq_error(struct ata_link *link)
 	memcpy(&qc->result_tf, &tf, sizeof(tf));
 	qc->result_tf.flags = ATA_TFLAG_ISADDR | ATA_TFLAG_LBA | ATA_TFLAG_LBA48;
 	qc->err_mask |= AC_ERR_DEV | AC_ERR_NCQ;
-	if (dev->class == ATA_DEV_ZAC &&
-	    ((qc->result_tf.status & ATA_SENSE) || qc->result_tf.auxiliary)) {
+
+	/*
+	 * If the device supports NCQ autosense, ata_eh_read_log_10h() will have
+	 * stored the sense data in qc->result_tf.auxiliary.
+	 */
+	if (qc->result_tf.auxiliary) {
 		char sense_key, asc, ascq;
 
 		sense_key = (qc->result_tf.auxiliary >> 16) & 0xff;
 		asc = (qc->result_tf.auxiliary >> 8) & 0xff;
 		ascq = qc->result_tf.auxiliary & 0xff;
-		ata_scsi_set_sense(dev, qc->scsicmd, sense_key, asc, ascq);
-		ata_scsi_set_sense_information(dev, qc->scsicmd,
-					       &qc->result_tf);
-		qc->flags |= ATA_QCFLAG_SENSE_VALID;
+		if (ata_scsi_sense_is_valid(sense_key, asc, ascq)) {
+			ata_scsi_set_sense(dev, qc->scsicmd, sense_key, asc,
+					   ascq);
+			ata_scsi_set_sense_information(dev, qc->scsicmd,
+						       &qc->result_tf);
+			qc->flags |= ATA_QCFLAG_SENSE_VALID;
+		}
 	}
 
 	ehc->i.err_mask &= ~AC_ERR_DEV;
