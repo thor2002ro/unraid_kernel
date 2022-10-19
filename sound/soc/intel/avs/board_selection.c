@@ -29,6 +29,12 @@ static const struct dmi_system_id kbl_dmi_table[] = {
 			DMI_MATCH(DMI_BOARD_NAME, "Skylake Y LPDDR3 RVP3"),
 		},
 	},
+	{
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Intel Corporation"),
+			DMI_MATCH(DMI_BOARD_NAME, "AmberLake Y"),
+		},
+	},
 	{}
 };
 
@@ -120,6 +126,14 @@ static struct snd_soc_acpi_mach avs_kbl_i2s_machines[] = {
 		.quirk_data = &kblr_dmi_table,
 		.machine_quirk = dmi_match_quirk,
 		.tplg_filename = "rt298-tplg.bin",
+	},
+	{
+		.id = "MX98927",
+		.drv_name = "avs_max98927",
+		.mach_params = {
+			.i2s_link_mask = AVS_SSP(0),
+		},
+		.tplg_filename = "max98927-tplg.bin",
 	},
 	{
 		.id = "MX98373",
