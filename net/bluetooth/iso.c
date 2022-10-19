@@ -235,6 +235,14 @@ static int iso_chan_add(struct iso_conn *conn, struct sock *sk,
 	return err;
 }
 
+static inline u8 le_addr_type(u8 bdaddr_type)
+{
+	if (bdaddr_type == BDADDR_LE_PUBLIC)
+		return ADDR_LE_DEV_PUBLIC;
+	else
+		return ADDR_LE_DEV_RANDOM;
+}
+
 static int iso_connect_bis(struct sock *sk)
 {
 	struct iso_conn *conn;
@@ -262,7 +270,8 @@ static int iso_connect_bis(struct sock *sk)
 		goto done;
 	}
 
-	hcon = hci_connect_bis(hdev, &iso_pi(sk)->dst, iso_pi(sk)->dst_type,
+	hcon = hci_connect_bis(hdev, &iso_pi(sk)->dst,
+			       le_addr_type(iso_pi(sk)->dst_type),
 			       &iso_pi(sk)->qos, iso_pi(sk)->base_len,
 			       iso_pi(sk)->base);
 	if (IS_ERR(hcon)) {
@@ -328,14 +337,16 @@ static int iso_connect_cis(struct sock *sk)
 	/* Just bind if DEFER_SETUP has been set */
 	if (test_bit(BT_SK_DEFER_SETUP, &bt_sk(sk)->flags)) {
 		hcon = hci_bind_cis(hdev, &iso_pi(sk)->dst,
-				    iso_pi(sk)->dst_type, &iso_pi(sk)->qos);
+				    le_addr_type(iso_pi(sk)->dst_type),
+				    &iso_pi(sk)->qos);
 		if (IS_ERR(hcon)) {
 			err = PTR_ERR(hcon);
 			goto done;
 		}
 	} else {
 		hcon = hci_connect_cis(hdev, &iso_pi(sk)->dst,
-				       iso_pi(sk)->dst_type, &iso_pi(sk)->qos);
+				       le_addr_type(iso_pi(sk)->dst_type),
+				       &iso_pi(sk)->qos);
 		if (IS_ERR(hcon)) {
 			err = PTR_ERR(hcon);
 			goto done;
@@ -865,7 +876,8 @@ static int iso_listen_bis(struct sock *sk)
 
 	hci_dev_lock(hdev);
 
-	err = hci_pa_create_sync(hdev, &iso_pi(sk)->dst, iso_pi(sk)->dst_type,
+	err = hci_pa_create_sync(hdev, &iso_pi(sk)->dst,
+				 le_addr_type(iso_pi(sk)->dst_type),
 				 iso_pi(sk)->bc_sid);
 
 	hci_dev_unlock(hdev);

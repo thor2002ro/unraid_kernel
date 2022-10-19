@@ -3054,6 +3054,7 @@ int hci_update_name_sync(struct hci_dev *hdev)
  * Enable Authentication
  * lmp_bredr_capable(Set Fast Connectable -> Set Scan Type -> Set Class ->
  * Set Name -> Set EIR)
+ * HCI_FORCE_STATIC_ADDR | BDADDR_ANY && !HCI_BREDR_ENABLED (Set Static Address)
  */
 int hci_powered_update_sync(struct hci_dev *hdev)
 {
@@ -3091,6 +3092,23 @@ int hci_powered_update_sync(struct hci_dev *hdev)
 		hci_update_class_sync(hdev);
 		hci_update_name_sync(hdev);
 		hci_update_eir_sync(hdev);
+	}
+
+	/* If forcing static address is in use or there is no public
+	 * address use the static address as random address (but skip
+	 * the HCI command if the current random address is already the
+	 * static one.
+	 *
+	 * In case BR/EDR has been disabled on a dual-mode controller
+	 * and a static address has been configured, then use that
+	 * address instead of the public BR/EDR address.
+	 */
+	if (hci_dev_test_flag(hdev, HCI_FORCE_STATIC_ADDR) ||
+	    (!bacmp(&hdev->bdaddr, BDADDR_ANY) &&
+	    !hci_dev_test_flag(hdev, HCI_BREDR_ENABLED))) {
+		if (bacmp(&hdev->static_addr, BDADDR_ANY))
+			return hci_set_random_addr_sync(hdev,
+							&hdev->static_addr);
 	}
 
 	return 0;
@@ -4696,6 +4714,7 @@ int hci_dev_open_sync(struct hci_dev *hdev)
 			hdev->flush(hdev);
 
 		if (hdev->sent_cmd) {
+			cancel_delayed_work_sync(&hdev->cmd_timer);
 			kfree_skb(hdev->sent_cmd);
 			hdev->sent_cmd = NULL;
 		}
