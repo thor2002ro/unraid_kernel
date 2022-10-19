@@ -182,7 +182,7 @@ rzg2l_cpg_mux_clk_register(const struct cpg_core_clk *core,
 static int rzg2l_cpg_sd_clk_mux_determine_rate(struct clk_hw *hw,
 					       struct clk_rate_request *req)
 {
-	return clk_mux_determine_rate_flags(hw, req, 0);
+	return clk_mux_determine_rate_flags(hw, req, CLK_MUX_ROUND_CLOSEST);
 }
 
 static int rzg2l_cpg_sd_clk_mux_set_parent(struct clk_hw *hw, u8 index)
@@ -1014,8 +1014,8 @@ static const struct clk_ops rzg2l_mod_clock_ops = {
 };
 
 static struct mstp_clock
-*rzg2l_mod_clock__get_sibling(struct mstp_clock *clock,
-			      struct rzg2l_cpg_priv *priv)
+*rzg2l_mod_clock_get_sibling(struct mstp_clock *clock,
+			     struct rzg2l_cpg_priv *priv)
 {
 	struct clk_hw *hw;
 	unsigned int i;
@@ -1101,7 +1101,7 @@ rzg2l_cpg_register_mod_clk(const struct rzg2l_mod_clk *mod,
 		struct mstp_clock *sibling;
 
 		clock->enabled = rzg2l_mod_clock_is_enabled(&clock->hw);
-		sibling = rzg2l_mod_clock__get_sibling(clock, priv);
+		sibling = rzg2l_mod_clock_get_sibling(clock, priv);
 		if (sibling) {
 			clock->sibling = sibling;
 			sibling->sibling = clock;
