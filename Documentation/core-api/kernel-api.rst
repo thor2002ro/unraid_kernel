@@ -36,6 +36,9 @@ String Conversions
 String Manipulation
 -------------------
 
+.. kernel-doc:: include/linux/fortify-string.h
+   :internal:
+
 .. kernel-doc:: lib/string.c
    :export:
 
@@ -117,6 +120,12 @@ Text Searching
 
 CRC and Math Functions in Linux
 ===============================
+
+Arithmetic Overflow Checking
+----------------------------
+
+.. kernel-doc:: include/linux/overflow.h
+   :internal:
 
 CRC Functions
 -------------
