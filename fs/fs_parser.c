@@ -197,6 +197,8 @@ int fs_param_is_bool(struct p_log *log, const struct fs_parameter_spec *p,
 		     struct fs_parameter *param, struct fs_parse_result *result)
 {
 	int b;
+	if (param->type == fs_value_is_empty)
+		return 0;
 	if (param->type != fs_value_is_string)
 		return fs_param_bad_value(log, param);
 	if (!*param->string && (p->flags & fs_param_can_be_empty))
@@ -213,6 +215,8 @@ int fs_param_is_u32(struct p_log *log, const struct fs_parameter_spec *p,
 		    struct fs_parameter *param, struct fs_parse_result *result)
 {
 	int base = (unsigned long)p->data;
+	if (param->type == fs_value_is_empty)
+		return 0;
 	if (param->type != fs_value_is_string)
 		return fs_param_bad_value(log, param);
 	if (!*param->string && (p->flags & fs_param_can_be_empty))
@@ -226,6 +230,8 @@ EXPORT_SYMBOL(fs_param_is_u32);
 int fs_param_is_s32(struct p_log *log, const struct fs_parameter_spec *p,
 		    struct fs_parameter *param, struct fs_parse_result *result)
 {
+	if (param->type == fs_value_is_empty)
+		return 0;
 	if (param->type != fs_value_is_string)
 		return fs_param_bad_value(log, param);
 	if (!*param->string && (p->flags & fs_param_can_be_empty))
@@ -239,6 +245,8 @@ EXPORT_SYMBOL(fs_param_is_s32);
 int fs_param_is_u64(struct p_log *log, const struct fs_parameter_spec *p,
 		    struct fs_parameter *param, struct fs_parse_result *result)
 {
+	if (param->type == fs_value_is_empty)
+		return 0;
 	if (param->type != fs_value_is_string)
 		return fs_param_bad_value(log, param);
 	if (!*param->string && (p->flags & fs_param_can_be_empty))
@@ -253,6 +261,8 @@ int fs_param_is_enum(struct p_log *log, const struct fs_parameter_spec *p,
 		     struct fs_parameter *param, struct fs_parse_result *result)
 {
 	const struct constant_table *c;
+	if (param->type == fs_value_is_empty)
+		return 0;
 	if (param->type != fs_value_is_string)
 		return fs_param_bad_value(log, param);
 	if (!*param->string && (p->flags & fs_param_can_be_empty))
@@ -268,6 +278,8 @@ EXPORT_SYMBOL(fs_param_is_enum);
 int fs_param_is_string(struct p_log *log, const struct fs_parameter_spec *p,
 		       struct fs_parameter *param, struct fs_parse_result *result)
 {
+	if (param->type == fs_value_is_empty)
+		return 0;
 	if (param->type != fs_value_is_string ||
 	    (!*param->string && !(p->flags & fs_param_can_be_empty)))
 		return fs_param_bad_value(log, param);
@@ -278,6 +290,8 @@ EXPORT_SYMBOL(fs_param_is_string);
 int fs_param_is_blob(struct p_log *log, const struct fs_parameter_spec *p,
 		     struct fs_parameter *param, struct fs_parse_result *result)
 {
+	if (param->type == fs_value_is_empty)
+		return 0;
 	if (param->type != fs_value_is_blob)
 		return fs_param_bad_value(log, param);
 	return 0;
@@ -287,6 +301,8 @@ EXPORT_SYMBOL(fs_param_is_blob);
 int fs_param_is_fd(struct p_log *log, const struct fs_parameter_spec *p,
 		  struct fs_parameter *param, struct fs_parse_result *result)
 {
+	if (param->type == fs_value_is_empty)
+		return 0;
 	switch (param->type) {
 	case fs_value_is_string:
 		if ((!*param->string && !(p->flags & fs_param_can_be_empty)) ||
