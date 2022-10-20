@@ -1397,7 +1397,12 @@ static void kmem_freepages(struct kmem_cache *cachep, struct slab *slab)
 	__free_pages(folio_page(folio, 0), order);
 }
 
-static void kmem_rcu_free(struct rcu_head *head)
+/*
+ * kmem_rcu_free() must be __aligned(4) because its address is saved
+ * in the rcu_head field, which coincides with page->mapping, which
+ * causes trouble if compaction mistakes it for PAGE_MAPPING_MOVABLE.
+ */
+__aligned(4) static void kmem_rcu_free(struct rcu_head *head)
 {
 	struct kmem_cache *cachep;
 	struct slab *slab;

@@ -513,9 +513,9 @@ static inline bool __cmpxchg_double_slab(struct kmem_cache *s, struct slab *slab
 #if defined(CONFIG_HAVE_CMPXCHG_DOUBLE) && \
     defined(CONFIG_HAVE_ALIGNED_STRUCT_PAGE)
 	if (s->flags & __CMPXCHG_DOUBLE) {
-		if (cmpxchg_double(&slab->freelist, &slab->counters,
-				   freelist_old, counters_old,
-				   freelist_new, counters_new))
+		if (cmpxchg_double(&slab->counters, &slab->freelist,
+				   counters_old, freelist_old,
+				   counters_new, freelist_new))
 			return true;
 	} else
 #endif
@@ -549,9 +549,9 @@ static inline bool cmpxchg_double_slab(struct kmem_cache *s, struct slab *slab,
 #if defined(CONFIG_HAVE_CMPXCHG_DOUBLE) && \
     defined(CONFIG_HAVE_ALIGNED_STRUCT_PAGE)
 	if (s->flags & __CMPXCHG_DOUBLE) {
-		if (cmpxchg_double(&slab->freelist, &slab->counters,
-				   freelist_old, counters_old,
-				   freelist_new, counters_new))
+		if (cmpxchg_double(&slab->counters, &slab->freelist,
+				   counters_old, freelist_old,
+				   counters_new, freelist_new))
 			return true;
 	} else
 #endif
@@ -1999,14 +1999,6 @@ static void __free_slab(struct kmem_cache *s, struct slab *slab)
 	int order = folio_order(folio);
 	int pages = 1 << order;
 
-	if (kmem_cache_debug_flags(s, SLAB_CONSISTENCY_CHECKS)) {
-		void *p;
-
-		slab_pad_check(s, slab);
-		for_each_object(p, s, slab_address(slab), slab->objects)
-			check_object(s, slab, p, SLUB_RED_INACTIVE);
-	}
-
 	__slab_clear_pfmemalloc(slab);
 	__folio_clear_slab(folio);
 	folio->mapping = NULL;
@@ -2016,7 +2008,12 @@ static void __free_slab(struct kmem_cache *s, struct slab *slab)
 	__free_pages(folio_page(folio, 0), order);
 }
 
-static void rcu_free_slab(struct rcu_head *h)
+/*
+ * rcu_free_slab() must be __aligned(4) because its address is saved
+ * in the rcu_head field, which coincides with page->mapping, which
+ * causes trouble if compaction mistakes it for PAGE_MAPPING_MOVABLE.
+ */
+__aligned(4) static void rcu_free_slab(struct rcu_head *h)
 {
 	struct slab *slab = container_of(h, struct slab, rcu_head);
 
@@ -2025,9 +2022,17 @@ static void rcu_free_slab(struct rcu_head *h)
 
 static void free_slab(struct kmem_cache *s, struct slab *slab)
 {
-	if (unlikely(s->flags & SLAB_TYPESAFE_BY_RCU)) {
+	if (kmem_cache_debug_flags(s, SLAB_CONSISTENCY_CHECKS)) {
+		void *p;
+
+		slab_pad_check(s, slab);
+		for_each_object(p, s, slab_address(slab), slab->objects)
+			check_object(s, slab, p, SLUB_RED_INACTIVE);
+	}
+
+	if (unlikely(s->flags & SLAB_TYPESAFE_BY_RCU))
 		call_rcu(&slab->rcu_head, rcu_free_slab);
-	} else
+	else
 		__free_slab(s, slab);
 }
 
