@@ -1029,49 +1029,6 @@ static void touch_pmd(struct vm_area_struct *vma, unsigned long addr,
 		update_mmu_cache_pmd(vma, addr, pmd);
 }
 
-struct page *follow_devmap_pmd(struct vm_area_struct *vma, unsigned long addr,
-		pmd_t *pmd, int flags, struct dev_pagemap **pgmap)
-{
-	unsigned long pfn = pmd_pfn(*pmd);
-	struct mm_struct *mm = vma->vm_mm;
-	struct page *page;
-
-	assert_spin_locked(pmd_lockptr(mm, pmd));
-
-	/* FOLL_GET and FOLL_PIN are mutually exclusive. */
-	if (WARN_ON_ONCE((flags & (FOLL_PIN | FOLL_GET)) ==
-			 (FOLL_PIN | FOLL_GET)))
-		return NULL;
-
-	if (flags & FOLL_WRITE && !pmd_write(*pmd))
-		return NULL;
-
-	if (pmd_present(*pmd) && pmd_devmap(*pmd))
-		/* pass */;
-	else
-		return NULL;
-
-	if (flags & FOLL_TOUCH)
-		touch_pmd(vma, addr, pmd, flags & FOLL_WRITE);
-
-	/*
-	 * device mapped pages can only be returned if the
-	 * caller will manage the page reference count.
-	 */
-	if (!(flags & (FOLL_GET | FOLL_PIN)))
-		return ERR_PTR(-EEXIST);
-
-	pfn += (addr & ~PMD_MASK) >> PAGE_SHIFT;
-	*pgmap = get_dev_pagemap(pfn, *pgmap);
-	if (!*pgmap)
-		return ERR_PTR(-EFAULT);
-	page = pfn_to_page(pfn);
-	if (!try_grab_page(page, flags))
-		page = ERR_PTR(-ENOMEM);
-
-	return page;
-}
-
 int copy_huge_pmd(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		  pmd_t *dst_pmd, pmd_t *src_pmd, unsigned long addr,
 		  struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma)
@@ -1188,7 +1145,7 @@ static void touch_pud(struct vm_area_struct *vma, unsigned long addr,
 }
 
 struct page *follow_devmap_pud(struct vm_area_struct *vma, unsigned long addr,
-		pud_t *pud, int flags, struct dev_pagemap **pgmap)
+			       pud_t *pud, int flags)
 {
 	unsigned long pfn = pud_pfn(*pud);
 	struct mm_struct *mm = vma->vm_mm;
@@ -1222,9 +1179,6 @@ struct page *follow_devmap_pud(struct vm_area_struct *vma, unsigned long addr,
 		return ERR_PTR(-EEXIST);
 
 	pfn += (addr & ~PUD_MASK) >> PAGE_SHIFT;
-	*pgmap = get_dev_pagemap(pfn, *pgmap);
-	if (!*pgmap)
-		return ERR_PTR(-EFAULT);
 	page = pfn_to_page(pfn);
 	if (!try_grab_page(page, flags))
 		page = ERR_PTR(-ENOMEM);
@@ -1379,7 +1333,7 @@ reuse:
 		if (pmdp_set_access_flags(vma, haddr, vmf->pmd, entry, 1))
 			update_mmu_cache_pmd(vma, vmf->address, vmf->pmd);
 		spin_unlock(vmf->ptl);
-		return VM_FAULT_WRITE;
+		return 0;
 	}
 
 unlock_fallback:
@@ -2455,7 +2409,16 @@ static void __split_huge_page_tail(struct page *head, int tail,
 			page_tail);
 	page_tail->mapping = head->mapping;
 	page_tail->index = head->index + tail;
-	page_tail->private = 0;
+
+	/*
+	 * page->private should not be set in tail pages with the exception
+	 * of swap cache pages that store the swp_entry_t in tail pages.
+	 * Fix up and warn once if private is unexpectedly set.
+	 */
+	if (!folio_test_swapcache(page_folio(head))) {
+		VM_WARN_ON_ONCE_PAGE(page_tail->private != 0, head);
+		page_tail->private = 0;
+	}
 
 	/* Page flags must be visible before we make the page non-compound. */
 	smp_wmb();
@@ -3057,28 +3020,28 @@ static int split_huge_pages_in_file(const char *file_path, pgoff_t off_start,
 	mapping = candidate->f_mapping;
 
 	for (index = off_start; index < off_end; index += nr_pages) {
-		struct page *fpage = pagecache_get_page(mapping, index,
-						FGP_ENTRY | FGP_HEAD, 0);
+		struct folio *folio = __filemap_get_folio(mapping, index,
+						FGP_ENTRY, 0);
 
 		nr_pages = 1;
-		if (xa_is_value(fpage) || !fpage)
+		if (xa_is_value(folio) || !folio)
 			continue;
 
-		if (!is_transparent_hugepage(fpage))
+		if (!folio_test_large(folio))
 			goto next;
 
 		total++;
-		nr_pages = thp_nr_pages(fpage);
+		nr_pages = folio_nr_pages(folio);
 
-		if (!trylock_page(fpage))
+		if (!folio_trylock(folio))
 			goto next;
 
-		if (!split_huge_page(fpage))
+		if (!split_folio(folio))
 			split++;
 
-		unlock_page(fpage);
+		folio_unlock(folio);
 next:
-		put_page(fpage);
+		folio_put(folio);
 		cond_resched();
 	}
 

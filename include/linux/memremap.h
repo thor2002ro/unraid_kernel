@@ -187,13 +187,15 @@ static inline bool folio_is_device_coherent(const struct folio *folio)
 }
 
 #ifdef CONFIG_ZONE_DEVICE
-void zone_device_page_init(struct page *page);
 void *memremap_pages(struct dev_pagemap *pgmap, int nid);
 void memunmap_pages(struct dev_pagemap *pgmap);
 void *devm_memremap_pages(struct device *dev, struct dev_pagemap *pgmap);
 void devm_memunmap_pages(struct device *dev, struct dev_pagemap *pgmap);
 struct dev_pagemap *get_dev_pagemap(unsigned long pfn,
-		struct dev_pagemap *pgmap);
+				    struct dev_pagemap *pgmap);
+bool pgmap_request_folios(struct dev_pagemap *pgmap, struct folio *folio,
+			  int nr_folios);
+void pgmap_release_folios(struct folio *folio, int nr_folios);
 bool pgmap_pfn_valid(struct dev_pagemap *pgmap, unsigned long pfn);
 
 unsigned long vmem_altmap_offset(struct vmem_altmap *altmap);
@@ -217,10 +219,26 @@ static inline void devm_memunmap_pages(struct device *dev,
 {
 }
 
+static inline struct dev_pagemap *
+get_dev_pagemap_many(unsigned long pfn, struct dev_pagemap *pgmap, int refs)
+{
+	return NULL;
+}
+
 static inline struct dev_pagemap *get_dev_pagemap(unsigned long pfn,
 		struct dev_pagemap *pgmap)
 {
 	return NULL;
+}
+
+static inline bool pgmap_request_folios(struct dev_pagemap *pgmap,
+					struct folio *folio, int nr_folios)
+{
+	return false;
+}
+
+static inline void pgmap_release_folios(struct folio *folio, int nr_folios)
+{
 }
 
 static inline bool pgmap_pfn_valid(struct dev_pagemap *pgmap, unsigned long pfn)

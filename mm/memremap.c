@@ -94,19 +94,6 @@ bool pgmap_pfn_valid(struct dev_pagemap *pgmap, unsigned long pfn)
 	return false;
 }
 
-static unsigned long pfn_end(struct dev_pagemap *pgmap, int range_id)
-{
-	const struct range *range = &pgmap->ranges[range_id];
-
-	return (range->start + range_len(range)) >> PAGE_SHIFT;
-}
-
-static unsigned long pfn_len(struct dev_pagemap *pgmap, unsigned long range_id)
-{
-	return (pfn_end(pgmap, range_id) -
-		pfn_first(pgmap, range_id)) >> pgmap->vmemmap_shift;
-}
-
 static void pageunmap_range(struct dev_pagemap *pgmap, int range_id)
 {
 	struct range *range = &pgmap->ranges[range_id];
@@ -138,10 +125,6 @@ void memunmap_pages(struct dev_pagemap *pgmap)
 	int i;
 
 	percpu_ref_kill(&pgmap->ref);
-	if (pgmap->type != MEMORY_DEVICE_PRIVATE &&
-	    pgmap->type != MEMORY_DEVICE_COHERENT)
-		for (i = 0; i < pgmap->nr_range; i++)
-			percpu_ref_put_many(&pgmap->ref, pfn_len(pgmap, i));
 
 	wait_for_completion(&pgmap->done);
 
@@ -267,9 +250,6 @@ static int pagemap_range(struct dev_pagemap *pgmap, struct mhp_params *params,
 	memmap_init_zone_device(&NODE_DATA(nid)->node_zones[ZONE_DEVICE],
 				PHYS_PFN(range->start),
 				PHYS_PFN(range_len(range)), pgmap);
-	if (pgmap->type != MEMORY_DEVICE_PRIVATE &&
-	    pgmap->type != MEMORY_DEVICE_COHERENT)
-		percpu_ref_get_many(&pgmap->ref, pfn_len(pgmap, range_id));
 	return 0;
 
 err_add_memory:
@@ -469,8 +449,10 @@ EXPORT_SYMBOL_GPL(get_dev_pagemap);
 
 void free_zone_device_page(struct page *page)
 {
-	if (WARN_ON_ONCE(!page->pgmap->ops || !page->pgmap->ops->page_free))
-		return;
+	struct dev_pagemap *pgmap = page->pgmap;
+
+	/* wake filesystem 'break dax layouts' waiters */
+	wake_up_var(page);
 
 	mem_cgroup_uncharge(page_folio(page));
 
@@ -505,45 +487,81 @@ void free_zone_device_page(struct page *page)
 	 * to clear page->mapping.
 	 */
 	page->mapping = NULL;
-	page->pgmap->ops->page_free(page);
-
-	if (page->pgmap->type != MEMORY_DEVICE_PRIVATE &&
-	    page->pgmap->type != MEMORY_DEVICE_COHERENT)
-		/*
-		 * Reset the page count to 1 to prepare for handing out the page
-		 * again.
-		 */
-		set_page_count(page, 1);
-	else
-		put_dev_pagemap(page->pgmap);
+	if (pgmap->ops && pgmap->ops->page_free)
+		pgmap->ops->page_free(page);
+	put_dev_pagemap(page->pgmap);
 }
 
-void zone_device_page_init(struct page *page)
+static __maybe_unused bool folio_span_valid(struct dev_pagemap *pgmap,
+					    struct folio *folio,
+					    int nr_folios)
 {
-	/*
-	 * Drivers shouldn't be allocating pages after calling
-	 * memunmap_pages().
-	 */
-	WARN_ON_ONCE(!percpu_ref_tryget_live(&page->pgmap->ref));
-	set_page_count(page, 1);
-	lock_page(page);
-}
-EXPORT_SYMBOL_GPL(zone_device_page_init);
+	unsigned long pfn_start, pfn_end;
 
-#ifdef CONFIG_FS_DAX
-bool __put_devmap_managed_page_refs(struct page *page, int refs)
-{
-	if (page->pgmap->type != MEMORY_DEVICE_FS_DAX)
+	pfn_start = page_to_pfn(folio_page(folio, 0));
+	pfn_end = pfn_start + (1 << folio_order(folio)) * nr_folios - 1;
+
+	if (pgmap != xa_load(&pgmap_array, pfn_start))
 		return false;
 
-	/*
-	 * fsdax page refcounts are 1-based, rather than 0-based: if
-	 * refcount is 1, then the page is free and the refcount is
-	 * stable because nobody holds a reference on the page.
-	 */
-	if (page_ref_sub_return(page, refs) == 1)
-		wake_up_var(&page->_refcount);
+	if (pfn_end > pfn_start && pgmap != xa_load(&pgmap_array, pfn_end))
+		return false;
+
 	return true;
 }
-EXPORT_SYMBOL(__put_devmap_managed_page_refs);
-#endif /* CONFIG_FS_DAX */
+
+/**
+ * pgmap_request_folios - activate an contiguous span of folios in @pgmap
+ * @pgmap: host page map for the folio array
+ * @folio: start of the folio list, all subsequent folios have same folio_size()
+ *
+ * Caller is responsible for @pgmap remaining live for the duration of
+ * this call. Caller is also responsible for not racing requests for the
+ * same folios.
+ */
+bool pgmap_request_folios(struct dev_pagemap *pgmap, struct folio *folio,
+			  int nr_folios)
+{
+	struct folio *iter;
+	int i;
+
+	/*
+	 * All of the WARNs below are for catching bugs in future
+	 * development that changes the assumptions of:
+	 * 1/ uniform folios in @pgmap
+	 * 2/ @pgmap death does not race this routine.
+	 */
+	VM_WARN_ON_ONCE(!folio_span_valid(pgmap, folio, nr_folios));
+
+	if (WARN_ON_ONCE(percpu_ref_is_dying(&pgmap->ref)))
+		return false;
+
+	for (iter = folio_next(folio), i = 1; i < nr_folios;
+	     iter = folio_next(folio), i++)
+		if (WARN_ON_ONCE(folio_order(iter) != folio_order(folio)))
+			return false;
+
+	for (iter = folio, i = 0; i < nr_folios; iter = folio_next(iter), i++) {
+		folio_ref_inc(iter);
+		if (folio_ref_count(iter) == 1)
+			percpu_ref_tryget(&pgmap->ref);
+	}
+
+	return true;
+}
+EXPORT_SYMBOL_GPL(pgmap_request_folios);
+
+/*
+ * A symmetric helper to undo the page references acquired by
+ * pgmap_request_folios(), but the caller can also just arrange
+ * folio_put() on all the folios it acquired previously for the same
+ * effect.
+ */
+void pgmap_release_folios(struct folio *folio, int nr_folios)
+{
+	struct folio *iter;
+	int i;
+
+	for (iter = folio, i = 0; i < nr_folios; iter = folio_next(folio), i++)
+		folio_put(iter);
+}

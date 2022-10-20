@@ -176,6 +176,7 @@ static vm_fault_t nouveau_dmem_migrate_to_ram(struct vm_fault *vmf)
 		.src		= &src,
 		.dst		= &dst,
 		.pgmap_owner	= drm->dev,
+		.fault_page	= vmf->page,
 		.flags		= MIGRATE_VMA_SELECT_DEVICE_PRIVATE,
 	};
 
@@ -324,7 +325,8 @@ nouveau_dmem_page_alloc_locked(struct nouveau_drm *drm)
 			return NULL;
 	}
 
-	zone_device_page_init(page);
+	pgmap_request_folios(page->pgmap, page_folio(page), 1);
+	lock_page(page);
 	return page;
 }
 

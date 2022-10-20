@@ -50,7 +50,8 @@ enum fs_context_phase {
  */
 enum fs_value_type {
 	fs_value_is_undefined,
-	fs_value_is_flag,		/* Value not given a value */
+	fs_value_is_flag,		/* Does not take a value */
+	fs_value_is_empty,		/* Value is not given */
 	fs_value_is_string,		/* Value is a string */
 	fs_value_is_blob,		/* Value is a binary blob */
 	fs_value_is_filename,		/* Value is a filename* + dirfd */

@@ -4069,12 +4069,12 @@ static inline bool zone_watermark_fast(struct zone *z, unsigned int order,
 					free_pages))
 		return true;
 	/*
-	 * Ignore watermark boosting for GFP_ATOMIC order-0 allocations
+	 * Ignore watermark boosting for GFP_HIGH order-0 allocations
 	 * when checking the min watermark. The min watermark is the
 	 * point where boosting is ignored so that kswapd is woken up
 	 * when below the low watermark.
 	 */
-	if (unlikely(!order && (gfp_mask & __GFP_ATOMIC) && z->watermark_boost
+	if (unlikely(!order && (alloc_flags & ALLOC_HARDER) && z->watermark_boost
 		&& ((alloc_flags & ALLOC_WMARK_MASK) == WMARK_MIN))) {
 		mark = z->_watermark[WMARK_MIN];
 		return __zone_watermark_ok(z, order, mark, highest_zoneidx,
@@ -4833,12 +4833,12 @@ gfp_to_alloc_flags(gfp_t gfp_mask)
 	 * The caller may dip into page reserves a bit more if the caller
 	 * cannot run direct reclaim, or if the caller has realtime scheduling
 	 * policy or is asking for __GFP_HIGH memory.  GFP_ATOMIC requests will
-	 * set both ALLOC_HARDER (__GFP_ATOMIC) and ALLOC_HIGH (__GFP_HIGH).
+	 * set both ALLOC_HARDER (unless __GFP_NOMEMALLOC) and ALLOC_HIGH.
 	 */
 	alloc_flags |= (__force int)
 		(gfp_mask & (__GFP_HIGH | __GFP_KSWAPD_RECLAIM));
 
-	if (gfp_mask & __GFP_ATOMIC) {
+	if (gfp_mask & __GFP_HIGH) {
 		/*
 		 * Not worth trying to allocate harder for __GFP_NOMEMALLOC even
 		 * if it can't schedule.
@@ -5031,14 +5031,6 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
 	unsigned int cpuset_mems_cookie;
 	unsigned int zonelist_iter_cookie;
 	int reserve_flags;
-
-	/*
-	 * We also sanity check to catch abuse of atomic reserves being used by
-	 * callers that are not in atomic context.
-	 */
-	if (WARN_ON_ONCE((gfp_mask & (__GFP_ATOMIC|__GFP_DIRECT_RECLAIM)) ==
-				(__GFP_ATOMIC|__GFP_DIRECT_RECLAIM)))
-		gfp_mask &= ~__GFP_ATOMIC;
 
 restart:
 	compaction_retries = 0;
@@ -5784,14 +5776,18 @@ static void *make_alloc_exact(unsigned long addr, unsigned int order,
 		size_t size)
 {
 	if (addr) {
-		unsigned long alloc_end = addr + (PAGE_SIZE << order);
-		unsigned long used = addr + PAGE_ALIGN(size);
+		unsigned long nr = DIV_ROUND_UP(size, PAGE_SIZE);
+		struct page *page = virt_to_page((void *)addr);
+		struct page *last = page + nr;
 
-		split_page(virt_to_page((void *)addr), order);
-		while (used < alloc_end) {
-			free_page(used);
-			used += PAGE_SIZE;
-		}
+		split_page_owner(page, 1 << order);
+		split_page_memcg(page, 1 << order);
+		while (page < --last)
+			set_page_refcounted(last);
+
+		last = page + (1UL << order);
+		for (page += nr; page < last; page++)
+			__free_pages_ok(page, 0, FPI_TO_TAIL);
 	}
 	return (void *)addr;
 }
@@ -6791,6 +6787,7 @@ static void __ref __init_zone_device_page(struct page *page, unsigned long pfn,
 {
 
 	__init_single_page(page, pfn, zone_idx, nid);
+	set_page_count(page, 0);
 
 	/*
 	 * Mark page reserved as it will need to wait for onlining
@@ -6823,14 +6820,6 @@ static void __ref __init_zone_device_page(struct page *page, unsigned long pfn,
 		set_pageblock_migratetype(page, MIGRATE_MOVABLE);
 		cond_resched();
 	}
-
-	/*
-	 * ZONE_DEVICE pages are released directly to the driver page allocator
-	 * which will set the page count to 1 when allocating the page.
-	 */
-	if (pgmap->type == MEMORY_DEVICE_PRIVATE ||
-	    pgmap->type == MEMORY_DEVICE_COHERENT)
-		set_page_count(page, 0);
 }
 
 /*
