@@ -66,6 +66,7 @@ int md_trace              = MD_TRACE;          /* command/debug tracing */
 	  22 for unraid 6.10rc4-6.10.3,
 	  24 for unraid 6.11.0,
 	  25 for unraid 6.11.1,
+	  27 for unraid 6.12.0,
 */
 module_param_named(unraid_patch, MD_PATCHLEVEL_VERSION, int, 0);
 
@@ -1046,7 +1047,7 @@ static int do_run(mddev_t *mddev)
 			gd->major = MAJOR(mddev->dev);
 			gd->first_minor = unit;
 			gd->minors = 1;
-			sprintf(gd->disk_name, "md%d", unit);
+			sprintf(gd->disk_name, "md%dp1", unit);
 			gd->fops = &md_fops;
 			gd->private_data = mddev;
 			gd->queue->queuedata = mddev;
@@ -1080,7 +1081,7 @@ static int do_run(mddev_t *mddev)
 				printk("md: unraid_run: failed add_disk: %d\n", err);
 				return -EINVAL;
 			}
-			printk("md%d: running, size: %llu blocks\n", unit, disk->size);
+			printk("md%dp1: running, size: %llu blocks\n", unit, disk->size);
 		}
 	}
 
@@ -1100,7 +1101,7 @@ static int do_stop(mddev_t *mddev)
 		if (mddev->gendisk[unit]) {
 			struct gendisk *gd = mddev->gendisk[unit];
 
-			printk("md%d: stopping\n", unit);
+			printk("md%dp1: stopping\n", unit);
 
 			del_gendisk(gd);
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(5,19,99)
@@ -1842,7 +1843,7 @@ static void status_disk(struct seq_file *seq, mdp_disk_t *disk, mdk_rdev_t *rdev
 
 	seq_printf(seq, "diskNumber.%d=%d\n", number, number);
 	if ((disk_active(disk) || disk_enabled(disk)) && !is_parity_idx(number))
-		seq_printf(seq, "diskName.%d=md%d\n", number, number);
+		seq_printf(seq, "diskName.%d=md%dp1\n", number, number);
 	else
 		seq_printf(seq, "diskName.%d=\n", number);
 	seq_printf(seq, "diskSize.%d=%llu\n", number, disk->size);
