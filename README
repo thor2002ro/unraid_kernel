@@ -1,0 +1,4 @@
+* add ryzen smu and ryzen_monitor
+* amd-pstate driver needs amd_pstate=passive to activate
+
+* does not include nvidia driver
