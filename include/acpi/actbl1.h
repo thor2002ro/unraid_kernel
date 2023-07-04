@@ -1583,6 +1583,75 @@ struct acpi_hest_aer_bridge {
 	u32 advanced_capabilities2;
 };
 
+struct acpi_hest_parse_aer_info {
+	struct pci_dev *pci_dev;
+	int hest_matched_with_dev;
+	struct acpi_hest_aer_endpoint *acpi_hest_aer_endpoint;
+	struct acpi_hest_aer_root_port *acpi_hest_aer_root_port;
+	struct acpi_hest_aer_for_bridge *acpi_hest_aer_for_bridge;
+};
+
+/* HEST Sub-structure for PCIe Root Port Structure (6) */
+
+struct acpi_hest_aer_root_port {
+	u16 reserved1;
+	u8 flags;
+	u8 enabled;
+	u32 records_to_preallocate;
+	u32 max_sections_per_record;
+	u32 bus;
+	u16 device;
+	u16 function;
+	u16 device_control;
+	u16 reserved2;
+	u32 uncorrectable_mask;
+	u32 uncorrectable_severity;
+	u32 correctable_mask;
+	u32 advanced_capabilities;
+	u32 root_error_command;
+};
+
+/* HEST Sub-structure for PCIe Endpoint Structure (7) */
+
+struct acpi_hest_aer_endpoint {
+	u16 reserved1;
+	u8 flags;
+	u8 enabled;
+	u32 records_to_preallocate;
+	u32 max_sections_per_record;
+	u32 bus;
+	u16 device;
+	u16 function;
+	u16 device_control;
+	u16 reserved2;
+	u32 uncorrectable_mask;
+	u32 uncorrectable_severity;
+	u32 correctable_mask;
+	u32 advanced_capabilities;
+};
+
+/* HEST Sub-structure for PCIe/PCI-X Bridge Structure (8) */
+
+struct acpi_hest_aer_for_bridge {
+	u16 reserved1;
+	u8 flags;
+	u8 enabled;
+	u32 records_to_preallocate;
+	u32 max_sections_per_record;
+	u32 bus;
+	u16 device;
+	u16 function;
+	u16 device_control;
+	u16 reserved2;
+	u32 uncorrectable_mask;
+	u32 uncorrectable_severity;
+	u32 correctable_mask;
+	u32 advanced_capabilities;
+	u32 uncorrectable_mask2;
+	u32 uncorrectable_severity2;
+	u32 advanced_capabilities2;
+};
+
 /* 9: Generic Hardware Error Source */
 
 struct acpi_hest_generic {

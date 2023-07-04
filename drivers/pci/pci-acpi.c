@@ -18,6 +18,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/pm_qos.h>
 #include <linux/rwsem.h>
+#include <acpi/apei.h>
 #include "pci.h"
 
 /*
@@ -781,6 +782,97 @@ int pci_acpi_program_hp_params(struct pci_dev *dev)
 		handle = phandle;
 	}
 	return -ENODEV;
+}
+
+/*
+ * program_aer_structure_to_aer_registers - Write the AER structure to
+ * the corresponding dev's AER registers.
+ *
+ * @info - the AER structure information
+ *
+ */
+static void program_aer_structure_to_aer_registers(struct acpi_hest_parse_aer_info info)
+{
+	u32 uncorrectable_mask;
+	u32 uncorrectable_severity;
+	u32 correctable_mask;
+	u32 advanced_capabilities;
+	u32 root_error_command;
+	u32 uncorrectable_mask2;
+	u32 uncorrectable_severity2;
+	u32 advanced_capabilities2;
+	int port_type;
+	int pos;
+	struct pci_dev *dev;
+
+	dev = info.pci_dev;
+	port_type = pci_pcie_type(dev);
+
+	pos = pci_find_ext_capability(dev, PCI_EXT_CAP_ID_ERR);
+	if (!pos)
+		return;
+
+	if (port_type == PCI_EXP_TYPE_ROOT_PORT) {
+		uncorrectable_mask = info.acpi_hest_aer_root_port->uncorrectable_mask;
+		uncorrectable_severity = info.acpi_hest_aer_root_port->uncorrectable_severity;
+		correctable_mask = info.acpi_hest_aer_root_port->correctable_mask;
+		advanced_capabilities = info.acpi_hest_aer_root_port->advanced_capabilities;
+		root_error_command = info.acpi_hest_aer_root_port->root_error_command;
+
+		pci_write_config_dword(dev, pos + PCI_ERR_UNCOR_MASK, uncorrectable_mask);
+		pci_write_config_dword(dev, pos + PCI_ERR_UNCOR_SEVER, uncorrectable_severity);
+		pci_write_config_dword(dev, pos + PCI_ERR_COR_MASK, correctable_mask);
+		pci_write_config_dword(dev, pos + PCI_ERR_CAP, advanced_capabilities);
+		pci_write_config_dword(dev, pos + PCI_ERR_ROOT_COMMAND, root_error_command);
+	} else if (port_type == PCI_EXP_TYPE_ENDPOINT) {
+		uncorrectable_mask = info.acpi_hest_aer_endpoint->uncorrectable_mask;
+		uncorrectable_severity = info.acpi_hest_aer_endpoint->uncorrectable_severity;
+		correctable_mask = info.acpi_hest_aer_endpoint->correctable_mask;
+		advanced_capabilities = info.acpi_hest_aer_endpoint->advanced_capabilities;
+
+		pci_write_config_dword(dev, pos + PCI_ERR_UNCOR_MASK, uncorrectable_mask);
+		pci_write_config_dword(dev, pos + PCI_ERR_UNCOR_SEVER, uncorrectable_severity);
+		pci_write_config_dword(dev, pos + PCI_ERR_COR_MASK, correctable_mask);
+		pci_write_config_dword(dev, pos + PCI_ERR_CAP, advanced_capabilities);
+	} else if ((pci_pcie_type(dev) == PCI_EXP_TYPE_PCI_BRIDGE) ||
+				(pci_pcie_type(dev) == PCI_EXP_TYPE_PCIE_BRIDGE)) {
+		uncorrectable_mask = info.acpi_hest_aer_for_bridge->uncorrectable_mask;
+		uncorrectable_severity = info.acpi_hest_aer_for_bridge->uncorrectable_severity;
+		correctable_mask = info.acpi_hest_aer_for_bridge->correctable_mask;
+		advanced_capabilities = info.acpi_hest_aer_for_bridge->advanced_capabilities;
+		uncorrectable_mask2 = info.acpi_hest_aer_for_bridge->uncorrectable_mask2;
+		uncorrectable_severity2 = info.acpi_hest_aer_for_bridge->uncorrectable_severity2;
+		advanced_capabilities2 = info.acpi_hest_aer_for_bridge->advanced_capabilities2;
+
+		pci_write_config_dword(dev, pos + PCI_ERR_UNCOR_MASK, uncorrectable_mask);
+		pci_write_config_dword(dev, pos + PCI_ERR_UNCOR_SEVER, uncorrectable_severity);
+		pci_write_config_dword(dev, pos + PCI_ERR_COR_MASK, correctable_mask);
+		pci_write_config_dword(dev, pos + PCI_ERR_CAP, advanced_capabilities);
+		pci_write_config_dword(dev, pos + PCI_ERR_UNCOR_MASK2, uncorrectable_mask2);
+		pci_write_config_dword(dev, pos + PCI_ERR_UNCOR_SEVER2, uncorrectable_severity2);
+		pci_write_config_dword(dev, pos + PCI_ERR_CAP2, advanced_capabilities2);
+	}
+}
+
+int pci_acpi_program_hest_aer_params(struct pci_dev *dev)
+{
+	struct acpi_hest_parse_aer_info info = {
+		.pci_dev	= dev,
+		.hest_matched_with_dev	= 0,
+		.acpi_hest_aer_endpoint = NULL,
+		.acpi_hest_aer_root_port = NULL,
+		.acpi_hest_aer_for_bridge = NULL,
+	};
+
+	if (!pci_is_pcie(dev))
+		return -ENODEV;
+
+	apei_hest_parse(apei_hest_parse_aer, &info);
+	if (info.hest_matched_with_dev == 1)
+		program_aer_structure_to_aer_registers(info);
+	else
+		return -ENODEV;
+	return 0;
 }
 
 /**
