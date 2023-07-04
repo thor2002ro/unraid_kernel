@@ -26,6 +26,7 @@
 #include <acpi/apei.h>
 #include <acpi/ghes.h>
 
+#include <linux/pci.h>
 #include "apei-internal.h"
 
 #define HEST_PFX "HEST: "
@@ -86,9 +87,52 @@ static int hest_esrc_len(struct acpi_hest_header *hest_hdr)
 	return len;
 };
 
-typedef int (*apei_hest_func_t)(struct acpi_hest_header *hest_hdr, void *data);
+static bool hest_source_is_pcie_aer(struct acpi_hest_header *hest_hdr)
+{
+	switch (hest_hdr->type) {
+	case ACPI_HEST_TYPE_AER_ROOT_PORT:
+	case ACPI_HEST_TYPE_AER_ENDPOINT:
+	case ACPI_HEST_TYPE_AER_BRIDGE:
+		return true;
+	default:
+		return false;
+	}
+}
 
-static int apei_hest_parse(apei_hest_func_t func, void *data)
+static bool hest_match_type(struct acpi_hest_header *hest_hdr,
+				struct pci_dev *dev)
+{
+	u16 hest_type = hest_hdr->type;
+	u8 pcie_type = pci_pcie_type(dev);
+
+	if ((hest_type == ACPI_HEST_TYPE_AER_ROOT_PORT &&
+		pcie_type == PCI_EXP_TYPE_ROOT_PORT) ||
+		(hest_type == ACPI_HEST_TYPE_AER_ENDPOINT &&
+		pcie_type == PCI_EXP_TYPE_ENDPOINT) ||
+		(hest_type == ACPI_HEST_TYPE_AER_BRIDGE &&
+		(pcie_type == PCI_EXP_TYPE_PCI_BRIDGE || pcie_type == PCI_EXP_TYPE_PCIE_BRIDGE)))
+		return true;
+	return false;
+}
+
+static bool hest_match_pci_devfn(struct acpi_hest_aer_common *p,
+		struct pci_dev *pci)
+{
+	return	ACPI_HEST_SEGMENT(p->bus) == pci_domain_nr(pci->bus) &&
+			ACPI_HEST_BUS(p->bus)     == pci->bus->number &&
+			p->device                 == PCI_SLOT(pci->devfn) &&
+			p->function               == PCI_FUNC(pci->devfn);
+}
+
+static bool hest_match_pci(struct acpi_hest_header *hest_hdr,
+		struct acpi_hest_aer_common *p, struct pci_dev *pci)
+{
+	if (hest_match_type(hest_hdr, pci))
+		return hest_match_pci_devfn(p, pci);
+	return false;
+}
+
+int apei_hest_parse(apei_hest_func_t func, void *data)
 {
 	struct acpi_hest_header *hest_hdr;
 	int i, rc, len;
@@ -122,6 +166,74 @@ static int apei_hest_parse(apei_hest_func_t func, void *data)
 	}
 
 	return 0;
+}
+
+/*
+ * apei_hest_parse_aer - Find the AER structure in the HEST and
+ * match it with the PCIe device.
+ *
+ * @hest_hdr: To save the ACPI AER error source in HEST
+ *
+ * Return 1 if the PCIe dev matched with the ACPI AER error source in
+ * HEST, else return 0.
+ */
+int apei_hest_parse_aer(struct acpi_hest_header *hest_hdr, void *data)
+{
+	struct acpi_hest_parse_aer_info *info = data;
+	struct acpi_hest_aer_endpoint *acpi_hest_aer_endpoint = NULL;
+	struct acpi_hest_aer_root_port *acpi_hest_aer_root_port = NULL;
+	struct acpi_hest_aer_for_bridge *acpi_hest_aer_for_bridge = NULL;
+
+	if (!hest_source_is_pcie_aer(hest_hdr))
+		return 0;
+
+	switch (hest_hdr->type) {
+	case ACPI_HEST_TYPE_AER_ROOT_PORT:
+		acpi_hest_aer_root_port = (struct acpi_hest_aer_root_port *)(hest_hdr + 1);
+		if (acpi_hest_aer_root_port->flags & ACPI_HEST_GLOBAL) {
+			if (hest_match_type(hest_hdr, info->pci_dev)) {
+				info->acpi_hest_aer_root_port = acpi_hest_aer_root_port;
+				info->hest_matched_with_dev = 1;
+			}
+		} else if (hest_match_pci(hest_hdr,
+					(struct acpi_hest_aer_common *)acpi_hest_aer_root_port,
+					info->pci_dev)) {
+			info->acpi_hest_aer_root_port = acpi_hest_aer_root_port;
+			info->hest_matched_with_dev = 1;
+		}
+		break;
+	case ACPI_HEST_TYPE_AER_ENDPOINT:
+		acpi_hest_aer_endpoint = (struct acpi_hest_aer_endpoint *)(hest_hdr + 1);
+		if (acpi_hest_aer_endpoint->flags & ACPI_HEST_GLOBAL) {
+			if (hest_match_type(hest_hdr, info->pci_dev)) {
+				info->acpi_hest_aer_endpoint = acpi_hest_aer_endpoint;
+				info->hest_matched_with_dev = 1;
+			}
+		} else if (hest_match_pci(hest_hdr,
+					(struct acpi_hest_aer_common *)acpi_hest_aer_endpoint,
+					info->pci_dev)) {
+				info->acpi_hest_aer_endpoint = acpi_hest_aer_endpoint;
+				info->hest_matched_with_dev = 1;
+		}
+		break;
+	case ACPI_HEST_TYPE_AER_BRIDGE:
+		acpi_hest_aer_for_bridge = (struct acpi_hest_aer_for_bridge *)(hest_hdr + 1);
+		if (acpi_hest_aer_for_bridge->flags & ACPI_HEST_GLOBAL) {
+			if (hest_match_type(hest_hdr, info->pci_dev)) {
+				info->acpi_hest_aer_for_bridge = acpi_hest_aer_for_bridge;
+				info->hest_matched_with_dev = 1;
+			}
+		} else if (hest_match_pci(hest_hdr,
+					(struct acpi_hest_aer_common *)acpi_hest_aer_for_bridge,
+					info->pci_dev)) {
+				info->acpi_hest_aer_for_bridge = acpi_hest_aer_for_bridge;
+				info->hest_matched_with_dev = 1;
+			}
+		break;
+	default:
+		break;
+	}
+	return info->hest_matched_with_dev;
 }
 
 /*
