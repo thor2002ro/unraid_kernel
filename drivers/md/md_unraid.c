@@ -429,7 +429,12 @@ static int lock_bdev(char *name, struct block_device **bdevP)
 
 	snprintf(path, sizeof(path), "/dev/%s", name);
 
-	bdev = blkdev_get_by_path(path, FMODE_READ | FMODE_WRITE, NULL);
+#if LINUX_VERSION_CODE > KERNEL_VERSION(6,4,99)
+  bdev = blkdev_get_by_path(path, FMODE_READ | FMODE_WRITE, NULL, NULL);
+#else  
+  bdev = blkdev_get_by_path(path, FMODE_READ | FMODE_WRITE, NULL);
+#endif
+
 	if (IS_ERR(bdev)) {
 		*bdevP = NULL;
 		return PTR_ERR(bdev);
@@ -442,7 +447,11 @@ static int lock_bdev(char *name, struct block_device **bdevP)
 static void unlock_bdev(struct block_device *bdev)
 {
 	if (bdev)
-		blkdev_put(bdev, FMODE_READ | FMODE_WRITE);
+#if LINUX_VERSION_CODE > KERNEL_VERSION(6,4,99)
+    blkdev_put(bdev, NULL);
+#else 
+    blkdev_put(bdev, FMODE_READ | FMODE_WRITE);
+#endif
 }
 
 /* Import a device.
@@ -965,10 +974,15 @@ static void md_submit_bio(struct bio *bi)
 	unraid_make_request(mddev, unit, bi);
 }
 
+#if LINUX_VERSION_CODE > KERNEL_VERSION(6,4,99)
+static int md_open(struct gendisk *disk, fmode_t mode)
+{
+	mddev_t *mddev = disk->private_data;
+#else 
 static int md_open(struct block_device *bdev, fmode_t mode)
-
 {
 	mddev_t *mddev = bdev->bd_disk->private_data;
+#endif
 
 	if (!mddev) {
 		printk("md_open: no mddev\n");
@@ -980,9 +994,15 @@ static int md_open(struct block_device *bdev, fmode_t mode)
 	return 0;
 }
 
+#if LINUX_VERSION_CODE > KERNEL_VERSION(6,4,99)
+static void md_release(struct gendisk *disk)
+{
+	mddev_t *mddev = disk->private_data;
+#else 
 static void md_release(struct gendisk *gd, fmode_t mode)
 {
 	mddev_t *mddev = gd->private_data;
+#endif
 
 	if (!mddev) {
 		printk("md_release: no mddev\n");
