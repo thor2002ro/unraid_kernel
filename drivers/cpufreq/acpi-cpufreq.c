@@ -628,28 +628,35 @@ static int acpi_cpufreq_blacklist(struct cpuinfo_x86 *c)
 #endif
 
 #ifdef CONFIG_ACPI_CPPC_LIB
-static u64 get_max_boost_ratio(unsigned int cpu)
+static void cpufreq_get_core_perf(int cpu, u64 *highest_perf, u64 *nominal_perf)
 {
 	struct cppc_perf_caps perf_caps;
-	u64 highest_perf, nominal_perf;
 	int ret;
 
 	if (acpi_pstate_strict)
-		return 0;
+		return;
 
 	ret = cppc_get_perf_caps(cpu, &perf_caps);
 	if (ret) {
 		pr_debug("CPU%d: Unable to get performance capabilities (%d)\n",
 			 cpu, ret);
-		return 0;
+		return;
 	}
 
 	if (boot_cpu_data.x86_vendor == X86_VENDOR_AMD)
-		highest_perf = amd_get_highest_perf();
+		*highest_perf = amd_get_highest_perf();
 	else
-		highest_perf = perf_caps.highest_perf;
+		*highest_perf = perf_caps.highest_perf;
 
-	nominal_perf = perf_caps.nominal_perf;
+	*nominal_perf = perf_caps.nominal_perf;
+	return;
+}
+
+static u64 get_max_boost_ratio(unsigned int cpu)
+{
+	u64 highest_perf, nominal_perf;
+
+	cpufreq_get_core_perf(cpu, &highest_perf, &nominal_perf);
 
 	if (!highest_perf || !nominal_perf) {
 		pr_debug("CPU%d: highest or nominal performance missing\n", cpu);
@@ -663,8 +670,44 @@ static u64 get_max_boost_ratio(unsigned int cpu)
 
 	return div_u64(highest_perf << SCHED_CAPACITY_SHIFT, nominal_perf);
 }
+
+static void cpufreq_sched_itmt_work_fn(struct work_struct *work)
+{
+	sched_set_itmt_support();
+}
+
+static DECLARE_WORK(sched_itmt_work, cpufreq_sched_itmt_work_fn);
+
+static void cpufreq_set_itmt_prio(int cpu)
+{
+	u64 highest_perf, nominal_perf;
+	static u32 max_highest_perf = 0, min_highest_perf = U32_MAX;
+
+	cpufreq_get_core_perf(cpu, &highest_perf, &nominal_perf);
+
+	sched_set_itmt_core_prio(highest_perf, cpu);
+
+	if (max_highest_perf <= min_highest_perf) {
+		if (highest_perf > max_highest_perf)
+			max_highest_perf = highest_perf;
+
+		if (highest_perf < min_highest_perf)
+			min_highest_perf = highest_perf;
+
+		if (max_highest_perf > min_highest_perf) {
+			/*
+			 * This code can be run during CPU online under the
+			 * CPU hotplug locks, so sched_set_itmt_support()
+			 * cannot be called from here.  Queue up a work item
+			 * to invoke it.
+			 */
+			schedule_work(&sched_itmt_work);
+		}
+	}
+}
 #else
 static inline u64 get_max_boost_ratio(unsigned int cpu) { return 0; }
+static void cpufreq_set_itmt_prio(int cpu) { return; }
 #endif
 
 static int acpi_cpufreq_cpu_init(struct cpufreq_policy *policy)
@@ -869,6 +912,8 @@ static int acpi_cpufreq_cpu_init(struct cpufreq_policy *policy)
 
 	/* notify BIOS that we exist */
 	acpi_processor_notify_smm(THIS_MODULE);
+
+	cpufreq_set_itmt_prio(cpu);
 
 	pr_debug("CPU%u - ACPI performance management activated.\n", cpu);
 	for (i = 0; i < perf->state_count; i++)
