@@ -1052,8 +1052,9 @@ config SCHED_MC
 
 config SCHED_MC_PRIO
 	bool "CPU core priorities scheduler support"
-	depends on SCHED_MC && CPU_SUP_INTEL
+	depends on SCHED_MC
 	select X86_INTEL_PSTATE
+	select X86_AMD_PSTATE
 	select CPU_FREQ
 	default y
 	help

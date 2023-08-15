@@ -70,6 +70,7 @@ struct amd_cpudata {
 	u32	nominal_perf;
 	u32	lowest_nonlinear_perf;
 	u32	lowest_perf;
+	u32     prefcore_highest_perf;
 
 	u32	max_freq;
 	u32	min_freq;
