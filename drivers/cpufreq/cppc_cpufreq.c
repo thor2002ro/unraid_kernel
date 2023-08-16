@@ -220,6 +220,15 @@ static void cppc_cpufreq_cpu_fie_exit(struct cpufreq_policy *policy)
 	}
 }
 
+static void cppc_freq_invariance_exit(void)
+{
+	if (fie_disabled)
+		return;
+
+	kthread_destroy_worker(kworker_fie);
+	kworker_fie = NULL;
+}
+
 static void __init cppc_freq_invariance_init(void)
 {
 	struct sched_attr attr = {
@@ -249,25 +258,20 @@ static void __init cppc_freq_invariance_init(void)
 		return;
 
 	kworker_fie = kthread_create_worker(0, "cppc_fie");
-	if (IS_ERR(kworker_fie))
+	if (IS_ERR(kworker_fie)) {
+		pr_warn("%s: failed to create kworker_fie: %ld\n", __func__,
+			PTR_ERR(kworker_fie));
+		fie_disabled = FIE_DISABLED;
 		return;
+	}
 
 	ret = sched_setattr_nocheck(kworker_fie->task, &attr);
 	if (ret) {
 		pr_warn("%s: failed to set SCHED_DEADLINE: %d\n", __func__,
 			ret);
-		kthread_destroy_worker(kworker_fie);
-		return;
+		cppc_freq_invariance_exit();
+		fie_disabled = FIE_DISABLED;
 	}
-}
-
-static void cppc_freq_invariance_exit(void)
-{
-	if (fie_disabled)
-		return;
-
-	kthread_destroy_worker(kworker_fie);
-	kworker_fie = NULL;
 }
 
 #else
