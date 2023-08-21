@@ -108,6 +108,7 @@
 #include "amdgpu_mca.h"
 #include "amdgpu_ras.h"
 #include "amdgpu_xcp.h"
+#include "amdgpu_workload.h"
 
 #define MAX_GPU_INSTANCE		64
 
@@ -1085,6 +1086,8 @@ struct amdgpu_device {
 	bool                            dc_enabled;
 	/* Mask of active clusters */
 	uint32_t			aid_mask;
+
+	struct amdgpu_smu_workload	smu_workload;
 };
 
 static inline struct amdgpu_device *drm_to_adev(struct drm_device *ddev)

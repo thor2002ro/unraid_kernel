@@ -725,9 +725,11 @@ void amdgpu_amdkfd_set_compute_idle(struct amdgpu_device *adev, bool idle)
 		pr_debug("GFXOFF is %s\n", idle ? "enabled" : "disabled");
 		amdgpu_gfx_off_ctrl(adev, idle);
 	}
-	amdgpu_dpm_switch_power_profile(adev,
-					PP_SMC_POWER_PROFILE_COMPUTE,
-					!idle);
+
+	if (idle)
+		amdgpu_workload_profile_put(adev, AMDGPU_RING_TYPE_COMPUTE);
+	else
+		amdgpu_workload_profile_set(adev, AMDGPU_RING_TYPE_COMPUTE);
 }
 
 bool amdgpu_amdkfd_is_kfd_vmid(struct amdgpu_device *adev, u32 vmid)

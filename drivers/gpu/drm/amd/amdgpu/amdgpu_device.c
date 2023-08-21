@@ -2396,6 +2396,8 @@ static int amdgpu_device_ip_early_init(struct amdgpu_device *adev)
 	adev->cg_flags &= amdgpu_cg_mask;
 	adev->pg_flags &= amdgpu_pg_mask;
 
+	amdgpu_workload_profile_init(adev);
+
 	return 0;
 }
 
@@ -3047,6 +3049,8 @@ static int amdgpu_device_ip_fini_early(struct amdgpu_device *adev)
 static int amdgpu_device_ip_fini(struct amdgpu_device *adev)
 {
 	int i, r;
+
+	amdgpu_workload_profile_fini(adev);
 
 	if (amdgpu_sriov_vf(adev) && adev->virt.ras_init_done)
 		amdgpu_virt_release_ras_err_handler_data(adev);
@@ -4397,6 +4401,8 @@ int amdgpu_device_suspend(struct drm_device *dev, bool fbcon)
 	flush_delayed_work(&adev->gfx.gfx_off_delay_work);
 
 	amdgpu_ras_suspend(adev);
+
+	amdgpu_workload_profile_suspend(adev);
 
 	amdgpu_device_ip_suspend_phase1(adev);
 

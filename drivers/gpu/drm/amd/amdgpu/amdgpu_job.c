@@ -178,6 +178,9 @@ void amdgpu_job_free_resources(struct amdgpu_job *job)
 static void amdgpu_job_free_cb(struct drm_sched_job *s_job)
 {
 	struct amdgpu_job *job = to_amdgpu_job(s_job);
+	struct amdgpu_ring *ring = to_amdgpu_ring(s_job->sched);
+
+	amdgpu_workload_profile_put(ring->adev, ring->funcs->type);
 
 	drm_sched_job_cleanup(s_job);
 
@@ -307,6 +310,8 @@ static struct dma_fence *amdgpu_job_run(struct drm_sched_job *sched_job)
 		if (r)
 			DRM_ERROR("Error scheduling IBs (%d)\n", r);
 	}
+
+	amdgpu_workload_profile_set(adev, ring->funcs->type);
 
 	job->job_run_counter++;
 	amdgpu_job_free_resources(job);
