@@ -353,6 +353,47 @@ is activated.  In this mode, driver requests minimum and maximum performance
 level and the platform autonomously selects a performance level in this range
 and appropriate to the current workload.
 
+AMD Pstate Preferred Core
+=================================
+
+The core frequency is subjected to the process variation in semiconductors.
+Not all cores are able to reach the maximum frequency respecting the
+infrastructure limits. Consequently, AMD has redefined the concept of
+maximum frequency of a part. This means that a fraction of cores can reach
+maximum frequency. To find the best process scheduling policy for a given
+scenario, OS needs to know the core ordering informed by the platform through
+highest performance capability register of the CPPC interface.
+
+``AMD Pstate Preferred Core`` enable the scheduler to favor scheduling on cores
+can be get a higher frequency with lower voltage under preferred core.
+And it has the ability to dynamically change the preferred core based on the
+workload and platform conditions and accounting for thermals and aging.
+
+The priority metric will be initialized by the AMD Pstate driver. The AMD Pstate
+driver will also determine whether or not ``AMD Pstate Preferred Core`` is
+supported by the platform.
+
+AMD Pstate driver will provide an initial core ordering when the system boots.
+The platform uses the CPPC interfaces to communicate the core ranking to the
+operating system and scheduler to make sure that OS is choosing the cores
+with highest performance firstly for scheduling the process. When AMD Pstate
+driver receives a message with the highest performance change, it will
+update the core ranking and set the cpu's priority.
+
+AMD Preferred Core Switch
+=================================
+Kernel Parameters
+-----------------
+
+``AMD Pstate Preferred Core`` has two states: enable and disable.
+Enable/disable states can be chosen by different kernel parameters.
+Default enable ``AMD Pstate Preferred Core``.
+
+``amd_prefcore=disable``
+
+``AMD Pstate Preferred Core`` will be enabled if the underlying platform
+supports it. It can be disabled by kernerl parameter: ``amd_prefcore=disable``.
+
 User Space Interface in ``sysfs`` - General
 ===========================================
 
@@ -384,6 +425,18 @@ control its functionality at the system level.  They are located in the
         these values to the sysfs file will cause the driver to switch over
         to the operation mode represented by that string - or to be
         unregistered in the "disable" case.
+
+``prefcore``
+	Preferred Core state of the driver: "enabled" or "disabled".
+
+	"enabled"
+		Enable the AMD Preferred Core.
+
+	"disabled"
+		Disable the AMD Preferred Core
+
+
+        This attribute is read-only to check the state of Preferred Core.
 
 ``cpupower`` tool support for ``amd-pstate``
 ===============================================
