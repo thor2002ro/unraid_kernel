@@ -1108,6 +1108,7 @@ static noinline int btrfs_ioctl_resize(struct file *file,
 	int ret = 0;
 	int mod = 0;
 	bool cancel;
+	bool to_min = false;
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
@@ -1165,9 +1166,12 @@ static noinline int btrfs_ioctl_resize(struct file *file,
 		goto out_finish;
 	}
 
-	if (!strcmp(sizestr, "max"))
+	if (!strcmp(sizestr, "max")) {
 		new_size = bdev_nr_bytes(device->bdev);
-	else {
+	} else if (!strcmp(sizestr, "min")) {
+		to_min = true;
+		new_size = SZ_256M;
+	} else {
 		if (sizestr[0] == '-') {
 			mod = -1;
 			sizestr++;
@@ -1223,7 +1227,7 @@ static noinline int btrfs_ioctl_resize(struct file *file,
 		ret = btrfs_grow_device(trans, device, new_size);
 		btrfs_commit_transaction(trans);
 	} else if (new_size < old_size) {
-		ret = btrfs_shrink_device(device, new_size);
+		ret = btrfs_shrink_device(device, &new_size, to_min);
 	} /* equal, nothing need to do */
 
 	if (ret == 0 && new_size != old_size)
