@@ -3900,20 +3900,15 @@ static int sd_resume(struct device *dev, bool runtime)
 	if (!sdkp)	/* E.g.: runtime resume at the start of sd_probe() */
 		return 0;
 
-	if (!sd_do_start_stop(sdkp->device, runtime)) {
-		sdkp->suspended = 0;
-		return 0;
-	}
-
-	if (!sdkp->device->no_start_on_resume) {
+	if (sd_do_start_stop(sdkp->device, runtime)) {
 		sd_printk(KERN_NOTICE, sdkp, "Starting disk\n");
 		ret = sd_start_stop_device(sdkp, 1);
+		if (!ret)
+			opal_unlock_from_suspend(sdkp->opal_dev);
 	}
 
-	if (!ret) {
-		opal_unlock_from_suspend(sdkp->opal_dev);
+	if (!ret)
 		sdkp->suspended = 0;
-	}
 
 	return ret;
 }
