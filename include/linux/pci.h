@@ -389,6 +389,7 @@ struct pci_dev {
 						   bit manually */
 	unsigned int	d3hot_delay;	/* D3hot->D0 transition time in ms */
 	unsigned int	d3cold_delay;	/* D3cold->D0 transition time in ms */
+	unsigned int	driver_d3;	/* Driver D3 request preference */
 
 #ifdef CONFIG_PCIEASPM
 	struct pcie_link_state	*link_state;	/* ASPM link state */
@@ -1374,6 +1375,14 @@ void pci_d3cold_disable(struct pci_dev *dev);
 bool pcie_relaxed_ordering_enabled(struct pci_dev *dev);
 void pci_resume_bus(struct pci_bus *bus);
 void pci_bus_set_current_state(struct pci_bus *bus, pci_power_t state);
+struct pci_d3_driver_ops {
+	struct list_head list_node;
+	int priority;
+	bool (*optin)(struct pci_dev *pdev);
+	bool (*veto)(struct pci_dev *pdev);
+};
+int pci_register_d3_possible_cb(struct pci_d3_driver_ops *arg);
+void pci_unregister_d3_possible_cb(struct pci_d3_driver_ops *arg);
 
 /* For use by arch with custom probe code */
 void set_pcie_port_type(struct pci_dev *pdev);
