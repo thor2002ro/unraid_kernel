@@ -741,6 +741,49 @@ static int amd_pmc_czn_wa_irq1(struct amd_pmc_dev *pdev)
 	return 0;
 }
 
+/*
+ * Constraints are specified in the ACPI LPS0 device and specify what the
+ * platform intended for the device.
+ *
+ * If a constraint is present and >= to ACPI_STATE_S3, then enable D3 for the
+ * device with the 'optin' callback.
+ * If a constraint is not present or < ACPI_STATE_S3, then disable D3 for the
+ * device with the 'veto' callback.
+ */
+static int amd_pmc_get_constraint(struct pci_dev *pci_dev)
+{
+	struct acpi_device *adev = ACPI_COMPANION(&pci_dev->dev);
+
+	if (!adev)
+		return ACPI_STATE_UNKNOWN;
+
+	return acpi_get_lps0_constraint(adev);
+}
+
+static bool amd_pmc_d3_optin_check(struct pci_dev *pci_dev)
+{
+	int constraint = amd_pmc_get_constraint(pci_dev);
+
+	if (constraint == ACPI_STATE_UNKNOWN ||
+	    constraint < ACPI_STATE_S3)
+		return false;
+
+	dev_dbg(&pci_dev->dev, "Opting in to D3 due to constraint %d\n", constraint);
+	return true;
+}
+
+static bool amd_pmc_d3_veto_check(struct pci_dev *pci_dev)
+{
+	int constraint = amd_pmc_get_constraint(pci_dev);
+
+	if (constraint != ACPI_STATE_UNKNOWN &&
+	    constraint >= ACPI_STATE_S3)
+		return false;
+
+	dev_dbg(&pci_dev->dev, "Vetoing D3 due to constraint %d\n", constraint);
+	return true;
+}
+
 static int amd_pmc_verify_czn_rtc(struct amd_pmc_dev *pdev, u32 *arg)
 {
 	struct rtc_device *rtc_device;
@@ -879,6 +922,12 @@ static struct acpi_s2idle_dev_ops amd_pmc_s2idle_dev_ops = {
 	.prepare = amd_pmc_s2idle_prepare,
 	.check = amd_pmc_s2idle_check,
 	.restore = amd_pmc_s2idle_restore,
+};
+
+static struct pci_d3_driver_ops amd_pmc_d3_veto_ops = {
+	.optin = amd_pmc_d3_optin_check,
+	.veto = amd_pmc_d3_veto_check,
+	.priority = 50,
 };
 
 static int amd_pmc_suspend_handler(struct device *dev)
@@ -1074,10 +1123,17 @@ static int amd_pmc_probe(struct platform_device *pdev)
 			amd_pmc_quirks_init(dev);
 	}
 
+	err = pci_register_d3_possible_cb(&amd_pmc_d3_veto_ops);
+	if (err)
+		goto err_register_lps0;
+
 	amd_pmc_dbgfs_register(dev);
 	pm_report_max_hw_sleep(U64_MAX);
 	return 0;
 
+err_register_lps0:
+	if (IS_ENABLED(CONFIG_SUSPEND))
+		acpi_unregister_lps0_dev(&amd_pmc_s2idle_dev_ops);
 err_pci_dev_put:
 	pci_dev_put(rdev);
 	return err;
@@ -1089,6 +1145,7 @@ static void amd_pmc_remove(struct platform_device *pdev)
 
 	if (IS_ENABLED(CONFIG_SUSPEND))
 		acpi_unregister_lps0_dev(&amd_pmc_s2idle_dev_ops);
+	pci_unregister_d3_possible_cb(&amd_pmc_d3_veto_ops);
 	amd_pmc_dbgfs_unregister(dev);
 	pci_dev_put(dev->rdev);
 	mutex_destroy(&dev->lock);
