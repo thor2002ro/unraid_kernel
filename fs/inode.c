@@ -168,6 +168,8 @@ int inode_init_always(struct super_block *sb, struct inode *inode)
 	inode->i_fop = &no_open_fops;
 	inode->i_ino = 0;
 	inode->__i_nlink = 1;
+	inode->__i_ctime.tv_sec = 0;
+	inode->__i_ctime.tv_nsec = 0;
 	inode->i_opflags = 0;
 	if (sb->s_xattr)
 		inode->i_opflags |= IOP_XATTR;
