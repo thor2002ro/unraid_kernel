@@ -3763,7 +3763,8 @@ static void sd_shutdown(struct device *dev)
 	if (!sdkp)
 		return;         /* this can happen */
 
-	if (pm_runtime_suspended(dev))
+	if (pm_runtime_suspended(dev) ||
+	    sdkp->device->host->shost_state != SHOST_RUNNING)
 		return;
 
 	if (sdkp->WCE && sdkp->media_present) {
