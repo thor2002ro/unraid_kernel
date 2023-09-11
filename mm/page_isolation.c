@@ -181,13 +181,12 @@ static int set_migratetype_isolate(struct page *page, int migratetype, int isol_
 		int nr_pages;
 		int mt = get_pageblock_migratetype(page);
 
-		nr_pages = move_freepages_block(zone, page, MIGRATE_ISOLATE);
+		nr_pages = move_freepages_block(zone, page, mt, MIGRATE_ISOLATE);
 		/* Block spans zone boundaries? */
 		if (nr_pages == -1) {
 			spin_unlock_irqrestore(&zone->lock, flags);
 			return -EBUSY;
 		}
-		__mod_zone_freepage_state(zone, -nr_pages, mt);
 		set_pageblock_migratetype(page, MIGRATE_ISOLATE);
 		zone->nr_isolate_pageblock++;
 		spin_unlock_irqrestore(&zone->lock, flags);
@@ -255,13 +254,13 @@ static void unset_migratetype_isolate(struct page *page, int migratetype)
 	 * allocation.
 	 */
 	if (!isolated_page) {
-		int nr_pages = move_freepages_block(zone, page, migratetype);
+		int nr_pages = move_freepages_block(zone, page, MIGRATE_ISOLATE,
+						    migratetype);
 		/*
 		 * Isolating this block already succeeded, so this
 		 * should not fail on zone boundaries.
 		 */
 		WARN_ON_ONCE(nr_pages == -1);
-		__mod_zone_freepage_state(zone, nr_pages, migratetype);
 	}
 	set_pageblock_migratetype(page, migratetype);
 	if (isolated_page)
