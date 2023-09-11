@@ -1646,7 +1646,7 @@ int move_freepages_block(struct zone *zone, struct page *page,
 
 	/* Do not cross zone boundaries */
 	if (!zone_spans_pfn(zone, start_pfn))
-		start_pfn = pfn;
+		start_pfn = zone->zone_start_pfn;
 	if (!zone_spans_pfn(zone, end_pfn))
 		return 0;
 
