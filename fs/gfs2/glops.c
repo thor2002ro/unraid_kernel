@@ -567,15 +567,16 @@ static void freeze_go_callback(struct gfs2_glock *gl, bool remote)
 	struct super_block *sb = sdp->sd_vfs;
 
 	if (!remote ||
-	    gl->gl_state != LM_ST_SHARED ||
+	    (gl->gl_state != LM_ST_SHARED &&
+	     gl->gl_state != LM_ST_UNLOCKED) ||
 	    gl->gl_demote_state != LM_ST_UNLOCKED)
 		return;
 
 	/*
 	 * Try to get an active super block reference to prevent racing with
-	 * unmount (see trylock_super()).  But note that unmount isn't the only
-	 * place where a write lock on s_umount is taken, and we can fail here
-	 * because of things like remount as well.
+	 * unmount (see super_trylock_shared()).  But note that unmount isn't
+	 * the only place where a write lock on s_umount is taken, and we can
+	 * fail here because of things like remount as well.
 	 */
 	if (down_read_trylock(&sb->s_umount)) {
 		atomic_inc(&sb->s_active);
@@ -609,18 +610,6 @@ static int freeze_go_xmote_bh(struct gfs2_glock *gl)
 		sdp->sd_log_sequence = head.lh_sequence + 1;
 		gfs2_log_pointers_init(sdp, head.lh_blkno);
 	}
-	return 0;
-}
-
-/**
- * freeze_go_demote_ok
- * @gl: the glock
- *
- * Always returns 0
- */
-
-static int freeze_go_demote_ok(const struct gfs2_glock *gl)
-{
 	return 0;
 }
 
@@ -743,7 +732,6 @@ const struct gfs2_glock_operations gfs2_rgrp_glops = {
 
 const struct gfs2_glock_operations gfs2_freeze_glops = {
 	.go_xmote_bh = freeze_go_xmote_bh,
-	.go_demote_ok = freeze_go_demote_ok,
 	.go_callback = freeze_go_callback,
 	.go_type = LM_TYPE_NONDISK,
 	.go_flags = GLOF_NONDISK,
