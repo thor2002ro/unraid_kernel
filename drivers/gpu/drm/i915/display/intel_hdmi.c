@@ -1665,9 +1665,10 @@ intel_hdmi_hdcp2_wait_for_msg(struct intel_digital_port *dig_port,
 }
 
 static
-int intel_hdmi_hdcp2_write_msg(struct intel_digital_port *dig_port,
+int intel_hdmi_hdcp2_write_msg(struct intel_connector *connector,
 			       void *buf, size_t size)
 {
+	struct intel_digital_port *dig_port = intel_attached_dig_port(connector);
 	unsigned int offset;
 
 	offset = HDCP_2_2_HDMI_REG_WR_MSG_OFFSET;
@@ -1675,9 +1676,10 @@ int intel_hdmi_hdcp2_write_msg(struct intel_digital_port *dig_port,
 }
 
 static
-int intel_hdmi_hdcp2_read_msg(struct intel_digital_port *dig_port,
+int intel_hdmi_hdcp2_read_msg(struct intel_connector *connector,
 			      u8 msg_id, void *buf, size_t size)
 {
+	struct intel_digital_port *dig_port = intel_attached_dig_port(connector);
 	struct drm_i915_private *i915 = to_i915(dig_port->base.base.dev);
 	struct intel_hdmi *hdmi = &dig_port->hdmi;
 	struct intel_hdcp *hdcp = &hdmi->attached_connector->hdcp;
@@ -1733,9 +1735,10 @@ int intel_hdmi_hdcp2_check_link(struct intel_digital_port *dig_port,
 }
 
 static
-int intel_hdmi_hdcp2_capable(struct intel_digital_port *dig_port,
+int intel_hdmi_hdcp2_capable(struct intel_connector *connector,
 			     bool *capable)
 {
+	struct intel_digital_port *dig_port = intel_attached_dig_port(connector);
 	u8 hdcp2_version;
 	int ret;
 
@@ -2452,7 +2455,6 @@ intel_hdmi_set_edid(struct drm_connector *connector)
 	struct intel_hdmi *intel_hdmi = intel_attached_hdmi(to_intel_connector(connector));
 	intel_wakeref_t wakeref;
 	const struct drm_edid *drm_edid;
-	const struct edid *edid;
 	bool connected = false;
 	struct i2c_adapter *i2c;
 
@@ -2475,9 +2477,7 @@ intel_hdmi_set_edid(struct drm_connector *connector)
 
 	to_intel_connector(connector)->detect_edid = drm_edid;
 
-	/* FIXME: Get rid of drm_edid_raw() */
-	edid = drm_edid_raw(drm_edid);
-	if (edid && edid->input & DRM_EDID_INPUT_DIGITAL) {
+	if (drm_edid_is_digital(drm_edid)) {
 		intel_hdmi_dp_dual_mode_detect(connector);
 
 		connected = true;
@@ -2485,7 +2485,8 @@ intel_hdmi_set_edid(struct drm_connector *connector)
 
 	intel_display_power_put(dev_priv, POWER_DOMAIN_GMBUS, wakeref);
 
-	cec_notifier_set_phys_addr_from_edid(intel_hdmi->cec_notifier, edid);
+	cec_notifier_set_phys_addr(intel_hdmi->cec_notifier,
+				   connector->display_info.source_physical_address);
 
 	return connected;
 }
@@ -2521,12 +2522,6 @@ out:
 
 	if (status != connector_status_connected)
 		cec_notifier_phys_addr_invalidate(intel_hdmi->cec_notifier);
-
-	/*
-	 * Make sure the refs for power wells enabled during detect are
-	 * dropped to avoid a new detect cycle triggered by HPD polling.
-	 */
-	intel_display_power_flush_work(dev_priv);
 
 	return status;
 }

@@ -451,6 +451,8 @@ static int hsw_crt_compute_config(struct intel_encoder *encoder,
 	/* FDI must always be 2.7 GHz */
 	pipe_config->port_clock = 135000 * 2;
 
+	pipe_config->enhanced_framing = true;
+
 	adjusted_mode->crtc_clock = lpt_iclkip(pipe_config);
 
 	return 0;
@@ -657,21 +659,18 @@ static bool intel_crt_detect_ddc(struct drm_connector *connector)
 	drm_edid = intel_crt_get_edid(connector, i2c);
 
 	if (drm_edid) {
-		const struct edid *edid = drm_edid_raw(drm_edid);
-		bool is_digital = edid->input & DRM_EDID_INPUT_DIGITAL;
-
 		/*
 		 * This may be a DVI-I connector with a shared DDC
 		 * link between analog and digital outputs, so we
 		 * have to check the EDID input spec of the attached device.
 		 */
-		if (!is_digital) {
+		if (drm_edid_is_digital(drm_edid)) {
+			drm_dbg_kms(&dev_priv->drm,
+				    "CRT not detected via DDC:0x50 [EDID reports a digital panel]\n");
+		} else {
 			drm_dbg_kms(&dev_priv->drm,
 				    "CRT detected via DDC:0x50 [EDID]\n");
 			ret = true;
-		} else {
-			drm_dbg_kms(&dev_priv->drm,
-				    "CRT not detected via DDC:0x50 [EDID reports a digital panel]\n");
 		}
 	} else {
 		drm_dbg_kms(&dev_priv->drm,
@@ -906,12 +905,6 @@ load_detect:
 
 out:
 	intel_display_power_put(dev_priv, intel_encoder->power_domain, wakeref);
-
-	/*
-	 * Make sure the refs for power wells enabled during detect are
-	 * dropped to avoid a new detect cycle triggered by HPD polling.
-	 */
-	intel_display_power_flush_work(dev_priv);
 
 	return status;
 }
