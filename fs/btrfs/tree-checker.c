@@ -29,6 +29,7 @@
 #include "accessors.h"
 #include "file-item.h"
 #include "inode-item.h"
+#include "dir-item.h"
 
 /*
  * Error message should follow the following format:
@@ -1464,6 +1465,9 @@ static int check_extent_item(struct extent_buffer *leaf,
 				return -EUCLEAN;
 			}
 			inline_refs += btrfs_shared_data_ref_count(leaf, sref);
+			break;
+		case BTRFS_EXTENT_OWNER_REF_KEY:
+			WARN_ON(!btrfs_fs_incompat(fs_info, SIMPLE_QUOTA));
 			break;
 		default:
 			extent_err(leaf, slot, "unknown inline ref type: %u",
