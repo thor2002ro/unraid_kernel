@@ -410,11 +410,12 @@ void tc_bpf_non_root(void)
 		goto restore_cap;
 
 	skel = test_tc_bpf__open_and_load();
-	if (!ASSERT_OK_PTR(skel, "test_tc_bpf__open_and_load"))
-		goto restore_cap;
+	if (!ASSERT_ERR_PTR(skel, "test_tc_bpf__open_and_load"))
+		goto destroy;
 
+	goto restore_cap;
+destroy:
 	test_tc_bpf__destroy(skel);
-
 restore_cap:
 	if (caps)
 		cap_enable_effective(caps, NULL);
