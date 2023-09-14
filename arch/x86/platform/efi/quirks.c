@@ -162,8 +162,9 @@ efi_status_t efi_query_variable_store(u32 attributes, unsigned long size,
 	efi_status_t status;
 	u64 storage_size, remaining_size, max_size;
 
-	if (!(attributes & EFI_VARIABLE_NON_VOLATILE))
-		return 0;
+	if (!(attributes & EFI_VARIABLE_NON_VOLATILE) ||
+	    !efi_rt_services_supported(EFI_RT_SUPPORTED_QUERY_VARIABLE_INFO))
+		return EFI_SUCCESS;
 
 	if (nonblocking)
 		return query_variable_store_nonblocking(attributes, size);
@@ -779,3 +780,30 @@ void efi_crash_gracefully_on_page_fault(unsigned long phys_addr)
 		schedule();
 	}
 }
+
+static int __init
+disable_buggy_query_variable_info(const struct dmi_system_id *id)
+{
+	pr_info("Detected %s machine, disabling EFI QueryVariableInfo()\n",
+		id->ident);
+	efi.runtime_supported_mask &= ~EFI_RT_SUPPORTED_QUERY_VARIABLE_INFO;
+	return 1;
+}
+
+static int __init efi_dmi_check(void)
+{
+	static const struct dmi_system_id dmi_ids[] __initconst = {
+		{
+			.callback = disable_buggy_query_variable_info,
+			.ident = "HP ProBook x360",
+			.matches = {
+				DMI_MATCH(DMI_SYS_VENDOR, "HP"),
+				DMI_MATCH(DMI_PRODUCT_NAME, "HP ProBook x360 11 G1 EE"),
+			},
+		},
+		{ }	/* terminating entry */
+	};
+	dmi_check_system(dmi_ids);
+	return 0;
+}
+subsys_initcall(efi_dmi_check);
