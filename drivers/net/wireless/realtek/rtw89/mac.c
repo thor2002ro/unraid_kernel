@@ -3452,7 +3452,7 @@ static void rtw89_disable_fw_watchdog(struct rtw89_dev *rtwdev)
 	rtw89_mac_mem_write(rtwdev, R_AX_WDT_STATUS, val32, RTW89_MAC_MEM_CPU_LOCAL);
 }
 
-void rtw89_mac_disable_cpu(struct rtw89_dev *rtwdev)
+static void rtw89_mac_disable_cpu_ax(struct rtw89_dev *rtwdev)
 {
 	clear_bit(RTW89_FLAG_FW_RDY, rtwdev->flags);
 
@@ -3467,7 +3467,8 @@ void rtw89_mac_disable_cpu(struct rtw89_dev *rtwdev)
 	rtw89_write32_set(rtwdev, R_AX_PLATFORM_ENABLE, B_AX_PLATFORM_EN);
 }
 
-int rtw89_mac_enable_cpu(struct rtw89_dev *rtwdev, u8 boot_reason, bool dlfw)
+static int rtw89_mac_enable_cpu_ax(struct rtw89_dev *rtwdev, u8 boot_reason,
+				   bool dlfw, bool include_bb)
 {
 	u32 val;
 	int ret;
@@ -3505,7 +3506,7 @@ int rtw89_mac_enable_cpu(struct rtw89_dev *rtwdev, u8 boot_reason, bool dlfw)
 	if (!dlfw) {
 		mdelay(5);
 
-		ret = rtw89_fw_check_rdy(rtwdev);
+		ret = rtw89_fw_check_rdy(rtwdev, RTW89_FWDL_CHECK_FREERTOS_DONE);
 		if (ret)
 			return ret;
 	}
@@ -3592,7 +3593,7 @@ int rtw89_mac_disable_bb_rf(struct rtw89_dev *rtwdev)
 }
 EXPORT_SYMBOL(rtw89_mac_disable_bb_rf);
 
-int rtw89_mac_partial_init(struct rtw89_dev *rtwdev)
+int rtw89_mac_partial_init(struct rtw89_dev *rtwdev, bool include_bb)
 {
 	int ret;
 
@@ -3606,6 +3607,12 @@ int rtw89_mac_partial_init(struct rtw89_dev *rtwdev)
 
 	rtw89_mac_ctrl_hci_dma_trx(rtwdev, true);
 
+	if (include_bb) {
+		rtw89_chip_bb_preinit(rtwdev, RTW89_PHY_0);
+		if (rtwdev->dbcc_en)
+			rtw89_chip_bb_preinit(rtwdev, RTW89_PHY_1);
+	}
+
 	ret = rtw89_mac_dmac_pre_init(rtwdev);
 	if (ret)
 		return ret;
@@ -3616,7 +3623,7 @@ int rtw89_mac_partial_init(struct rtw89_dev *rtwdev)
 			return ret;
 	}
 
-	ret = rtw89_fw_download(rtwdev, RTW89_FW_NORMAL);
+	ret = rtw89_fw_download(rtwdev, RTW89_FW_NORMAL, include_bb);
 	if (ret)
 		return ret;
 
@@ -3625,9 +3632,11 @@ int rtw89_mac_partial_init(struct rtw89_dev *rtwdev)
 
 int rtw89_mac_init(struct rtw89_dev *rtwdev)
 {
+	const struct rtw89_chip_info *chip = rtwdev->chip;
+	bool include_bb = !!chip->bbmcu_nr;
 	int ret;
 
-	ret = rtw89_mac_partial_init(rtwdev);
+	ret = rtw89_mac_partial_init(rtwdev, include_bb);
 	if (ret)
 		goto fail;
 
@@ -5684,11 +5693,35 @@ int rtw89_mac_ptk_drop_by_band_and_wait(struct rtw89_dev *rtwdev,
 	return ret;
 }
 
+static u8 rtw89_fw_get_rdy_ax(struct rtw89_dev *rtwdev, enum rtw89_fwdl_check_type type)
+{
+	u8 val = rtw89_read8(rtwdev, R_AX_WCPU_FW_CTRL);
+
+	return FIELD_GET(B_AX_WCPU_FWDL_STS_MASK, val);
+}
+
+static
+int rtw89_fwdl_check_path_ready_ax(struct rtw89_dev *rtwdev,
+				   bool h2c_or_fwdl)
+{
+	u8 check = h2c_or_fwdl ? B_AX_H2C_PATH_RDY : B_AX_FWDL_PATH_RDY;
+	u8 val;
+
+	return read_poll_timeout_atomic(rtw89_read8, val, val & check,
+					1, FWDL_WAIT_CNT, false,
+					rtwdev, R_AX_WCPU_FW_CTRL);
+}
+
 const struct rtw89_mac_gen_def rtw89_mac_gen_ax = {
 	.band1_offset = RTW89_MAC_AX_BAND_REG_OFFSET,
 	.filter_model_addr = R_AX_FILTER_MODEL_ADDR,
 	.indir_access_addr = R_AX_INDIR_ACCESS_ENTRY,
 	.mem_base_addrs = rtw89_mac_mem_base_addrs_ax,
 	.rx_fltr = R_AX_RX_FLTR_OPT,
+
+	.disable_cpu = rtw89_mac_disable_cpu_ax,
+	.fwdl_enable_wcpu = rtw89_mac_enable_cpu_ax,
+	.fwdl_get_status = rtw89_fw_get_rdy_ax,
+	.fwdl_check_path_ready = rtw89_fwdl_check_path_ready_ax,
 };
 EXPORT_SYMBOL(rtw89_mac_gen_ax);

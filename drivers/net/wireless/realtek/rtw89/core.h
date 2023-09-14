@@ -3032,6 +3032,7 @@ struct rtw89_hci_info {
 struct rtw89_chip_ops {
 	int (*enable_bb_rf)(struct rtw89_dev *rtwdev);
 	int (*disable_bb_rf)(struct rtw89_dev *rtwdev);
+	void (*bb_preinit)(struct rtw89_dev *rtwdev, enum rtw89_phy_idx phy_idx);
 	void (*bb_reset)(struct rtw89_dev *rtwdev,
 			 enum rtw89_phy_idx phy_idx);
 	void (*bb_sethw)(struct rtw89_dev *rtwdev);
@@ -3446,6 +3447,7 @@ struct rtw89_chip_info {
 	const char *fw_basename;
 	u8 fw_format_max;
 	bool try_ce_fw;
+	u8 bbmcu_nr;
 	u32 needed_fw_elms;
 	u32 fifo_size;
 	bool small_fifo_size;
@@ -3608,6 +3610,14 @@ struct rtw89_mac_info {
 
 	/* see RTW89_FW_OFLD_WAIT_COND series for wait condition */
 	struct rtw89_wait_info fw_ofld_wait;
+};
+
+enum rtw89_fwdl_check_type {
+	RTW89_FWDL_CHECK_FREERTOS_DONE,
+	RTW89_FWDL_CHECK_WCPU_FWDL_DONE,
+	RTW89_FWDL_CHECK_DCPU_FWDL_DONE,
+	RTW89_FWDL_CHECK_BB0_FWDL_DONE,
+	RTW89_FWDL_CHECK_BB1_FWDL_DONE,
 };
 
 enum rtw89_fw_type {
@@ -4357,8 +4367,95 @@ struct rtw89_wow_param {
 	u8 pattern_cnt;
 };
 
+struct rtw89_mcc_limit {
+	bool enable;
+	u16 max_tob; /* TU; max time offset behind */
+	u16 max_toa; /* TU; max time offset ahead */
+	u16 max_dur; /* TU */
+};
+
+struct rtw89_mcc_policy {
+	u8 c2h_rpt;
+	u8 tx_null_early;
+	u8 dis_tx_null;
+	u8 in_curr_ch;
+	u8 dis_sw_retry;
+	u8 sw_retry_count;
+};
+
+struct rtw89_mcc_role {
+	struct rtw89_vif *rtwvif;
+	struct rtw89_mcc_policy policy;
+	struct rtw89_mcc_limit limit;
+
+	/* byte-array in LE order for FW */
+	u8 macid_bitmap[BITS_TO_BYTES(RTW89_MAX_MAC_ID_NUM)];
+
+	u16 duration; /* TU */
+	u16 beacon_interval; /* TU */
+	bool is_2ghz;
+	bool is_go;
+	bool is_gc;
+};
+
+struct rtw89_mcc_bt_role {
+	u16 duration; /* TU */
+};
+
+struct rtw89_mcc_courtesy {
+	bool enable;
+	u8 slot_num;
+	u8 macid_src;
+	u8 macid_tgt;
+};
+
+enum rtw89_mcc_plan {
+	RTW89_MCC_PLAN_TAIL_BT,
+	RTW89_MCC_PLAN_MID_BT,
+	RTW89_MCC_PLAN_NO_BT,
+
+	NUM_OF_RTW89_MCC_PLAN,
+};
+
+struct rtw89_mcc_pattern {
+	s16 tob_ref; /* TU; time offset behind of reference role */
+	s16 toa_ref; /* TU; time offset ahead of reference role */
+	s16 tob_aux; /* TU; time offset behind of auxiliary role */
+	s16 toa_aux; /* TU; time offset ahead of auxiliary role */
+
+	enum rtw89_mcc_plan plan;
+	struct rtw89_mcc_courtesy courtesy;
+};
+
+struct rtw89_mcc_sync {
+	bool enable;
+	u16 offset; /* TU */
+	u8 macid_src;
+	u8 macid_tgt;
+};
+
+struct rtw89_mcc_config {
+	struct rtw89_mcc_pattern pattern;
+	struct rtw89_mcc_sync sync;
+	u64 start_tsf;
+	u16 mcc_interval; /* TU */
+	u16 beacon_offset; /* TU */
+};
+
+enum rtw89_mcc_mode {
+	RTW89_MCC_MODE_GO_STA,
+	RTW89_MCC_MODE_GC_STA,
+};
+
 struct rtw89_mcc_info {
 	struct rtw89_wait_info wait;
+
+	u8 group;
+	enum rtw89_mcc_mode mode;
+	struct rtw89_mcc_role role_ref; /* reference role */
+	struct rtw89_mcc_role role_aux; /* auxiliary role */
+	struct rtw89_mcc_bt_role bt_role;
+	struct rtw89_mcc_config config;
 };
 
 struct rtw89_dev {
@@ -5015,6 +5112,15 @@ static inline void rtw89_chip_rfe_gpio(struct rtw89_dev *rtwdev)
 
 	if (chip->ops->rfe_gpio)
 		chip->ops->rfe_gpio(rtwdev);
+}
+
+static inline
+void rtw89_chip_bb_preinit(struct rtw89_dev *rtwdev, enum rtw89_phy_idx phy_idx)
+{
+	const struct rtw89_chip_info *chip = rtwdev->chip;
+
+	if (chip->ops->bb_preinit)
+		chip->ops->bb_preinit(rtwdev, phy_idx);
 }
 
 static inline void rtw89_chip_bb_sethw(struct rtw89_dev *rtwdev)

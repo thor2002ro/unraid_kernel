@@ -10,6 +10,26 @@
 /* The dwell time in TU before doing rtw89_chanctx_work(). */
 #define RTW89_CHANCTX_TIME_MCC_PREPARE 100
 
+/* various MCC setting time in TU */
+#define RTW89_MCC_LONG_TRIGGER_TIME 300
+#define RTW89_MCC_SHORT_TRIGGER_TIME 100
+#define RTW89_MCC_EARLY_TX_BCN_TIME 10
+#define RTW89_MCC_EARLY_RX_BCN_TIME 5
+#define RTW89_MCC_MIN_RX_BCN_TIME 10
+#define RTW89_MCC_DFLT_BCN_OFST_TIME 40
+
+#define RTW89_MCC_MIN_GO_DURATION \
+	(RTW89_MCC_EARLY_TX_BCN_TIME + RTW89_MCC_MIN_RX_BCN_TIME)
+
+#define RTW89_MCC_MIN_STA_DURATION \
+	(RTW89_MCC_EARLY_RX_BCN_TIME + RTW89_MCC_MIN_RX_BCN_TIME)
+
+#define RTW89_MCC_DFLT_GROUP 0
+#define RTW89_MCC_DFLT_TX_NULL_EARLY 3
+#define RTW89_MCC_DFLT_COURTESY_SLOT 3
+
+#define NUM_OF_RTW89_MCC_ROLES 2
+
 static inline bool rtw89_get_entity_state(struct rtw89_dev *rtwdev)
 {
 	struct rtw89_hal *hal = &rtwdev->hal;
