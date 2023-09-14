@@ -35,7 +35,7 @@ static inline bool is_migrate_isolate(int migratetype)
 
 void set_pageblock_migratetype(struct page *page, int migratetype);
 int move_freepages_block(struct zone *zone, struct page *page,
-				int migratetype, int *num_movable);
+			 int old_mt, int new_mt);
 
 int start_isolate_page_range(unsigned long start_pfn, unsigned long end_pfn,
 			     int migratetype, int flags, gfp_t gfp_flags);
