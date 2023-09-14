@@ -663,7 +663,7 @@ static noinline int create_subvol(struct mnt_idmap *idmap,
 		goto out;
 	}
 
-	btrfs_mark_buffer_dirty(leaf);
+	btrfs_mark_buffer_dirty(trans, leaf);
 
 	inode_item = &root_item->inode;
 	btrfs_set_stack_inode_generation(inode_item, 1);
@@ -1108,6 +1108,7 @@ static noinline int btrfs_ioctl_resize(struct file *file,
 	int ret = 0;
 	int mod = 0;
 	bool cancel;
+	bool to_min = false;
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
@@ -1165,9 +1166,12 @@ static noinline int btrfs_ioctl_resize(struct file *file,
 		goto out_finish;
 	}
 
-	if (!strcmp(sizestr, "max"))
+	if (!strcmp(sizestr, "max")) {
 		new_size = bdev_nr_bytes(device->bdev);
-	else {
+	} else if (!strcmp(sizestr, "min")) {
+		to_min = true;
+		new_size = SZ_256M;
+	} else {
 		if (sizestr[0] == '-') {
 			mod = -1;
 			sizestr++;
@@ -1223,7 +1227,7 @@ static noinline int btrfs_ioctl_resize(struct file *file,
 		ret = btrfs_grow_device(trans, device, new_size);
 		btrfs_commit_transaction(trans);
 	} else if (new_size < old_size) {
-		ret = btrfs_shrink_device(device, new_size);
+		ret = btrfs_shrink_device(device, &new_size, to_min);
 	} /* equal, nothing need to do */
 
 	if (ret == 0 && new_size != old_size)
@@ -1958,6 +1962,13 @@ static int btrfs_search_path_in_tree_user(struct mnt_idmap *idmap,
 				goto out_put;
 			}
 
+			/*
+			 * We don't need the path anymore, so release it and
+			 * avoid deadlocks and lockdep warnings in case
+			 * btrfs_iget() needs to lookup the inode from its root
+			 * btree and lock the same leaf.
+			 */
+			btrfs_release_path(path);
 			temp_inode = btrfs_iget(sb, key2.objectid, root);
 			if (IS_ERR(temp_inode)) {
 				ret = PTR_ERR(temp_inode);
@@ -1978,7 +1989,6 @@ static int btrfs_search_path_in_tree_user(struct mnt_idmap *idmap,
 				goto out_put;
 			}
 
-			btrfs_release_path(path);
 			key.objectid = key.offset;
 			key.offset = (u64)-1;
 			dirid = key.objectid;
@@ -2941,7 +2951,7 @@ static long btrfs_ioctl_default_subvol(struct file *file, void __user *argp)
 
 	btrfs_cpu_key_to_disk(&disk_key, &new_root->root_key);
 	btrfs_set_dir_item_key(path->nodes[0], di, &disk_key);
-	btrfs_mark_buffer_dirty(path->nodes[0]);
+	btrfs_mark_buffer_dirty(trans, path->nodes[0]);
 	btrfs_release_path(path);
 
 	btrfs_set_fs_incompat(fs_info, DEFAULT_SUBVOL);

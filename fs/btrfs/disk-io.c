@@ -29,7 +29,6 @@
 #include "tree-log.h"
 #include "free-space-cache.h"
 #include "free-space-tree.h"
-#include "check-integrity.h"
 #include "rcu-string.h"
 #include "dev-replace.h"
 #include "raid56.h"
@@ -318,9 +317,10 @@ static bool check_tree_block_fsid(struct extent_buffer *eb)
 			   BTRFS_FSID_SIZE);
 
 	/*
-	 * alloc_fs_devices() copies the fsid into metadata_uuid if the
-	 * metadata_uuid is unset in the superblock, including for a seed device.
-	 * So, we can use fs_devices->metadata_uuid.
+	 * alloc_fsid_devices() copies the fsid into fs_devices::metadata_uuid.
+	 * This is then overwritten by metadata_uuid if it is present in the
+	 * device_list_add(). The same true for a seed device as well. So use of
+	 * fs_devices::metadata_uuid is appropriate here.
 	 */
 	if (memcmp(fsid, fs_info->fs_devices->metadata_uuid, BTRFS_FSID_SIZE) == 0)
 		return false;
@@ -520,6 +520,7 @@ static bool btree_dirty_folio(struct address_space *mapping,
 		struct folio *folio)
 {
 	struct btrfs_fs_info *fs_info = btrfs_sb(mapping->host->i_sb);
+	struct btrfs_subpage_info *spi = fs_info->subpage_info;
 	struct btrfs_subpage *subpage;
 	struct extent_buffer *eb;
 	int cur_bit = 0;
@@ -533,18 +534,19 @@ static bool btree_dirty_folio(struct address_space *mapping,
 		btrfs_assert_tree_write_locked(eb);
 		return filemap_dirty_folio(mapping, folio);
 	}
+
+	ASSERT(spi);
 	subpage = folio_get_private(folio);
 
-	ASSERT(subpage->dirty_bitmap);
-	while (cur_bit < BTRFS_SUBPAGE_BITMAP_SIZE) {
+	for (cur_bit = spi->dirty_offset;
+	     cur_bit < spi->dirty_offset + spi->bitmap_nr_bits;
+	     cur_bit++) {
 		unsigned long flags;
 		u64 cur;
-		u16 tmp = (1 << cur_bit);
 
 		spin_lock_irqsave(&subpage->lock, flags);
-		if (!(tmp & subpage->dirty_bitmap)) {
+		if (!test_bit(cur_bit, subpage->bitmaps)) {
 			spin_unlock_irqrestore(&subpage->lock, flags);
-			cur_bit++;
 			continue;
 		}
 		spin_unlock_irqrestore(&subpage->lock, flags);
@@ -557,7 +559,7 @@ static bool btree_dirty_folio(struct address_space *mapping,
 		btrfs_assert_tree_write_locked(eb);
 		free_extent_buffer(eb);
 
-		cur_bit += (fs_info->nodesize >> fs_info->sectorsize_bits);
+		cur_bit += (fs_info->nodesize >> fs_info->sectorsize_bits) - 1;
 	}
 	return filemap_dirty_folio(mapping, folio);
 }
@@ -865,7 +867,7 @@ struct btrfs_root *btrfs_create_tree(struct btrfs_trans_handle *trans,
 	}
 
 	root->node = leaf;
-	btrfs_mark_buffer_dirty(leaf);
+	btrfs_mark_buffer_dirty(trans, leaf);
 
 	root->commit_root = btrfs_root_node(root);
 	set_bit(BTRFS_ROOT_TRACK_DIRTY, &root->state);
@@ -940,7 +942,7 @@ int btrfs_alloc_log_tree_node(struct btrfs_trans_handle *trans,
 
 	root->node = leaf;
 
-	btrfs_mark_buffer_dirty(root->node);
+	btrfs_mark_buffer_dirty(trans, root->node);
 	btrfs_tree_unlock(root->node);
 
 	return 0;
@@ -1400,7 +1402,8 @@ struct btrfs_root *btrfs_get_new_fs_root(struct btrfs_fs_info *fs_info,
 }
 
 /*
- * btrfs_get_fs_root_commit_root - return a root for the given objectid
+ * Return a root for the given objectid.
+ *
  * @fs_info:	the fs_info
  * @objectid:	the objectid we need to lookup
  *
@@ -1547,7 +1550,7 @@ static int transaction_kthread(void *arg)
 
 		delta = ktime_get_seconds() - cur->start_time;
 		if (!test_and_clear_bit(BTRFS_FS_COMMIT_TRANS, &fs_info->flags) &&
-		    cur->state < TRANS_STATE_COMMIT_START &&
+		    cur->state < TRANS_STATE_COMMIT_PREP &&
 		    delta < fs_info->commit_interval) {
 			spin_unlock(&fs_info->trans_lock);
 			delay -= msecs_to_jiffies((delta - 1) * 1000);
@@ -1697,11 +1700,11 @@ static void backup_super_roots(struct btrfs_fs_info *info)
 }
 
 /*
- * read_backup_root - Reads a backup root based on the passed priority. Prio 0
- * is the newest, prio 1/2/3 are 2nd newest/3rd newest/4th (oldest) backup roots
+ * Reads a backup root based on the passed priority. Prio 0 is the newest, prio
+ * 1/2/3 are 2nd newest/3rd newest/4th (oldest) backup roots
  *
- * fs_info - filesystem whose backup roots need to be read
- * priority - priority of backup root required
+ * @fs_info:  filesystem whose backup roots need to be read
+ * @priority: priority of backup root required
  *
  * Returns backup root index on success and -EINVAL otherwise.
  */
@@ -2682,8 +2685,8 @@ void btrfs_init_fs_info(struct btrfs_fs_info *fs_info)
 	btrfs_lockdep_init_map(fs_info, btrfs_trans_num_extwriters);
 	btrfs_lockdep_init_map(fs_info, btrfs_trans_pending_ordered);
 	btrfs_lockdep_init_map(fs_info, btrfs_ordered_extent);
-	btrfs_state_lockdep_init_map(fs_info, btrfs_trans_commit_start,
-				     BTRFS_LOCKDEP_TRANS_COMMIT_START);
+	btrfs_state_lockdep_init_map(fs_info, btrfs_trans_commit_prep,
+				     BTRFS_LOCKDEP_TRANS_COMMIT_PREP);
 	btrfs_state_lockdep_init_map(fs_info, btrfs_trans_unblocked,
 				     BTRFS_LOCKDEP_TRANS_UNBLOCKED);
 	btrfs_state_lockdep_init_map(fs_info, btrfs_trans_super_committed,
@@ -2733,9 +2736,6 @@ void btrfs_init_fs_info(struct btrfs_fs_info *fs_info)
 	spin_lock_init(&fs_info->ordered_root_lock);
 
 	btrfs_init_scrub(fs_info);
-#ifdef CONFIG_BTRFS_FS_CHECK_INTEGRITY
-	fs_info->check_integrity_print_mask = 0;
-#endif
 	btrfs_init_balance(fs_info);
 	btrfs_init_async_reclaim_work(fs_info);
 
@@ -3507,18 +3507,6 @@ int __cold open_ctree(struct super_block *sb, struct btrfs_fs_devices *fs_device
 				   "auto enabling async discard");
 	}
 
-#ifdef CONFIG_BTRFS_FS_CHECK_INTEGRITY
-	if (btrfs_test_opt(fs_info, CHECK_INTEGRITY)) {
-		ret = btrfsic_mount(fs_info, fs_devices,
-				    btrfs_test_opt(fs_info,
-					CHECK_INTEGRITY_DATA) ? 1 : 0,
-				    fs_info->check_integrity_print_mask);
-		if (ret)
-			btrfs_warn(fs_info,
-				"failed to initialize integrity check module: %d",
-				ret);
-	}
-#endif
 	ret = btrfs_read_qgroup_config(fs_info);
 	if (ret)
 		goto fail_trans_kthread;
@@ -3818,8 +3806,6 @@ static int write_dev_supers(struct btrfs_device *device,
 		 */
 		if (i == 0 && !btrfs_test_opt(device->fs_info, NOBARRIER))
 			bio->bi_opf |= REQ_FUA;
-
-		btrfsic_check_bio(bio);
 		submit_bio(bio);
 
 		if (btrfs_advance_sb_log(device, i))
@@ -3915,28 +3901,11 @@ static void write_dev_flush(struct btrfs_device *device)
 
 	device->last_flush_error = BLK_STS_OK;
 
-#ifndef CONFIG_BTRFS_FS_CHECK_INTEGRITY
-	/*
-	 * When a disk has write caching disabled, we skip submission of a bio
-	 * with flush and sync requests before writing the superblock, since
-	 * it's not needed. However when the integrity checker is enabled, this
-	 * results in reports that there are metadata blocks referred by a
-	 * superblock that were not properly flushed. So don't skip the bio
-	 * submission only when the integrity checker is enabled for the sake
-	 * of simplicity, since this is a debug tool and not meant for use in
-	 * non-debug builds.
-	 */
-	if (!bdev_write_cache(device->bdev))
-		return;
-#endif
-
 	bio_init(bio, device->bdev, NULL, 0,
 		 REQ_OP_WRITE | REQ_SYNC | REQ_PREFLUSH);
 	bio->bi_end_io = btrfs_end_empty_barrier;
 	init_completion(&device->flush_wait);
 	bio->bi_private = &device->flush_wait;
-
-	btrfsic_check_bio(bio);
 	submit_bio(bio);
 	set_bit(BTRFS_DEV_STATE_FLUSH_SENT, &device->dev_state);
 }
@@ -4412,16 +4381,12 @@ void __cold close_ctree(struct btrfs_fs_info *fs_info)
 
 	iput(fs_info->btree_inode);
 
-#ifdef CONFIG_BTRFS_FS_CHECK_INTEGRITY
-	if (btrfs_test_opt(fs_info, CHECK_INTEGRITY))
-		btrfsic_unmount(fs_info->fs_devices);
-#endif
-
 	btrfs_mapping_tree_free(&fs_info->mapping_tree);
 	btrfs_close_devices(fs_info->fs_devices);
 }
 
-void btrfs_mark_buffer_dirty(struct extent_buffer *buf)
+void btrfs_mark_buffer_dirty(struct btrfs_trans_handle *trans,
+			     struct extent_buffer *buf)
 {
 	struct btrfs_fs_info *fs_info = buf->fs_info;
 	u64 transid = btrfs_header_generation(buf);
@@ -4435,21 +4400,16 @@ void btrfs_mark_buffer_dirty(struct extent_buffer *buf)
 	if (unlikely(test_bit(EXTENT_BUFFER_UNMAPPED, &buf->bflags)))
 		return;
 #endif
+	/* This is an active transaction (its state < TRANS_STATE_UNBLOCKED). */
+	ASSERT(trans->transid == fs_info->generation);
 	btrfs_assert_tree_write_locked(buf);
-	if (transid != fs_info->generation)
-		WARN(1, KERN_CRIT "btrfs transid mismatch buffer %llu, found %llu running %llu\n",
-			buf->start, transid, fs_info->generation);
-	set_extent_buffer_dirty(buf);
-#ifdef CONFIG_BTRFS_FS_CHECK_INTEGRITY
-	/*
-	 * btrfs_check_leaf() won't check item data if we don't have WRITTEN
-	 * set, so this will only validate the basic structure of the items.
-	 */
-	if (btrfs_header_level(buf) == 0 && btrfs_check_leaf(buf)) {
-		btrfs_print_leaf(buf);
-		ASSERT(0);
+	if (unlikely(transid != fs_info->generation)) {
+		btrfs_abort_transaction(trans, -EUCLEAN);
+		btrfs_crit(fs_info,
+"dirty buffer transid mismatch, logical %llu found transid %llu running transid %llu",
+			   buf->start, transid, fs_info->generation);
 	}
-#endif
+	set_extent_buffer_dirty(buf);
 }
 
 static void __btrfs_btree_balance_dirty(struct btrfs_fs_info *fs_info,
@@ -4609,6 +4569,7 @@ static void btrfs_destroy_delayed_refs(struct btrfs_transaction *trans,
 				list_del(&ref->add_list);
 			atomic_dec(&delayed_refs->num_entries);
 			btrfs_put_delayed_ref(ref);
+			btrfs_delayed_refs_rsv_release(fs_info, 1, 0);
 		}
 		if (head->must_insert_reserved)
 			pin_bytes = true;
@@ -4806,7 +4767,7 @@ void btrfs_cleanup_dirty_bgs(struct btrfs_transaction *cur_trans,
 
 		spin_unlock(&cur_trans->dirty_bgs_lock);
 		btrfs_put_block_group(cache);
-		btrfs_delayed_refs_rsv_release(fs_info, 1);
+		btrfs_delayed_refs_rsv_release(fs_info, 1, 0);
 		spin_lock(&cur_trans->dirty_bgs_lock);
 	}
 	spin_unlock(&cur_trans->dirty_bgs_lock);
@@ -4870,7 +4831,7 @@ static int btrfs_cleanup_transaction(struct btrfs_fs_info *fs_info)
 	while (!list_empty(&fs_info->trans_list)) {
 		t = list_first_entry(&fs_info->trans_list,
 				     struct btrfs_transaction, list);
-		if (t->state >= TRANS_STATE_COMMIT_START) {
+		if (t->state >= TRANS_STATE_COMMIT_PREP) {
 			refcount_inc(&t->use_count);
 			spin_unlock(&fs_info->trans_lock);
 			btrfs_wait_for_commit(fs_info, t->transid);
