@@ -421,11 +421,6 @@ union replay_hw_flags {
 		uint32_t smu_optimizations_en : 1;
 
 		/**
-		 * @otg_powered_down: Flag to keep track of OTG power state.
-		 */
-		uint32_t otg_powered_down : 1;
-
-		/**
 		 * @phy_power_state: Indicates current phy power state
 		 */
 		uint32_t phy_power_state : 1;
@@ -455,6 +450,8 @@ struct dmub_feature_caps {
 	uint8_t reserved[4];
 	uint8_t subvp_psr_support;
 	uint8_t gecc_enable;
+	uint8_t replay_supported;
+	uint8_t replay_reserved[3];
 };
 
 struct dmub_visual_confirm_color {
@@ -2286,9 +2283,9 @@ struct dmub_cmd_psr_copy_settings_data {
 	 */
 	uint16_t dsc_slice_height;
 	/**
-	 * Explicit padding to 4 byte boundary.
+	 * Some panels request main link off before xth vertical line
 	 */
-	uint16_t pad;
+	uint16_t poweroff_before_vertical_line;
 };
 
 /**

@@ -42,9 +42,11 @@
 #include "nbio_v4_3.h"
 #include "gfxhub_v3_0.h"
 #include "gfxhub_v3_0_3.h"
+#include "gfxhub_v11_5_0.h"
 #include "mmhub_v3_0.h"
 #include "mmhub_v3_0_1.h"
 #include "mmhub_v3_0_2.h"
+#include "mmhub_v3_3.h"
 #include "athub_v3_0.h"
 
 
@@ -498,8 +500,7 @@ static void gmc_v11_0_get_vm_pde(struct amdgpu_device *adev, int level,
 				 uint64_t *addr, uint64_t *flags)
 {
 	if (!(*flags & AMDGPU_PDE_PTE) && !(*flags & AMDGPU_PTE_SYSTEM))
-		*addr = adev->vm_manager.vram_base_offset + *addr -
-			adev->gmc.vram_start;
+		*addr = amdgpu_gmc_vram_mc2pa(adev, *addr);
 	BUG_ON(*addr & 0xFFFF00000000003FULL);
 
 	if (!adev->gmc.translate_further)
@@ -617,6 +618,9 @@ static void gmc_v11_0_set_mmhub_funcs(struct amdgpu_device *adev)
 	case IP_VERSION(3, 0, 2):
 		adev->mmhub.funcs = &mmhub_v3_0_2_funcs;
 		break;
+	case IP_VERSION(3, 3, 0):
+		adev->mmhub.funcs = &mmhub_v3_3_funcs;
+		break;
 	default:
 		adev->mmhub.funcs = &mmhub_v3_0_funcs;
 		break;
@@ -628,6 +632,9 @@ static void gmc_v11_0_set_gfxhub_funcs(struct amdgpu_device *adev)
 	switch (adev->ip_versions[GC_HWIP][0]) {
 	case IP_VERSION(11, 0, 3):
 		adev->gfxhub.funcs = &gfxhub_v3_0_3_funcs;
+		break;
+	case IP_VERSION(11, 5, 0):
+		adev->gfxhub.funcs = &gfxhub_v11_5_0_funcs;
 		break;
 	default:
 		adev->gfxhub.funcs = &gfxhub_v3_0_funcs;
@@ -781,6 +788,7 @@ static int gmc_v11_0_sw_init(void *handle)
 	case IP_VERSION(11, 0, 2):
 	case IP_VERSION(11, 0, 3):
 	case IP_VERSION(11, 0, 4):
+	case IP_VERSION(11, 5, 0):
 		set_bit(AMDGPU_GFXHUB(0), adev->vmhubs_mask);
 		set_bit(AMDGPU_MMHUB0(0), adev->vmhubs_mask);
 		/*

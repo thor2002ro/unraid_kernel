@@ -769,9 +769,10 @@ int amdgpu_ras_feature_enable(struct amdgpu_device *adev,
 	if (!con)
 		return -EINVAL;
 
-	/* Do not enable ras feature if it is not allowed */
-	if (enable &&
-	    head->block != AMDGPU_RAS_BLOCK__GFX &&
+	/* For non-gfx ip, do not enable ras feature if it is not allowed */
+	/* For gfx ip, regardless of feature support status, */
+	/* Force issue enable or disable ras feature commands */
+	if (head->block != AMDGPU_RAS_BLOCK__GFX &&
 	    !amdgpu_ras_is_feature_allowed(adev, head))
 		return 0;
 
@@ -1052,7 +1053,8 @@ int amdgpu_ras_query_error_status(struct amdgpu_device *adev,
 	info->ce_count = obj->err_data.ce_count;
 
 	if (err_data.ce_count) {
-		if (adev->smuio.funcs &&
+		if (!adev->aid_mask &&
+		    adev->smuio.funcs &&
 		    adev->smuio.funcs->get_socket_id &&
 		    adev->smuio.funcs->get_die_id) {
 			dev_info(adev->dev, "socket: %d, die: %d "
@@ -1072,7 +1074,8 @@ int amdgpu_ras_query_error_status(struct amdgpu_device *adev,
 		}
 	}
 	if (err_data.ue_count) {
-		if (adev->smuio.funcs &&
+		if (!adev->aid_mask &&
+		    adev->smuio.funcs &&
 		    adev->smuio.funcs->get_socket_id &&
 		    adev->smuio.funcs->get_die_id) {
 			dev_info(adev->dev, "socket: %d, die: %d "
