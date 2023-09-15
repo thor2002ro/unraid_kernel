@@ -4140,11 +4140,7 @@ static const struct ata_blacklist_entry ata_device_blacklist [] = {
 	{ "C300-CTFDDAC128MAG",	"0001",		ATA_HORKAGE_NONCQ },
 
 	/* Sandisk SD7/8/9s lock up hard on large trims */
-	// corrupts data let's nuke it
-	{ "SanDisk SD[789]*",	NULL,		ATA_HORKAGE_MAX_TRIM_128M | 
-						ATA_HORKAGE_NO_NCQ_TRIM |
-						ATA_HORKAGE_ZERO_AFTER_TRIM |
-						ATA_HORKAGE_NOLPM },
+	{ "SanDisk SD[789]*",	NULL,		ATA_HORKAGE_MAX_TRIM_128M },
 
 	/* devices which puke on READ_NATIVE_MAX */
 	{ "HDS724040KLSA80",	"KFAOA20N",	ATA_HORKAGE_BROKEN_HPA },
@@ -4189,16 +4185,6 @@ static const struct ata_blacklist_entry ata_device_blacklist [] = {
 
 	/* Crucial BX100 SSD 500GB has broken LPM support */
 	{ "CT500BX100SSD1",		NULL,	ATA_HORKAGE_NOLPM },
-
-	/* Crucial BX500 SSD seems to have broken LPM support */
-	{ "CT*BX500*",		NULL,	ATA_HORKAGE_NO_NCQ_TRIM |
-						ATA_HORKAGE_ZERO_AFTER_TRIM |
-						ATA_HORKAGE_NOLPM },
-
-	/* Crucial MX500 SSD seems to have broken LPM support */
-	{ "CT*MX500*",		NULL,	ATA_HORKAGE_NO_NCQ_TRIM |
-						ATA_HORKAGE_ZERO_AFTER_TRIM |
-						ATA_HORKAGE_NOLPM },
 
 	/* 512GB MX100 with MU01 firmware has both queued TRIM and LPM issues */
 	{ "Crucial_CT512MX100*",	"MU01",	ATA_HORKAGE_NO_NCQ_TRIM |
