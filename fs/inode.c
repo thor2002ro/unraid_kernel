@@ -168,6 +168,8 @@ int inode_init_always(struct super_block *sb, struct inode *inode)
 	inode->i_fop = &no_open_fops;
 	inode->i_ino = 0;
 	inode->__i_nlink = 1;
+	inode->__i_ctime.tv_sec = 0;
+	inode->__i_ctime.tv_nsec = 0;
 	inode->i_opflags = 0;
 	if (sb->s_xattr)
 		inode->i_opflags |= IOP_XATTR;
@@ -1903,7 +1905,7 @@ int inode_update_timestamps(struct inode *inode, int flags)
 	}
 
 	if (flags & S_ATIME) {
-		if (!timespec64_equal(&now, &inode->i_atime)) {
+		if (timespec64_compare(&inode->i_atime, &now) < 0) {
 			inode->i_atime = now;
 			updated |= S_ATIME;
 		}
@@ -1989,7 +1991,7 @@ bool atime_needs_update(const struct path *path, struct inode *inode)
 	if (!relatime_need_update(mnt, inode, now))
 		return false;
 
-	if (timespec64_equal(&inode->i_atime, &now))
+	if (timespec64_compare(&inode->i_atime, &now) >= 0)
 		return false;
 
 	return true;
