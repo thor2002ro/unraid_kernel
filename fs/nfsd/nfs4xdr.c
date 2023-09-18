@@ -3471,10 +3471,10 @@ static const nfsd4_enc_attr nfsd4_enc_fattr4_encode_ops[] = {
  * ourselves.
  */
 static __be32
-nfsd4_encode_fattr(struct xdr_stream *xdr, struct svc_fh *fhp,
-		struct svc_export *exp,
-		struct dentry *dentry, const u32 *bmval,
-		struct svc_rqst *rqstp, int ignore_crossmnt)
+nfsd4_encode_fattr4(struct svc_rqst *rqstp, struct xdr_stream *xdr,
+		    struct svc_fh *fhp, struct svc_export *exp,
+		    struct dentry *dentry, const u32 *bmval,
+		    int ignore_crossmnt)
 {
 	struct nfsd4_fattr_args args;
 	struct svc_fh *tempfh = NULL;
@@ -3588,11 +3588,13 @@ nfsd4_encode_fattr(struct xdr_stream *xdr, struct svc_fh *fhp,
 	}
 #endif /* CONFIG_NFSD_V4_SECURITY_LABEL */
 
+	/* attrmask */
 	status = nfsd4_encode_bitmap4(xdr, attrmask[0],
 				      attrmask[1], attrmask[2]);
 	if (status)
 		goto out;
 
+	/* attr_vals */
 	attrlen_offset = xdr->buf->len;
 	attrlen_p = xdr_reserve_space(xdr, XDR_UNIT);
 	if (!attrlen_p)
@@ -3652,8 +3654,8 @@ __be32 nfsd4_encode_fattr_to_buf(__be32 **p, int words,
 	__be32 ret;
 
 	svcxdr_init_encode_from_buffer(&xdr, &dummy, *p, words << 2);
-	ret = nfsd4_encode_fattr(&xdr, fhp, exp, dentry, bmval, rqstp,
-							ignore_crossmnt);
+	ret = nfsd4_encode_fattr4(rqstp, &xdr, fhp, exp, dentry, bmval,
+				  ignore_crossmnt);
 	*p = xdr.p;
 	return ret;
 }
@@ -3712,8 +3714,8 @@ nfsd4_encode_dirent_fattr(struct xdr_stream *xdr, struct nfsd4_readdir *cd,
 
 	}
 out_encode:
-	nfserr = nfsd4_encode_fattr(xdr, NULL, exp, dentry, cd->rd_bmval,
-					cd->rd_rqstp, ignore_crossmnt);
+	nfserr = nfsd4_encode_fattr4(cd->rd_rqstp, xdr, NULL, exp, dentry,
+				     cd->rd_bmval, ignore_crossmnt);
 out_put:
 	dput(dentry);
 	exp_put(exp);
@@ -3957,8 +3959,9 @@ nfsd4_encode_getattr(struct nfsd4_compoundres *resp, __be32 nfserr,
 	struct svc_fh *fhp = getattr->ga_fhp;
 	struct xdr_stream *xdr = resp->xdr;
 
-	return nfsd4_encode_fattr(xdr, fhp, fhp->fh_export, fhp->fh_dentry,
-				    getattr->ga_bmval, resp->rqstp, 0);
+	/* obj_attributes */
+	return nfsd4_encode_fattr4(resp->rqstp, xdr, fhp, fhp->fh_export,
+				   fhp->fh_dentry, getattr->ga_bmval, 0);
 }
 
 static __be32
