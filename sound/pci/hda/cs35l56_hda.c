@@ -218,7 +218,7 @@ static int cs35l56_hda_posture_get(struct snd_kcontrol *kcontrol,
 
 	ucontrol->value.integer.value[0] = pos;
 
-	return ret;
+	return 0;
 }
 
 static int cs35l56_hda_posture_put(struct snd_kcontrol *kcontrol,
@@ -865,14 +865,12 @@ static int cs35l56_hda_read_acpi(struct cs35l56_hda *cs35l56, int id)
 	sub = acpi_get_subsystem_id(ACPI_HANDLE(cs35l56->base.dev));
 
 	if (IS_ERR(sub)) {
-		/* If no ACPI SUB, return 0 and fallback to legacy firmware path, otherwise fail */
-		if (PTR_ERR(sub) == -ENODATA)
-			return 0;
-		else
-			return PTR_ERR(sub);
+		dev_info(cs35l56->base.dev,
+			 "Read ACPI _SUB failed(%ld): fallback to generic firmware\n",
+			 PTR_ERR(sub));
+	} else {
+		cs35l56->system_name = sub;
 	}
-
-	cs35l56->system_name = sub;
 
 	cs35l56->base.reset_gpio = devm_gpiod_get_index_optional(cs35l56->base.dev,
 								 "reset",
@@ -1003,6 +1001,7 @@ void cs35l56_hda_remove(struct device *dev)
 {
 	struct cs35l56_hda *cs35l56 = dev_get_drvdata(dev);
 
+	pm_runtime_dont_use_autosuspend(cs35l56->base.dev);
 	pm_runtime_get_sync(cs35l56->base.dev);
 	pm_runtime_disable(cs35l56->base.dev);
 
