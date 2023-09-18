@@ -1177,7 +1177,7 @@ retry:
 	 * will be enabled if required later
 	 */
 	dd_dev_info(dd, "%s: clearing ASPM\n", __func__);
-	aspm_hw_disable_l1(dd);
+	pci_disable_link_state(dd->pcidev, PCIE_LINK_STATE_L0S | PCIE_LINK_STATE_L1);
 
 	/*
 	 * step 5f: clear DirectSpeedChange

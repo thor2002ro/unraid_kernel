@@ -497,8 +497,7 @@ static void rts5228_enable_aspm(struct rtsx_pcr *pcr, bool enable)
 	val = FORCE_ASPM_CTL0 | FORCE_ASPM_CTL1;
 	val |= (pcr->aspm_en & 0x02);
 	rtsx_pci_write_register(pcr, ASPM_FORCE_CTL, mask, val);
-	pcie_capability_clear_and_set_word(pcr->pci, PCI_EXP_LNKCTL,
-					   PCI_EXP_LNKCTL_ASPMC, pcr->aspm_en);
+	pci_enable_link_state(pcr->pci, pcr->aspm_en);
 	pcr->aspm_enabled = enable;
 }
 
@@ -509,8 +508,7 @@ static void rts5228_disable_aspm(struct rtsx_pcr *pcr, bool enable)
 	if (pcr->aspm_enabled == enable)
 		return;
 
-	pcie_capability_clear_and_set_word(pcr->pci, PCI_EXP_LNKCTL,
-					   PCI_EXP_LNKCTL_ASPMC, 0);
+	pci_disable_link_state(pcr->pci, PCIE_LINK_STATE_L0S | PCIE_LINK_STATE_L1);
 	mask = FORCE_ASPM_VAL_MASK | FORCE_ASPM_CTL0 | FORCE_ASPM_CTL1;
 	val = FORCE_ASPM_CTL0 | FORCE_ASPM_CTL1;
 	rtsx_pci_write_register(pcr, ASPM_FORCE_CTL, mask, val);

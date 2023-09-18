@@ -490,7 +490,6 @@ struct bcm4377_data;
  * clear_pciecfg_subsystem_ctrl_bit19: Set to true if bit 19 in the
  *                                     vendor-specific subsystem control
  *                                     register has to be cleared
- * disable_aspm: Set to true if ASPM must be disabled due to hardware errata
  * broken_ext_scan: Set to true if the chip erroneously claims to support
  *                  extended scanning
  * broken_mws_transport_config: Set to true if the chip erroneously claims to
@@ -509,7 +508,6 @@ struct bcm4377_hw {
 
 	unsigned long has_bar0_core2_window2 : 1;
 	unsigned long clear_pciecfg_subsystem_ctrl_bit19 : 1;
-	unsigned long disable_aspm : 1;
 	unsigned long broken_ext_scan : 1;
 	unsigned long broken_mws_transport_config : 1;
 
@@ -2222,20 +2220,6 @@ static int bcm4377_probe_of(struct bcm4377_data *bcm4377)
 	return 0;
 }
 
-static void bcm4377_disable_aspm(struct bcm4377_data *bcm4377)
-{
-	pci_disable_link_state(bcm4377->pdev,
-			       PCIE_LINK_STATE_L0S | PCIE_LINK_STATE_L1);
-
-	/*
-	 * pci_disable_link_state can fail if either CONFIG_PCIEASPM is disabled
-	 * or if the BIOS hasn't handed over control to us. We must *always*
-	 * disable ASPM for this device due to hardware errata though.
-	 */
-	pcie_capability_clear_word(bcm4377->pdev, PCI_EXP_LNKCTL,
-				   PCI_EXP_LNKCTL_ASPMC);
-}
-
 static void bcm4377_pci_free_irq_vectors(void *data)
 {
 	pci_free_irq_vectors(data);
@@ -2287,9 +2271,6 @@ static int bcm4377_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		dev_err(&pdev->dev, "unable to determine board type\n");
 		return -ENODEV;
 	}
-
-	if (bcm4377->hw->disable_aspm)
-		bcm4377_disable_aspm(bcm4377);
 
 	ret = pci_reset_function_locked(pdev);
 	if (ret)
@@ -2448,7 +2429,6 @@ static const struct bcm4377_hw bcm4377_hw_variants[] = {
 		.otp_offset = 0x4120,
 		.bar0_window1 = 0x1800b000,
 		.bar0_window2 = 0x1810c000,
-		.disable_aspm = true,
 		.broken_ext_scan = true,
 		.send_ptb = bcm4377_send_ptb,
 	},

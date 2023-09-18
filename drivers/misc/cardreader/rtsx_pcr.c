@@ -86,9 +86,11 @@ static void rtsx_comm_set_aspm(struct rtsx_pcr *pcr, bool enable)
 		return;
 
 	if (pcr->aspm_mode == ASPM_MODE_CFG) {
-		pcie_capability_clear_and_set_word(pcr->pci, PCI_EXP_LNKCTL,
-						PCI_EXP_LNKCTL_ASPMC,
-						enable ? pcr->aspm_en : 0);
+		if (enable)
+			pci_enable_link_state(pcr->pci, pcr->aspm_en);
+		else
+			pci_disable_link_state(pcr->pci, PCIE_LINK_STATE_L0S |
+							 PCIE_LINK_STATE_L1);
 	} else if (pcr->aspm_mode == ASPM_MODE_REG) {
 		if (pcr->aspm_en & 0x02)
 			rtsx_pci_write_register(pcr, ASPM_FORCE_CTL, FORCE_ASPM_CTL0 |

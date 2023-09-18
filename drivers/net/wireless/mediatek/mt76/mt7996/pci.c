@@ -111,7 +111,7 @@ static int mt7996_pci_probe(struct pci_dev *pdev,
 	if (ret)
 		return ret;
 
-	mt76_pci_disable_aspm(pdev);
+	pci_disable_link_state(pdev, PCIE_LINK_STATE_L0S | PCIE_LINK_STATE_L1);
 
 	if (id->device == 0x7991)
 		return mt7996_pci_hif2_probe(pdev);

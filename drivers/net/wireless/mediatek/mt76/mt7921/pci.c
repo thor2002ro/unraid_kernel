@@ -294,7 +294,7 @@ static int mt7921_pci_probe(struct pci_dev *pdev,
 		goto err_free_pci_vec;
 
 	if (mt7921_disable_aspm)
-		mt76_pci_disable_aspm(pdev);
+		pci_disable_link_state(pdev, PCIE_LINK_STATE_L0S | PCIE_LINK_STATE_L1);
 
 	ops = mt792x_get_mac80211_ops(&pdev->dev, &mt7921_ops,
 				      (void *)id->driver_data, &features);

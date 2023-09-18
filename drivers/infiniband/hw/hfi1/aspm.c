@@ -54,45 +54,13 @@ static void aspm_hw_set_l1_ent_latency(struct hfi1_devdata *dd)
 	pci_write_config_dword(dd->pcidev, PCIE_CFG_REG_PL3, reg32);
 }
 
-static void aspm_hw_enable_l1(struct hfi1_devdata *dd)
-{
-	struct pci_dev *parent = dd->pcidev->bus->self;
-
-	/*
-	 * If the driver does not have access to the upstream component,
-	 * it cannot support ASPM L1 at all.
-	 */
-	if (!parent)
-		return;
-
-	/* Enable ASPM L1 first in upstream component and then downstream */
-	pcie_capability_clear_and_set_word(parent, PCI_EXP_LNKCTL,
-					   PCI_EXP_LNKCTL_ASPMC,
-					   PCI_EXP_LNKCTL_ASPM_L1);
-	pcie_capability_clear_and_set_word(dd->pcidev, PCI_EXP_LNKCTL,
-					   PCI_EXP_LNKCTL_ASPMC,
-					   PCI_EXP_LNKCTL_ASPM_L1);
-}
-
-void aspm_hw_disable_l1(struct hfi1_devdata *dd)
-{
-	struct pci_dev *parent = dd->pcidev->bus->self;
-
-	/* Disable ASPM L1 first in downstream component and then upstream */
-	pcie_capability_clear_and_set_word(dd->pcidev, PCI_EXP_LNKCTL,
-					   PCI_EXP_LNKCTL_ASPMC, 0x0);
-	if (parent)
-		pcie_capability_clear_and_set_word(parent, PCI_EXP_LNKCTL,
-						   PCI_EXP_LNKCTL_ASPMC, 0x0);
-}
-
 static  void aspm_enable(struct hfi1_devdata *dd)
 {
 	if (dd->aspm_enabled || aspm_mode == ASPM_MODE_DISABLED ||
 	    !dd->aspm_supported)
 		return;
 
-	aspm_hw_enable_l1(dd);
+	pci_enable_link_state(dd->pcidev, PCI_EXP_LNKCTL_ASPM_L1);
 	dd->aspm_enabled = true;
 }
 
@@ -101,7 +69,7 @@ static  void aspm_disable(struct hfi1_devdata *dd)
 	if (!dd->aspm_enabled || aspm_mode == ASPM_MODE_ENABLED)
 		return;
 
-	aspm_hw_disable_l1(dd);
+	pci_disable_link_state(dd->pcidev, PCIE_LINK_STATE_L0S | PCIE_LINK_STATE_L1);
 	dd->aspm_enabled = false;
 }
 
@@ -254,7 +222,7 @@ void aspm_init(struct hfi1_devdata *dd)
 	/* Start with ASPM disabled */
 	aspm_hw_set_l1_ent_latency(dd);
 	dd->aspm_enabled = false;
-	aspm_hw_disable_l1(dd);
+	pci_disable_link_state(dd->pcidev, PCIE_LINK_STATE_L0S | PCIE_LINK_STATE_L1);
 
 	/* Now turn on ASPM if configured */
 	aspm_enable_all(dd);

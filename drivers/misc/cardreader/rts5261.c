@@ -578,8 +578,7 @@ static void rts5261_enable_aspm(struct rtsx_pcr *pcr, bool enable)
 
 	val |= (pcr->aspm_en & 0x02);
 	rtsx_pci_write_register(pcr, ASPM_FORCE_CTL, mask, val);
-	pcie_capability_clear_and_set_word(pcr->pci, PCI_EXP_LNKCTL,
-					   PCI_EXP_LNKCTL_ASPMC, pcr->aspm_en);
+	pci_enable_link_state(pcr->pci, pcr->aspm_en);
 	pcr->aspm_enabled = enable;
 }
 
@@ -591,8 +590,7 @@ static void rts5261_disable_aspm(struct rtsx_pcr *pcr, bool enable)
 	if (pcr->aspm_enabled == enable)
 		return;
 
-	pcie_capability_clear_and_set_word(pcr->pci, PCI_EXP_LNKCTL,
-					   PCI_EXP_LNKCTL_ASPMC, 0);
+	pci_disable_link_state(pcr->pci, PCIE_LINK_STATE_L0S | PCIE_LINK_STATE_L1);
 	rtsx_pci_write_register(pcr, ASPM_FORCE_CTL, mask, val);
 	rtsx_pci_write_register(pcr, SD_CFG1, SD_ASYNC_FIFO_NOT_RST, 0);
 	udelay(10);
