@@ -500,15 +500,15 @@ struct intel_hdcp_shim {
 	enum hdcp_wired_protocol protocol;
 
 	/* Detects whether sink is HDCP2.2 capable */
-	int (*hdcp_2_2_capable)(struct intel_digital_port *dig_port,
+	int (*hdcp_2_2_capable)(struct intel_connector *connector,
 				bool *capable);
 
 	/* Write HDCP2.2 messages */
-	int (*write_2_2_msg)(struct intel_digital_port *dig_port,
+	int (*write_2_2_msg)(struct intel_connector *connector,
 			     void *buf, size_t size);
 
 	/* Read HDCP2.2 messages */
-	int (*read_2_2_msg)(struct intel_digital_port *dig_port,
+	int (*read_2_2_msg)(struct intel_connector *connector,
 			    u8 msg_id, void *buf, size_t size);
 
 	/*
@@ -516,7 +516,7 @@ struct intel_hdcp_shim {
 	 * type to Receivers. In DP HDCP2.2 Stream type is one of the input to
 	 * the HDCP2.2 Cipher for En/De-Cryption. Not applicable for HDMI.
 	 */
-	int (*config_stream_type)(struct intel_digital_port *dig_port,
+	int (*config_stream_type)(struct intel_connector *connector,
 				  bool is_repeater, u8 type);
 
 	/* Enable/Disable HDCP 2.2 stream encryption on DP MST Transport Link */
@@ -1362,6 +1362,8 @@ struct intel_crtc_state {
 	u16 linetime;
 	u16 ips_linetime;
 
+	bool enhanced_framing;
+
 	/* Forward Error correction State */
 	bool fec_enable;
 
@@ -1581,7 +1583,6 @@ struct intel_watermark_params {
 
 struct intel_hdmi {
 	i915_reg_t hdmi_reg;
-	int ddc_bus;
 	struct {
 		enum drm_dp_dual_mode_type type;
 		int max_tmds_clock;
