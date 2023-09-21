@@ -125,6 +125,19 @@ struct pipe_buf_operations {
 };
 
 /**
+ * pipe_has_watch_queue - Check whether the pipe is a watch_queue,
+ * i.e. it was created with O_NOTIFICATION_PIPE
+ */
+static inline bool pipe_has_watch_queue(const struct pipe_inode_info *pipe)
+{
+#ifdef CONFIG_WATCH_QUEUE
+	return pipe->watch_queue != NULL;
+#else
+	return false;
+#endif
+}
+
+/**
  * pipe_empty - Return true if the pipe is empty
  * @head: The pipe ring head pointer
  * @tail: The pipe ring tail pointer
