@@ -135,6 +135,9 @@
 #define SOF_HDA_ADSP_REG_SD_BDLPU		0x1C
 #define SOF_HDA_ADSP_SD_ENTRY_SIZE		0x20
 
+/* SDxFIFOS FIFOS */
+#define SOF_HDA_SD_FIFOSIZE_FIFOS_MASK		GENMASK(15, 0)
+
 /* CL: Software Position Based FIFO Capability Registers */
 #define SOF_DSP_REG_CL_SPBFIFO \
 	(SOF_HDA_ADSP_LOADER_BASE + 0x20)
@@ -600,6 +603,7 @@ int hda_dsp_shutdown_dma_flush(struct snd_sof_dev *sdev);
 int hda_dsp_shutdown(struct snd_sof_dev *sdev);
 int hda_dsp_set_hw_params_upon_resume(struct snd_sof_dev *sdev);
 void hda_dsp_dump(struct snd_sof_dev *sdev, u32 flags);
+void hda_ipc4_dsp_dump(struct snd_sof_dev *sdev, u32 flags);
 void hda_ipc_dump(struct snd_sof_dev *sdev);
 void hda_ipc_irq_dump(struct snd_sof_dev *sdev);
 void hda_dsp_d0i3_work(struct work_struct *work);
