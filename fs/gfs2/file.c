@@ -836,7 +836,15 @@ static ssize_t gfs2_file_direct_read(struct kiocb *iocb, struct iov_iter *to,
 		return 0; /* skip atime */
 
 	gfs2_holder_init(ip->i_gl, LM_ST_DEFERRED, 0, gh);
+
+	if (should_fault_in_pages(to, iocb, &prev_count, &window_size)) {
 retry:
+		window_size -= fault_in_iov_iter_writeable(to, window_size);
+		ret = -EFAULT;
+		if (!window_size)
+			goto out_uninit;
+	}
+
 	ret = gfs2_glock_nq(gh);
 	if (ret)
 		goto out_uninit;
@@ -854,13 +862,11 @@ retry:
 
 	if (should_fault_in_pages(to, iocb, &prev_count, &window_size)) {
 		gfs2_glock_dq(gh);
-		window_size -= fault_in_iov_iter_writeable(to, window_size);
-		if (window_size)
-			goto retry;
+		goto retry;
 	}
+
 out_unlock:
-	if (gfs2_holder_queued(gh))
-		gfs2_glock_dq(gh);
+	gfs2_glock_dq(gh);
 out_uninit:
 	gfs2_holder_uninit(gh);
 	/* User space doesn't expect partial success. */
@@ -899,7 +905,15 @@ static ssize_t gfs2_file_direct_write(struct kiocb *iocb, struct iov_iter *from,
 	 * VFS does.
 	 */
 	gfs2_holder_init(ip->i_gl, LM_ST_DEFERRED, 0, gh);
+
+	if (should_fault_in_pages(from, iocb, &prev_count, &window_size)) {
 retry:
+		window_size -= fault_in_iov_iter_readable(from, window_size);
+		ret = -EFAULT;
+		if (!window_size)
+			goto out_uninit;
+	}
+
 	ret = gfs2_glock_nq(gh);
 	if (ret)
 		goto out_uninit;
@@ -911,11 +925,11 @@ retry:
 	ret = iomap_dio_rw(iocb, from, &gfs2_iomap_ops, NULL,
 			   IOMAP_DIO_PARTIAL, NULL, written);
 	from->nofault = false;
-	if (ret <= 0) {
+	if (ret <= 0 && ret != -EFAULT) {
+		/* fall back to buffered I/O? */
 		if (ret == -ENOTBLK)
 			ret = 0;
-		if (ret != -EFAULT)
-			goto out_unlock;
+		goto out_unlock;
 	}
 	/* No increment (+=) because iomap_dio_rw returns a cumulative value. */
 	if (ret > 0)
@@ -924,18 +938,14 @@ retry:
 	enough_retries = prev_count == iov_iter_count(from) &&
 			 window_size <= PAGE_SIZE;
 	if (should_fault_in_pages(from, iocb, &prev_count, &window_size)) {
-		gfs2_glock_dq(gh);
-		window_size -= fault_in_iov_iter_readable(from, window_size);
-		if (window_size) {
-			if (!enough_retries)
-				goto retry;
-			/* fall back to buffered I/O */
-			ret = 0;
+		if (!enough_retries) {
+			gfs2_glock_dq(gh);
+			goto retry;
 		}
 	}
+
 out_unlock:
-	if (gfs2_holder_queued(gh))
-		gfs2_glock_dq(gh);
+	gfs2_glock_dq(gh);
 out_uninit:
 	gfs2_holder_uninit(gh);
 	/* User space doesn't expect partial success. */
