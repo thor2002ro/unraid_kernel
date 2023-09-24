@@ -74,15 +74,6 @@
 
 #include "../workqueue_internal.h"
 
-#ifdef CONFIG_CGROUP_SCHED
-#include <linux/cgroup.h>
-#include <linux/psi.h>
-#endif
-
-#ifdef CONFIG_SCHED_DEBUG
-# include <linux/static_key.h>
-#endif
-
 #ifdef CONFIG_PARAVIRT
 # include <asm/paravirt.h>
 # include <asm/paravirt_api_clock.h>
@@ -108,8 +99,6 @@ extern __read_mostly int scheduler_running;
 
 extern unsigned long calc_load_update;
 extern atomic_long_t calc_load_tasks;
-
-extern unsigned int sysctl_sched_child_runs_first;
 
 extern void calc_global_load_tick(struct rq *this_rq);
 extern long calc_load_fold_active(struct rq *this_rq, long adjust);
@@ -594,6 +583,7 @@ struct cfs_rq {
 	} removed;
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
+	u64			last_update_tg_load_avg;
 	unsigned long		tg_load_avg_contrib;
 	long			propagate;
 	long			prop_runnable_sum;
@@ -644,9 +634,7 @@ struct cfs_rq {
 	int			throttled;
 	int			throttle_count;
 	struct list_head	throttled_list;
-#ifdef CONFIG_SMP
 	struct list_head	throttled_csd_list;
-#endif
 #endif /* CONFIG_CFS_BANDWIDTH */
 #endif /* CONFIG_FAIR_GROUP_SCHED */
 };
@@ -1658,6 +1646,11 @@ task_rq_unlock(struct rq *rq, struct task_struct *p, struct rq_flags *rf)
 	raw_spin_unlock_irqrestore(&p->pi_lock, rf->flags);
 }
 
+DEFINE_LOCK_GUARD_1(task_rq_lock, struct task_struct,
+		    _T->rq = task_rq_lock(_T->lock, &_T->rf),
+		    task_rq_unlock(_T->rq, _T->lock, &_T->rf),
+		    struct rq *rq; struct rq_flags rf)
+
 static inline void
 rq_lock_irqsave(struct rq *rq, struct rq_flags *rf)
 	__acquires(rq->lock)
@@ -2239,7 +2232,7 @@ struct sched_class {
 	void (*yield_task)   (struct rq *rq);
 	bool (*yield_to_task)(struct rq *rq, struct task_struct *p);
 
-	void (*check_preempt_curr)(struct rq *rq, struct task_struct *p, int flags);
+	void (*wakeup_preempt)(struct rq *rq, struct task_struct *p, int flags);
 
 	struct task_struct *(*pick_next_task)(struct rq *rq);
 
@@ -2513,7 +2506,7 @@ static inline void sub_nr_running(struct rq *rq, unsigned count)
 extern void activate_task(struct rq *rq, struct task_struct *p, int flags);
 extern void deactivate_task(struct rq *rq, struct task_struct *p, int flags);
 
-extern void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags);
+extern void wakeup_preempt(struct rq *rq, struct task_struct *p, int flags);
 
 #ifdef CONFIG_PREEMPT_RT
 #define SCHED_NR_MIGRATE_BREAK 8
