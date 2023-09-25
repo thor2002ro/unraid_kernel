@@ -2477,6 +2477,18 @@ F:	drivers/rtc/rtc-nct3018y.c
 F:	include/dt-bindings/clock/nuvoton,npcm7xx-clock.h
 F:	include/dt-bindings/clock/nuvoton,npcm845-clk.h
 
+ARM/NUVOTON NPCM VIDEO ENGINE DRIVER
+M:	Joseph Liu <kwliu@nuvoton.com>
+M:	Marvin Lin <kflin@nuvoton.com>
+L:	linux-media@vger.kernel.org
+L:	openbmc@lists.ozlabs.org (moderated for non-subscribers)
+S:	Maintained
+F:	Documentation/devicetree/bindings/media/nuvoton,npcm-ece.yaml
+F:	Documentation/devicetree/bindings/media/nuvoton,npcm-vcd.yaml
+F:	Documentation/userspace-api/media/drivers/npcm-video.rst
+F:	drivers/media/platform/nuvoton/
+F:	include/uapi/linux/npcm-video.h
+
 ARM/NUVOTON WPCM450 ARCHITECTURE
 M:	Jonathan Neuschäfer <j.neuschaefer@gmx.net>
 L:	openbmc@lists.ozlabs.org (moderated for non-subscribers)
@@ -15798,7 +15810,7 @@ L:	linux-media@vger.kernel.org
 S:	Maintained
 T:	git git://linuxtv.org/media_tree.git
 F:	Documentation/devicetree/bindings/media/i2c/ovti,ov4689.yaml
-F:	drivers/media/i2c/ov5647.c
+F:	drivers/media/i2c/ov4689.c
 
 OMNIVISION OV5640 SENSOR DRIVER
 M:	Steve Longerbeam <slongerbeam@gmail.com>
