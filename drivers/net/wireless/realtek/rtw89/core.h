@@ -640,12 +640,29 @@ enum rtw89_rate_section {
 	RTW89_RS_TX_SHAPE_NUM = RTW89_RS_OFDM + 1,
 };
 
+enum rtw89_rate_offset_indexes {
+	RTW89_RATE_OFFSET_HE,
+	RTW89_RATE_OFFSET_VHT,
+	RTW89_RATE_OFFSET_HT,
+	RTW89_RATE_OFFSET_OFDM,
+	RTW89_RATE_OFFSET_CCK,
+	RTW89_RATE_OFFSET_DLRU_EHT,
+	RTW89_RATE_OFFSET_DLRU_HE,
+	RTW89_RATE_OFFSET_EHT,
+	__RTW89_RATE_OFFSET_NUM,
+
+	RTW89_RATE_OFFSET_NUM_AX = RTW89_RATE_OFFSET_CCK + 1,
+	RTW89_RATE_OFFSET_NUM_BE = RTW89_RATE_OFFSET_EHT + 1,
+};
+
 enum rtw89_rate_num {
 	RTW89_RATE_CCK_NUM	= 4,
 	RTW89_RATE_OFDM_NUM	= 8,
-	RTW89_RATE_MCS_NUM	= 12,
 	RTW89_RATE_HEDCM_NUM	= 4, /* for HEDCM MCS0/1/3/4 */
-	RTW89_RATE_OFFSET_NUM	= 5, /* for HE(HEDCM)/VHT/HT/OFDM/CCK offset */
+
+	RTW89_RATE_MCS_NUM_AX	= 12,
+	RTW89_RATE_MCS_NUM_BE	= 16,
+	__RTW89_RATE_MCS_NUM	= 16,
 };
 
 enum rtw89_nss {
@@ -668,6 +685,12 @@ enum rtw89_beamforming_type {
 	RTW89_NONBF	= 0,
 	RTW89_BF	= 1,
 	RTW89_BF_NUM,
+};
+
+enum rtw89_ofdma_type {
+	RTW89_NON_OFDMA	= 0,
+	RTW89_OFDMA	= 1,
+	RTW89_OFDMA_NUM,
 };
 
 enum rtw89_regulation_type {
@@ -715,9 +738,10 @@ enum rtw89_fw_pkt_ofld_type {
 struct rtw89_txpwr_byrate {
 	s8 cck[RTW89_RATE_CCK_NUM];
 	s8 ofdm[RTW89_RATE_OFDM_NUM];
-	s8 mcs[RTW89_NSS_NUM][RTW89_RATE_MCS_NUM];
-	s8 hedcm[RTW89_NSS_HEDCM_NUM][RTW89_RATE_HEDCM_NUM];
-	s8 offset[RTW89_RATE_OFFSET_NUM];
+	s8 mcs[RTW89_OFDMA_NUM][RTW89_NSS_NUM][__RTW89_RATE_MCS_NUM];
+	s8 hedcm[RTW89_OFDMA_NUM][RTW89_NSS_HEDCM_NUM][RTW89_RATE_HEDCM_NUM];
+	s8 offset[__RTW89_RATE_OFFSET_NUM];
+	s8 trap;
 };
 
 enum rtw89_bandwidth_section_num {
@@ -753,6 +777,7 @@ struct rtw89_txpwr_limit_ru {
 struct rtw89_rate_desc {
 	enum rtw89_nss nss;
 	enum rtw89_rate_section rs;
+	enum rtw89_ofdma_type ofdma;
 	u8 idx;
 };
 
@@ -841,9 +866,14 @@ enum rtw89_bandwidth {
 	RTW89_CHANNEL_WIDTH_40	= 1,
 	RTW89_CHANNEL_WIDTH_80	= 2,
 	RTW89_CHANNEL_WIDTH_160	= 3,
-	RTW89_CHANNEL_WIDTH_80_80	= 4,
-	RTW89_CHANNEL_WIDTH_5	= 5,
-	RTW89_CHANNEL_WIDTH_10	= 6,
+	RTW89_CHANNEL_WIDTH_320	= 4,
+
+	/* keep index order above */
+	RTW89_CHANNEL_WIDTH_ORDINARY_NUM = 5,
+
+	RTW89_CHANNEL_WIDTH_80_80 = 5,
+	RTW89_CHANNEL_WIDTH_5 = 6,
+	RTW89_CHANNEL_WIDTH_10 = 7,
 };
 
 enum rtw89_ps_mode {
@@ -855,13 +885,16 @@ enum rtw89_ps_mode {
 
 #define RTW89_2G_BW_NUM (RTW89_CHANNEL_WIDTH_40 + 1)
 #define RTW89_5G_BW_NUM (RTW89_CHANNEL_WIDTH_160 + 1)
-#define RTW89_6G_BW_NUM (RTW89_CHANNEL_WIDTH_160 + 1)
+#define RTW89_6G_BW_NUM (RTW89_CHANNEL_WIDTH_320 + 1)
+#define RTW89_BYR_BW_NUM (RTW89_CHANNEL_WIDTH_320 + 1)
 #define RTW89_PPE_BW_NUM (RTW89_CHANNEL_WIDTH_160 + 1)
 
 enum rtw89_ru_bandwidth {
 	RTW89_RU26 = 0,
 	RTW89_RU52 = 1,
 	RTW89_RU106 = 2,
+	RTW89_RU52_26 = 3,
+	RTW89_RU106_26 = 4,
 	RTW89_RU_NUM,
 };
 
@@ -898,6 +931,7 @@ struct rtw89_chan {
 	u32 freq;
 	enum rtw89_subband subband_type;
 	enum rtw89_sc_offset pri_ch_idx;
+	u8 pri_sb_idx;
 };
 
 struct rtw89_chan_rcd {
@@ -926,6 +960,12 @@ struct rtw89_port_reg {
 	u32 bcn_cnt_tmr;
 	u32 tsftr_l;
 	u32 tsftr_h;
+	u32 md_tsft;
+	u32 bss_color;
+	u32 mbssid;
+	u32 mbssid_drop;
+	u32 tsf_sync;
+	u32 hiq_win[RTW89_PORT_NUM];
 };
 
 struct rtw89_txwd_body {
@@ -948,6 +988,17 @@ struct rtw89_txwd_body_v1 {
 	__le32 dword7;
 } __packed;
 
+struct rtw89_txwd_body_v2 {
+	__le32 dword0;
+	__le32 dword1;
+	__le32 dword2;
+	__le32 dword3;
+	__le32 dword4;
+	__le32 dword5;
+	__le32 dword6;
+	__le32 dword7;
+} __packed;
+
 struct rtw89_txwd_info {
 	__le32 dword0;
 	__le32 dword1;
@@ -957,10 +1008,23 @@ struct rtw89_txwd_info {
 	__le32 dword5;
 } __packed;
 
+struct rtw89_txwd_info_v2 {
+	__le32 dword0;
+	__le32 dword1;
+	__le32 dword2;
+	__le32 dword3;
+	__le32 dword4;
+	__le32 dword5;
+	__le32 dword6;
+	__le32 dword7;
+} __packed;
+
 struct rtw89_rx_desc_info {
 	u16 pkt_size;
 	u8 pkt_type;
 	u8 drv_info_size;
+	u8 phy_rpt_size;
+	u8 hdr_cnv_size;
 	u8 shift;
 	u8 wl_hd_iv_len;
 	bool long_rxdesc;
@@ -999,6 +1063,15 @@ struct rtw89_rxdesc_short {
 	__le32 dword3;
 } __packed;
 
+struct rtw89_rxdesc_short_v2 {
+	__le32 dword0;
+	__le32 dword1;
+	__le32 dword2;
+	__le32 dword3;
+	__le32 dword4;
+	__le32 dword5;
+} __packed;
+
 struct rtw89_rxdesc_long {
 	__le32 dword0;
 	__le32 dword1;
@@ -1008,6 +1081,19 @@ struct rtw89_rxdesc_long {
 	__le32 dword5;
 	__le32 dword6;
 	__le32 dword7;
+} __packed;
+
+struct rtw89_rxdesc_long_v2 {
+	__le32 dword0;
+	__le32 dword1;
+	__le32 dword2;
+	__le32 dword3;
+	__le32 dword4;
+	__le32 dword5;
+	__le32 dword6;
+	__le32 dword7;
+	__le32 dword8;
+	__le32 dword9;
 } __packed;
 
 struct rtw89_tx_desc_info {
@@ -2930,6 +3016,7 @@ struct rtw89_vif {
 	struct list_head list;
 	struct rtw89_dev *rtwdev;
 	struct rtw89_roc roc;
+	bool chanctx_assigned; /* only valid when running with chanctx_ops */
 	enum rtw89_sub_entity_idx sub_entity_idx;
 	enum rtw89_reg_6ghz_power reg_6ghz_power;
 
@@ -3032,6 +3119,7 @@ struct rtw89_hci_info {
 struct rtw89_chip_ops {
 	int (*enable_bb_rf)(struct rtw89_dev *rtwdev);
 	int (*disable_bb_rf)(struct rtw89_dev *rtwdev);
+	void (*bb_preinit)(struct rtw89_dev *rtwdev, enum rtw89_phy_idx phy_idx);
 	void (*bb_reset)(struct rtw89_dev *rtwdev,
 			 enum rtw89_phy_idx phy_idx);
 	void (*bb_sethw)(struct rtw89_dev *rtwdev);
@@ -3294,15 +3382,111 @@ struct rtw89_txpwr_rule_6ghz {
 			  [RTW89_6G_CH_NUM];
 };
 
+struct rtw89_tx_shape {
+	const u8 (*lmt)[RTW89_BAND_NUM][RTW89_RS_TX_SHAPE_NUM][RTW89_REGD_NUM];
+	const u8 (*lmt_ru)[RTW89_BAND_NUM][RTW89_REGD_NUM];
+};
+
 struct rtw89_rfe_parms {
+	const struct rtw89_txpwr_table *byr_tbl;
 	struct rtw89_txpwr_rule_2ghz rule_2ghz;
 	struct rtw89_txpwr_rule_5ghz rule_5ghz;
 	struct rtw89_txpwr_rule_6ghz rule_6ghz;
+	struct rtw89_tx_shape tx_shape;
 };
 
 struct rtw89_rfe_parms_conf {
 	const struct rtw89_rfe_parms *rfe_parms;
 	u8 rfe_type;
+};
+
+#define RTW89_TXPWR_CONF_DFLT_RFE_TYPE 0x0
+
+struct rtw89_txpwr_conf {
+	u8 rfe_type;
+	u8 ent_sz;
+	u32 num_ents;
+	const void *data;
+};
+
+#define rtw89_txpwr_conf_valid(conf) (!!(conf)->data)
+
+#define rtw89_for_each_in_txpwr_conf(entry, cursor, conf) \
+	for (typecheck(const void *, cursor), (cursor) = (conf)->data, \
+	     memcpy(&(entry), cursor, \
+		    min_t(u8, sizeof(entry), (conf)->ent_sz)); \
+	     (cursor) < (conf)->data + (conf)->num_ents * (conf)->ent_sz; \
+	     (cursor) += (conf)->ent_sz, \
+	     memcpy(&(entry), cursor, \
+		    min_t(u8, sizeof(entry), (conf)->ent_sz)))
+
+struct rtw89_txpwr_byrate_data {
+	struct rtw89_txpwr_conf conf;
+	struct rtw89_txpwr_table tbl;
+};
+
+struct rtw89_txpwr_lmt_2ghz_data {
+	struct rtw89_txpwr_conf conf;
+	s8 v[RTW89_2G_BW_NUM][RTW89_NTX_NUM]
+	    [RTW89_RS_LMT_NUM][RTW89_BF_NUM]
+	    [RTW89_REGD_NUM][RTW89_2G_CH_NUM];
+};
+
+struct rtw89_txpwr_lmt_5ghz_data {
+	struct rtw89_txpwr_conf conf;
+	s8 v[RTW89_5G_BW_NUM][RTW89_NTX_NUM]
+	    [RTW89_RS_LMT_NUM][RTW89_BF_NUM]
+	    [RTW89_REGD_NUM][RTW89_5G_CH_NUM];
+};
+
+struct rtw89_txpwr_lmt_6ghz_data {
+	struct rtw89_txpwr_conf conf;
+	s8 v[RTW89_6G_BW_NUM][RTW89_NTX_NUM]
+	    [RTW89_RS_LMT_NUM][RTW89_BF_NUM]
+	    [RTW89_REGD_NUM][NUM_OF_RTW89_REG_6GHZ_POWER]
+	    [RTW89_6G_CH_NUM];
+};
+
+struct rtw89_txpwr_lmt_ru_2ghz_data {
+	struct rtw89_txpwr_conf conf;
+	s8 v[RTW89_RU_NUM][RTW89_NTX_NUM]
+	    [RTW89_REGD_NUM][RTW89_2G_CH_NUM];
+};
+
+struct rtw89_txpwr_lmt_ru_5ghz_data {
+	struct rtw89_txpwr_conf conf;
+	s8 v[RTW89_RU_NUM][RTW89_NTX_NUM]
+	    [RTW89_REGD_NUM][RTW89_5G_CH_NUM];
+};
+
+struct rtw89_txpwr_lmt_ru_6ghz_data {
+	struct rtw89_txpwr_conf conf;
+	s8 v[RTW89_RU_NUM][RTW89_NTX_NUM]
+	    [RTW89_REGD_NUM][NUM_OF_RTW89_REG_6GHZ_POWER]
+	    [RTW89_6G_CH_NUM];
+};
+
+struct rtw89_tx_shape_lmt_data {
+	struct rtw89_txpwr_conf conf;
+	u8 v[RTW89_BAND_NUM][RTW89_RS_TX_SHAPE_NUM][RTW89_REGD_NUM];
+};
+
+struct rtw89_tx_shape_lmt_ru_data {
+	struct rtw89_txpwr_conf conf;
+	u8 v[RTW89_BAND_NUM][RTW89_REGD_NUM];
+};
+
+struct rtw89_rfe_data {
+	struct rtw89_txpwr_byrate_data byrate;
+	struct rtw89_txpwr_lmt_2ghz_data lmt_2ghz;
+	struct rtw89_txpwr_lmt_5ghz_data lmt_5ghz;
+	struct rtw89_txpwr_lmt_6ghz_data lmt_6ghz;
+	struct rtw89_txpwr_lmt_ru_2ghz_data lmt_ru_2ghz;
+	struct rtw89_txpwr_lmt_ru_5ghz_data lmt_ru_5ghz;
+	struct rtw89_txpwr_lmt_ru_6ghz_data lmt_ru_6ghz;
+	struct rtw89_tx_shape_lmt_data tx_shape_lmt;
+	struct rtw89_tx_shape_lmt_ru_data tx_shape_lmt_ru;
+	struct rtw89_rfe_parms rfe_parms;
 };
 
 struct rtw89_page_regs {
@@ -3428,6 +3612,7 @@ enum rtw89_chanctx_state {
 
 enum rtw89_chanctx_callbacks {
 	RTW89_CHANCTX_CALLBACK_PLACEHOLDER,
+	RTW89_CHANCTX_CALLBACK_RFK,
 
 	NUM_OF_RTW89_CHANCTX_CALLBACKS,
 };
@@ -3446,6 +3631,7 @@ struct rtw89_chip_info {
 	const char *fw_basename;
 	u8 fw_format_max;
 	bool try_ce_fw;
+	u8 bbmcu_nr;
 	u32 needed_fw_elms;
 	u32 fifo_size;
 	bool small_fifo_size;
@@ -3490,7 +3676,6 @@ struct rtw89_chip_info {
 	const struct rtw89_phy_table *rf_table[RF_PATH_MAX];
 	const struct rtw89_phy_table *nctl_table;
 	const struct rtw89_rfk_tbl *nctl_post_table;
-	const struct rtw89_txpwr_table *byr_table;
 	const struct rtw89_phy_dig_gain_table *dig_table;
 	const struct rtw89_dig_regs *dig_regs;
 	const struct rtw89_phy_tssi_dbw_table *tssi_dbw_table;
@@ -3527,6 +3712,7 @@ struct rtw89_chip_info {
 	u32 hci_func_en_addr;
 	u32 h2c_desc_size;
 	u32 txwd_body_size;
+	u32 txwd_info_size;
 	u32 h2c_ctrl_reg;
 	const u32 *h2c_regs;
 	struct rtw89_reg_def h2c_counter_reg;
@@ -3608,6 +3794,14 @@ struct rtw89_mac_info {
 
 	/* see RTW89_FW_OFLD_WAIT_COND series for wait condition */
 	struct rtw89_wait_info fw_ofld_wait;
+};
+
+enum rtw89_fwdl_check_type {
+	RTW89_FWDL_CHECK_FREERTOS_DONE,
+	RTW89_FWDL_CHECK_WCPU_FWDL_DONE,
+	RTW89_FWDL_CHECK_DCPU_FWDL_DONE,
+	RTW89_FWDL_CHECK_BB0_FWDL_DONE,
+	RTW89_FWDL_CHECK_BB1_FWDL_DONE,
 };
 
 enum rtw89_fw_type {
@@ -3776,6 +3970,17 @@ struct rtw89_chanctx_cfg {
 	enum rtw89_sub_entity_idx idx;
 };
 
+enum rtw89_chanctx_changes {
+	RTW89_CHANCTX_REMOTE_STA_CHANGE,
+	RTW89_CHANCTX_BCN_OFFSET_CHANGE,
+	RTW89_CHANCTX_P2P_PS_CHANGE,
+	RTW89_CHANCTX_BT_SLOT_CHANGE,
+	RTW89_CHANCTX_TSF32_TOGGLE_CHANGE,
+
+	NUM_OF_RTW89_CHANCTX_CHANGES,
+	RTW89_CHANCTX_CHANGE_DFLT = NUM_OF_RTW89_CHANCTX_CHANGES,
+};
+
 enum rtw89_entity_mode {
 	RTW89_ENTITY_MODE_SCC,
 	RTW89_ENTITY_MODE_MCC_PREPARE,
@@ -3807,6 +4012,7 @@ struct rtw89_hal {
 	bool support_igi;
 	atomic_t roc_entity_idx;
 
+	DECLARE_BITMAP(changes, NUM_OF_RTW89_CHANCTX_CHANGES);
 	DECLARE_BITMAP(entity_map, NUM_OF_RTW89_SUB_ENTITY);
 	struct rtw89_sub_entity sub[NUM_OF_RTW89_SUB_ENTITY];
 	struct cfg80211_chan_def roc_chandef;
@@ -4357,8 +4563,95 @@ struct rtw89_wow_param {
 	u8 pattern_cnt;
 };
 
+struct rtw89_mcc_limit {
+	bool enable;
+	u16 max_tob; /* TU; max time offset behind */
+	u16 max_toa; /* TU; max time offset ahead */
+	u16 max_dur; /* TU */
+};
+
+struct rtw89_mcc_policy {
+	u8 c2h_rpt;
+	u8 tx_null_early;
+	u8 dis_tx_null;
+	u8 in_curr_ch;
+	u8 dis_sw_retry;
+	u8 sw_retry_count;
+};
+
+struct rtw89_mcc_role {
+	struct rtw89_vif *rtwvif;
+	struct rtw89_mcc_policy policy;
+	struct rtw89_mcc_limit limit;
+
+	/* byte-array in LE order for FW */
+	u8 macid_bitmap[BITS_TO_BYTES(RTW89_MAX_MAC_ID_NUM)];
+
+	u16 duration; /* TU */
+	u16 beacon_interval; /* TU */
+	bool is_2ghz;
+	bool is_go;
+	bool is_gc;
+};
+
+struct rtw89_mcc_bt_role {
+	u16 duration; /* TU */
+};
+
+struct rtw89_mcc_courtesy {
+	bool enable;
+	u8 slot_num;
+	u8 macid_src;
+	u8 macid_tgt;
+};
+
+enum rtw89_mcc_plan {
+	RTW89_MCC_PLAN_TAIL_BT,
+	RTW89_MCC_PLAN_MID_BT,
+	RTW89_MCC_PLAN_NO_BT,
+
+	NUM_OF_RTW89_MCC_PLAN,
+};
+
+struct rtw89_mcc_pattern {
+	s16 tob_ref; /* TU; time offset behind of reference role */
+	s16 toa_ref; /* TU; time offset ahead of reference role */
+	s16 tob_aux; /* TU; time offset behind of auxiliary role */
+	s16 toa_aux; /* TU; time offset ahead of auxiliary role */
+
+	enum rtw89_mcc_plan plan;
+	struct rtw89_mcc_courtesy courtesy;
+};
+
+struct rtw89_mcc_sync {
+	bool enable;
+	u16 offset; /* TU */
+	u8 macid_src;
+	u8 macid_tgt;
+};
+
+struct rtw89_mcc_config {
+	struct rtw89_mcc_pattern pattern;
+	struct rtw89_mcc_sync sync;
+	u64 start_tsf;
+	u16 mcc_interval; /* TU */
+	u16 beacon_offset; /* TU */
+};
+
+enum rtw89_mcc_mode {
+	RTW89_MCC_MODE_GO_STA,
+	RTW89_MCC_MODE_GC_STA,
+};
+
 struct rtw89_mcc_info {
 	struct rtw89_wait_info wait;
+
+	u8 group;
+	enum rtw89_mcc_mode mode;
+	struct rtw89_mcc_role role_ref; /* reference role */
+	struct rtw89_mcc_role role_aux; /* auxiliary role */
+	struct rtw89_mcc_bt_role bt_role;
+	struct rtw89_mcc_config config;
 };
 
 struct rtw89_dev {
@@ -4378,6 +4671,7 @@ struct rtw89_dev {
 	struct rtw89_hci_info hci;
 	struct rtw89_efuse efuse;
 	struct rtw89_traffic_stats stats;
+	struct rtw89_rfe_data *rfe_data;
 
 	/* ensures exclusive access from mac80211 callbacks */
 	struct mutex mutex;
@@ -4425,7 +4719,7 @@ struct rtw89_dev {
 	bool is_bt_iqk_timeout;
 
 	struct rtw89_fem_info fem;
-	struct rtw89_txpwr_byrate byr[RTW89_BAND_NUM];
+	struct rtw89_txpwr_byrate byr[RTW89_BAND_NUM][RTW89_BYR_BW_NUM];
 	struct rtw89_tssi_info tssi;
 	struct rtw89_power_trim_info pwr_trim;
 
@@ -5017,6 +5311,15 @@ static inline void rtw89_chip_rfe_gpio(struct rtw89_dev *rtwdev)
 		chip->ops->rfe_gpio(rtwdev);
 }
 
+static inline
+void rtw89_chip_bb_preinit(struct rtw89_dev *rtwdev, enum rtw89_phy_idx phy_idx)
+{
+	const struct rtw89_chip_info *chip = rtwdev->chip;
+
+	if (chip->ops->bb_preinit)
+		chip->ops->bb_preinit(rtwdev, phy_idx);
+}
+
 static inline void rtw89_chip_bb_sethw(struct rtw89_dev *rtwdev)
 {
 	const struct rtw89_chip_info *chip = rtwdev->chip;
@@ -5333,7 +5636,13 @@ void rtw89_core_fill_txdesc(struct rtw89_dev *rtwdev,
 void rtw89_core_fill_txdesc_v1(struct rtw89_dev *rtwdev,
 			       struct rtw89_tx_desc_info *desc_info,
 			       void *txdesc);
+void rtw89_core_fill_txdesc_v2(struct rtw89_dev *rtwdev,
+			       struct rtw89_tx_desc_info *desc_info,
+			       void *txdesc);
 void rtw89_core_fill_txdesc_fwcmd_v1(struct rtw89_dev *rtwdev,
+				     struct rtw89_tx_desc_info *desc_info,
+				     void *txdesc);
+void rtw89_core_fill_txdesc_fwcmd_v2(struct rtw89_dev *rtwdev,
 				     struct rtw89_tx_desc_info *desc_info,
 				     void *txdesc);
 void rtw89_core_rx(struct rtw89_dev *rtwdev,
@@ -5342,6 +5651,9 @@ void rtw89_core_rx(struct rtw89_dev *rtwdev,
 void rtw89_core_query_rxdesc(struct rtw89_dev *rtwdev,
 			     struct rtw89_rx_desc_info *desc_info,
 			     u8 *data, u32 data_offset);
+void rtw89_core_query_rxdesc_v2(struct rtw89_dev *rtwdev,
+				struct rtw89_rx_desc_info *desc_info,
+				u8 *data, u32 data_offset);
 void rtw89_core_napi_start(struct rtw89_dev *rtwdev);
 void rtw89_core_napi_stop(struct rtw89_dev *rtwdev);
 void rtw89_core_napi_init(struct rtw89_dev *rtwdev);
@@ -5410,6 +5722,7 @@ void rtw89_core_scan_complete(struct rtw89_dev *rtwdev,
 			      struct ieee80211_vif *vif, bool hw_scan);
 void rtw89_reg_6ghz_power_recalc(struct rtw89_dev *rtwdev,
 				 struct rtw89_vif *rtwvif, bool active);
+void rtw89_core_update_p2p_ps(struct rtw89_dev *rtwdev, struct ieee80211_vif *vif);
 void rtw89_core_ntfy_btc_event(struct rtw89_dev *rtwdev, enum rtw89_btc_hmsg event);
 
 #endif
