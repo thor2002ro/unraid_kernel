@@ -94,7 +94,7 @@ static int find_free_gsl_group(const struct dc *dc)
  * gsl_0 <=> pipe_ctx->stream_res.gsl_group == 1
  * Using a magic value like -1 would require tracking all inits/resets
  */
-static void dcn20_setup_gsl_group_as_lock(
+ void dcn20_setup_gsl_group_as_lock(
 		const struct dc *dc,
 		struct pipe_ctx *pipe_ctx,
 		bool enable)
@@ -614,6 +614,8 @@ void dcn20_plane_atomic_disable(struct dc *dc, struct pipe_ctx *pipe_ctx)
 	memset(&pipe_ctx->plane_res, 0, sizeof(pipe_ctx->plane_res));
 	pipe_ctx->top_pipe = NULL;
 	pipe_ctx->bottom_pipe = NULL;
+	pipe_ctx->prev_odm_pipe = NULL;
+	pipe_ctx->next_odm_pipe = NULL;
 	pipe_ctx->plane_state = NULL;
 }
 
@@ -1645,8 +1647,18 @@ static void dcn20_update_dchubp_dpp(
 
 	if (pipe_ctx->update_flags.bits.enable ||
 		pipe_ctx->update_flags.bits.plane_changed ||
-		plane_state->update_flags.bits.addr_update)
+		plane_state->update_flags.bits.addr_update) {
+		if (resource_is_pipe_type(pipe_ctx, OTG_MASTER) &&
+				pipe_ctx->stream->mall_stream_config.type == SUBVP_MAIN) {
+			union block_sequence_params params;
+
+			params.subvp_save_surf_addr.dc_dmub_srv = dc->ctx->dmub_srv;
+			params.subvp_save_surf_addr.addr = &pipe_ctx->plane_state->address;
+			params.subvp_save_surf_addr.subvp_index = pipe_ctx->subvp_index;
+			hwss_subvp_save_surf_addr(&params);
+		}
 		hws->funcs.update_plane_addr(dc, pipe_ctx);
+	}
 
 	if (pipe_ctx->update_flags.bits.enable)
 		hubp->funcs->set_blank(hubp, false);
@@ -1723,7 +1735,11 @@ static void dcn20_program_pipe(
 		hws->funcs.update_odm(dc, context, pipe_ctx);
 
 	if (pipe_ctx->update_flags.bits.enable) {
-		dcn20_enable_plane(dc, pipe_ctx, context);
+		if (hws->funcs.enable_plane)
+			hws->funcs.enable_plane(dc, pipe_ctx, context);
+		else
+			dcn20_enable_plane(dc, pipe_ctx, context);
+
 		if (dc->res_pool->hubbub->funcs->force_wm_propagate_to_pipes)
 			dc->res_pool->hubbub->funcs->force_wm_propagate_to_pipes(dc->res_pool->hubbub);
 	}
@@ -1793,14 +1809,8 @@ void dcn20_program_front_end_for_ctx(
 	struct dce_hwseq *hws = dc->hwseq;
 	DC_LOGGER_INIT(dc->ctx->logger);
 
-	/* Carry over GSL groups in case the context is changing. */
-	for (i = 0; i < dc->res_pool->pipe_count; i++) {
-		struct pipe_ctx *pipe_ctx = &context->res_ctx.pipe_ctx[i];
-		struct pipe_ctx *old_pipe_ctx = &dc->current_state->res_ctx.pipe_ctx[i];
-
-		if (pipe_ctx->stream == old_pipe_ctx->stream)
-			pipe_ctx->stream_res.gsl_group = old_pipe_ctx->stream_res.gsl_group;
-	}
+	if (resource_is_pipe_topology_changed(dc->current_state, context))
+		resource_log_pipe_topology_update(dc, context);
 
 	if (dc->hwss.program_triplebuffer != NULL && dc->debug.enable_tri_buf) {
 		for (i = 0; i < dc->res_pool->pipe_count; i++) {
@@ -1830,8 +1840,16 @@ void dcn20_program_front_end_for_ctx(
 			dc->current_state->res_ctx.pipe_ctx[i].stream->mall_stream_config.type == SUBVP_PHANTOM) {
 			struct timing_generator *tg = dc->current_state->res_ctx.pipe_ctx[i].stream_res.tg;
 
-			if (tg->funcs->enable_crtc)
+			if (tg->funcs->enable_crtc) {
+				if (dc->hwss.blank_phantom) {
+					int main_pipe_width, main_pipe_height;
+
+					main_pipe_width = dc->current_state->res_ctx.pipe_ctx[i].stream->mall_stream_config.paired_stream->dst.width;
+					main_pipe_height = dc->current_state->res_ctx.pipe_ctx[i].stream->mall_stream_config.paired_stream->dst.height;
+					dc->hwss.blank_phantom(dc, tg, main_pipe_width, main_pipe_height);
+				}
 				tg->funcs->enable_crtc(tg);
+			}
 		}
 	}
 	/* OTG blank before disabling all front ends */
@@ -2833,7 +2851,7 @@ void dcn20_fpga_init_hw(struct dc *dc)
 	res_pool->mpc->funcs->mpc_init(res_pool->mpc);
 
 	/* initialize OPP mpc_tree parameter */
-	for (i = 0; i < dc->res_pool->res_cap->num_opp; i++) {
+	for (i = 0; i < dc->res_pool->pipe_count; i++) {
 		res_pool->opps[i]->mpc_tree_params.opp_id = res_pool->opps[i]->inst;
 		res_pool->opps[i]->mpc_tree_params.opp_list = NULL;
 		for (j = 0; j < MAX_PIPES; j++)
