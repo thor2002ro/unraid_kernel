@@ -775,12 +775,11 @@ static int gfs2_fsync(struct file *file, loff_t start, loff_t end,
 }
 
 static inline bool should_fault_in_pages(struct iov_iter *i,
-					 struct kiocb *iocb,
 					 size_t *prev_count,
 					 size_t *window_size)
 {
 	size_t count = iov_iter_count(i);
-	size_t size, offs;
+	size_t size;
 
 	if (!count)
 		return false;
@@ -788,21 +787,16 @@ static inline bool should_fault_in_pages(struct iov_iter *i,
 		return false;
 
 	/*
-	 * Try to fault in multiple pages initially.  When that doesn't result
-	 * in any progress, fall back to a single page.
+	 * Try to fault in the entire buffer initially.  When that doesn't
+	 * result in any progress, fall back to a single page.
 	 */
-	size = PAGE_SIZE;
-	offs = offset_in_page(iocb->ki_pos);
-	if (*prev_count != count) {
-		size_t nr_dirtied;
-
-		nr_dirtied = max(current->nr_dirtied_pause -
-				 current->nr_dirtied, 8);
-		size = min_t(size_t, SZ_1M, nr_dirtied << PAGE_SHIFT);
-	}
+	if (*prev_count != count)
+		size = count;
+	else
+		size = PAGE_SIZE - offset_in_page(i->iov_offset);
 
 	*prev_count = count;
-	*window_size = size - offs;
+	*window_size = size;
 	return true;
 }
 
@@ -836,7 +830,15 @@ static ssize_t gfs2_file_direct_read(struct kiocb *iocb, struct iov_iter *to,
 		return 0; /* skip atime */
 
 	gfs2_holder_init(ip->i_gl, LM_ST_DEFERRED, 0, gh);
+
+	if (should_fault_in_pages(to, &prev_count, &window_size)) {
 retry:
+		window_size -= fault_in_iov_iter_writeable(to, window_size);
+		ret = -EFAULT;
+		if (!window_size)
+			goto out_uninit;
+	}
+
 	ret = gfs2_glock_nq(gh);
 	if (ret)
 		goto out_uninit;
@@ -852,15 +854,13 @@ retry:
 	if (ret > 0)
 		read = ret;
 
-	if (should_fault_in_pages(to, iocb, &prev_count, &window_size)) {
+	if (should_fault_in_pages(to, &prev_count, &window_size)) {
 		gfs2_glock_dq(gh);
-		window_size -= fault_in_iov_iter_writeable(to, window_size);
-		if (window_size)
-			goto retry;
+		goto retry;
 	}
+
 out_unlock:
-	if (gfs2_holder_queued(gh))
-		gfs2_glock_dq(gh);
+	gfs2_glock_dq(gh);
 out_uninit:
 	gfs2_holder_uninit(gh);
 	/* User space doesn't expect partial success. */
@@ -899,7 +899,15 @@ static ssize_t gfs2_file_direct_write(struct kiocb *iocb, struct iov_iter *from,
 	 * VFS does.
 	 */
 	gfs2_holder_init(ip->i_gl, LM_ST_DEFERRED, 0, gh);
+
+	if (should_fault_in_pages(from, &prev_count, &window_size)) {
 retry:
+		window_size -= fault_in_iov_iter_readable(from, window_size);
+		ret = -EFAULT;
+		if (!window_size)
+			goto out_uninit;
+	}
+
 	ret = gfs2_glock_nq(gh);
 	if (ret)
 		goto out_uninit;
@@ -911,11 +919,11 @@ retry:
 	ret = iomap_dio_rw(iocb, from, &gfs2_iomap_ops, NULL,
 			   IOMAP_DIO_PARTIAL, NULL, written);
 	from->nofault = false;
-	if (ret <= 0) {
+	if (ret <= 0 && ret != -EFAULT) {
+		/* fall back to buffered I/O? */
 		if (ret == -ENOTBLK)
 			ret = 0;
-		if (ret != -EFAULT)
-			goto out_unlock;
+		goto out_unlock;
 	}
 	/* No increment (+=) because iomap_dio_rw returns a cumulative value. */
 	if (ret > 0)
@@ -923,19 +931,15 @@ retry:
 
 	enough_retries = prev_count == iov_iter_count(from) &&
 			 window_size <= PAGE_SIZE;
-	if (should_fault_in_pages(from, iocb, &prev_count, &window_size)) {
-		gfs2_glock_dq(gh);
-		window_size -= fault_in_iov_iter_readable(from, window_size);
-		if (window_size) {
-			if (!enough_retries)
-				goto retry;
-			/* fall back to buffered I/O */
-			ret = 0;
+	if (should_fault_in_pages(from, &prev_count, &window_size)) {
+		if (!enough_retries) {
+			gfs2_glock_dq(gh);
+			goto retry;
 		}
 	}
+
 out_unlock:
-	if (gfs2_holder_queued(gh))
-		gfs2_glock_dq(gh);
+	gfs2_glock_dq(gh);
 out_uninit:
 	gfs2_holder_uninit(gh);
 	/* User space doesn't expect partial success. */
@@ -991,7 +995,7 @@ retry:
 	if (ret > 0)
 		read += ret;
 
-	if (should_fault_in_pages(to, iocb, &prev_count, &window_size)) {
+	if (should_fault_in_pages(to, &prev_count, &window_size)) {
 		gfs2_glock_dq(&gh);
 		window_size -= fault_in_iov_iter_writeable(to, window_size);
 		if (window_size)
@@ -1033,7 +1037,7 @@ static ssize_t gfs2_file_buffered_write(struct kiocb *iocb,
 	}
 
 	gfs2_holder_init(ip->i_gl, LM_ST_EXCLUSIVE, 0, gh);
-	if (should_fault_in_pages(from, iocb, &prev_count, &window_size)) {
+	if (should_fault_in_pages(from, &prev_count, &window_size)) {
 retry:
 		window_size -= fault_in_iov_iter_readable(from, window_size);
 		if (!window_size) {
@@ -1068,7 +1072,7 @@ retry:
 		goto out_unlock;
 
 	from->count = orig_count - written;
-	if (should_fault_in_pages(from, iocb, &prev_count, &window_size)) {
+	if (should_fault_in_pages(from, &prev_count, &window_size)) {
 		gfs2_glock_dq(gh);
 		goto retry;
 	}
@@ -1120,13 +1124,15 @@ static ssize_t gfs2_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	if (ret)
 		goto out_unlock;
 
-	ret = file_update_time(file);
-	if (ret)
-		goto out_unlock;
-
 	if (iocb->ki_flags & IOCB_DIRECT) {
 		struct address_space *mapping = file->f_mapping;
 		ssize_t buffered, ret2;
+
+		/*
+		 * Note that under direct I/O, we don't allow and inode
+		 * timestamp updates, so we're not calling file_update_time()
+		 * here.
+		 */
 
 		ret = gfs2_file_direct_write(iocb, from, &gh);
 		if (ret < 0 || !iov_iter_count(from))
@@ -1154,6 +1160,10 @@ static ssize_t gfs2_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 		if (!ret || ret2 > 0)
 			ret += ret2;
 	} else {
+		ret = file_update_time(file);
+		if (ret)
+			goto out_unlock;
+
 		ret = gfs2_file_buffered_write(iocb, from, &gh);
 		if (likely(ret > 0))
 			ret = generic_write_sync(iocb, ret);
