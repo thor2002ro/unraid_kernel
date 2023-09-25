@@ -165,7 +165,7 @@ struct fsl_edma_desc {
 	bool				iscyclic;
 	enum dma_transfer_direction	dirn;
 	unsigned int			n_tcds;
-	struct fsl_edma_sw_tcd		tcd[];
+	struct fsl_edma_sw_tcd		tcd[] __counted_by(n_tcds);
 };
 
 #define FSL_EDMA_DRV_HAS_DMACLK		BIT(0)
