@@ -62,6 +62,9 @@ static_assert(__AVIC_GATAG(AVIC_VM_ID_MASK, AVIC_VCPU_ID_MASK) == -1u);
 static bool force_avic;
 module_param_unsafe(force_avic, bool, 0444);
 
+static int avic_zen2_errata_workaround = -1;
+module_param(avic_zen2_errata_workaround, int, 0444);
+
 /* Note:
  * This hash table is used to map VM_ID to a struct kvm_svm,
  * when handling AMD IOMMU GALOG notification to schedule in
@@ -276,7 +279,7 @@ static u64 *avic_get_physical_id_entry(struct kvm_vcpu *vcpu,
 
 static int avic_init_backing_page(struct kvm_vcpu *vcpu)
 {
-	u64 *entry, new_entry;
+	u64 *entry;
 	int id = vcpu->vcpu_id;
 	struct vcpu_svm *svm = to_svm(vcpu);
 
@@ -308,10 +311,10 @@ static int avic_init_backing_page(struct kvm_vcpu *vcpu)
 	if (!entry)
 		return -EINVAL;
 
-	new_entry = __sme_set((page_to_phys(svm->avic_backing_page) &
-			      AVIC_PHYSICAL_ID_ENTRY_BACKING_PAGE_MASK) |
-			      AVIC_PHYSICAL_ID_ENTRY_VALID_MASK);
-	WRITE_ONCE(*entry, new_entry);
+	svm->avic_physical_id_entry = __sme_set((page_to_phys(svm->avic_backing_page) &
+						 AVIC_PHYSICAL_ID_ENTRY_BACKING_PAGE_MASK) |
+						 AVIC_PHYSICAL_ID_ENTRY_VALID_MASK);
+	WRITE_ONCE(*entry, svm->avic_physical_id_entry);
 
 	svm->avic_physical_id_cache = entry;
 
@@ -529,8 +532,11 @@ int avic_incomplete_ipi_interception(struct kvm_vcpu *vcpu)
 	case AVIC_IPI_FAILURE_INVALID_BACKING_PAGE:
 		WARN_ONCE(1, "Invalid backing page\n");
 		break;
+	case AVIC_IPI_FAILURE_INVALID_IPI_VECTOR:
+		/* Invalid IPI with vector < 16 */
+		break;
 	default:
-		pr_err("Unknown IPI interception\n");
+		vcpu_unimpl(vcpu, "Unknown avic incomplete IPI interception\n");
 	}
 
 	return 1;
@@ -832,7 +838,7 @@ static int svm_ir_list_add(struct vcpu_svm *svm, struct amd_iommu_pi_data *pi)
 	 * will update the pCPU info when the vCPU awkened and/or scheduled in.
 	 * See also avic_vcpu_load().
 	 */
-	entry = READ_ONCE(*(svm->avic_physical_id_cache));
+	entry = READ_ONCE(svm->avic_physical_id_entry);
 	if (entry & AVIC_PHYSICAL_ID_ENTRY_IS_RUNNING_MASK)
 		amd_iommu_update_ga(entry & AVIC_PHYSICAL_ID_ENTRY_HOST_PHYSICAL_ID_MASK,
 				    true, pi->ir_data);
@@ -1024,7 +1030,6 @@ avic_update_iommu_vcpu_affinity(struct kvm_vcpu *vcpu, int cpu, bool r)
 
 void avic_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
 {
-	u64 entry;
 	int h_physical_id = kvm_cpu_get_apicid(cpu);
 	struct vcpu_svm *svm = to_svm(vcpu);
 	unsigned long flags;
@@ -1053,14 +1058,23 @@ void avic_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
 	 */
 	spin_lock_irqsave(&svm->ir_list_lock, flags);
 
-	entry = READ_ONCE(*(svm->avic_physical_id_cache));
-	WARN_ON_ONCE(entry & AVIC_PHYSICAL_ID_ENTRY_IS_RUNNING_MASK);
 
-	entry &= ~AVIC_PHYSICAL_ID_ENTRY_HOST_PHYSICAL_ID_MASK;
-	entry |= (h_physical_id & AVIC_PHYSICAL_ID_ENTRY_HOST_PHYSICAL_ID_MASK);
-	entry |= AVIC_PHYSICAL_ID_ENTRY_IS_RUNNING_MASK;
+	WARN_ON_ONCE(svm->avic_physical_id_entry & AVIC_PHYSICAL_ID_ENTRY_IS_RUNNING_MASK);
 
-	WRITE_ONCE(*(svm->avic_physical_id_cache), entry);
+	svm->avic_physical_id_entry &= ~AVIC_PHYSICAL_ID_ENTRY_HOST_PHYSICAL_ID_MASK;
+	svm->avic_physical_id_entry |=
+		(h_physical_id & AVIC_PHYSICAL_ID_ENTRY_HOST_PHYSICAL_ID_MASK);
+
+	svm->avic_physical_id_entry |= AVIC_PHYSICAL_ID_ENTRY_IS_RUNNING_MASK;
+
+	/*
+	 * Do not update the actual physical id table entry if workaround
+	 * for #1235 - the physical ID entry is_running is never set when
+	 * the workaround is activated
+	 */
+	if (!avic_zen2_errata_workaround)
+		WRITE_ONCE(*(svm->avic_physical_id_cache), svm->avic_physical_id_entry);
+
 	avic_update_iommu_vcpu_affinity(vcpu, h_physical_id, true);
 
 	spin_unlock_irqrestore(&svm->ir_list_lock, flags);
@@ -1068,7 +1082,6 @@ void avic_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
 
 void avic_vcpu_put(struct kvm_vcpu *vcpu)
 {
-	u64 entry;
 	struct vcpu_svm *svm = to_svm(vcpu);
 	unsigned long flags;
 
@@ -1081,10 +1094,9 @@ void avic_vcpu_put(struct kvm_vcpu *vcpu)
 	 * can't be scheduled out and thus avic_vcpu_{put,load}() can't run
 	 * recursively.
 	 */
-	entry = READ_ONCE(*(svm->avic_physical_id_cache));
 
 	/* Nothing to do if IsRunning == '0' due to vCPU blocking. */
-	if (!(entry & AVIC_PHYSICAL_ID_ENTRY_IS_RUNNING_MASK))
+	if (!(svm->avic_physical_id_entry & AVIC_PHYSICAL_ID_ENTRY_IS_RUNNING_MASK))
 		return;
 
 	/*
@@ -1099,8 +1111,14 @@ void avic_vcpu_put(struct kvm_vcpu *vcpu)
 
 	avic_update_iommu_vcpu_affinity(vcpu, -1, 0);
 
-	entry &= ~AVIC_PHYSICAL_ID_ENTRY_IS_RUNNING_MASK;
-	WRITE_ONCE(*(svm->avic_physical_id_cache), entry);
+	svm->avic_physical_id_entry &= ~AVIC_PHYSICAL_ID_ENTRY_IS_RUNNING_MASK;
+
+	/*
+	 * Do not update the actual physical id table entry
+	 * See explanation in avic_vcpu_load
+	 */
+	if (!avic_zen2_errata_workaround)
+		WRITE_ONCE(*(svm->avic_physical_id_cache), svm->avic_physical_id_entry);
 
 	spin_unlock_irqrestore(&svm->ir_list_lock, flags);
 
@@ -1213,6 +1231,18 @@ bool avic_hardware_setup(void)
 		pr_info("x2AVIC enabled\n");
 
 	amd_iommu_register_ga_log_notifier(&avic_ga_log_notifier);
+
+	if (avic_zen2_errata_workaround == -1) {
+
+		/* Assume that Zen1 and Zen2 have errata #1235 */
+		if (boot_cpu_data.x86 == 0x17)
+			avic_zen2_errata_workaround = 1;
+		else
+			avic_zen2_errata_workaround = 0;
+	}
+
+	if (avic_zen2_errata_workaround)
+		pr_info("Workaround for AVIC errata #1235 is enabled\n");
 
 	return true;
 }
