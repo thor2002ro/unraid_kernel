@@ -273,6 +273,7 @@ struct vcpu_svm {
 	u32 ldr_reg;
 	u32 dfr_reg;
 	struct page *avic_backing_page;
+	u64 avic_physical_id_entry;
 	u64 *avic_physical_id_cache;
 
 	/*
