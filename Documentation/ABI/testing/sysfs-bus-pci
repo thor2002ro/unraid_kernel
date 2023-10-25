@@ -283,8 +283,8 @@ Description:
 		device will never be put into D3Cold state.  If it is set, the
 		device may be put into D3Cold state if other requirements are
 		satisfied too.  Reading this attribute will show the current
-		value of d3cold_allowed bit.  Writing this attribute will set
-		the value of d3cold_allowed bit.
+		value of no_d3cold bit.
+		Writing to this attribute is deprecated and will do nothing.
 
 What:		/sys/bus/pci/devices/.../sriov_totalvfs
 Date:		November 2012

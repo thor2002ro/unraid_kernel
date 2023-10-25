@@ -741,6 +741,61 @@ static int amd_pmc_czn_wa_irq1(struct amd_pmc_dev *pdev)
 	return 0;
 }
 
+static inline void amd_pmc_apply_constraint(struct pci_dev *pci_dev, bool apply)
+{
+	if (apply)
+		pci_d3cold_disable(pci_dev);
+	else
+		pci_d3cold_enable(pci_dev);
+}
+
+/*
+ * Constraints are specified in the ACPI LPS0 device and specify what the
+ * platform intended for devices that are internal to the SoC.
+ *
+ * If a constraint is present and >= to ACPI_STATE_D3, then enable D3.
+ * If a constraint is not present or < ACPI_STATE_D3, then disable D3.
+ */
+static void amd_pmc_check_constraints(struct amd_pmc_dev *pdev, bool apply)
+{
+	struct pci_dev *pci_dev = NULL;
+	struct acpi_device *adev;
+	int constraint;
+
+	switch (pdev->cpu_id) {
+	case AMD_CPU_ID_RV:
+	case AMD_CPU_ID_RN:
+	case AMD_CPU_ID_YC:
+	case AMD_CPU_ID_CB:
+	case AMD_CPU_ID_PS:
+	case AMD_CPU_ID_SP:
+		return;
+	default:
+		break;
+	}
+
+	while ((pci_dev = pci_get_device(PCI_ANY_ID, PCI_ANY_ID, pci_dev))) {
+		adev = ACPI_COMPANION(&pci_dev->dev);
+		if (!adev)
+			continue;
+		constraint = acpi_get_lps0_constraint(adev);
+		dev_dbg(&pci_dev->dev, "constraint is %d\n", constraint);
+
+		switch (constraint) {
+		case ACPI_STATE_UNKNOWN:
+		case ACPI_STATE_D0:
+		case ACPI_STATE_D1:
+		case ACPI_STATE_D2:
+			amd_pmc_apply_constraint(pci_dev, apply);
+			continue;
+		/* use the logic pci_bridge_d3_possible() to decide */
+		case ACPI_STATE_D3:
+		default:
+			continue;
+		}
+	}
+}
+
 static int amd_pmc_verify_czn_rtc(struct amd_pmc_dev *pdev, u32 *arg)
 {
 	struct rtc_device *rtc_device;
@@ -1074,6 +1129,7 @@ static int amd_pmc_probe(struct platform_device *pdev)
 			amd_pmc_quirks_init(dev);
 	}
 
+	amd_pmc_check_constraints(dev, TRUE);
 	amd_pmc_dbgfs_register(dev);
 	pm_report_max_hw_sleep(U64_MAX);
 	return 0;
@@ -1089,6 +1145,7 @@ static void amd_pmc_remove(struct platform_device *pdev)
 
 	if (IS_ENABLED(CONFIG_SUSPEND))
 		acpi_unregister_lps0_dev(&amd_pmc_s2idle_dev_ops);
+	amd_pmc_check_constraints(dev, FALSE);
 	amd_pmc_dbgfs_unregister(dev);
 	pci_dev_put(dev->rdev);
 	mutex_destroy(&dev->lock);
