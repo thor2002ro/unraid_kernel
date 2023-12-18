@@ -18,6 +18,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/pm_qos.h>
 #include <linux/rwsem.h>
+#include <acpi/apei.h>
 #include "pci.h"
 
 /*
@@ -782,6 +783,103 @@ int pci_acpi_program_hp_params(struct pci_dev *dev)
 	}
 	return -ENODEV;
 }
+
+#ifdef CONFIG_ACPI_APEI
+static void program_hest_aer_endpoint(struct acpi_hest_aer_common aer_endpoint,
+				struct pci_dev *dev, int pos)
+{
+	u32 uncor_mask;
+	u32 uncor_severity;
+	u32 cor_mask;
+	u32 adv_cap;
+
+	uncor_mask = aer_endpoint.uncorrectable_mask;
+	uncor_severity = aer_endpoint.uncorrectable_severity;
+	cor_mask = aer_endpoint.correctable_mask;
+	adv_cap = aer_endpoint.advanced_capabilities;
+
+	pci_write_config_dword(dev, pos + PCI_ERR_UNCOR_MASK, uncor_mask);
+	pci_write_config_dword(dev, pos + PCI_ERR_UNCOR_SEVER, uncor_severity);
+	pci_write_config_dword(dev, pos + PCI_ERR_COR_MASK, cor_mask);
+	pci_write_config_dword(dev, pos + PCI_ERR_CAP, adv_cap);
+}
+
+static void program_hest_aer_root(struct acpi_hest_aer_root *aer_root, struct pci_dev *dev, int pos)
+{
+	u32 root_err_cmd;
+
+	root_err_cmd = aer_root->root_error_command;
+
+	pci_write_config_dword(dev, pos + PCI_ERR_ROOT_COMMAND, root_err_cmd);
+}
+
+static void program_hest_aer_bridge(struct acpi_hest_aer_bridge *hest_aer_bridge,
+				struct pci_dev *dev, int pos)
+{
+	u32 uncor_mask2;
+	u32 uncor_severity2;
+	u32 adv_cap2;
+
+	uncor_mask2 = hest_aer_bridge->uncorrectable_mask2;
+	uncor_severity2 = hest_aer_bridge->uncorrectable_severity2;
+	adv_cap2 = hest_aer_bridge->advanced_capabilities2;
+
+	pci_write_config_dword(dev, pos + PCI_ERR_UNCOR_MASK2, uncor_mask2);
+	pci_write_config_dword(dev, pos + PCI_ERR_UNCOR_SEVER2, uncor_severity2);
+	pci_write_config_dword(dev, pos + PCI_ERR_CAP2, adv_cap2);
+}
+
+static void program_hest_aer_params(struct hest_parse_aer_info info)
+{
+	struct pci_dev *dev;
+	int port_type;
+	int pos;
+	struct acpi_hest_aer_root *hest_aer_root;
+	struct acpi_hest_aer *hest_aer_endpoint;
+	struct acpi_hest_aer_bridge *hest_aer_bridge;
+
+	dev = info.pci_dev;
+	port_type = pci_pcie_type(dev);
+	pos = pci_find_ext_capability(dev, PCI_EXT_CAP_ID_ERR);
+	if (!pos)
+		return;
+
+	switch (port_type) {
+	case PCI_EXP_TYPE_ROOT_PORT:
+		hest_aer_root = info.hest_aer_root_port;
+		program_hest_aer_endpoint(hest_aer_root->aer, dev, pos);
+		program_hest_aer_root(hest_aer_root, dev, pos);
+		break;
+	case PCI_EXP_TYPE_ENDPOINT:
+		hest_aer_endpoint = info.hest_aer_endpoint;
+		program_hest_aer_endpoint(hest_aer_endpoint->aer, dev, pos);
+		break;
+	case PCI_EXP_TYPE_PCI_BRIDGE:
+	case PCI_EXP_TYPE_PCIE_BRIDGE:
+		hest_aer_bridge = info.hest_aer_bridge;
+		program_hest_aer_endpoint(hest_aer_bridge->aer, dev, pos);
+		program_hest_aer_bridge(hest_aer_bridge, dev, pos);
+		break;
+	default:
+		return;
+	}
+}
+
+int pci_acpi_program_hest_aer_params(struct pci_dev *dev)
+{
+	struct hest_parse_aer_info info = {
+		.pci_dev = dev
+	};
+
+	if (!pci_is_pcie(dev))
+		return -ENODEV;
+
+	if (apei_hest_parse(hest_parse_pcie_aer, &info) == 1)
+		program_hest_aer_params(info);
+
+	return 0;
+}
+#endif
 
 /**
  * pciehp_is_native - Check whether a hotplug port is handled by the OS
