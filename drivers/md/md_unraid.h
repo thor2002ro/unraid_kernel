@@ -217,7 +217,8 @@ typedef struct mdp_superblock_v1_s {
 /* 'md_k.h' holds kernel internal definitions  */
 
 typedef struct mdk_rdev_s {
-	struct block_device     *bdev;	                  /* block device handle */
+	struct bdev_handle *bdev_handle;
+	//struct block_device     *bdev;	                  /* block device handle */
 
 	char *status;                                     /* disk status */
 	unsigned long           offset;		          /* disk offset in sectors */

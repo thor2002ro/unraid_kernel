@@ -1587,7 +1587,7 @@ static void handle_stripe(struct stripe_head *sh)
 			bio_init(bi, &col->vec, 1);
 			bi->bi_opf = REQ_OP_READ;
 #else
-			bio_init(bi, rdev->bdev, &col->vec, 1, REQ_OP_READ);
+			bio_init(bi, rdev->bdev_handle->bdev, &col->vec, 1, REQ_OP_READ);
 #endif			
 			rdev->reads++;
 		}
@@ -1596,7 +1596,7 @@ static void handle_stripe(struct stripe_head *sh)
 			bio_init(bi, &col->vec, 1);
 			bi->bi_opf = REQ_OP_WRITE | ((i < pd_idx) ? op_flags : pq_flags);
 #else
-			bio_init(bi, rdev->bdev, &col->vec, 1, REQ_OP_WRITE | ((i < pd_idx) ? op_flags : pq_flags));
+			bio_init(bi, rdev->bdev_handle->bdev, &col->vec, 1, REQ_OP_WRITE | ((i < pd_idx) ? op_flags : pq_flags));
 #endif			
 			rdev->writes++;
 		}
@@ -1662,7 +1662,7 @@ static void submit_flush_bio(flush_stripe_t *flush_stripe, struct bio *bi, mdk_r
 	bio_set_dev(bi, rdev->bdev);
 	bi->bi_opf = REQ_OP_WRITE | REQ_PREFLUSH;
 #else
-	bio_init(bi, rdev->bdev, NULL, 0, REQ_OP_WRITE | REQ_PREFLUSH);
+	bio_init(bi, rdev->bdev_handle->bdev, NULL, 0, REQ_OP_WRITE | REQ_PREFLUSH);
 #endif	
 	bi->bi_private = flush_stripe;
 	bi->bi_end_io = end_flush;	
