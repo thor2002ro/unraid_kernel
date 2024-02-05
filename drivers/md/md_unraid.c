@@ -422,35 +422,34 @@ static char DISK_NP_DSBL[] =    "DISK_NP_DSBL";           /* disabled, no disk p
 static char DISK_DSBL_NEW[] =   "DISK_DSBL_NEW";          /* disabled, new disk present */
 static char DISK_NEW[] =        "DISK_NEW";               /* new disk */
 
-static int lock_bdev(char *name, struct block_device **bdevP)
+static int lock_bdev(char *name, struct bdev_handle **bdev_handle)
 {
-	char path[BDEVNAME_SIZE + 6];
-	struct block_device *bdev;
+    char path[BDEVNAME_SIZE + 6];
 
-	snprintf(path, sizeof(path), "/dev/%s", name);
+    snprintf(path, sizeof(path), "/dev/%s", name);
 
 #if LINUX_VERSION_CODE > KERNEL_VERSION(6,4,99)
-  bdev = blkdev_get_by_path(path, FMODE_READ | FMODE_WRITE, NULL, NULL);
+    *bdev_handle = bdev_open_by_path(path, FMODE_READ | FMODE_WRITE, NULL, NULL);
 #else  
-  bdev = blkdev_get_by_path(path, FMODE_READ | FMODE_WRITE, NULL);
+    bdev = blkdev_get_by_path(path, FMODE_READ | FMODE_WRITE, NULL);
 #endif
 
-	if (IS_ERR(bdev)) {
-		*bdevP = NULL;
-		return PTR_ERR(bdev);
-	}
+    if (IS_ERR(bdev_handle)) {
+        *bdev_handle = NULL;
+        return PTR_ERR(bdev_handle);
+    }
 
-	*bdevP = bdev;
-	return 0;
+    //*bdevP = handle->bdev;
+    return 0;
 }
 
-static void unlock_bdev(struct block_device *bdev)
+static void unlock_bdev(struct bdev_handle *bdev_handle)
 {
-	if (bdev)
+    if (bdev_handle)
 #if LINUX_VERSION_CODE > KERNEL_VERSION(6,4,99)
-    blkdev_put(bdev, NULL);
+        bdev_release(bdev_handle);
 #else 
-    blkdev_put(bdev, FMODE_READ | FMODE_WRITE);
+        blkdev_put(bdev, FMODE_READ | FMODE_WRITE);
 #endif
 }
 
@@ -460,44 +459,46 @@ static int import_device(mdk_rdev_t *rdev, char *name,
                          unsigned long offset, unsigned long long size,
                          int erased, char *id, mddev_t *mddev, int unit)
 {
-	struct block_device *bdev;
-	int err = 0;
+    struct bdev_handle *bdev_handle;
+    int err = 0;
 
-	memset(rdev, 0, sizeof(mdk_rdev_t));
-	rdev->status = DISK_NP; /* assume not present */
+    memset(rdev, 0, sizeof(mdk_rdev_t));
+    rdev->status = DISK_NP; /* assume not present */
 
-	/* check if device assigned to slot */
-	if (size == 0) {
-		dprintk("md: import disk%d: no device\n", unit);
-		return -ENODEV;
-	}
+    /* check if device assigned to slot */
+    if (size == 0) {
+        dprintk("md: import disk%d: no device\n", unit);
+        return -ENODEV;
+    }
 
-	/* open the disk device */
-	err = lock_bdev(name, &bdev);
-	if (err) {
-		printk("md: import disk%d: lock_bdev error: %d\n", unit, err);
-		return err; /* device probably not present */
-	}
+    /* open the disk device */
+    err = lock_bdev(name, &bdev_handle);
+    if (err) {
+        printk("md: import disk%d: lock_bdev error: %d\n", unit, err);
+        return err; /* device probably not present */
+    }
 
-	/* record device name, eg, "hda" */
-	strcpy( rdev->name, name);
+    /* record device name, eg, "hda" */
+    strcpy(rdev->name, name);
 
-	/* record geometry */
-	rdev->offset = offset; /* in 512-byte sectors */
-	rdev->size = size;     /* in 1024-byte blocks */
-	rdev->erased = erased;
+    /* record geometry */
+    rdev->offset = offset; /* in 512-byte sectors */
+    rdev->size = size;     /* in 1024-byte blocks */
+    rdev->erased = erased;
 
-	/* get id string */
-	strncpy(rdev->id, id, MD_ID_SIZE - 1);
+    /* get id string */
+    strncpy(rdev->id, id, MD_ID_SIZE - 1);
 
-	/* disk is present */
-	rdev->status = DISK_OK;
-	printk("md: import disk%d: (%s) %s size: %llu %s\n",
-	       unit, rdev->name, rdev->id, rdev->size, erased ? "erased" : "");
+    /* disk is present */
+    rdev->status = DISK_OK;
+    printk("md: import disk%d: (%s) %s size: %llu %s\n",
+           unit, rdev->name, rdev->id, rdev->size, erased ? "erased" : "");
 
-	unlock_bdev(bdev);
-	return err;
+    unlock_bdev(bdev_handle);
+    return err;
 }
+
+
 
 /* Check if rdev id & size matches disk id & size.
  * Input strict determines comparison between recorded size/id (disk) vs. actual size/id (rdev)
@@ -1032,19 +1033,21 @@ static int do_run(mddev_t *mddev)
 
 	/* lock the devices */
 	for (i = 0; i < MD_SB_DISKS; i++) {
-		mdk_rdev_t *rdev = &mddev->rdev[i];
+    mdk_rdev_t *rdev = &mddev->rdev[i];
 
-		/* only lock present devices */
-		if (!strstr(rdev->status, "DISK_NP")) {
-			err = lock_bdev(rdev->name, &rdev->bdev);
-			if (err) {
-				printk("md: do_run: lock_bdev error: %d\n", err);
-				return err; /* partition not present */
-			}
-			/* sync device & invalidate cache buffers */
-			sync_blockdev(rdev->bdev);
-			invalidate_bdev(rdev->bdev);
+    /* only lock present devices */
+    if (!strstr(rdev->status, "DISK_NP")) {
+        err = lock_bdev(rdev->name, &rdev->bdev_handle);
+        if (err) {
+            printk("md: do_run: lock_bdev error: %d\n", err);
+            return err; /* partition not present */
+        }
+
+        /* sync device & invalidate cache buffers */
+        sync_blockdev(rdev->bdev_handle->bdev);  // Pass the block device directly
+        invalidate_bdev(rdev->bdev_handle->bdev);  // Pass the block device directly    	
 		}
+
 	}
 
 	/* alloc transfer resources */
@@ -1140,8 +1143,8 @@ static int do_stop(mddev_t *mddev)
 	for (i = 0; i < MD_SB_DISKS; i++) {
 		mdk_rdev_t *rdev = &mddev->rdev[i];
 
-		unlock_bdev(rdev->bdev);
-		rdev->bdev = NULL;
+		unlock_bdev(rdev->bdev_handle);
+		rdev->bdev_handle = NULL;
 	}
 
 	return 0;
