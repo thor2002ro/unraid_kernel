@@ -93,7 +93,6 @@ struct amd_cpudata {
 	struct amd_aperf_mperf prev;
 
 	u64	freq;
-	bool	boost_supported;
 	bool	hw_prefcore;
 
 	/* EPP feature related attributes*/
@@ -124,4 +123,18 @@ static const char * const amd_pstate_mode_string[] = {
 	[AMD_PSTATE_GUIDED]      = "guided",
 	NULL,
 };
+
+/**
+ * struct global_params - Global parameters, mostly tunable via sysfs.
+ * @cpb_boost:		Whether or not to use boost CPU P-states.
+ * @cpb_supported:	Whether or not CPU boost P-states are available
+ *			based on the MSR_K7_HWCR bit[25] state
+ */
+struct global_params {
+	bool cpb_boost;
+	bool cpb_supported;
+};
+
+extern struct global_params global;
+
 #endif /* _LINUX_AMD_PSTATE_H */
