@@ -235,7 +235,10 @@ struct kvm_page_fault {
 	/* The memslot containing gfn. May be NULL. */
 	struct kvm_memory_slot *slot;
 
-	/* Outputs of kvm_faultin_pfn.  */
+	/*
+	 * Outputs of kvm_faultin_pfn, guaranteed to be valid if and only if
+	 * slot is non-NULL.
+	 */
 	unsigned long mmu_seq;
 	kvm_pfn_t pfn;
 	hva_t hva;
