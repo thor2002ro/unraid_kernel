@@ -124,6 +124,11 @@ static const char * const amd_pstate_mode_string[] = {
 	NULL,
 };
 
+struct quirk_entry {
+	u32 nominal_freq;
+	u32 lowest_freq;
+};
+
 /**
  * struct global_params - Global parameters, mostly tunable via sysfs.
  * @cpb_boost:		Whether or not to use boost CPU P-states.
