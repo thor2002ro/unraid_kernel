@@ -441,10 +441,144 @@ static void thermal_of_zone_unregister(struct thermal_zone_device *tz)
 	struct thermal_trip *trips = tz->trips;
 	struct thermal_zone_device_ops *ops = tz->ops;
 
+	thermal_multi_sensor_unregister(tz);
 	thermal_zone_device_disable(tz);
 	thermal_zone_device_unregister(tz);
 	kfree(trips);
 	kfree(ops);
+}
+
+int thermal_of_get_sensor_id(struct device_node *tz_np,
+			    struct device_node *sensor_np,
+			    int phandle_index, u32 *id)
+{
+	struct of_phandle_args sensor_specs;
+	int ret;
+
+	ret = of_parse_phandle_with_args(tz_np,
+					 "thermal-sensors",
+					 "#thermal-sensor-cells",
+					 phandle_index,
+					 &sensor_specs);
+	if (ret)
+		return ret;
+
+	if (sensor_specs.np != sensor_np) {
+		of_node_put(sensor_specs.np);
+		return -ENODEV;
+	}
+
+	if (sensor_specs.args_count > 1)
+		pr_warn("%pOFn: too many cells in sensor specifier %d\n",
+			sensor_specs.np, sensor_specs.args_count);
+
+	*id = sensor_specs.args_count ? sensor_specs.args[0] : 0;
+	of_node_put(sensor_specs.np);
+
+	return 0;
+}
+
+static int thermal_of_has_sensor_id(struct device_node *tz_np,
+				    struct device_node *sensor_np,
+				    u32 sensor_id)
+{
+	int count;
+	int i;
+
+	count = of_count_phandle_with_args(tz_np,
+					   "thermal-sensors",
+					   "#thermal-sensor-cells");
+	if (count <= 0)
+		return -ENODEV;
+
+	for (i = 0; i < count; i++) {
+		int ret;
+		u32 id;
+
+		ret = thermal_of_get_sensor_id(tz_np, sensor_np, i, &id);
+		if (ret)
+			return ret;
+
+		if (id == sensor_id)
+			return i;
+
+	}
+
+	return -ENODEV;
+}
+
+static int thermal_of_register_mutli_sensor(struct device_node *sensor, int id,
+					    struct thermal_zone_device *tz,
+					    struct device_node *tz_np)
+{
+	struct device_node *child;
+	u32 *coeff;
+	int ret;
+	int i;
+
+	/*
+	 * Go through all the thermal zone and check if the sensor is
+	 * referenced. If so, find or create a multi sensor thermal zone
+	 * and register the sensor to it.
+	 */
+	for_each_available_child_of_node(of_get_parent(tz_np), child) {
+		int count;
+		int index;
+		int offset;
+
+		/* Skip the tz that is currently registering */
+		if (child == tz_np)
+			continue;
+
+		/* Test if the sensor is referenced by a tz*/
+		index = thermal_of_has_sensor_id(child, sensor, id);
+		if (index < 0)
+			continue;
+
+		/*
+		 * Get the coefficients and offset and assign them to the
+		 * multi sensor thermal zone.
+		 */
+		count = of_count_phandle_with_args(child,
+						   "thermal-sensors",
+						   "#thermal-sensor-cells");
+		coeff = kmalloc_array(count, sizeof(*coeff), GFP_KERNEL);
+		if (!coeff)
+			goto err;
+
+		for (i = 0; i < count; i++) {
+			ret = of_property_read_u32_index(child,
+							 "coefficients",
+							 i, coeff + i);
+			if (ret)
+				coeff[i] = 1;
+		}
+
+		ret = of_property_read_u32_index(child, "coefficients",
+						 count, &offset);
+		if (ret)
+			offset = 0;
+
+		/* Make sure the coeff and offset won't cause an overflow */
+		ret = thermal_multi_sensor_validate_coeff(coeff, count, offset);
+		if (ret)
+			goto err_free_coeff;
+
+		ret = thermal_multi_sensor_register(child->name, tz,
+							 coeff[index]);
+		if (ret)
+			goto err_free_coeff;
+		kfree(coeff);
+	}
+
+	return 0;
+
+err_free_coeff:
+	kfree(coeff);
+err:
+	thermal_multi_sensor_unregister(tz);
+
+	return ret;
 }
 
 /**
@@ -527,6 +661,11 @@ static struct thermal_zone_device *thermal_of_zone_register(struct device_node *
 		thermal_of_zone_unregister(tz);
 		return ERR_PTR(ret);
 	}
+
+	/* Register the sensor to all other thermal zone referencing it */
+	ret = thermal_of_register_mutli_sensor(sensor, id, tz, np);
+	if (ret)
+		pr_warn("Failed to register a sensor to a multi sensor tz\n");
 
 	return tz;
 

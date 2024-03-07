@@ -138,6 +138,13 @@ ssize_t weight_show(struct device *, struct device_attribute *, char *);
 ssize_t weight_store(struct device *, struct device_attribute *, const char *,
 		     size_t);
 
+/* Multi sensors */
+int thermal_multi_sensor_validate_coeff(int *coeff, int count, int offset);
+int thermal_multi_sensor_register(const char *name,
+	struct thermal_zone_device *sensor_tz, int coeff);
+void thermal_multi_sensor_unregister(struct thermal_zone_device *sensor_tz);
+
+
 #ifdef CONFIG_THERMAL_STATISTICS
 void thermal_cooling_device_stats_update(struct thermal_cooling_device *cdev,
 					 unsigned long new_state);
