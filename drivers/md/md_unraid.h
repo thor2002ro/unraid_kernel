@@ -218,6 +218,7 @@ typedef struct mdp_superblock_v1_s {
 
 typedef struct mdk_rdev_s {
 	struct block_device     *bdev;	                  /* block device handle */
+    struct file *bdev_file; 		                  /* File handle from open for block device */
 
 	char *status;                                     /* disk status */
 	unsigned long           offset;		          /* disk offset in sectors */
