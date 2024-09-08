@@ -8,8 +8,6 @@
  * Interface between cpufreq drivers and the scheduler:
  */
 
-#define SCHED_CPUFREQ_IOWAIT	(1U << 0)
-
 #ifdef CONFIG_CPU_FREQ
 struct cpufreq_policy;
 
