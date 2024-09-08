@@ -31,6 +31,7 @@
 #include <asm/dma.h>
 #include <linux/aer.h>
 #include <linux/bitfield.h>
+#include <linux/sizes.h>
 #include "pci.h"
 
 DEFINE_MUTEX(pci_slot_mutex);
@@ -6493,7 +6494,12 @@ struct pci_dev __weak *pci_real_dma_dev(struct pci_dev *dev)
 
 resource_size_t __weak pcibios_default_alignment(void)
 {
-	return 0;
+	/*
+	 * Avoid MSI-X tables being mapped in the same 4k region as other data
+	 * according to PCIe 6.1 specification section 7.7.2 MSI-X Capability
+	 * and Table Structure.
+	 */
+	return max(SZ_4K, PAGE_SIZE);
 }
 
 /*
@@ -6573,7 +6579,7 @@ out:
 	return align;
 }
 
-static void pci_request_resource_alignment(struct pci_dev *dev, int bar,
+static bool pci_request_resource_alignment(struct pci_dev *dev, int bar,
 					   resource_size_t align, bool resize)
 {
 	struct resource *r = &dev->resource[bar];
@@ -6581,17 +6587,20 @@ static void pci_request_resource_alignment(struct pci_dev *dev, int bar,
 	resource_size_t size;
 
 	if (!(r->flags & IORESOURCE_MEM))
-		return;
+		return false;
 
 	if (r->flags & IORESOURCE_PCI_FIXED) {
 		pci_info(dev, "%s %pR: ignoring requested alignment %#llx\n",
 			 r_name, r, (unsigned long long)align);
-		return;
+		return false;
 	}
 
 	size = resource_size(r);
 	if (size >= align)
-		return;
+		return false;
+
+	if (!resize && (r->start > align) && !(r->start & (align - 1)))
+		return false;
 
 	/*
 	 * Increase the alignment of the resource.  There are two ways we
@@ -6634,6 +6643,8 @@ static void pci_request_resource_alignment(struct pci_dev *dev, int bar,
 		r->end = r->start + size - 1;
 	}
 	r->flags |= IORESOURCE_UNSET;
+
+	return true;
 }
 
 /*
@@ -6649,7 +6660,7 @@ void pci_reassigndev_resource_alignment(struct pci_dev *dev)
 	struct resource *r;
 	resource_size_t align;
 	u16 command;
-	bool resize = false;
+	bool resize = false, align_needed = false;
 
 	/*
 	 * VF BARs are read-only zero according to SR-IOV spec r1.1, sec
@@ -6671,12 +6682,22 @@ void pci_reassigndev_resource_alignment(struct pci_dev *dev)
 		return;
 	}
 
-	pci_read_config_word(dev, PCI_COMMAND, &command);
-	command &= ~PCI_COMMAND_MEMORY;
-	pci_write_config_word(dev, PCI_COMMAND, command);
+	for (i = 0; i <= PCI_ROM_RESOURCE; i++) {
+		bool ret;
 
-	for (i = 0; i <= PCI_ROM_RESOURCE; i++)
-		pci_request_resource_alignment(dev, i, align, resize);
+		ret = pci_request_resource_alignment(dev, i, align, resize);
+		align_needed = align_needed || ret;
+	}
+
+	if (!align_needed)
+		return;
+
+	pci_read_config_word(dev, PCI_COMMAND, &command);
+	if (command & PCI_COMMAND_MEMORY) {
+		dev->dev_flags |= PCI_DEV_FLAGS_MEMORY_ENABLE;
+		command &= ~PCI_COMMAND_MEMORY;
+		pci_write_config_word(dev, PCI_COMMAND, command);
+	}
 
 	/*
 	 * Need to disable bridge's resource window,
