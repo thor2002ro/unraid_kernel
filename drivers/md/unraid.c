@@ -779,7 +779,7 @@ static void copy_write_data(struct stripe_head *sh)
 	}
 }
 
-void rmw5_write_data(struct stripe_head *sh)
+static void rmw5_write_data(struct stripe_head *sh)
 {
 	int disks = sh->conf->disks, pd_idx = disks - 2, count, i;
 	void *dest, *ptr[MAX_XOR_BLOCKS];
