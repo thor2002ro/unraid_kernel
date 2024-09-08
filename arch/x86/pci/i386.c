@@ -246,6 +246,25 @@ struct pci_check_idx_range {
 	int end;
 };
 
+static void alloc_resource(struct pci_dev *dev, int idx, int pass)
+{
+	struct resource *r = &dev->resource[idx];
+
+	dev_dbg(&dev->dev, "BAR %d: reserving %pr (p=%d)\n", idx, r, pass);
+
+	if (pci_claim_resource(dev, idx) < 0) {
+		if (r->flags & IORESOURCE_PCI_FIXED) {
+			dev_info(&dev->dev, "BAR %d %pR is immovable\n",
+				 idx, r);
+		} else if (!(r->flags & IORESOURCE_STARTALIGN)) {
+			/* We'll assign a new address later */
+			pcibios_save_fw_addr(dev, idx, r->start);
+			r->end -= r->start;
+			r->start = 0;
+		}
+	}
+}
+
 static void pcibios_allocate_dev_resources(struct pci_dev *dev, int pass)
 {
 	int idx, disabled, i;
@@ -271,23 +290,8 @@ static void pcibios_allocate_dev_resources(struct pci_dev *dev, int pass)
 				disabled = !(command & PCI_COMMAND_IO);
 			else
 				disabled = !(command & PCI_COMMAND_MEMORY);
-			if (pass == disabled) {
-				dev_dbg(&dev->dev,
-					"BAR %d: reserving %pr (d=%d, p=%d)\n",
-					idx, r, disabled, pass);
-				if (pci_claim_resource(dev, idx) < 0) {
-					if (r->flags & IORESOURCE_PCI_FIXED) {
-						dev_info(&dev->dev, "BAR %d %pR is immovable\n",
-							 idx, r);
-					} else {
-						/* We'll assign a new address later */
-						pcibios_save_fw_addr(dev,
-								idx, r->start);
-						r->end -= r->start;
-						r->start = 0;
-					}
-				}
-			}
+			if (pass == disabled)
+				alloc_resource(dev, idx, pass);
 		}
 	if (!pass) {
 		r = &dev->resource[PCI_ROM_RESOURCE];
