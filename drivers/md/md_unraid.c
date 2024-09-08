@@ -1031,6 +1031,14 @@ static int do_run(mddev_t *mddev)
 {
 	mdp_super_t *sb = &mddev->sb;
 	int i, err;
+	struct queue_limits lim = {
+		.features		= BLK_FEAT_WRITE_CACHE | BLK_FEAT_FUA | BLK_FEAT_ROTATIONAL,
+		//.max_hw_sectors		= 256,
+		.max_write_zeroes_sectors	= 0,
+		.max_discard_sectors		= 0,
+
+		
+	};
 
 	/* lock the devices */
 	for (i = 0; i < MD_SB_DISKS; i++) {
@@ -1061,8 +1069,12 @@ static int do_run(mddev_t *mddev)
 		mdp_disk_t *disk = &sb->disks[i];
 
 		if (disk_active(disk) || disk_enabled(disk)) {
+			if (md_restrict & 1) {
+    				lim.max_hw_sectors = 512; // 256 orig // 256 sectors => 128K
+			}
+
 			int unit = disk->number;
-			struct gendisk *gd = blk_alloc_disk(NULL, NUMA_NO_NODE);
+			struct gendisk *gd = blk_alloc_disk(&lim, NUMA_NO_NODE);
 
 			mddev->gendisk[unit] = gd;
 
@@ -1077,26 +1089,26 @@ static int do_run(mddev_t *mddev)
 			/* capacity in 512-byte sectors */
 			set_capacity(gd, disk->size * 2);
 
-			blk_set_stacking_limits(&gd->queue->limits);
-			blk_queue_write_cache(gd->queue, true, true);
+			//blk_set_stacking_limits(&gd->queue->limits);
+			//blk_queue_write_cache(gd->queue, true, true);
 
 			//blk_queue_io_min(gd->queue, PAGE_SIZE);
 			//blk_queue_io_opt(gd->queue, 128 * 1024);
 			//gd->queue->backing_dev_info->ra_pages = (128*1024)/PAGE_SIZE;
 
-			if (md_restrict & 1)
-				blk_queue_max_hw_sectors(gd->queue, 256);  /* 256 sectors => 128K */
+			// if (md_restrict & 1)
+			// 	blk_queue_max_hw_sectors(gd->queue, 256);  /* 256 sectors => 128K */
 
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(5,17,99)
 			blk_queue_max_write_same_sectors(gd->queue, 0);
 #endif
-			blk_queue_max_write_zeroes_sectors(gd->queue, 0);
-			blk_queue_max_discard_sectors(gd->queue, 0);
+			//blk_queue_max_write_zeroes_sectors(gd->queue, 0);
+			//blk_queue_max_discard_sectors(gd->queue, 0);
 
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(5,18,99)
 			blk_queue_flag_clear(QUEUE_FLAG_DISCARD, gd->queue);
 #endif
-			blk_queue_flag_clear(QUEUE_FLAG_NONROT, gd->queue);
+			//blk_queue_flag_clear(QUEUE_FLAG_NONROT, gd->queue);
 
 			err = add_disk(gd);
 			if (err) {
