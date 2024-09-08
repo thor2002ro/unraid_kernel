@@ -202,7 +202,7 @@ static inline unsigned long get_seconds(void)
 /* Open the indicated file and read size bytes into the buffer; then close the file.
  * Returns count of bytes read, which should equal size, upon success.
  */
-int read_file(char *filename, void *buffer, int size)
+static int read_file(char *filename, void *buffer, int size)
 {
 	int retval = 0;
 
@@ -226,7 +226,7 @@ int read_file(char *filename, void *buffer, int size)
 /* Open the indicated file and write size bytes from the buffer; then close the file.
  * Returns count of bytes written, which should equal size, upon success.
  */
-int write_file(char *filename, void *buffer, int size)
+static int write_file(char *filename, void *buffer, int size)
 {
 	int retval = 0;
 
@@ -280,7 +280,7 @@ static unsigned int calc_sb_csum(mdp_super_t * sb)
  */
 
 /* remove all embedded spaces, replacing with single underscore */
-char *strcat_sb_old_id(char *tar, char *src, int len)
+static char *strcat_sb_old_id(char *tar, char *src, int len)
 {
 	int space = 0;
 	int i;
@@ -462,7 +462,7 @@ static int import_device(mdk_rdev_t *rdev, char *name,
                          unsigned long offset, unsigned long long size,
                          int erased, char *id, mddev_t *mddev, int unit)
 {
-	struct block_device *bdev;
+	//struct block_device *bdev;
 	int err = 0;
 
 	memset(rdev, 0, sizeof(mdk_rdev_t));
@@ -566,14 +566,14 @@ static inline mddev_t *dev_to_mddev(dev_t dev)
 	return mddev_map[0];
 }
 
-void add_mddev_mapping(mddev_t *mddev)
+static void add_mddev_mapping(mddev_t *mddev)
 {
 	BUG_ON(mddev_map[0] != NULL);
 
 	mddev_map[0] = mddev;
 }
 
-void del_mddev_mapping(mddev_t *mddev)
+static void del_mddev_mapping(mddev_t *mddev)
 {
 	BUG_ON(mddev_map[0] != mddev);
 
@@ -1181,7 +1181,7 @@ void md_sync_done(mddev_t *mddev, sector_t sector, int count)
 #define SYNC_MARKS	10
 #define	SYNC_MARK_STEP	(3*HZ)
 
-int md_do_sync(mddev_t *mddev)
+static int md_do_sync(mddev_t *mddev)
 {
 	unsigned long start_time, last_mark;
 	unsigned long mark[SYNC_MARKS];
@@ -1910,7 +1910,7 @@ static int md_status(struct seq_file *seq, dev_t array_dev)
  */
 
 /* Caution: modifies the input buffer. */
-char *get_token(char **bufp, char *delim) {
+static char *get_token(char **bufp, char *delim) {
 	char *ptr = *bufp;
 	char *token;
 
@@ -2179,7 +2179,7 @@ static int md_seq_open(struct inode *inode, struct file *file)
 	return single_open(file, md_seq_show, NULL);
 }
 
-int md_seq_release(struct inode *inode, struct file *file)
+static int md_seq_release(struct inode *inode, struct file *file)
 {
 	return single_release(inode, file);
 }
