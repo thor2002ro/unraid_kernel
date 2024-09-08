@@ -64,7 +64,7 @@ extern void (*raid6_xor_syndrome)(int, int, int, size_t, void **);
  * Different patchlevel versions are downward and upward compatible.
  */
 #define MD_MAJOR_VERSION                2
-#define MD_MINOR_VERSION                9
+#define MD_MINOR_VERSION		9
 static int MD_PATCHLEVEL_VERSION = 		27;
 
 /****************************************************************************/
@@ -317,5 +317,6 @@ extern int unraid_num_stripes(mddev_t *mddev, int num_stripes);
 extern void unraid_make_request(mddev_t *mddev, int unit, struct bio *bi);
 
 /****************************************************************************/
+
 #endif
 
