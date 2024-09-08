@@ -1303,8 +1303,10 @@ static inline void alloc_resource(struct pci_dev *dev, int idx)
 			pr_debug("PCI:  parent is %p: %pR\n", pr, pr);
 		/* We'll assign a new address later */
 		r->flags |= IORESOURCE_UNSET;
-		r->end -= r->start;
-		r->start = 0;
+		if (!(r->flags & IORESOURCE_STARTALIGN)) {
+			r->end -= r->start;
+			r->start = 0;
+		}
 	}
 }
 
