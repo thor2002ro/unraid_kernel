@@ -1361,6 +1361,7 @@ static int cpufreq_online(unsigned int cpu)
 	bool new_policy;
 	unsigned long flags;
 	unsigned int j;
+	u32 init_min_freq = FREQ_QOS_MIN_DEFAULT_VALUE;
 	int ret;
 
 	pr_debug("%s: bringing CPU%u online\n", __func__, cpu);
@@ -1445,9 +1446,12 @@ static int cpufreq_online(unsigned int cpu)
 			goto out_destroy_policy;
 		}
 
+		if (cpufreq_driver->get_init_min_freq)
+			init_min_freq = cpufreq_driver->get_init_min_freq(policy);
+
 		ret = freq_qos_add_request(&policy->constraints,
 					   policy->min_freq_req, FREQ_QOS_MIN,
-					   FREQ_QOS_MIN_DEFAULT_VALUE);
+					   init_min_freq);
 		if (ret < 0) {
 			/*
 			 * So we don't call freq_qos_remove_request() for an

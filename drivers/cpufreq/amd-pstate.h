@@ -28,7 +28,7 @@ struct amd_aperf_mperf {
 /**
  * struct amd_cpudata - private CPU data for AMD P-State
  * @cpu: CPU number
- * @req: constraint request to apply
+ * @max_freq_req: maximum frequency constraint request to apply
  * @cppc_req_cached: cached performance request hints
  * @highest_perf: the maximum performance an individual processor may reach,
  *		  assuming ideal conditions
@@ -68,7 +68,7 @@ struct amd_aperf_mperf {
 struct amd_cpudata {
 	int	cpu;
 
-	struct	freq_qos_request req[2];
+	struct	freq_qos_request max_freq_req;
 	u64	cppc_req_cached;
 
 	u32	highest_perf;

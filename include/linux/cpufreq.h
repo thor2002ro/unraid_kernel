@@ -414,6 +414,12 @@ struct cpufreq_driver {
 	 * policy is properly initialized, but before the governor is started.
 	 */
 	void		(*register_em)(struct cpufreq_policy *policy);
+
+	/*
+	 * Set by drivers that want to initialize the policy->min_freq_req with
+	 * a value different from the default value (0) in cpufreq core.
+	 */
+	int		(*get_init_min_freq)(struct cpufreq_policy *policy);
 };
 
 /* flags */
