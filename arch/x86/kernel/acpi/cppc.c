@@ -217,6 +217,12 @@ int amd_detect_prefcore(bool *detected)
 }
 EXPORT_SYMBOL_GPL(amd_detect_prefcore);
 
+static void amd_do_get_core_type(void *data)
+{
+	enum amd_core_type *core_type = data;
+	*core_type = amd_get_core_type();
+}
+
 /**
  * amd_get_boost_ratio_numerator: Get the numerator to use for boost ratio calculation
  * @cpu: CPU to get numerator for.
@@ -234,7 +240,9 @@ EXPORT_SYMBOL_GPL(amd_detect_prefcore);
  */
 int amd_get_boost_ratio_numerator(unsigned int cpu, u64 *numerator)
 {
+	enum amd_core_type core_type;
 	bool prefcore;
+	u32 tmp;
 	int ret;
 
 	ret = amd_detect_prefcore(&prefcore);
@@ -261,6 +269,28 @@ int amd_get_boost_ratio_numerator(unsigned int cpu, u64 *numerator)
 			break;
 		}
 	}
+
+	/* detect if running on heterogeneous design */
+	smp_call_function_single(cpu, amd_do_get_core_type, &core_type, 1);
+	switch (core_type) {
+	case CPU_CORE_TYPE_NO_HETERO_SUP:
+		break;
+	case CPU_CORE_TYPE_PERFORMANCE:
+		/* use the max scale for performance cores */
+		*numerator = CPPC_HIGHEST_PERF_PERFORMANCE;
+		return 0;
+	case CPU_CORE_TYPE_EFFICIENCY:
+		/* use the highest perf value for efficiency cores */
+		ret = amd_get_highest_perf(cpu, &tmp);
+		if (ret)
+			return ret;
+		*numerator = tmp;
+		return 0;
+	default:
+		pr_warn("WARNING: Undefined core type %d found\n", core_type);
+		break;
+	}
+
 	*numerator = CPPC_HIGHEST_PERF_PREFCORE;
 
 	return 0;
