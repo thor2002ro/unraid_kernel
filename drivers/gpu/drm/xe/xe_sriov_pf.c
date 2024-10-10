@@ -4,7 +4,9 @@
  */
 
 #include <drm/drm_managed.h>
+#include <linux/pci.h>
 
+#include "regs/xe_bars.h"
 #include "xe_assert.h"
 #include "xe_device.h"
 #include "xe_module.h"
@@ -80,7 +82,13 @@ bool xe_sriov_pf_readiness(struct xe_device *xe)
  */
 int xe_sriov_pf_init_early(struct xe_device *xe)
 {
+	int err;
+
 	xe_assert(xe, IS_SRIOV_PF(xe));
+
+	err = pci_iov_resource_extend(to_pci_dev(xe->drm.dev), VF_LMEM_BAR, true);
+	if (err)
+		xe_sriov_info(xe, "Failed to extend VF LMEM BAR: %d", err);
 
 	return drmm_mutex_init(&xe->drm, &xe->sriov.pf.master_lock);
 }

@@ -7,6 +7,7 @@
  * Copyright (C) 2009 Intel Corporation, Yu Zhao <yu.zhao@intel.com>
  */
 
+#include <linux/bitfield.h>
 #include <linux/pci.h>
 #include <linux/slab.h>
 #include <linux/export.h>
@@ -152,6 +153,106 @@ resource_size_t pci_iov_resource_size(struct pci_dev *dev, int resno)
 
 	return dev->sriov->barsz[resno - PCI_IOV_RESOURCES];
 }
+
+void pci_iov_resource_set_size(struct pci_dev *dev, int resno, resource_size_t size)
+{
+	if (!pci_resource_is_iov(resno)) {
+		pci_warn(dev, "%s is not an IOV resource\n",
+			 pci_resource_name(dev, resno));
+		return;
+	}
+
+	dev->sriov->barsz[resno - PCI_IOV_RESOURCES] = size;
+}
+
+bool pci_iov_is_memory_decoding_enabled(struct pci_dev *dev)
+{
+	u16 cmd;
+
+	pci_read_config_word(dev, dev->sriov->pos + PCI_SRIOV_CTRL, &cmd);
+
+	return cmd & PCI_SRIOV_CTRL_MSE;
+}
+
+static void pci_iov_resource_do_extend(struct pci_dev *dev, int resno, u16 num_vfs)
+{
+	resource_size_t size;
+	int ret, old, i;
+	u32 sizes;
+
+	pci_config_pm_runtime_get(dev);
+
+	if (pci_iov_is_memory_decoding_enabled(dev)) {
+		ret = -EBUSY;
+		goto err;
+	}
+
+	sizes = pci_rebar_get_possible_sizes(dev, resno);
+	if (!sizes) {
+		ret = -ENOTSUPP;
+		goto err;
+	}
+
+	old = pci_rebar_get_current_size(dev, resno);
+	if (old < 0) {
+		ret = old;
+		goto err;
+	}
+
+	while (sizes > 0) {
+		i = __fls(sizes);
+		size = pci_rebar_size_to_bytes(i);
+		if (size * num_vfs <= pci_resource_len(dev, resno)) {
+			if (i != old) {
+				ret = pci_rebar_set_size(dev, resno, size);
+				if (ret)
+					goto err;
+
+				pci_iov_resource_set_size(dev, resno, size);
+				pci_iov_update_resource(dev, resno);
+			}
+			break;
+		}
+		sizes &= ~BIT(i);
+	}
+
+	pci_config_pm_runtime_put(dev);
+
+	return;
+
+err:
+	pci_warn(dev, "Failed to extend %s: %d\n",
+		 pci_resource_name(dev, resno), ret);
+
+	pci_config_pm_runtime_put(dev);
+}
+
+static void pci_iov_resource_do_restore(struct pci_dev *dev, int resno)
+{
+	if (dev->sriov->rebar_extend[resno - PCI_IOV_RESOURCES])
+		pci_iov_resource_do_extend(dev, resno, dev->sriov->total_VFs);
+}
+
+int pci_iov_resource_extend(struct pci_dev *dev, int resno, bool enable)
+{
+	if (!pci_resource_is_iov(resno)) {
+		pci_warn(dev, "%s is not an IOV resource\n",
+			 pci_resource_name(dev, resno));
+
+		return -ENODEV;
+	}
+
+	if (!pci_rebar_get_possible_sizes(dev, resno))
+		return -ENOTSUPP;
+
+	if (!enable)
+		pci_iov_resource_do_restore(dev, resno);
+
+	dev->sriov->rebar_extend[resno - PCI_IOV_RESOURCES] = enable;
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(pci_iov_resource_extend);
 
 static void pci_read_vf_config_common(struct pci_dev *virtfn)
 {
@@ -417,7 +518,7 @@ static ssize_t sriov_numvfs_store(struct device *dev,
 				  const char *buf, size_t count)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
-	int ret = 0;
+	int i, ret = 0;
 	u16 num_vfs;
 
 	if (kstrtou16(buf, 0, &num_vfs) < 0)
@@ -457,6 +558,11 @@ static ssize_t sriov_numvfs_store(struct device *dev,
 			 pdev->sriov->num_VFs, num_vfs);
 		ret = -EBUSY;
 		goto exit;
+	}
+
+	for (i = 0; i < PCI_SRIOV_NUM_BARS; i++) {
+		if (pdev->sriov->rebar_extend[i])
+			pci_iov_resource_do_extend(pdev, i + PCI_IOV_RESOURCES, num_vfs);
 	}
 
 	ret = pdev->driver->sriov_configure(pdev, num_vfs);
@@ -853,13 +959,42 @@ failed:
 
 static void sriov_release(struct pci_dev *dev)
 {
+	int i;
+
 	BUG_ON(dev->sriov->num_VFs);
+
+	for (i = 0; i < PCI_SRIOV_NUM_BARS; i++)
+		pci_iov_resource_do_restore(dev, i + PCI_IOV_RESOURCES);
 
 	if (dev != dev->sriov->dev)
 		pci_dev_put(dev->sriov->dev);
 
 	kfree(dev->sriov);
 	dev->sriov = NULL;
+}
+
+static void sriov_restore_vf_rebar_state(struct pci_dev *dev)
+{
+	unsigned int pos, nbars, i;
+	u32 ctrl;
+
+	pos = pci_find_ext_capability(dev, PCI_EXT_CAP_ID_VF_REBAR);
+	if (!pos)
+		return;
+
+	pci_read_config_dword(dev, pos + PCI_REBAR_CTRL, &ctrl);
+	nbars = FIELD_GET(PCI_REBAR_CTRL_NBAR_MASK, ctrl);
+
+	for (i = 0; i < nbars; i++, pos += 8) {
+		int bar_idx, size;
+
+		pci_read_config_dword(dev, pos + PCI_REBAR_CTRL, &ctrl);
+		bar_idx = ctrl & PCI_REBAR_CTRL_BAR_IDX;
+		size = pci_rebar_bytes_to_size(dev->sriov->barsz[bar_idx]);
+		ctrl &= ~PCI_REBAR_CTRL_BAR_SIZE;
+		ctrl |= FIELD_PREP(PCI_REBAR_CTRL_BAR_SIZE, size);
+		pci_write_config_dword(dev, pos + PCI_REBAR_CTRL, ctrl);
+	}
 }
 
 static void sriov_restore_state(struct pci_dev *dev)
@@ -1021,8 +1156,10 @@ resource_size_t pci_sriov_resource_alignment(struct pci_dev *dev, int resno)
  */
 void pci_restore_iov_state(struct pci_dev *dev)
 {
-	if (dev->is_physfn)
+	if (dev->is_physfn) {
+		sriov_restore_vf_rebar_state(dev);
 		sriov_restore_state(dev);
+	}
 }
 
 /**
