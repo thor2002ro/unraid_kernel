@@ -320,7 +320,7 @@ struct dma_fence *amdgpu_job_submit(struct amdgpu_job *job)
 {
 	struct dma_fence *f;
 
-	drm_sched_job_arm(&job->base);
+	drm_sched_job_arm(&job->base, -1);
 	f = dma_fence_get(&job->base.s_fence->finished);
 	amdgpu_job_free_resources(job);
 	drm_sched_entity_push_job(&job->base);

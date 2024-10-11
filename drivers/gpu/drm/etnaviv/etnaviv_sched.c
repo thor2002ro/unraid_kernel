@@ -107,7 +107,7 @@ int etnaviv_sched_push_job(struct etnaviv_gem_submit *submit)
 	 */
 	mutex_lock(&gpu->sched_lock);
 
-	drm_sched_job_arm(&submit->sched_job);
+	drm_sched_job_arm(&submit->sched_job, -1);
 
 	submit->out_fence = dma_fence_get(&submit->sched_job.s_fence->finished);
 	ret = xa_alloc_cyclic(&gpu->user_fences, &submit->out_fence_id,

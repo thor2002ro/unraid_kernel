@@ -301,7 +301,7 @@ int panfrost_job_push(struct panfrost_job *job)
 		return ret;
 
 	mutex_lock(&pfdev->sched_lock);
-	drm_sched_job_arm(&job->base);
+	drm_sched_job_arm(&job->base, -1);
 
 	job->render_done_fence = dma_fence_get(&job->base.s_fence->finished);
 

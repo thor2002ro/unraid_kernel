@@ -1276,6 +1276,7 @@ static void amdgpu_cs_post_dependencies(struct amdgpu_cs_parser *p)
 static int amdgpu_cs_submit(struct amdgpu_cs_parser *p,
 			    union drm_amdgpu_cs *cs)
 {
+	struct drm_amdgpu_cs_chunk_ib *chunk_ib = p->chunks[0].kdata;
 	struct amdgpu_fpriv *fpriv = p->filp->driver_priv;
 	struct amdgpu_job *leader = p->gang_leader;
 	struct amdgpu_bo_list_entry *e;
@@ -1285,8 +1286,12 @@ static int amdgpu_cs_submit(struct amdgpu_cs_parser *p,
 	uint64_t seq;
 	int r;
 
-	for (i = 0; i < p->gang_size; ++i)
-		drm_sched_job_arm(&p->jobs[i]->base);
+	for (i = 0; i < p->gang_size; ++i) {
+		if (amdgpu_ring_id_schedule)
+			drm_sched_job_arm(&p->jobs[i]->base, chunk_ib->ring);
+		else
+			drm_sched_job_arm(&p->jobs[i]->base, -1);
+	}
 
 	for (i = 0; i < p->gang_size; ++i) {
 		struct dma_fence *fence;

@@ -824,13 +824,13 @@ EXPORT_SYMBOL(drm_sched_job_init);
  *
  * This can only be called if drm_sched_job_init() succeeded.
  */
-void drm_sched_job_arm(struct drm_sched_job *job)
+void drm_sched_job_arm(struct drm_sched_job *job, int ring)
 {
 	struct drm_gpu_scheduler *sched;
 	struct drm_sched_entity *entity = job->entity;
 
 	BUG_ON(!entity);
-	drm_sched_entity_select_rq(entity);
+	drm_sched_entity_select_rq(entity, ring);
 	sched = entity->rq->sched;
 
 	job->sched = sched;

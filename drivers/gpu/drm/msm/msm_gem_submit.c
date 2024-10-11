@@ -831,7 +831,7 @@ int msm_ioctl_gem_submit(struct drm_device *dev, void *data,
 		goto out;
 	}
 
-	drm_sched_job_arm(&submit->base);
+	drm_sched_job_arm(&submit->base, -1);
 
 	submit->user_fence = dma_fence_get(&submit->base.s_fence->finished);
 
