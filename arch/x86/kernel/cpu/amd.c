@@ -1204,3 +1204,32 @@ void amd_check_microcode(void)
 
 	on_each_cpu(zenbleed_check_cpu, NULL, 1);
 }
+
+/**
+ * amd_get_core_type - Heterogeneous core type identification
+ *
+ * Returns the CPU type [31:28] (i.e., performance or efficient) of
+ * a CPU in the processor.
+ *
+ * If the processor has no core type support, returns
+ * CPU_CORE_TYPE_NO_HETERO_SUP.
+ */
+enum amd_core_type amd_get_core_type(void)
+{
+	struct {
+		u32  num_processors             :16,
+		     power_efficiency_ranking   :8,
+		     native_model_id            :4,
+		     core_type                  :4;
+	} props;
+
+	if (!cpu_feature_enabled(X86_FEATURE_HETERO_CORE_TOPOLOGY))
+		return CPU_CORE_TYPE_NO_HETERO_SUP;
+
+	cpuid_leaf_reg(0x80000026, CPUID_EBX, &props);
+	if (props.core_type >= CPU_CORE_TYPE_UNDEFINED)
+		return CPU_CORE_TYPE_UNDEFINED;
+
+	return props.core_type;
+}
+EXPORT_SYMBOL_GPL(amd_get_core_type);
