@@ -44,7 +44,7 @@
 #ifdef CONFIG_KMOD
 #include <linux/kmod.h>
 #endif
-#include <asm/unaligned.h>
+//#include <asm/unaligned.h>
 #include <linux/hdreg.h>
 #include <linux/ata.h>
 #include <net/checksum.h>
