@@ -220,7 +220,6 @@ int amdgpu_reset_method = -1; /* auto */
 int amdgpu_num_kcq = -1;
 int amdgpu_smartshift_bias;
 int amdgpu_use_xgmi_p2p = 1;
-int amdgpu_ring_id_schedule = 0;
 int amdgpu_vcnfw_log;
 int amdgpu_sg_display = -1; /* auto */
 int amdgpu_user_partt_mode = AMDGPU_AUTO_COMPUTE_PARTITION_MODE;
@@ -745,13 +744,6 @@ MODULE_PARM_DESC(use_xgmi_p2p,
 	"Enable XGMI P2P interface (0 = disable; 1 = enable (default))");
 module_param_named(use_xgmi_p2p, amdgpu_use_xgmi_p2p, int, 0444);
 
-/**
- * DOC: ring_id_schedule (int)
- * Enables/disables ring id schedule interface (0 = disable, 1 = enable, -1 auto (default))
- */
-MODULE_PARM_DESC(ring_id_schedule,
-	"Enable ring id schedule interface(0 = disable, 1 = enable, -1 auto (default))");
-module_param_named(ring_id_schedule, amdgpu_ring_id_schedule, int, 0644);
 
 #ifdef CONFIG_HSA_AMD
 /**

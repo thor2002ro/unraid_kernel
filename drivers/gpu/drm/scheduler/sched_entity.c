@@ -527,7 +527,7 @@ struct drm_sched_job *drm_sched_entity_pop_job(struct drm_sched_entity *entity)
 	return sched_job;
 }
 
-void drm_sched_entity_select_rq(struct drm_sched_entity *entity, int ring)
+void drm_sched_entity_select_rq(struct drm_sched_entity *entity)
 {
 	struct dma_fence *fence;
 	struct drm_gpu_scheduler *sched;
@@ -556,14 +556,7 @@ void drm_sched_entity_select_rq(struct drm_sched_entity *entity, int ring)
 		return;
 
 	spin_lock(&entity->rq_lock);
-	if(ring >= 0) {
-		if(entity->sched_list[ring] && entity->sched_list[ring]->ready)
-			sched = entity->sched_list[ring];
-		else
-			sched = drm_sched_pick_best(entity->sched_list, entity->num_sched_list);
-	}
-	else
-		sched = drm_sched_pick_best(entity->sched_list, entity->num_sched_list);
+	sched = drm_sched_pick_best(entity->sched_list, entity->num_sched_list);
 	rq = sched ? sched->sched_rq[entity->priority] : NULL;
 	if (rq != entity->rq) {
 		drm_sched_rq_remove_entity(entity->rq, entity);

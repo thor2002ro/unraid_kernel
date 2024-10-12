@@ -211,7 +211,7 @@ fail_deps:
 static void
 v3d_push_job(struct v3d_job *job)
 {
-	drm_sched_job_arm(&job->base, -1);
+	drm_sched_job_arm(&job->base);
 
 	job->done_fence = dma_fence_get(&job->base.s_fence->finished);
 

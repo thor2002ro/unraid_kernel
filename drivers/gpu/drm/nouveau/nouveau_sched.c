@@ -309,7 +309,7 @@ nouveau_job_submit(struct nouveau_job *job)
 	list_add(&job->entry, &sched->job.list.head);
 	spin_unlock(&sched->job.list.lock);
 
-	drm_sched_job_arm(&job->base, -1);
+	drm_sched_job_arm(&job->base);
 	job->done_fence = dma_fence_get(&job->base.s_fence->finished);
 	if (job->sync)
 		done_fence = dma_fence_get(job->done_fence);

@@ -1115,7 +1115,7 @@ int pvr_queue_job_init(struct pvr_job *job)
  */
 struct dma_fence *pvr_queue_job_arm(struct pvr_job *job)
 {
-	drm_sched_job_arm(&job->base, -1);
+	drm_sched_job_arm(&job->base);
 
 	return &job->base.s_fence->finished;
 }
