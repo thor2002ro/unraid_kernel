@@ -1070,7 +1070,7 @@ static int do_run(mddev_t *mddev)
 
 		if (disk_active(disk) || disk_enabled(disk)) {
 			if (md_restrict & 1) {
-    				lim.max_hw_sectors = 256; // 256 orig // 256 sectors => 128K
+    				lim.max_hw_sectors = 512; // 256 orig // 256 sectors => 128K
 			}
 
 			int unit = disk->number;
