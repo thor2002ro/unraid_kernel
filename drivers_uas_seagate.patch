@@ -1,0 +1,13 @@
+--- a/drivers/usb/storage/uas-detect.h   2024-07-22 10:51:22.475527265 -0700
++++ b/drivers/usb/storage/uas-detect.h   2024-07-22 11:03:43.705804118 -0700
+--- uas-detect.h.orig	2024-07-22 11:13:22.395190854 -0700
++++ uas-detect.h	2024-07-22 11:20:00.163723235 -0700
+@@ -114,7 +114,7 @@
+ 
+ 	/* All Seagate disk enclosures have broken ATA pass-through support */
+ 	if (le16_to_cpu(udev->descriptor.idVendor) == 0x0bc2)
+-		flags |= US_FL_NO_ATA_1X;
++		flags |= (US_FL_NO_ATA_1X | US_FL_IGNORE_UAS); /* limetech - bind none of them to uas driver */
+ 
+ 	/*
+ 	 * RTL9210-based enclosure from HIKSEMI, MD202 reportedly have issues
