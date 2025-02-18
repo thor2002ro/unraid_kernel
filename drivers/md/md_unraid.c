@@ -639,7 +639,7 @@ static mddev_t *alloc_mddev(dev_t dev)
 	sb->num_disks = 2;
 
 	/* initialize */
-	mddev->state = NO_DATA_DISKS;
+	mddev->state = STOPPED;
 	mddev->num_disks = 0;
 	mddev->num_disabled = 0;
 	mddev->num_replaced = 0;
@@ -819,7 +819,7 @@ static int import_slot(dev_t array_dev, int slot, char *name,
 	mddev->state = STOPPED;
 
 	/* verify at least one data disk assigned */
-	if (sb->num_disks == 2) {
+        if (mddev->num_disks & (sb->num_disks == 2)) {
 		mddev->state = NO_DATA_DISKS;
 	}
 	else
@@ -908,34 +908,34 @@ int md_write_error(mddev_t *mddev, int disk_number, sector_t sector)
 
 	if (disk_active(disk)) {
 		/* an active array disk failed */
-		if (disk_enabled(disk) && (mddev->num_disabled < 2)) {
-			/* mark the failing disk "not enabled" and "not valid" */
-			rdev->status = DISK_DSBL;
-
-			mark_disk_disabled(disk);
-			mddev->num_disabled++;
-
-			if (disk_valid(disk)) {
-				mark_disk_invalid(disk);
-				mddev->num_invalid++;
-
-				if (mddev->num_disabled == 2) {
-					/* stop recovery if it's running */
-					md_interrupt_thread(mddev->recovery_thread);
-				}
-			}
-			else {
-				/* failure of disk being rebuilt */
-				if (mddev->num_invalid == mddev->num_disabled) {
-					/* stop recovery if it's running */
-					md_interrupt_thread(mddev->recovery_thread);
-				}
-			}
-
-			/* config changed */
-			update_sb++;
-		}
-	}
+                if (disk_enabled(disk) && (mddev->num_disabled < 2)) {
+                        /* if a replacement disk that failed */
+                        if (!disk_valid(disk)) {
+                                /* mark the disk disabled again */
+                                rdev->status = DISK_DSBL;
+                                mark_disk_disabled(disk);
+                                mddev->num_disabled++;
+                                /* stop recovery if it's running */
+                                md_interrupt_thread(mddev->recovery_thread);
+                                /* config changed */
+                                update_sb++;
+                        }
+                        else if (mddev->num_invalid < 2) {
+                                /* mark the failing disk disabled and "not valid" */
+                                rdev->status = DISK_DSBL;
+                                mark_disk_disabled(disk);
+                                mddev->num_disabled++;
+                                mark_disk_invalid(disk);
+                                mddev->num_invalid++;
+                                if (mddev->num_disabled == 2) {
+                                        /* stop recovery if it's running */
+                                        md_interrupt_thread(mddev->recovery_thread);
+                                }
+                                /* config changed */
+                                update_sb++;
+                        }
+                }
+        }
 	else {
 		if (disk_enabled(disk)) {
 			/* must be a disk we're clearing */
@@ -1547,10 +1547,12 @@ static int start_array(dev_t array_dev, char *state)
 	}
 
 	/* gitty up */
+        if (sb->num_disks > 2) {
 	err = do_run(mddev);
 	if (err) {
 		do_stop(mddev);
 		return err;
+                }
 	}
 
 	mddev->state = STARTED;
@@ -1571,10 +1573,6 @@ static int stop_array(dev_t array_dev, int notifier)
 	mddev_t *mddev = dev_to_mddev(array_dev);
 	int active;
 
-	if (!mddev->private) {
-		printk("md: stop_array: not started\n");
-		return -EINVAL;
-	}
 
 	/* check if still in use */
 	active = atomic_read(&mddev->active);
@@ -1589,7 +1587,9 @@ static int stop_array(dev_t array_dev, int notifier)
 	mutex_unlock(&mddev->recovery_sem);
 	mddev->curr_resync = 0;
 
+	if (mddev->private) {
 	do_stop(mddev);
+        }
 	mddev->state = STOPPED;
 
 	return 0;
@@ -1604,10 +1604,15 @@ static int stop_array(dev_t array_dev, int notifier)
 static int check_array(dev_t array_dev, char *option, unsigned long long offset)
 {
 	mddev_t *mddev = dev_to_mddev(array_dev);
+	mdp_super_t *sb = &mddev->sb;
 	int recovery_option, recovery_resume;
 
 	if (!mddev->private) {
 		printk("md: check_array: not started\n");
+		return -EINVAL;
+	}
+	if (sb->num_disks <= 2) {
+		printk("md: check_array: no devices\n");
 		return -EINVAL;
 	}
 
@@ -1802,7 +1807,7 @@ static void status_resync(mddev_t *mddev)
 			}
 		}
 	}
-	else {
+	else if (sb->num_disks > 2) {
 		/* read all data disks and check P and/or Q if present */
 		/* note: if it's a single disabled data disk we are really just checking Q
 		 * because check_parity() will generate D from P and then check Q.
