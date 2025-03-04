@@ -818,8 +818,8 @@ static int import_slot(dev_t array_dev, int slot, char *name,
 	/* assume we're just stopped */
 	mddev->state = STOPPED;
 
-	/* verify at least one data disk assigned */
-        if (mddev->num_disks & (sb->num_disks == 2)) {
+	/* maybe parity assigned but no data disks */
+        if (mddev->num_disks && (sb->num_disks == 2)) {
 		mddev->state = NO_DATA_DISKS;
 	}
 	else
