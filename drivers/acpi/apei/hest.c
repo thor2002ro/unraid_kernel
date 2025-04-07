@@ -22,6 +22,7 @@
 #include <linux/kdebug.h>
 #include <linux/highmem.h>
 #include <linux/io.h>
+#include <linux/pci.h>
 #include <linux/platform_device.h>
 #include <acpi/apei.h>
 #include <acpi/ghes.h>
@@ -132,9 +133,58 @@ static bool is_ghes_assist_struct(struct acpi_hest_header *hest_hdr)
 	return false;
 }
 
-typedef int (*apei_hest_func_t)(struct acpi_hest_header *hest_hdr, void *data);
+static bool hest_match_pci_devfn(struct acpi_hest_aer_common *p, struct pci_dev *dev)
+{
+	return ACPI_HEST_SEGMENT(p->bus) == pci_domain_nr(dev->bus) &&
+	       ACPI_HEST_BUS(p->bus)     == dev->bus->number &&
+	       p->device                 == PCI_SLOT(dev->devfn) &&
+	       p->function               == PCI_FUNC(dev->devfn);
+}
 
-static int apei_hest_parse(apei_hest_func_t func, void *data)
+static bool hest_source_is_pcie_aer(struct acpi_hest_header *hest_hdr, struct pci_dev *dev)
+{
+	u16 hest_type = hest_hdr->type;
+	u8 pcie_type = pci_pcie_type(dev);
+	struct acpi_hest_aer_common *common = (struct acpi_hest_aer_common *)(hest_hdr + 1);
+
+	switch (hest_type) {
+	case ACPI_HEST_TYPE_AER_ROOT_PORT:
+		if (pcie_type != PCI_EXP_TYPE_ROOT_PORT)
+			return false;
+		break;
+	case ACPI_HEST_TYPE_AER_ENDPOINT:
+		if (pcie_type != PCI_EXP_TYPE_ENDPOINT)
+			return false;
+		break;
+	case ACPI_HEST_TYPE_AER_BRIDGE:
+		if (pcie_type != PCI_EXP_TYPE_PCI_BRIDGE && pcie_type != PCI_EXP_TYPE_PCIE_BRIDGE)
+			return false;
+		break;
+	default:
+		return false;
+	}
+
+	if (common->flags & ACPI_HEST_GLOBAL)
+		return true;
+
+	if (hest_match_pci_devfn(common, dev))
+		return true;
+
+	return false;
+}
+
+int hest_parse_pcie_aer(struct acpi_hest_header *hest_hdr, void *data)
+{
+	struct hest_parse_aer_info *info = data;
+
+	info->data = (void *)hest_hdr;
+	if (!hest_source_is_pcie_aer(hest_hdr, info->pci_dev))
+		return 0;
+	else
+		return 1;
+}
+
+int apei_hest_parse(apei_hest_func_t func, void *data)
 {
 	struct acpi_hest_header *hest_hdr;
 	int i, rc, len;
