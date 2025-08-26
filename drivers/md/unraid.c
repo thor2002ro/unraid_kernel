@@ -737,7 +737,7 @@ static void raid5_generate_d(struct stripe_head *sh, int dd_idx)
 		BUG_ON(!buff_uptodate(col));
 
 		/* no point xor'ing buffer full of zeros */
-		if (sh->srcs[i] == (void *)raid6_empty_zero_page)
+		if (sh->srcs[i] == raid6_get_zero_page())
 			continue;
 
 		ptr[count++] = sh->srcs[i];
@@ -896,7 +896,7 @@ static int check_parity5(struct stripe_head *sh)
 		BUG_ON(!buff_uptodate(col));
 
 		/* no point xor'ing buffer full of zeros */
-		if (sh->srcs[i] == (void *)raid6_empty_zero_page)
+		if (sh->srcs[i] == raid6_get_zero_page())
 			continue;
 
 		ptr[count++] = sh->srcs[i];
@@ -1845,7 +1845,7 @@ static int grow_buffers(struct stripe_head *sh, int num)
 		}
 		else {
 			sh->col[i].page = NULL;
-			sh->srcs[i] = (void *)raid6_empty_zero_page;
+			sh->srcs[i] = raid6_get_zero_page();
 		}
 	}
 	return 0;
