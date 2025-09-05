@@ -927,30 +927,6 @@ static void xhci_dequeue_td(struct xhci_hcd *xhci, struct xhci_td *td, struct xh
 	xhci_td_cleanup(xhci, td, ring, status);
 }
 
-/* Complete the cancelled URBs we unlinked from td_list. */
-static void xhci_giveback_invalidated_tds(struct xhci_virt_ep *ep)
-{
-	struct xhci_ring *ring;
-	struct xhci_td *td, *tmp_td;
-
-	list_for_each_entry_safe(td, tmp_td, &ep->cancelled_td_list,
-				 cancelled_td_list) {
-
-		ring = xhci_urb_to_transfer_ring(ep->xhci, td->urb);
-
-		if (td->cancel_status == TD_CLEARED) {
-			xhci_dbg(ep->xhci, "%s: Giveback cancelled URB %p TD\n",
-				 __func__, td->urb);
-			xhci_td_cleanup(ep->xhci, td, ring, td->status);
-		} else {
-			xhci_dbg(ep->xhci, "%s: Keep cancelled URB %p TD as cancel_status is %d\n",
-				 __func__, td->urb, td->cancel_status);
-		}
-		if (ep->xhci->xhc_state & XHCI_STATE_DYING)
-			return;
-	}
-}
-
 static int xhci_reset_halted_ep(struct xhci_hcd *xhci, unsigned int slot_id,
 				unsigned int ep_index, enum xhci_ep_reset_type reset_type)
 {
@@ -1031,7 +1007,7 @@ static int xhci_invalidate_cancelled_tds(struct xhci_virt_ep *ep)
 	struct xhci_td		*td = NULL;
 	struct xhci_td		*tmp_td = NULL;
 	struct xhci_td		*cached_td = NULL;
-	struct xhci_ring	*ring;
+	struct xhci_ring	*ring, *cached_ring = NULL;
 	u64			hw_deq;
 	unsigned int		slot_id = ep->vdev->slot_id;
 	int			err;
@@ -1045,6 +1021,7 @@ static int xhci_invalidate_cancelled_tds(struct xhci_virt_ep *ep)
 
 	xhci = ep->xhci;
 
+again:
 	list_for_each_entry_safe(td, tmp_td, &ep->cancelled_td_list, cancelled_td_list) {
 		xhci_dbg_trace(xhci, trace_xhci_dbg_cancel_urb,
 			       "Removing canceled TD starting at 0x%llx (dma) in stream %u URB %p",
@@ -1070,19 +1047,16 @@ static int xhci_invalidate_cancelled_tds(struct xhci_virt_ep *ep)
 
 		if (td->cancel_status == TD_HALTED || trb_in_td(td, hw_deq)) {
 			switch (td->cancel_status) {
-			case TD_CLEARED: /* TD is already no-op */
 			case TD_CLEARING_CACHE: /* set TR deq command already queued */
 				break;
 			case TD_DIRTY: /* TD is cached, clear it */
 			case TD_HALTED:
-			case TD_CLEARING_CACHE_DEFERRED:
 				if (cached_td) {
 					if (cached_td->urb->stream_id != td->urb->stream_id) {
 						/* Multiple streams case, defer move dq */
 						xhci_dbg(xhci,
 							 "Move dq deferred: stream %u URB %p\n",
 							 td->urb->stream_id, td->urb);
-						td->cancel_status = TD_CLEARING_CACHE_DEFERRED;
 						break;
 					}
 
@@ -1092,16 +1066,18 @@ static int xhci_invalidate_cancelled_tds(struct xhci_virt_ep *ep)
 						  td->urb, cached_td->urb,
 						  td->urb->stream_id);
 					td_to_noop(cached_td, false);
-					cached_td->cancel_status = TD_CLEARED;
+					xhci_td_cleanup(xhci, cached_td, cached_ring,
+							cached_td->status);
 				}
 				td_to_noop(td, false);
 				td->cancel_status = TD_CLEARING_CACHE;
+				cached_ring = ring;
 				cached_td = td;
 				break;
 			}
 		} else {
 			td_to_noop(td, false);
-			td->cancel_status = TD_CLEARED;
+			xhci_td_cleanup(xhci, td, ring, td->status);
 		}
 	}
 
@@ -1114,20 +1090,15 @@ static int xhci_invalidate_cancelled_tds(struct xhci_virt_ep *ep)
 					cached_td);
 	if (err) {
 		/* Failed to move past cached td, just set cached TDs to no-op */
-		list_for_each_entry_safe(td, tmp_td, &ep->cancelled_td_list, cancelled_td_list) {
-			/*
-			 * Deferred TDs need to have the deq pointer set after the above command
-			 * completes, so if that failed we just give up on all of them (and
-			 * complain loudly since this could cause issues due to caching).
-			 */
-			if (td->cancel_status != TD_CLEARING_CACHE &&
-			    td->cancel_status != TD_CLEARING_CACHE_DEFERRED)
-				continue;
-			xhci_warn(xhci, "Failed to clear cancelled cached URB %p, mark clear anyway\n",
-				  td->urb);
-			td_to_noop(td, false);
-			td->cancel_status = TD_CLEARED;
-		}
+		xhci_warn(xhci, "Failed to clear cancelled cached URB %p, give back anyway\n",
+				cached_td->urb);
+		td_to_noop(cached_td, false);
+		xhci_td_cleanup(xhci, cached_td, cached_ring, cached_td->status);
+
+		/* Try to clear any deferred TDs on other streams */
+		cached_ring = NULL;
+		cached_td = NULL;
+		goto again;
 	}
 	return 0;
 }
@@ -1142,7 +1113,6 @@ static int xhci_invalidate_cancelled_tds(struct xhci_virt_ep *ep)
 void xhci_process_cancelled_tds(struct xhci_virt_ep *ep)
 {
 	xhci_invalidate_cancelled_tds(ep);
-	xhci_giveback_invalidated_tds(ep);
 }
 
 /*
@@ -1295,7 +1265,6 @@ reset_done:
 	ep->ep_state &= ~EP_STOP_CMD_PENDING;
 
 	/* Otherwise ring the doorbell(s) to restart queued transfers */
-	xhci_giveback_invalidated_tds(ep);
 	ring_doorbell_for_active_rings(xhci, slot_id, ep_index);
 }
 
@@ -1519,13 +1488,9 @@ static void xhci_handle_cmd_set_deq(struct xhci_hcd *xhci, int slot_id,
 				 cancelled_td_list) {
 		ep_ring = xhci_urb_to_transfer_ring(ep->xhci, td->urb);
 		if (td->cancel_status == TD_CLEARING_CACHE) {
-			td->cancel_status = TD_CLEARED;
 			xhci_dbg(ep->xhci, "%s: Giveback cancelled URB %p TD\n",
 				 __func__, td->urb);
 			xhci_td_cleanup(ep->xhci, td, ep_ring, td->status);
-		} else {
-			xhci_dbg(ep->xhci, "%s: Keep cancelled URB %p TD as cancel_status is %d\n",
-				 __func__, td->urb, td->cancel_status);
 		}
 	}
 cleanup:
@@ -1540,8 +1505,6 @@ cleanup:
 		xhci_invalidate_cancelled_tds(ep);
 		/* Try to restart the endpoint if all is done */
 		ring_doorbell_for_active_rings(xhci, slot_id, ep_index);
-		/* Start giving back any TDs invalidated above */
-		xhci_giveback_invalidated_tds(ep);
 	} else {
 		/* Restart any rings with pending URBs */
 		xhci_dbg(ep->xhci, "%s: All TDs cleared, ring doorbell\n", __func__);
@@ -1575,8 +1538,6 @@ static void xhci_handle_cmd_reset_ep(struct xhci_hcd *xhci, int slot_id,
 
 	/* Clear our internal halted state */
 	ep->ep_state &= ~EP_HALTED;
-
-	xhci_giveback_invalidated_tds(ep);
 
 	/* if this was a soft reset, then restart */
 	if ((le32_to_cpu(trb->generic.field[3])) & TRB_TSP)
