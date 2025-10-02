@@ -21,6 +21,8 @@
 #define PCI_EXP_DPC_CTL_EN_MASK	(PCI_EXP_DPC_CTL_EN_FATAL | \
 				 PCI_EXP_DPC_CTL_EN_NONFATAL)
 
+#define PCIE_EXP_DPC_BUSY_CHECK_MS	10
+
 static const char * const rp_pio_error_string[] = {
 	"Configuration Request received UR Completion",	 /* Bit Position 0  */
 	"Configuration Request received CA Completion",	 /* Bit Position 1  */
@@ -135,7 +137,7 @@ static int dpc_wait_rp_inactive(struct pci_dev *pdev)
 	pci_read_config_word(pdev, cap + PCI_EXP_DPC_STATUS, &status);
 	while (status & PCI_EXP_DPC_RP_BUSY &&
 					!time_after(jiffies, timeout)) {
-		msleep(10);
+		msleep(PCIE_EXP_DPC_BUSY_CHECK_MS);
 		pci_read_config_word(pdev, cap + PCI_EXP_DPC_STATUS, &status);
 	}
 	if (status & PCI_EXP_DPC_RP_BUSY) {
