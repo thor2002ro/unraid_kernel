@@ -77,6 +77,8 @@ struct pci_pme_device {
  */
 #define PCIE_RESET_READY_POLL_MS 60000 /* msec */
 
+#define PCIE_LINK_STATUS_CHECK_MS 1
+
 static void pci_dev_d3_sleep(struct pci_dev *dev)
 {
 	unsigned int delay_ms = max(dev->d3hot_delay, pci_pm_d3hot_delay);
@@ -4683,7 +4685,7 @@ static int pcie_wait_for_link_status(struct pci_dev *pdev,
 		pcie_capability_read_word(pdev, PCI_EXP_LNKSTA, &lnksta);
 		if ((lnksta & lnksta_mask) == lnksta_match)
 			return 0;
-		msleep(1);
+		msleep(PCIE_LINK_STATUS_CHECK_MS);
 	} while (time_before(jiffies, end_jiffies));
 
 	return -ETIMEDOUT;
@@ -4963,11 +4965,8 @@ void pci_reset_secondary_bus(struct pci_dev *dev)
 	ctrl |= PCI_BRIDGE_CTL_BUS_RESET;
 	pci_write_config_word(dev, PCI_BRIDGE_CONTROL, ctrl);
 
-	/*
-	 * PCI spec v3.0 7.6.4.2 requires minimum Trst of 1ms.  Double
-	 * this to 2ms to ensure that we meet the minimum requirement.
-	 */
-	msleep(2);
+	/* Double this to 2ms to ensure that we meet the minimum requirement */
+	fsleep(2 * PCI_T_RST_SEC_BUS_DELAY_US);
 
 	ctrl &= ~PCI_BRIDGE_CTL_BUS_RESET;
 	pci_write_config_word(dev, PCI_BRIDGE_CONTROL, ctrl);

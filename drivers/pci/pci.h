@@ -60,6 +60,9 @@ struct pcie_tlp_log;
 #define PCIE_LINK_WAIT_MAX_RETRIES	10
 #define PCIE_LINK_WAIT_SLEEP_MS		90
 
+/* PCIe r7.0, sec 7.5.1.3.13, requires minimum Trst of 1ms */
+#define PCI_T_RST_SEC_BUS_DELAY_US	1000
+
 /* Message Routing (r[2:0]); PCIe r6.0, sec 2.2.8 */
 #define PCIE_MSG_TYPE_R_RC	0
 #define PCIE_MSG_TYPE_R_ADDR	1

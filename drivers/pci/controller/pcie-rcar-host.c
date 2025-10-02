@@ -34,6 +34,8 @@
 
 #include "pcie-rcar.h"
 
+#define RCAR_SPEED_CHANGE_CHECK_MS	1
+
 struct rcar_msi {
 	DECLARE_BITMAP(used, INT_PCI_MSI_NR);
 	struct irq_domain *domain;
@@ -339,7 +341,7 @@ static void rcar_pcie_force_speedup(struct rcar_pcie *pcie)
 			goto done;
 		}
 
-		msleep(1);
+		msleep(RCAR_SPEED_CHANGE_CHECK_MS);
 	}
 
 	dev_err(dev, "Speed change timed out\n");

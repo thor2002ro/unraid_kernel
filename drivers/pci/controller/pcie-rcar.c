@@ -11,6 +11,8 @@
 
 #include "pcie-rcar.h"
 
+#define RCAR_PCIE_PHYRDY_CHECK_MS	5
+
 void rcar_pci_write_reg(struct rcar_pcie *pcie, u32 val, unsigned int reg)
 {
 	writel(val, pcie->base + reg);
@@ -39,7 +41,7 @@ int rcar_pcie_wait_for_phyrdy(struct rcar_pcie *pcie)
 		if (rcar_pci_read_reg(pcie, PCIEPHYSR) & PHYRDY)
 			return 0;
 
-		msleep(5);
+		msleep(RCAR_PCIE_PHYRDY_CHECK_MS);
 	}
 
 	return -ETIMEDOUT;
