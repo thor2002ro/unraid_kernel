@@ -901,6 +901,7 @@ static void __pci_config_acs(struct pci_dev *dev, struct pci_acs *caps,
 			     const char *p, const u16 acs_mask, const u16 acs_flags)
 {
 	u16 flags = acs_flags;
+	u16 supported_flags;
 	u16 mask = acs_mask;
 	char *delimit;
 	int ret = 0;
@@ -945,8 +946,14 @@ static void __pci_config_acs(struct pci_dev *dev, struct pci_acs *caps,
 			}
 		}
 
-		if (mask & ~(PCI_ACS_SV | PCI_ACS_TB | PCI_ACS_RR | PCI_ACS_CR |
-			    PCI_ACS_UF | PCI_ACS_EC | PCI_ACS_DT)) {
+		supported_flags = PCI_ACS_SV | PCI_ACS_TB | PCI_ACS_RR |
+				  PCI_ACS_CR | PCI_ACS_UF | PCI_ACS_EC |
+				  PCI_ACS_DT;
+		if (caps->cap & PCI_ACS_ENHANCED)
+			supported_flags |= PCI_ACS_USP_MT_RR |
+					   PCI_ACS_DSP_MT_RR |
+					   PCI_ACS_UNCLAIMED_RR;
+		if (mask & ~supported_flags) {
 			pci_err(dev, "Invalid ACS flags specified\n");
 			return;
 		}
@@ -1005,6 +1012,14 @@ static void pci_std_enable_acs(struct pci_dev *dev, struct pci_acs *caps)
 
 	/* Upstream Forwarding */
 	caps->ctrl |= (caps->cap & PCI_ACS_UF);
+
+	/*
+	 * USP/DSP Memory Target Access Control and Unclaimed Request Redirect
+	 */
+	if (caps->cap & PCI_ACS_ENHANCED) {
+		caps->ctrl |= PCI_ACS_USP_MT_RR | PCI_ACS_DSP_MT_RR |
+			      PCI_ACS_UNCLAIMED_RR;
+	}
 
 	/* Enable Translation Blocking for external devices and noats */
 	if (pci_ats_disabled() || dev->external_facing || dev->untrusted)
@@ -3540,6 +3555,52 @@ void pci_configure_ari(struct pci_dev *dev)
 	}
 }
 
+
+/*
+ * The spec is not clear what it means if the capability bit is 0. One view is
+ * that the device acts as though the ctrl bit is zero, another view is the
+ * device behavior is undefined.
+ *
+ * Historically Linux has taken the position that the capability bit as 0 means
+ * the device supports the most favorable interpretation of the spec - ie that
+ * things like P2P RR are always on. As this is security sensitive we expect
+ * devices that do not follow this rule to be quirked.
+ *
+ * ACS Enhanced eliminated undefined areas of the spec around MMIO in root ports
+ * and switch ports. If those ports have no MMIO then it is not relavent.
+ * PCI_ACS_UNCLAIMED_RR eliminates the undefined area around an upstream switch
+ * window that is not fully decoded by the downstream windows.
+ *
+ * This takes the same approach with ACS Enhanced, if the device does not
+ * support it then we assume the ACS P2P RR has all the enhanced behaviors too.
+ *
+ * Due to ACS Enhanced bits being force set to 0 by older Linux kernels, and
+ * those values would break old kernels on the edge cases they cover, the only
+ * compatible thing for a new device to implement is ACS Enhanced supported with
+ * the control bits (except PCI_ACS_IORB) wired to follow ACS_RR.
+ */
+static u16 pci_acs_ctrl_mask(struct pci_dev *pdev, u16 hw_cap)
+{
+	/*
+	 * Egress Control enables use of the Egress Control Vector which is not
+	 * present without the cap.
+	 */
+	u16 mask = PCI_ACS_EC;
+
+	mask = hw_cap & (PCI_ACS_SV | PCI_ACS_TB | PCI_ACS_RR |
+				      PCI_ACS_CR | PCI_ACS_UF | PCI_ACS_DT);
+
+	/*
+	 * If ACS Enhanced is supported the device reports what it is doing
+	 * through these bits which may not be settable.
+	 */
+	if (hw_cap & PCI_ACS_ENHANCED)
+		mask |= PCI_ACS_IORB | PCI_ACS_DSP_MT_RB | PCI_ACS_DSP_MT_RR |
+			PCI_ACS_USP_MT_RB | PCI_ACS_USP_MT_RR |
+			PCI_ACS_UNCLAIMED_RR;
+	return mask;
+}
+
 static bool pci_acs_flags_enabled(struct pci_dev *pdev, u16 acs_flags)
 {
 	int pos;
@@ -3549,15 +3610,9 @@ static bool pci_acs_flags_enabled(struct pci_dev *pdev, u16 acs_flags)
 	if (!pos)
 		return false;
 
-	/*
-	 * Except for egress control, capabilities are either required
-	 * or only required if controllable.  Features missing from the
-	 * capability field can therefore be assumed as hard-wired enabled.
-	 */
 	pci_read_config_word(pdev, pos + PCI_ACS_CAP, &cap);
-	acs_flags &= (cap | PCI_ACS_EC);
-
 	pci_read_config_word(pdev, pos + PCI_ACS_CTRL, &ctrl);
+	acs_flags &= pci_acs_ctrl_mask(pdev, cap);
 	return (ctrl & acs_flags) == acs_flags;
 }
 
