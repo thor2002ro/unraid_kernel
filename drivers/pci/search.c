@@ -113,6 +113,190 @@ int pci_for_each_dma_alias(struct pci_dev *pdev,
 	return ret;
 }
 
+static enum pci_bus_isolation pcie_switch_isolated(struct pci_bus *bus)
+{
+	struct pci_dev *pdev;
+
+	/*
+	 * Within a PCIe switch we have an interior bus that has the Upstream
+	 * port as the bridge and a set of Downstream port bridging to the
+	 * egress ports.
+	 *
+	 * Each DSP has an ACS setting which controls where its traffic is
+	 * permitted to go. Any DSP with a permissive ACS setting can send
+	 * traffic flowing upstream back downstream through another DSP.
+	 *
+	 * Thus any non-permissive DSP spoils the whole bus.
+	 * PCI_ACS_UNCLAIMED_RR is not required since rejecting requests with
+	 * error is still isolation.
+	 */
+	guard(rwsem_read)(&pci_bus_sem);
+	list_for_each_entry(pdev, &bus->devices, bus_list) {
+		/* Don't understand what this is, be conservative */
+		if (!pci_is_pcie(pdev) ||
+		    pci_pcie_type(pdev) != PCI_EXP_TYPE_DOWNSTREAM ||
+		    pdev->dma_alias_mask)
+			return PCIE_NON_ISOLATED;
+
+		if (!pci_acs_enabled(pdev, PCI_ACS_ISOLATED |
+						   PCI_ACS_DSP_MT_RR |
+						   PCI_ACS_USP_MT_RR)) {
+			/* The USP is isolated from the DSP */
+			if (!pci_acs_enabled(pdev, PCI_ACS_USP_MT_RR))
+				return PCIE_NON_ISOLATED;
+			return PCIE_SWITCH_DSP_NON_ISOLATED;
+		}
+	}
+	return PCIE_ISOLATED;
+}
+
+static bool pci_has_mmio(struct pci_dev *pdev)
+{
+	unsigned int i;
+
+	for (i = 0; i <= PCI_ROM_RESOURCE; i++) {
+		struct resource *res = pci_resource_n(pdev, i);
+
+		if (resource_size(res) && resource_type(res) == IORESOURCE_MEM)
+			return true;
+	}
+	return false;
+}
+
+/**
+ * pci_bus_isolated - Determine how isolated connected devices are
+ * @bus: The bus to check
+ *
+ * Isolation is the ability of devices to talk to each other. Full isolation
+ * means that a device can only communicate with the IOMMU and can not do peer
+ * to peer within the fabric.
+ *
+ * We consider isolation on a bus by bus basis. If the bus will permit a
+ * transaction originated downstream to complete on anything other than the
+ * IOMMU then the bus is not isolated.
+ *
+ * Non-isolation includes all the downstream devices on this bus, and it may
+ * include the upstream bridge or port that is creating this bus.
+ *
+ * The various cases are returned in an enum.
+ *
+ * Broadly speaking this function evaluates the ACS settings in a PCI switch to
+ * determine if a PCI switch is configured to have full isolation.
+ *
+ * Old PCI/PCI-X busses cannot have isolation due to their physical properties,
+ * but they do have some aliasing properties that effect group creation.
+ *
+ * pci_bus_isolated() does not consider loopback internal to devices, like
+ * multi-function devices performing a self-loopback. The caller must check
+ * this separately. It does not considering alasing within the bus.
+ *
+ * It does not currently support the ACS P2P Egress Control Vector, Linux does
+ * not yet have any way to enable this feature. EC will create subsets of the
+ * bus that are isolated from other subsets.
+ */
+enum pci_bus_isolation pci_bus_isolated(struct pci_bus *bus)
+{
+	struct pci_dev *bridge = bus->self;
+	int type;
+
+	/*
+	 * This bus was created by pci_register_host_bridge(). The spec provides
+	 * no way to tell what kind of bus this is, for PCIe we expect this to
+	 * be internal to the root complex and not covered by any spec behavior.
+	 * Linux has historically been optimistic about this bus and treated it
+	 * as isolating. Given that the behavior of the root complex and the ACS
+	 * behavior of RCiEP's is explicitly not specified we hope that the
+	 * implementation is directing everything that reaches the root bus to
+	 * the IOMMU.
+	 */
+	if (pci_is_root_bus(bus))
+		return PCIE_ISOLATED;
+
+	/*
+	 * bus->self is only NULL for SRIOV VFs, it represents a "virtual" bus
+	 * within Linux to hold any bus numbers consumed by VF RIDs. Caller must
+	 * use pci_physfn() to get the bus for calling this function.
+	 */
+	if (WARN_ON(!bridge))
+		return PCI_BRIDGE_NON_ISOLATED;
+
+	/*
+	 * The bridge is not a PCIe bridge therefore this bus is PCI/PCI-X.
+	 *
+	 * PCI does not have anything like ACS. Any down stream device can bus
+	 * master an address that any other downstream device can claim. No
+	 * isolation is possible.
+	 */
+	if (!pci_is_pcie(bridge)) {
+		if (bridge->dev_flags & PCI_DEV_FLAG_PCIE_BRIDGE_ALIAS)
+			type = PCI_EXP_TYPE_PCI_BRIDGE;
+		else
+			return PCI_BRIDGE_NON_ISOLATED;
+	} else {
+		type = pci_pcie_type(bridge);
+	}
+
+	switch (type) {
+	/*
+	 * Since PCIe links are point to point root ports are isolated if there
+	 * is no internal loopback to the root port's MMIO. Like MFDs assume if
+	 * there is no ACS cap then there is no loopback. The root port uses
+	 * DSP_MT_RR for its own MMIO.
+	 */
+	case PCI_EXP_TYPE_ROOT_PORT:
+		if (bridge->acs_cap &&
+		    !pci_acs_enabled(bridge,
+				     PCI_ACS_ISOLATED | PCI_ACS_DSP_MT_RR))
+			return PCIE_NON_ISOLATED;
+		return PCIE_ISOLATED;
+
+	/*
+	 * Since PCIe links are point to point a DSP is always considered
+	 * isolated. The internal bus of the switch will be non-isolated if the
+	 * DSP's have any ACS that allows upstream traffic to flow back
+	 * downstream to any DSP, including back to this DSP or its MMIO.
+	 */
+	case PCI_EXP_TYPE_DOWNSTREAM:
+		return PCIE_ISOLATED;
+
+	/*
+	 * bus is the interior bus of a PCI-E switch where ACS rules apply.
+	 */
+	case PCI_EXP_TYPE_UPSTREAM:
+		return pcie_switch_isolated(bus);
+
+	/*
+	 * PCIe to PCI/PCI-X - this bus is PCI.
+	 */
+	case PCI_EXP_TYPE_PCI_BRIDGE:
+		/*
+		 * A PCIe express bridge will use the subordinate bus number
+		 * with a 0 devfn as the RID in some cases. This causes all
+		 * subordinate devfns to alias with 0, which is the same
+		 * grouping as PCI_BUS_NON_ISOLATED. The RID of the bridge
+		 * itself is only used by the bridge.
+		 *
+		 * However, if the bridge has MMIO then we will assume the MMIO
+		 * is not isolated due to no ACS controls on this bridge type.
+		 */
+		if (pci_has_mmio(bridge))
+			return PCI_BRIDGE_NON_ISOLATED;
+		return PCI_BUS_NON_ISOLATED;
+
+	/*
+	 * PCI/PCI-X to PCIe - this bus is PCIe. We already know there must be a
+	 * PCI bus upstream of this bus, so just return non-isolated. If
+	 * upstream is PCI-X the PCIe RID should be preserved, but for PCI the
+	 * RID will be lost.
+	 */
+	case PCI_EXP_TYPE_PCIE_BRIDGE:
+		return PCI_BRIDGE_NON_ISOLATED;
+
+	default:
+		return PCI_BRIDGE_NON_ISOLATED;
+	}
+}
+
 static struct pci_bus *pci_do_find_bus(struct pci_bus *bus, unsigned char busnr)
 {
 	struct pci_bus *child;
@@ -421,3 +605,93 @@ int pci_dev_present(const struct pci_device_id *ids)
 	return 0;
 }
 EXPORT_SYMBOL(pci_dev_present);
+
+/**
+ * pci_reachable_set - Generate a bitmap of devices within a reachability set
+ * @start: First device in the set
+ * @devfns: The set of devices on the bus
+ * @reachable: Callback to tell if two devices can reach each other
+ *
+ * Compute a bitmap where every set bit is a device on the bus that is reachable
+ * from the start device, including the start device. Reachability between two
+ * devices is determined by a callback function.
+ *
+ * This is a non-recursive implementation that invokes the callback once per
+ * pair. The callback must be commutative:
+ *    reachable(a, b) == reachable(b, a)
+ * reachable() can form a cyclic graph:
+ *    reachable(a,b) == reachable(b,c) == reachable(c,a) == true
+ *
+ * Since this function is limited to a single bus the largest set can be 256
+ * devices large.
+ */
+void pci_reachable_set(struct pci_dev *start, struct pci_reachable_set *devfns,
+		       bool (*reachable)(struct pci_dev *deva,
+					 struct pci_dev *devb))
+{
+	struct pci_reachable_set todo_devfns = {};
+	struct pci_reachable_set next_devfns = {};
+	struct pci_bus *bus = start->bus;
+	bool again;
+
+	/* Assume devfn of all PCI devices is bounded by MAX_NR_DEVFNS */
+	static_assert(sizeof(next_devfns.devfns) * BITS_PER_BYTE >=
+		      MAX_NR_DEVFNS);
+
+	memset(devfns, 0, sizeof(devfns->devfns));
+	__set_bit(start->devfn, devfns->devfns);
+	__set_bit(start->devfn, next_devfns.devfns);
+
+	down_read(&pci_bus_sem);
+	while (true) {
+		unsigned int devfna;
+		unsigned int i;
+
+		/*
+		 * For each device that hasn't been checked compare every
+		 * device on the bus against it.
+		 */
+		again = false;
+		for_each_set_bit(devfna, next_devfns.devfns, MAX_NR_DEVFNS) {
+			struct pci_dev *deva = NULL;
+			struct pci_dev *devb;
+
+			list_for_each_entry(devb, &bus->devices, bus_list) {
+				if (devb->devfn == devfna)
+					deva = devb;
+
+				if (test_bit(devb->devfn, devfns->devfns))
+					continue;
+
+				if (!deva) {
+					deva = devb;
+					list_for_each_entry_continue(
+						deva, &bus->devices, bus_list)
+						if (deva->devfn == devfna)
+							break;
+				}
+
+				if (!reachable(deva, devb))
+					continue;
+
+				__set_bit(devb->devfn, todo_devfns.devfns);
+				again = true;
+			}
+		}
+
+		if (!again)
+			break;
+
+		/*
+		 * Every new bit adds a new deva to check, reloop the whole
+		 * thing. Expect this to be rare.
+		 */
+		for (i = 0; i != ARRAY_SIZE(devfns->devfns); i++) {
+			devfns->devfns[i] |= todo_devfns.devfns[i];
+			next_devfns.devfns[i] = todo_devfns.devfns[i];
+			todo_devfns.devfns[i] = 0;
+		}
+	}
+	up_read(&pci_bus_sem);
+}
+EXPORT_SYMBOL_GPL(pci_reachable_set);
