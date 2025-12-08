@@ -1445,6 +1445,7 @@ static int vga_arb_release(struct inode *inode, struct file *file)
 
 	spin_lock_irqsave(&vga_user_lock, flags);
 	list_del(&priv->list);
+	spin_unlock_irqrestore(&vga_user_lock, flags);
 	for (i = 0; i < MAX_USER_CARDS; i++) {
 		uc = &priv->cards[i];
 		if (uc->pdev == NULL)
@@ -1456,7 +1457,6 @@ static int vga_arb_release(struct inode *inode, struct file *file)
 		while (uc->mem_cnt--)
 			vga_put(uc->pdev, VGA_RSRC_LEGACY_MEM);
 	}
-	spin_unlock_irqrestore(&vga_user_lock, flags);
 
 	kfree(priv);
 
