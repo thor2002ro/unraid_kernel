@@ -28,6 +28,9 @@ int pci_mmap_resource_range(struct pci_dev *pdev, int bar,
 	unsigned long size;
 	int ret;
 
+	if (!pci_bar_index_is_valid(bar))
+		return -EINVAL;
+
 	size = ((pci_resource_len(pdev, bar) - 1) >> PAGE_SHIFT) + 1;
 	if (vma->vm_pgoff + vma_pages(vma) > size)
 		return -EINVAL;
