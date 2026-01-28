@@ -2246,7 +2246,7 @@ void pcie_clear_device_status(struct pci_dev *dev)
 	u16 sta;
 
 	pcie_capability_read_word(dev, PCI_EXP_DEVSTA, &sta);
-	pcie_capability_write_word(dev, PCI_EXP_DEVSTA, sta);
+	pcie_capability_write_word(dev, PCI_EXP_DEVSTA, sta & PCI_EXP_DEVSTA_ERR);
 }
 #endif
 
