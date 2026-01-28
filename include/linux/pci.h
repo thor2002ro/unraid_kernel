@@ -1865,7 +1865,7 @@ static inline int pcie_set_target_speed(struct pci_dev *port,
 #endif
 
 #define PCIE_LINK_STATE_L0S		(BIT(0) | BIT(1)) /* Upstr/dwnstr L0s */
-#define PCIE_LINK_STATE_L1		BIT(2)	/* L1 state */
+#define PCIE_LINK_STATE_L1		BIT(2)	/* ASPM L1 state */
 #define PCIE_LINK_STATE_L1_1		BIT(3)	/* ASPM L1.1 state */
 #define PCIE_LINK_STATE_L1_2		BIT(4)	/* ASPM L1.2 state */
 #define PCIE_LINK_STATE_L1_1_PCIPM	BIT(5)	/* PCI-PM L1.1 state */
