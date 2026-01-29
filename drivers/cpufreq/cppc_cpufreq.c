@@ -325,9 +325,23 @@ static unsigned int cppc_cpufreq_fast_switch(struct cpufreq_policy *policy,
 	return target_freq;
 }
 
-static int cppc_verify_policy(struct cpufreq_policy_data *policy)
+static int cppc_verify_policy(struct cpufreq_policy_data *policy_data)
 {
-	cpufreq_verify_within_cpu_limits(policy);
+	if (policy_data->min == FREQ_QOS_MIN_DEFAULT_VALUE) {
+		struct cpufreq_policy *policy __free(put_cpufreq_policy) =
+					      cpufreq_cpu_get(policy_data->cpu);
+		struct cppc_cpudata *cpu_data;
+
+		if (!policy)
+			return -EINVAL;
+
+		cpu_data = policy->driver_data;
+		policy_data->min = cppc_perf_to_khz(&cpu_data->perf_caps,
+			cpu_data->perf_caps.lowest_nonlinear_perf);
+	}
+
+	cpufreq_verify_within_cpu_limits(policy_data);
+
 	return 0;
 }
 
