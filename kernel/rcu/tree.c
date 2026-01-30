@@ -1809,6 +1809,14 @@ static noinline_for_stack bool rcu_gp_init(void)
 	struct rcu_node *rnp = rcu_get_root();
 	bool start_new_poll;
 	unsigned long old_gp_seq;
+#ifdef CONFIG_RCU_PER_CPU_BLOCKED_LISTS
+	struct task_struct *t_verify;
+	int cpu_verify;
+	int rnp_count;
+	int rdp_total;
+	struct rcu_data *rdp_cpu;
+	struct task_struct *t_rdp;
+#endif
 
 	WRITE_ONCE(rcu_state.gp_activity, jiffies);
 	raw_spin_lock_irq_rcu_node(rnp);
@@ -1891,6 +1899,7 @@ static noinline_for_stack bool rcu_gp_init(void)
 		 */
 		arch_spin_lock(&rcu_state.ofl_lock);
 		raw_spin_lock_rcu_node(rnp);
+		rcu_promote_blocked_tasks(rnp);
 		if (rnp->qsmaskinit == rnp->qsmaskinitnext &&
 		    !rnp->wait_blkd_tasks) {
 			/* Nothing to do on this leaf rcu_node structure. */
@@ -1954,6 +1963,7 @@ static noinline_for_stack bool rcu_gp_init(void)
 		rcu_gp_slow(gp_init_delay);
 		raw_spin_lock_irqsave_rcu_node(rnp, flags);
 		rdp = this_cpu_ptr(&rcu_data);
+		rcu_promote_blocked_tasks(rnp);
 		rcu_preempt_check_blocked_tasks(rnp);
 		rnp->qsmask = rnp->qsmaskinit;
 		WRITE_ONCE(rnp->gp_seq, rcu_state.gp_seq);
@@ -1971,8 +1981,21 @@ static noinline_for_stack bool rcu_gp_init(void)
 		 */
 		mask = rnp->qsmask & ~rnp->qsmaskinitnext;
 		rnp->rcu_gp_init_mask = mask;
-		if ((mask || rnp->wait_blkd_tasks) && rcu_is_leaf_node(rnp))
+		if ((mask || rnp->wait_blkd_tasks) && rcu_is_leaf_node(rnp)) {
+			int cpu;
+
+			/*
+			 * Promote blocked tasks from offline CPUs before
+			 * reporting QS, so they properly block the GP.
+			 */
+			for_each_leaf_node_cpu_mask(rnp, cpu, mask) {
+				struct rcu_data *rdp_cpu;
+
+				rdp_cpu = per_cpu_ptr(&rcu_data, cpu);
+				rcu_promote_blocked_tasks_rdp(rdp_cpu, rnp);
+			}
 			rcu_report_qs_rnp(mask, rnp, rnp->gp_seq, flags);
+		}
 		else
 			raw_spin_unlock_irq_rcu_node(rnp);
 		cond_resched_tasks_rcu_qs();
@@ -2004,7 +2027,7 @@ static bool rcu_gp_fqs_check_wake(int *gfp)
 		return true;
 
 	// The current grace period has completed.
-	if (!READ_ONCE(rnp->qsmask) && !rcu_preempt_blocked_readers_cgp(rnp))
+	if (!READ_ONCE(rnp->qsmask) && !rcu_preempt_blocked_readers_cgp(rnp, false))
 		return true;
 
 	return false;
@@ -2095,7 +2118,7 @@ static noinline_for_stack void rcu_gp_fqs_loop(void)
 		 * the corresponding leaf nodes have passed through their quiescent state.
 		 */
 		if (!READ_ONCE(rnp->qsmask) &&
-		    !rcu_preempt_blocked_readers_cgp(rnp))
+		    !rcu_preempt_blocked_readers_cgp(rnp, false))
 			break;
 		/* If time for quiescent-state forcing, do it. */
 		if (!time_after(rcu_state.jiffies_force_qs, jiffies) ||
@@ -2177,7 +2200,7 @@ static noinline void rcu_gp_cleanup(void)
 	rcu_seq_end(&new_gp_seq);
 	rcu_for_each_node_breadth_first(rnp) {
 		raw_spin_lock_irq_rcu_node(rnp);
-		if (WARN_ON_ONCE(rcu_preempt_blocked_readers_cgp(rnp)))
+		if (WARN_ON_ONCE(rcu_preempt_blocked_readers_cgp(rnp, true)))
 			dump_blkd_tasks(rnp, 10);
 		WARN_ON_ONCE(rnp->qsmask);
 		WRITE_ONCE(rnp->gp_seq, new_gp_seq);
@@ -2346,13 +2369,13 @@ static void rcu_report_qs_rnp(unsigned long mask, struct rcu_node *rnp,
 		}
 		WARN_ON_ONCE(oldmask); /* Any child must be all zeroed! */
 		WARN_ON_ONCE(!rcu_is_leaf_node(rnp) &&
-			     rcu_preempt_blocked_readers_cgp(rnp));
+			     rcu_preempt_blocked_readers_cgp(rnp, true));
 		WRITE_ONCE(rnp->qsmask, rnp->qsmask & ~mask);
 		trace_rcu_quiescent_state_report(rcu_state.name, rnp->gp_seq,
 						 mask, rnp->qsmask, rnp->level,
 						 rnp->grplo, rnp->grphi,
 						 !!rnp->gp_tasks);
-		if (rnp->qsmask != 0 || rcu_preempt_blocked_readers_cgp(rnp)) {
+		if (rnp->qsmask != 0 || rcu_preempt_blocked_readers_cgp(rnp, true)) {
 
 			/* Other bits still set at this level, so done. */
 			raw_spin_unlock_irqrestore_rcu_node(rnp, flags);
@@ -2398,7 +2421,7 @@ rcu_report_unblock_qs_rnp(struct rcu_node *rnp, unsigned long flags)
 
 	raw_lockdep_assert_held_rcu_node(rnp);
 	if (WARN_ON_ONCE(!IS_ENABLED(CONFIG_PREEMPT_RCU)) ||
-	    WARN_ON_ONCE(rcu_preempt_blocked_readers_cgp(rnp)) ||
+	    WARN_ON_ONCE(rcu_preempt_blocked_readers_cgp(rnp, true)) ||
 	    rnp->qsmask != 0) {
 		raw_spin_unlock_irqrestore_rcu_node(rnp, flags);
 		return;  /* Still need more quiescent states! */
@@ -2469,6 +2492,13 @@ rcu_report_qs_rdp(struct rcu_data *rdp)
 			 */
 			WARN_ON_ONCE(rcu_accelerate_cbs(rnp, rdp));
 		}
+
+		/*
+		 * Promote any late-arriving blocked tasks before reporting QS.
+		 * This handles the case where a task blocks just as a GP is
+		 * starting, missing the initial promotion in rcu_gp_init().
+		 */
+		rcu_promote_blocked_tasks_rdp(rdp, rnp);
 
 		rcu_disable_urgency_upon_qs(rdp);
 		rcu_report_qs_rnp(mask, rnp, rnp->gp_seq, flags);
@@ -2733,7 +2763,7 @@ static void force_qs_rnp(int (*f)(struct rcu_data *rdp))
 		raw_spin_lock_irqsave_rcu_node(rnp, flags);
 		rcu_state.cbovldnext |= !!rnp->cbovldmask;
 		if (rnp->qsmask == 0) {
-			if (rcu_preempt_blocked_readers_cgp(rnp)) {
+			if (rcu_preempt_blocked_readers_cgp(rnp, true)) {
 				/*
 				 * No point in scanning bits because they
 				 * are all zero.  But we might need to
@@ -2753,6 +2783,11 @@ static void force_qs_rnp(int (*f)(struct rcu_data *rdp))
 			rdp = per_cpu_ptr(&rcu_data, cpu);
 			ret = f(rdp);
 			if (ret > 0) {
+				/*
+				 * Promote blocked tasks before reporting QS.
+				 * Otherwise tasks on per-CPU list aren't tracked.
+				 */
+				rcu_promote_blocked_tasks_rdp(rdp, rnp);
 				mask |= rdp->grpmask;
 				rcu_disable_urgency_upon_qs(rdp);
 			}
@@ -4143,6 +4178,10 @@ rcu_boot_init_percpu_data(int cpu)
 	rdp->rcu_onl_gp_state = RCU_GP_CLEANED;
 	rdp->last_sched_clock = jiffies;
 	rdp->cpu = cpu;
+#ifdef CONFIG_RCU_PER_CPU_BLOCKED_LISTS
+	raw_spin_lock_init(&rdp->blkd_lock);
+	INIT_LIST_HEAD(&rdp->blkd_list);
+#endif
 	rcu_boot_init_nocb_percpu_data(rdp);
 }
 
@@ -4414,6 +4453,11 @@ void rcutree_report_cpu_dead(void)
 	rdp->rcu_ofl_gp_seq = READ_ONCE(rcu_state.gp_seq);
 	rdp->rcu_ofl_gp_state = READ_ONCE(rcu_state.gp_state);
 	if (rnp->qsmask & mask) { /* RCU waiting on outgoing CPU? */
+		/*
+		 * Promote blocked tasks from dying CPU's per-CPU list before
+		 * reporting QS. Otherwise those tasks won't block the GP.
+		 */
+		rcu_promote_blocked_tasks_rdp(rdp, rnp);
 		/* Report quiescent state -before- changing ->qsmaskinitnext! */
 		rcu_disable_urgency_upon_qs(rdp);
 		rcu_report_qs_rnp(mask, rnp, rnp->gp_seq, flags);

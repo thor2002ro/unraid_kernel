@@ -1819,6 +1819,10 @@ static inline void rcu_copy_process(struct task_struct *p)
 	p->rcu_read_unlock_special.s = 0;
 	p->rcu_blocked_node = NULL;
 	INIT_LIST_HEAD(&p->rcu_node_entry);
+#ifdef CONFIG_RCU_PER_CPU_BLOCKED_LISTS
+	INIT_LIST_HEAD(&p->rcu_rdp_entry);
+	p->rcu_blocked_cpu = -1;
+#endif
 #endif /* #ifdef CONFIG_PREEMPT_RCU */
 #ifdef CONFIG_TASKS_RCU
 	p->rcu_tasks_holdout = false;

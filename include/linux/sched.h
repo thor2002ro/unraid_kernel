@@ -931,6 +931,10 @@ struct task_struct {
 	union rcu_special		rcu_read_unlock_special;
 	struct list_head		rcu_node_entry;
 	struct rcu_node			*rcu_blocked_node;
+#ifdef CONFIG_RCU_PER_CPU_BLOCKED_LISTS
+	struct list_head		rcu_rdp_entry;
+	int				rcu_blocked_cpu;
+#endif
 #endif /* #ifdef CONFIG_PREEMPT_RCU */
 
 #ifdef CONFIG_TASKS_RCU

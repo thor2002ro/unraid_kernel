@@ -335,23 +335,43 @@ void rcu_note_context_switch(bool preempt)
 
 		/* Possibly blocking in an RCU read-side critical section. */
 		rnp = rdp->mynode;
-		raw_spin_lock_rcu_node(rnp);
 		t->rcu_read_unlock_special.b.blocked = true;
-		t->rcu_blocked_node = rnp;
-
+#ifdef CONFIG_RCU_PER_CPU_BLOCKED_LISTS
 		/*
-		 * Verify the CPU's sanity, trace the preemption, and
-		 * then queue the task as required based on the states
-		 * of any ongoing and expedited grace periods.
+		 * Check if a GP is in progress.
 		 */
-		WARN_ON_ONCE(!rcu_rdp_cpu_online(rdp));
-		WARN_ON_ONCE(!list_empty(&t->rcu_node_entry));
-		trace_rcu_preempt_task(rcu_state.name,
-				       t->pid,
-				       (rnp->qsmask & rdp->grpmask)
-				       ? rnp->gp_seq
-				       : rcu_seq_snap(&rnp->gp_seq));
-		rcu_preempt_ctxt_queue(rnp, rdp);
+		if (!rcu_gp_in_progress() && !rdp->cpu_no_qs.b.norm && !rdp->cpu_no_qs.b.exp) {
+			/*
+			 * No GP waiting on this CPU. Add to per-CPU list only,
+			 * skipping rnp->lock for better scalability.
+			 */
+			t->rcu_blocked_node = NULL;
+			t->rcu_blocked_cpu = rdp->cpu;
+			raw_spin_lock(&rdp->blkd_lock);
+			list_add(&t->rcu_rdp_entry, &rdp->blkd_list);
+			raw_spin_unlock(&rdp->blkd_lock);
+			trace_rcu_preempt_task(rcu_state.name, t->pid,
+					       rcu_seq_snap(&rnp->gp_seq));
+		} else
+#endif
+		/* GP waiting (or per-CPU lists disabled) - add to rnp. */
+		{
+			raw_spin_lock_rcu_node(rnp);
+			t->rcu_blocked_node = rnp;
+
+			/*
+			 * Verify the CPU's sanity, trace the preemption, and
+			 * then queue the task as required based on the states
+			 * of any ongoing and expedited grace periods.
+			 */
+			WARN_ON_ONCE(!rcu_rdp_cpu_online(rdp));
+			WARN_ON_ONCE(!list_empty(&t->rcu_node_entry));
+			trace_rcu_preempt_task(rcu_state.name, t->pid,
+					       (rnp->qsmask & rdp->grpmask)
+					       ? rnp->gp_seq
+					       : rcu_seq_snap(&rnp->gp_seq));
+			rcu_preempt_ctxt_queue(rnp, rdp);
+		}
 	} else {
 		rcu_preempt_deferred_qs(t);
 	}
@@ -377,9 +397,28 @@ EXPORT_SYMBOL_GPL(rcu_note_context_switch);
  * Check for preempted RCU readers blocking the current grace period
  * for the specified rcu_node structure.  If the caller needs a reliable
  * answer, it must hold the rcu_node's ->lock.
+ *
+ * If @promote is true and CONFIG_RCU_PER_CPU_BLOCKED_LISTS is enabled,
+ * this function first promotes any tasks from per-CPU blocked lists to
+ * the rcu_node's blkd_tasks list before checking.  This ensures that
+ * late-arriving tasks (blocked after GP init's promotion scan) are
+ * visible for priority boosting and other operations.  When promoting,
+ * the caller must hold rnp->lock.
  */
-static int rcu_preempt_blocked_readers_cgp(struct rcu_node *rnp)
+static int rcu_preempt_blocked_readers_cgp(struct rcu_node *rnp, bool promote)
 {
+#ifdef CONFIG_RCU_PER_CPU_BLOCKED_LISTS
+	if (promote && rcu_is_leaf_node(rnp)) {
+		int cpu;
+		struct rcu_data *rdp;
+
+		raw_lockdep_assert_held_rcu_node(rnp);
+		for (cpu = rnp->grplo; cpu <= rnp->grphi; cpu++) {
+			rdp = per_cpu_ptr(&rcu_data, cpu);
+			rcu_promote_blocked_tasks_rdp(rdp, rnp);
+		}
+	}
+#endif
 	return READ_ONCE(rnp->gp_tasks) != NULL;
 }
 
@@ -485,6 +524,10 @@ rcu_preempt_deferred_qs_irqrestore(struct task_struct *t, unsigned long flags)
 	struct rcu_data *rdp;
 	struct rcu_node *rnp;
 	union rcu_special special;
+#ifdef CONFIG_RCU_PER_CPU_BLOCKED_LISTS
+	int blocked_cpu;
+	struct rcu_data *blocked_rdp;
+#endif
 
 	rdp = this_cpu_ptr(&rcu_data);
 	if (rdp->defer_qs_iw_pending == DEFER_QS_PENDING)
@@ -530,10 +573,43 @@ rcu_preempt_deferred_qs_irqrestore(struct task_struct *t, unsigned long flags)
 		 * to loop.  Retain a WARN_ON_ONCE() out of sheer paranoia.
 		 */
 		rnp = t->rcu_blocked_node;
+#ifdef CONFIG_RCU_PER_CPU_BLOCKED_LISTS
+		blocked_cpu = t->rcu_blocked_cpu;
+		if (blocked_cpu != -1) {
+			/*
+			 * Task is on per-CPU list. Remove it and check if
+			 * it was promoted to rnp->blkd_tasks.
+			 */
+			blocked_rdp = per_cpu_ptr(&rcu_data, blocked_cpu);
+			raw_spin_lock(&blocked_rdp->blkd_lock);
+			list_del_init(&t->rcu_rdp_entry);
+			t->rcu_blocked_cpu = -1;
+
+			/*
+			 * Read rcu_blocked_node while holding blkd_lock to
+			 * serialize with rcu_promote_blocked_tasks().
+			 */
+			rnp = t->rcu_blocked_node;
+			raw_spin_unlock(&blocked_rdp->blkd_lock);
+			/*
+			 * TODO: This should just be "WARN_ON_ONCE(rnp); return;" since after
+			 * the last patches, the task can only be in either the rdp or the rnp
+			 * list, not both. Since blocked_cpu != -1, it is clearly not in the rnp
+			 * so we activate the benefits of this patchset by removing the task
+			 * from the rdp blocked list and early returning.
+			 */
+			if (!rnp) {
+				/* Not promoted - no GP waiting for this task. */
+				local_irq_restore(flags);
+				return;
+			}
+		}
+		/* else: Task went directly to rnp->blkd_tasks. */
+#endif
 		raw_spin_lock_rcu_node(rnp); /* irqs already disabled. */
 		WARN_ON_ONCE(rnp != t->rcu_blocked_node);
 		WARN_ON_ONCE(!rcu_is_leaf_node(rnp));
-		empty_norm = !rcu_preempt_blocked_readers_cgp(rnp);
+		empty_norm = !rcu_preempt_blocked_readers_cgp(rnp, true);
 		WARN_ON_ONCE(rnp->completedqs == rnp->gp_seq &&
 			     (!empty_norm || rnp->qsmask));
 		empty_exp = sync_rcu_exp_done(rnp);
@@ -560,7 +636,7 @@ rcu_preempt_deferred_qs_irqrestore(struct task_struct *t, unsigned long flags)
 		 * so we must take a snapshot of the expedited state.
 		 */
 		empty_exp_now = sync_rcu_exp_done(rnp);
-		if (!empty_norm && !rcu_preempt_blocked_readers_cgp(rnp)) {
+		if (!empty_norm && !rcu_preempt_blocked_readers_cgp(rnp, true)) {
 			trace_rcu_quiescent_state_report(TPS("preempt_rcu"),
 							 rnp->gp_seq,
 							 0, rnp->qsmask,
@@ -769,6 +845,86 @@ static void rcu_read_unlock_special(struct task_struct *t)
 	rcu_preempt_deferred_qs_irqrestore(t, flags);
 }
 
+#ifdef CONFIG_RCU_PER_CPU_BLOCKED_LISTS
+/*
+ * Promote blocked tasks from a single CPU's per-CPU list to the rnp list.
+ *
+ * If there are no tracked blockers (gp_tasks/exp_tasks NULL) and this CPU
+ * is still blocking the corresponding GP (bit set in qsmask/expmask), set
+ * the pointer to ensure the GP machinery knows about the blocking task.
+ * This handles late promotion during QS reporting, where tasks may have
+ * blocked after rcu_gp_init() or sync_exp_reset_tree() ran their scans.
+ */
+static void rcu_promote_blocked_tasks_rdp(struct rcu_data *rdp,
+					  struct rcu_node *rnp)
+{
+	struct task_struct *t, *tmp;
+
+	raw_lockdep_assert_held_rcu_node(rnp);
+
+	raw_spin_lock(&rdp->blkd_lock);
+	list_for_each_entry_safe(t, tmp, &rdp->blkd_list, rcu_rdp_entry) {
+		/*
+		 * Skip tasks already on rnp list. A non-NULL
+		 * rcu_blocked_node indicates the task was already
+		 * promoted or added directly during blocking.
+		 * TODO: Should be WARN_ON_ONCE() after the last patch?
+		 */
+		if (t->rcu_blocked_node != NULL)
+			continue;
+
+		/*
+		 * Add to rnp list and remove from per-CPU list. We must add to
+		 * TAIL so that the task blocks any ongoing GPs.
+		 */
+		list_add_tail(&t->rcu_node_entry, &rnp->blkd_tasks);
+		t->rcu_blocked_node = rnp;
+		list_del_init(&t->rcu_rdp_entry);
+		t->rcu_blocked_cpu = -1;
+
+		/*
+		 * Set gp_tasks/exp_tasks if this is the first blocker and
+		 * this CPU is still blocking the corresponding GP.
+		 */
+		if (!rnp->gp_tasks && (rnp->qsmask & rdp->grpmask))
+			WRITE_ONCE(rnp->gp_tasks, &t->rcu_node_entry);
+		if (!rnp->exp_tasks && (rnp->expmask & rdp->grpmask))
+			WRITE_ONCE(rnp->exp_tasks, &t->rcu_node_entry);
+	}
+	raw_spin_unlock(&rdp->blkd_lock);
+}
+
+/*
+ * Promote blocked tasks from per-CPU lists to the rcu_node's blkd_tasks list.
+ * This is called during grace period initialization to move tasks that were
+ * blocked on per-CPU lists to the rnp list where they will block the new GP.
+ * rnp->lock must be held by the caller.
+ */
+static void rcu_promote_blocked_tasks(struct rcu_node *rnp)
+{
+	int cpu;
+	struct rcu_data *rdp_cpu;
+
+	raw_lockdep_assert_held_rcu_node(rnp);
+
+	/*
+	 * Only leaf nodes have per-CPU blocked task lists.
+	 * TODO: Should be WARN_ON_ONCE()?
+	 */
+	if (!rcu_is_leaf_node(rnp))
+		return;
+
+	for (cpu = rnp->grplo; cpu <= rnp->grphi; cpu++) {
+		rdp_cpu = per_cpu_ptr(&rcu_data, cpu);
+		rcu_promote_blocked_tasks_rdp(rdp_cpu, rnp);
+	}
+}
+#else /* #ifdef CONFIG_RCU_PER_CPU_BLOCKED_LISTS */
+static inline void rcu_promote_blocked_tasks_rdp(struct rcu_data *rdp,
+						 struct rcu_node *rnp) { }
+static void rcu_promote_blocked_tasks(struct rcu_node *rnp) { }
+#endif /* #else #ifdef CONFIG_RCU_PER_CPU_BLOCKED_LISTS */
+
 /*
  * Check that the list of blocked tasks for the newly completed grace
  * period is in fact empty.  It is a serious bug to complete a grace
@@ -784,7 +940,7 @@ static void rcu_preempt_check_blocked_tasks(struct rcu_node *rnp)
 
 	RCU_LOCKDEP_WARN(preemptible(), "rcu_preempt_check_blocked_tasks() invoked with preemption enabled!!!\n");
 	raw_lockdep_assert_held_rcu_node(rnp);
-	if (WARN_ON_ONCE(rcu_preempt_blocked_readers_cgp(rnp)))
+	if (WARN_ON_ONCE(rcu_preempt_blocked_readers_cgp(rnp, true)))
 		dump_blkd_tasks(rnp, 10);
 	if (rcu_preempt_has_tasks(rnp) &&
 	    (rnp->qsmaskinit || rnp->wait_blkd_tasks)) {
@@ -842,10 +998,18 @@ static void rcu_flavor_sched_clock_irq(int user)
 void exit_rcu(void)
 {
 	struct task_struct *t = current;
+	bool on_list;
 
-	if (unlikely(!list_empty(&current->rcu_node_entry))) {
+	/* Check if task is on any blocked list (rnp or per-CPU). */
+	on_list = !list_empty(&current->rcu_node_entry);
+#ifdef CONFIG_RCU_PER_CPU_BLOCKED_LISTS
+	on_list = on_list || !list_empty(&current->rcu_rdp_entry);
+#endif
+
+	if (unlikely(on_list)) {
 		rcu_preempt_depth_set(1);
 		barrier();
+		WARN_ON_ONCE(!t->rcu_read_unlock_special.b.blocked);
 		WRITE_ONCE(t->rcu_read_unlock_special.b.blocked, true);
 	} else if (unlikely(rcu_preempt_depth())) {
 		rcu_preempt_depth_set(1);
@@ -1009,7 +1173,7 @@ EXPORT_SYMBOL_GPL(rcu_note_context_switch);
  * Because preemptible RCU does not exist, there are never any preempted
  * RCU readers.
  */
-static int rcu_preempt_blocked_readers_cgp(struct rcu_node *rnp)
+static int rcu_preempt_blocked_readers_cgp(struct rcu_node *rnp, bool promote)
 {
 	return 0;
 }
@@ -1100,6 +1264,11 @@ dump_blkd_tasks(struct rcu_node *rnp, int ncheck)
 }
 
 static void rcu_preempt_deferred_qs_init(struct rcu_data *rdp) { }
+
+static void rcu_promote_blocked_tasks(struct rcu_node *rnp) { }
+
+static void rcu_promote_blocked_tasks_rdp(struct rcu_data *rdp,
+					  struct rcu_node *rnp) { }
 
 #endif /* #else #ifdef CONFIG_PREEMPT_RCU */
 
@@ -1258,7 +1427,7 @@ static void rcu_initiate_boost(struct rcu_node *rnp, unsigned long flags)
 {
 	raw_lockdep_assert_held_rcu_node(rnp);
 	if (!rnp->boost_kthread_task ||
-	    (!rcu_preempt_blocked_readers_cgp(rnp) && !rnp->exp_tasks)) {
+	    (!rcu_preempt_blocked_readers_cgp(rnp, true) && !rnp->exp_tasks)) {
 		raw_spin_unlock_irqrestore_rcu_node(rnp, flags);
 		return;
 	}
