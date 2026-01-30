@@ -142,6 +142,11 @@ static void __maybe_unused sync_exp_reset_tree(void)
 		WARN_ON_ONCE(rnp->expmask);
 		WRITE_ONCE(rnp->expmask, rnp->expmaskinit);
 		/*
+		 * Promote tasks from per-CPU lists before checking blkd_tasks.
+		 * This ensures expedited GPs see tasks blocked.
+		 */
+		rcu_promote_blocked_tasks(rnp);
+		/*
 		 * Need to wait for any blocked tasks as well.	Note that
 		 * additional blocking tasks will also block the expedited GP
 		 * until such time as the ->expmask bits are cleared.

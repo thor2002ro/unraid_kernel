@@ -277,7 +277,7 @@ static void rcu_print_detail_task_stall_rnp(struct rcu_node *rnp)
 	struct task_struct *t;
 
 	raw_spin_lock_irqsave_rcu_node(rnp, flags);
-	if (!rcu_preempt_blocked_readers_cgp(rnp)) {
+	if (!rcu_preempt_blocked_readers_cgp(rnp, true)) {
 		raw_spin_unlock_irqrestore_rcu_node(rnp, flags);
 		return;
 	}
@@ -331,7 +331,7 @@ static int rcu_print_task_stall(struct rcu_node *rnp, unsigned long flags)
 	struct task_struct *ts[8];
 
 	lockdep_assert_irqs_disabled();
-	if (!rcu_preempt_blocked_readers_cgp(rnp)) {
+	if (!rcu_preempt_blocked_readers_cgp(rnp, true)) {
 		raw_spin_unlock_irqrestore_rcu_node(rnp, flags);
 		return 0;
 	}
