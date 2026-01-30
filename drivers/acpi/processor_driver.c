@@ -33,6 +33,7 @@ MODULE_AUTHOR("Paul Diefenbaugh");
 MODULE_DESCRIPTION("ACPI Processor Driver");
 MODULE_LICENSE("GPL");
 
+static int acpi_processor_start(struct device *dev);
 static int acpi_processor_stop(struct device *dev);
 
 static const struct acpi_device_id processor_device_ids[] = {
@@ -46,6 +47,7 @@ static struct device_driver acpi_processor_driver = {
 	.name = "processor",
 	.bus = &cpu_subsys,
 	.acpi_match_table = processor_device_ids,
+	.probe = acpi_processor_start,
 	.remove = acpi_processor_stop,
 };
 
@@ -162,10 +164,6 @@ static int __acpi_processor_start(struct acpi_device *device)
 	if (!pr)
 		return -ENODEV;
 
-	result = acpi_cppc_processor_probe(pr);
-	if (result && !IS_ENABLED(CONFIG_ACPI_CPU_FREQ_PSS))
-		dev_dbg(&device->dev, "CPPC data invalid or not present\n");
-
 	if (!cpuidle_get_driver() || cpuidle_get_driver() == &acpi_idle_driver)
 		acpi_processor_power_init(pr);
 
@@ -190,6 +188,30 @@ err_thermal_exit:
 err_power_exit:
 	acpi_processor_power_exit(pr);
 	return result;
+}
+
+static int acpi_processor_start(struct device *dev)
+{
+	struct acpi_device *device = ACPI_COMPANION(dev);
+	struct acpi_processor *pr;
+	int result;
+
+	if (!device)
+		return -ENODEV;
+
+	pr = acpi_driver_data(device);
+	if (!pr)
+		return -ENODEV;
+
+	/* Protect against concurrent CPU hotplug operations */
+	cpu_hotplug_disable();
+	result = acpi_cppc_processor_probe(pr);
+	cpu_hotplug_enable();
+
+	if (result && !IS_ENABLED(CONFIG_ACPI_CPU_FREQ_PSS))
+		dev_dbg(&device->dev, "CPPC data invalid or not present\n");
+
+	return 0;
 }
 
 static int acpi_processor_stop(struct device *dev)
