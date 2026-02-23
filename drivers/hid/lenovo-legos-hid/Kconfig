@@ -1,0 +1,11 @@
+config LENOVO_LEGOS_HID
+	tristate "Lenovo Legion Go S HID"
+	depends on USB_HID
+	depends on LEDS_CLASS
+	depends on LEDS_CLASS_MULTICOLOR
+	help
+	  Say Y here to include support for the Lenovo Legion Go S Handheld
+	  Console Controller.
+
+	  To compile this driver as a module, choose M here: the module will
+	  be called lenovo-legos-hid.
