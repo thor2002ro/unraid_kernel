@@ -1445,6 +1445,8 @@ source "drivers/hid/intel-ish-hid/Kconfig"
 
 source "drivers/hid/amd-sfh-hid/Kconfig"
 
+source "drivers/hid/asus-ally-hid/Kconfig"
+
 source "drivers/hid/surface-hid/Kconfig"
 
 source "drivers/hid/intel-thc-hid/Kconfig"
@@ -1454,5 +1456,9 @@ endif # HID
 # USB support may be used with HID disabled
 
 source "drivers/hid/usbhid/Kconfig"
+
+source "drivers/hid/lenovo-legos-hid/Kconfig"
+
+source "drivers/hid/zotac-zone-hid/Kconfig"
 
 endif # HID_SUPPORT

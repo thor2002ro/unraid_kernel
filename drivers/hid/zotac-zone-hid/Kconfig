@@ -1,0 +1,8 @@
+config ZOTAC_ZONE_HID
+	tristate "Zotac Zone handheld support"
+	depends on USB_HID
+	depends on LEDS_CLASS
+	depends on LEDS_CLASS_MULTICOLOR
+	select POWER_SUPPLY
+	help
+	Support for the Zotac Zone handheld gaming console.

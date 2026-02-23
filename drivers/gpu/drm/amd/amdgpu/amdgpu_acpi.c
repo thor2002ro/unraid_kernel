@@ -403,6 +403,20 @@ int amdgpu_atif_query_backlight_caps(struct amdgpu_atif *atif)
 	memcpy(atif->backlight_caps.luminance_data,
 	       characteristics.data_points,
 	       sizeof(atif->backlight_caps.luminance_data));
+
+	/*
+	 * Sanity check the data points to ensure both input signal and
+	 * luminance increase monotonically
+	 */
+	for (int i = 0; i < atif->backlight_caps.data_points - 1; i++) {
+		if (atif->backlight_caps.luminance_data[i].input_signal >=
+		    atif->backlight_caps.luminance_data[i + 1].input_signal ||
+		    atif->backlight_caps.luminance_data[i].luminance >=
+		    atif->backlight_caps.luminance_data[i + 1].luminance) {
+			DRM_ERROR(FW_BUG "Invalid luminance data, disabling custom brightness curve support\n");
+			atif->backlight_caps.data_points = 0;
+		}
+	}
 out:
 	kfree(info);
 	return err;

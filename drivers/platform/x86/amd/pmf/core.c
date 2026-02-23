@@ -63,6 +63,10 @@ MODULE_PARM_DESC(smart_pc_support, "Smart PC Support (default = true)");
 
 static struct device *pmf_device;
 
+static bool smart_pc_support = true;
+module_param(smart_pc_support, bool, 0444);
+MODULE_PARM_DESC(smart_pc_support, "Smart PC Support (default = true)");
+
 static int amd_pmf_pwr_src_notify_call(struct notifier_block *nb, unsigned long event, void *data)
 {
 	struct amd_pmf_dev *pmf = container_of(nb, struct amd_pmf_dev, pwr_src_notifier);
