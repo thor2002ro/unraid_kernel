@@ -13,6 +13,7 @@ static const struct regmap_config bmi270_i2c_regmap_config = {
 	.reg_bits = 8,
 	.val_bits = 8,
 };
+MODULE_DEVICE_TABLE(i2c, bmi270_i2c_id);
 
 static int bmi270_i2c_probe(struct i2c_client *client)
 {
