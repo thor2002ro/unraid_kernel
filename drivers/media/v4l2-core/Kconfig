@@ -40,6 +40,11 @@ config VIDEO_TUNER
 config V4L2_JPEG_HELPER
 	tristate
 
+config V4L2_LOOPBACK
+	tristate "V4L2 loopback device"
+	help
+	  V4L2 loopback device
+
 # Used by drivers that need v4l2-h264.ko
 config V4L2_H264
 	tristate
