@@ -34,9 +34,7 @@ endif
 # certain optimization flags it knows it has not implemented.
 # Make it behave more like gcc by erroring when these flags are encountered
 # so they can be implemented or wrapped in cc-option.
-CLANG_FLAGS	+= -Werror=unknown-warning-option
 CLANG_FLAGS	+= -Werror=ignored-optimization-argument
 CLANG_FLAGS	+= -Werror=option-ignored
-CLANG_FLAGS	+= -Werror=unused-command-line-argument
 KBUILD_CPPFLAGS	+= $(CLANG_FLAGS)
 export CLANG_FLAGS

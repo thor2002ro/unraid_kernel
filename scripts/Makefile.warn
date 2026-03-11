@@ -13,7 +13,6 @@ KBUILD_CFLAGS += -Wundef
 KBUILD_CFLAGS += -Werror=implicit-function-declaration
 KBUILD_CFLAGS += -Werror=implicit-int
 KBUILD_CFLAGS += -Werror=return-type
-KBUILD_CFLAGS += -Werror=strict-prototypes
 KBUILD_CFLAGS += -Wno-format-security
 KBUILD_CFLAGS += -Wno-trigraphs
 KBUILD_CFLAGS += -Wno-frame-address
@@ -100,9 +99,6 @@ KBUILD_CFLAGS += $(KBUILD_CFLAGS-y) $(CONFIG_CC_IMPLICIT_FALLTHROUGH)
 
 # Prohibit date/time macros, which would make the build non-deterministic
 KBUILD_CFLAGS += -Werror=date-time
-
-# enforce correct pointer usage
-KBUILD_CFLAGS += -Werror=incompatible-pointer-types
 
 # Require designated initializers for all marked structures
 KBUILD_CFLAGS += $(call cc-option,-Werror=designated-init)

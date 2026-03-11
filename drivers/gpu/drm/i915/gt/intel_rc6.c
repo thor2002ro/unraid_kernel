@@ -2,9 +2,9 @@
 /*
  * Copyright © 2019 Intel Corporation
  */
-
 #include <linux/pm_runtime.h>
 #include <linux/string_helpers.h>
+#include <linux/dmi.h>
 
 #include <drm/drm_print.h>
 
@@ -496,6 +496,17 @@ static bool rc6_supported(struct intel_rc6 *rc6)
 
 	if (!HAS_RC6(i915))
 		return false;
+
+	if (dmi_match(DMI_PRODUCT_SKU, "IBP1XI08MK1") ||
+	    dmi_match(DMI_PRODUCT_SKU, "IBP14I08MK2") ||
+	    dmi_match(DMI_PRODUCT_SKU, "IBP1XI08MK2") ||
+	    dmi_match(DMI_PRODUCT_SKU, "IBP16I08MK2") ||
+	    dmi_match(DMI_PRODUCT_SKU, "OMNIA08IMK1") ||
+	    dmi_match(DMI_PRODUCT_SKU, "OMNIA08IMK2")) {
+		drm_notice(&i915->drm,
+			   "RC6 disabled by quirk\n");
+		return false;
+	}
 
 	if (intel_vgpu_active(i915))
 		return false;
