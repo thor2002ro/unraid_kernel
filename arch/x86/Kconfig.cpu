@@ -255,6 +255,11 @@ config CC_HAS_MARCH_NATIVE
 	# usage warnings that only appear wth '-march=native'.
 	depends on CC_IS_GCC || CLANG_VERSION >= 190100
 
+
+choice
+	prompt "x86_64 Compiler Build Optimization"
+	default GENERIC_CPU
+
 config X86_NATIVE_CPU
 	bool "Build and optimize for local/native CPU"
 	depends on X86_64
@@ -268,6 +273,47 @@ config X86_NATIVE_CPU
 	  different x86 machine.
 
 	  If unsure, say N.
+
+config GENERIC_CPU
+	bool "Generic-x86-64"
+	depends on X86_64
+	help
+	  Generic x86-64 CPU.
+          Runs equally well on all x86-64 CPUs.
+
+config MZEN4
+	bool "AMD Ryzen 4"
+	depends on (CC_IS_GCC && GCC_VERSION >= 130000) || (CC_IS_CLANG && CLANG_VERSION >= 160000)
+	help
+	  Select this for AMD Family 19h Zen 4 processors.
+
+          Enables -march=znver4
+
+endchoice
+
+config X86_64_VERSION
+	int "x86-64 compiler ISA level"
+	range 1 4
+	depends on (CC_IS_GCC && GCC_VERSION > 110000) || (CC_IS_CLANG && CLANG_VERSION >= 120000)
+	depends on X86_64 && GENERIC_CPU
+	help
+	  Specify a specific x86-64 compiler ISA level.
+
+	  There are three x86-64 ISA levels that work on top of
+	  the x86-64 baseline, namely: x86-64-v2 and x86-64-v3.
+
+	  x86-64-v2 brings support for vector instructions up to Streaming SIMD
+	  Extensions 4.2 (SSE4.2) and Supplemental Streaming SIMD Extensions 3
+	  (SSSE3), the POPCNT instruction, and CMPXCHG16B.
+
+	  x86-64-v3 adds vector instructions up to AVX2, MOVBE, and additional
+	  bit-manipulation instructions.
+
+	  x86-64-v4 is not included since the kernel does not use AVX512 instructions
+
+	  You can find the best version for your CPU by running one of the following:
+	  /lib/ld-linux-x86-64.so.2 --help | grep supported
+	  /lib64/ld-linux-x86-64.so.2 --help | grep supported
 
 config X86_GENERIC
 	bool "Generic x86 support"
