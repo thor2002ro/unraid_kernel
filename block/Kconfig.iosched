@@ -16,6 +16,20 @@ config MQ_IOSCHED_KYBER
 	  synchronous writes, it will self-tune queue depths to achieve that
 	  goal.
 
+config MQ_IOSCHED_ADIOS
+	tristate "Adaptive Deadline I/O scheduler"
+	default m
+	help
+	  The Adaptive Deadline I/O Scheduler (ADIOS) is a multi-queue I/O
+	  scheduler with learning-based adaptive latency control.
+
+config MQ_IOSCHED_DEFAULT_ADIOS
+	bool "Enable ADIOS I/O scheduler as default MQ I/O scheduler"
+	depends on MQ_IOSCHED_ADIOS=y
+	default n
+	help
+	  Enable the ADIOS I/O scheduler as the default scheduler for MQ I/O.
+
 config IOSCHED_BFQ
 	tristate "BFQ I/O scheduler"
 	select BLK_ICQ
