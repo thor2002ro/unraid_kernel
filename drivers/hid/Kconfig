@@ -200,6 +200,15 @@ config HID_ASUS
 	- GL553V series
 	- GL753V series
 
+config HID_ASUS_ALLY
+    tristate "Asus Ally gamepad configuration support"
+    depends on USB_HID
+    depends on LEDS_CLASS
+    depends on LEDS_CLASS_MULTICOLOR
+    select POWER_SUPPLY
+    help
+    Support for configuring the Asus ROG Ally gamepad using attributes.
+
 config HID_AUREAL
 	tristate "Aureal"
 	help
@@ -1471,5 +1480,7 @@ endif # HID
 # USB support may be used with HID disabled
 
 source "drivers/hid/usbhid/Kconfig"
+
+source "drivers/hid/zotac-zone-hid/Kconfig"
 
 endif # HID_SUPPORT
