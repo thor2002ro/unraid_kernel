@@ -2238,7 +2238,11 @@ extern int group_balance_cpu(struct sched_group *sg);
 extern void update_sched_domain_debugfs(void);
 extern void dirty_sched_domain_sysctl(int cpu);
 
+#ifdef CONFIG_SCHED_BORE
+extern void sched_update_min_base_slice(void);
+#else /* !CONFIG_SCHED_BORE */
 extern int sched_update_scaling(void);
+#endif /* CONFIG_SCHED_BORE */
 
 static inline const struct cpumask *task_user_cpus(struct task_struct *p)
 {
@@ -3055,7 +3059,12 @@ static inline void attach_one_task(struct rq *rq, struct task_struct *p)
 extern __read_mostly unsigned int sysctl_sched_nr_migrate;
 extern __read_mostly unsigned int sysctl_sched_migration_cost;
 
+#ifdef CONFIG_SCHED_BORE
+extern unsigned int sysctl_sched_min_base_slice;
+extern __read_mostly uint sysctl_sched_base_slice;
+#else /* !CONFIG_SCHED_BORE */
 extern unsigned int sysctl_sched_base_slice;
+#endif /* CONFIG_SCHED_BORE */
 
 extern int sysctl_resched_latency_warn_ms;
 extern int sysctl_resched_latency_warn_once;

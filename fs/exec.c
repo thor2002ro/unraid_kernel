@@ -120,6 +120,7 @@ bool path_noexec(const struct path *path)
 	return (path->mnt->mnt_flags & MNT_NOEXEC) ||
 	       (path->mnt->mnt_sb->s_iflags & SB_I_NOEXEC);
 }
+EXPORT_SYMBOL_GPL(path_noexec);
 
 #ifdef CONFIG_MMU
 /*
@@ -777,6 +778,9 @@ static struct file *do_open_execat(int fd, struct filename *name, int flags)
 		return ERR_PTR(-EINVAL);
 	if (flags & AT_SYMLINK_NOFOLLOW)
 		open_exec_flags.lookup_flags &= ~LOOKUP_FOLLOW;
+	/* for aufs, pass LOOKUP_EMPTY flag, but untested */
+	if (flags & AT_EMPTY_PATH)
+		open_exec_flags.lookup_flags |= LOOKUP_EMPTY;
 
 	file = do_file_open(fd, name, &open_exec_flags);
 	if (IS_ERR(file))

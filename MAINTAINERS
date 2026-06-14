@@ -4253,6 +4253,19 @@ F:	kernel/audit*
 F:	lib/*audit.c
 K:	\baudit_[a-z_0-9]\+\b
 
+AUFS (advanced multi layered unification filesystem) FILESYSTEM
+M:	"J. R. Okajima" <hooanon05g@gmail.com>
+L:	aufs-users@lists.sourceforge.net (members only)
+L:	linux-unionfs@vger.kernel.org
+S:	Supported
+W:	http://aufs.sourceforge.net
+T:	git://github.com/sfjro/aufs-linux.git
+F:	Documentation/ABI/testing/debugfs-aufs
+F:	Documentation/ABI/testing/sysfs-aufs
+F:	Documentation/filesystems/aufs/
+F:	fs/aufs/
+F:	include/uapi/linux/aufs_type.h
+
 AUTOFDO BUILD
 M:	Rong Xu <xur@google.com>
 M:	Han Shen <shenhan@google.com>

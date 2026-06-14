@@ -3210,6 +3210,9 @@ static struct file *vfs_open_tree(int dfd, const char __user *filename, unsigned
 		lookup_flags &= ~LOOKUP_AUTOMOUNT;
 	if (flags & AT_SYMLINK_NOFOLLOW)
 		lookup_flags &= ~LOOKUP_FOLLOW;
+	/* for aufs, pass LOOKUP_EMPTY flag, but untested */
+	if (flags & AT_EMPTY_PATH)
+		lookup_flags |= LOOKUP_EMPTY;
 
 	/*
 	 * If we create a new mount namespace with the cloned mount tree we
@@ -5153,6 +5156,9 @@ SYSCALL_DEFINE5(mount_setattr, int, dfd, const char __user *, path,
 		lookup_flags &= ~LOOKUP_AUTOMOUNT;
 	if (flags & AT_SYMLINK_NOFOLLOW)
 		lookup_flags &= ~LOOKUP_FOLLOW;
+	/* for aufs, pass LOOKUP_EMPTY flag, but untested */
+	if (flags & AT_EMPTY_PATH)
+		lookup_flags |= LOOKUP_EMPTY;
 
 	kattr = (struct mount_kattr) {
 		.lookup_flags	= lookup_flags,
@@ -6320,6 +6326,7 @@ bool our_mnt(struct vfsmount *mnt)
 {
 	return check_mnt(real_mount(mnt));
 }
+EXPORT_SYMBOL_GPL(our_mnt);
 
 bool current_chrooted(void)
 {

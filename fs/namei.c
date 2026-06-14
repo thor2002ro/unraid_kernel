@@ -3781,7 +3781,7 @@ static struct dentry *lock_two_directories(struct dentry *p1, struct dentry *p2)
 /*
  * p1 and p2 should be directories on the same fs.
  */
-static struct dentry *lock_rename(struct dentry *p1, struct dentry *p2)
+struct dentry *lock_rename(struct dentry *p1, struct dentry *p2)
 {
 	if (p1 == p2) {
 		inode_lock_nested(p1->d_inode, I_MUTEX_PARENT);
@@ -3791,6 +3791,7 @@ static struct dentry *lock_rename(struct dentry *p1, struct dentry *p2)
 	mutex_lock(&p1->d_sb->s_vfs_rename_mutex);
 	return lock_two_directories(p1, p2);
 }
+EXPORT_SYMBOL_GPL(lock_rename);
 
 /*
  * c1 and p2 should be on the same fs.
@@ -3833,7 +3834,7 @@ static struct dentry *lock_rename_child(struct dentry *c1, struct dentry *p2)
 	return NULL;
 }
 
-static void unlock_rename(struct dentry *p1, struct dentry *p2)
+void unlock_rename(struct dentry *p1, struct dentry *p2)
 {
 	inode_unlock(p1->d_inode);
 	if (p1 != p2) {
@@ -3841,6 +3842,7 @@ static void unlock_rename(struct dentry *p1, struct dentry *p2)
 		mutex_unlock(&p1->d_sb->s_vfs_rename_mutex);
 	}
 }
+EXPORT_SYMBOL_GPL(unlock_rename);
 
 /**
  * __start_renaming - lookup and lock names for rename
