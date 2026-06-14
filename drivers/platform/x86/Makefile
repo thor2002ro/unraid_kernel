@@ -174,3 +174,6 @@ obj-$(CONFIG_SEL3350_PLATFORM)		+= sel3350-platform.o
 
 # OneXPlayer
 obj-$(CONFIG_OXP_EC)			+= oxpec.o
+
+# Zotac ZONE
+obj-$(CONFIG_ZOTAC_ZONE_PLATFORM)	+= zotac-zone-platform.o

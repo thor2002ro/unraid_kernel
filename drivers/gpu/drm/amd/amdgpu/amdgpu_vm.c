@@ -2473,6 +2473,13 @@ void amdgpu_vm_adjust_size(struct amdgpu_device *adev, uint32_t min_vm_size,
  */
 long amdgpu_vm_wait_idle(struct amdgpu_vm *vm, long timeout)
 {
+	/* If the process is being killed, skip flush VM entities
+	 * as entities of concurrent job submission of this process
+	 * might be in an inconsistent state
+	 */
+	if (current->flags & PF_EXITING)
+		return timeout;
+
 	timeout = drm_sched_entity_flush(&vm->immediate, timeout);
 	if (timeout <= 0)
 		return timeout;
