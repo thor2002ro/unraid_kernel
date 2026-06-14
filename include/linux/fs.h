@@ -1390,6 +1390,7 @@ extern void fasync_free(struct fasync_struct *);
 /* can be called from interrupts */
 extern void kill_fasync(struct fasync_struct **, int, int);
 
+extern int setfl(int fd, struct file *filp, unsigned int arg);
 extern void __f_setown(struct file *filp, struct pid *, enum pid_type, int force);
 extern int f_setown(struct file *filp, int who, int force);
 extern void f_delown(struct file *filp);
@@ -1946,6 +1947,7 @@ struct file_operations {
 	int (*lock) (struct file *, int, struct file_lock *);
 	unsigned long (*get_unmapped_area)(struct file *, unsigned long, unsigned long, unsigned long, unsigned long);
 	int (*check_flags)(int);
+	int (*setfl)(struct file *, unsigned long);
 	int (*flock) (struct file *, int, struct file_lock *);
 	ssize_t (*splice_write)(struct pipe_inode_info *, struct file *, loff_t *, size_t, unsigned int);
 	ssize_t (*splice_read)(struct file *, loff_t *, struct pipe_inode_info *, size_t, unsigned int);
@@ -2489,6 +2491,21 @@ static inline void backing_file_set_security(struct file *f, void *security)
 }
 #endif /* CONFIG_SECURITY */
 
+#if IS_MODULE(CONFIG_AUFS_FS)
+/* fs/au_mf.c */
+const struct path *au_file_user_path(const struct file *f);
+const struct inode *au_file_user_inode(const struct file *f);
+#elif IS_BUILTIN(CONFIG_AUFS_FS)
+/* fs/aufs/mf.c */
+const struct path *au_do_file_user_path(const struct file *f);
+const struct inode *au_do_file_user_inode(const struct file *f);
+#define au_file_user_path(f)	au_do_file_user_path(f)
+#define au_file_user_inode(f)	au_do_file_user_inode(f)
+#else
+#define au_file_user_path(f)	NULL
+#define au_file_user_inode(f)	NULL
+#endif
+
 /*
  * When mmapping a file on a stackable filesystem (e.g., overlayfs), the file
  * stored in ->vm_file is a backing file whose f_inode is on the underlying
@@ -2501,15 +2518,25 @@ static inline void backing_file_set_security(struct file *f, void *security)
 /* Get the path to display in /proc/<pid>/maps */
 static inline const struct path *file_user_path(const struct file *f)
 {
+	const struct path *path;
+
 	if (unlikely(f->f_mode & FMODE_BACKING))
 		return backing_file_user_path(f);
+	path = au_file_user_path(f);
+	if (path)
+		return path;
 	return &f->f_path;
 }
 /* Get the inode whose inode number to display in /proc/<pid>/maps */
 static inline const struct inode *file_user_inode(const struct file *f)
 {
+	const struct inode *inode;
+
 	if (unlikely(f->f_mode & FMODE_BACKING))
 		return d_inode(backing_file_user_path(f)->dentry);
+	inode = au_file_user_inode(f);
+	if (inode)
+		return inode;
 	return file_inode(f);
 }
 

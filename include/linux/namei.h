@@ -165,6 +165,8 @@ extern int follow_down_one(struct path *);
 extern int follow_down(struct path *path, unsigned int flags);
 extern int follow_up(struct path *);
 
+struct dentry *lock_rename(struct dentry *p1, struct dentry *p2);
+void unlock_rename(struct dentry *p1, struct dentry *p2);
 int start_renaming(struct renamedata *rd, int lookup_flags,
 		   struct qstr *old_last, struct qstr *new_last);
 int start_renaming_dentry(struct renamedata *rd, int lookup_flags,

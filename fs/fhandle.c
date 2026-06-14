@@ -156,6 +156,9 @@ SYSCALL_DEFINE5(name_to_handle_at, int, dfd, const char __user *, name,
 		fh_flags |= EXPORT_FH_CONNECTABLE;
 
 	lookup_flags = (flag & AT_SYMLINK_FOLLOW) ? LOOKUP_FOLLOW : 0;
+	/* for aufs, pass LOOKUP_EMPTY flag */
+	if (flag & AT_EMPTY_PATH)
+		lookup_flags |= LOOKUP_EMPTY;
 	CLASS(filename_uflags, filename)(name, flag);
 	err = filename_lookup(dfd, filename, lookup_flags, &path, NULL);
 	if (!err) {

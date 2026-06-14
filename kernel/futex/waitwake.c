@@ -4,6 +4,9 @@
 #include <linux/sched/task.h>
 #include <linux/sched/signal.h>
 #include <linux/freezer.h>
+#ifdef CONFIG_SCHED_BORE
+#include <linux/sched/bore.h>
+#endif /* CONFIG_SCHED_BORE */
 
 #include "futex.h"
 
@@ -355,7 +358,15 @@ void futex_do_wait(struct futex_q *q, struct hrtimer_sleeper *timeout)
 		 * is no timeout, or if it has yet to expire.
 		 */
 		if (!timeout || timeout->task)
+#ifdef CONFIG_SCHED_BORE
+		{
+			current->bore.futex_waiting = true;
+#endif /* CONFIG_SCHED_BORE */
 			schedule();
+#ifdef CONFIG_SCHED_BORE
+			current->bore.futex_waiting = false;
+		}
+#endif /* CONFIG_SCHED_BORE */
 	}
 	__set_current_state(TASK_RUNNING);
 }

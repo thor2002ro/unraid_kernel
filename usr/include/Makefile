@@ -145,6 +145,8 @@ uses-libc += linux/wireless.h
 uses-libc += regulator/regulator.h
 uses-libc += scsi/fc/fc_els.h
 
+uses-libc += linux/aufs_type.h
+
 ifeq ($(UAPI_ARCH),hexagon)
 uses-libc += asm/sigcontext.h
 endif
