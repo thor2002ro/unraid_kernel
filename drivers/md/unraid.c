@@ -708,17 +708,19 @@ static void raid6_generate_q(struct stripe_head *sh)
 	set_buff_locked(&sh->col[qd_idx]);
 }
 
+#define UNRAID_XOR_BLOCKS	4
+
 #define check_xor()   do { 						\
-						 if (count == MAX_XOR_BLOCKS) {		        \
-							xor_blocks(count, BUFFER_SIZE, dest, ptr);	\
-							count = 0;				        \
+						 if (count == UNRAID_XOR_BLOCKS) {		\
+							xor_gen(dest, ptr, count, BUFFER_SIZE);	\
+							count = 0;				\
 						 }						\
 					  } while(0)
 
 static void raid5_generate_d(struct stripe_head *sh, int dd_idx)
 {
 	int disks = sh->conf->disks, pd_idx = disks - 2, count, i;
-	void *dest, *ptr[MAX_XOR_BLOCKS];
+	void *dest, *ptr[UNRAID_XOR_BLOCKS];
 
 	dprintk("raid5_generate_d, stripe %llu, idx %d\n",
 	        (unsigned long long)sh->sector, dd_idx);
@@ -744,7 +746,7 @@ static void raid5_generate_d(struct stripe_head *sh, int dd_idx)
 		check_xor();
 	}
 	if (count)
-		xor_blocks(count, BUFFER_SIZE, dest, ptr);
+		xor_gen(dest, ptr, count, BUFFER_SIZE);
 
 	set_buff_uptodate(&sh->col[dd_idx]);
 	set_buff_locked(&sh->col[dd_idx]);
@@ -782,7 +784,7 @@ static void copy_write_data(struct stripe_head *sh)
 static void rmw5_write_data(struct stripe_head *sh)
 {
 	int disks = sh->conf->disks, pd_idx = disks - 2, count, i;
-	void *dest, *ptr[MAX_XOR_BLOCKS];
+	void *dest, *ptr[UNRAID_XOR_BLOCKS];
 
 	dprintk("rmw5_write_data, stripe %llu\n",
 	        (unsigned long long)sh->sector);
@@ -803,7 +805,7 @@ static void rmw5_write_data(struct stripe_head *sh)
 		}
 	}
 	if (count) {
-		xor_blocks(count, BUFFER_SIZE, dest, ptr);
+		xor_gen(dest, ptr, count, BUFFER_SIZE);
 		count = 0;
 	}
 
@@ -825,7 +827,7 @@ static void rmw5_write_data(struct stripe_head *sh)
 		}
 	}
 	if (count) {
-		xor_blocks(count, BUFFER_SIZE, dest, ptr);
+		xor_gen(dest, ptr, count, BUFFER_SIZE);
 		count = 0;
 	}
 
@@ -882,7 +884,7 @@ static void rmw6_write_data(struct stripe_head *sh, int pd_uptodate)
 static int check_parity5(struct stripe_head *sh)
 {
 	int disks = sh->conf->disks, pd_idx = disks - 2, count, i;
-	void *dest, *ptr[MAX_XOR_BLOCKS];
+	void *dest, *ptr[UNRAID_XOR_BLOCKS];
 
 	dprintk("check_parity5, stripe %llu\n", (unsigned long long)sh->sector);
 
@@ -903,7 +905,7 @@ static int check_parity5(struct stripe_head *sh)
 		check_xor();
 	}
 	if (count) {
-		xor_blocks(count, BUFFER_SIZE, dest, ptr);
+		xor_gen(dest, ptr, count, BUFFER_SIZE);
 		count = 0;
 	}
 
