@@ -490,7 +490,7 @@ static int import_device(mdk_rdev_t *rdev, char *name,
 	rdev->erased = erased;
 
 	/* get id string */
-	strncpy(rdev->id, id, MD_ID_SIZE - 1);
+	strscpy((char *)rdev->id, id, sizeof(rdev->id));
 
 	/* disk is present */
 	rdev->status = DISK_OK;
@@ -2098,7 +2098,7 @@ static ssize_t md_proc_write(struct file *file, const char *buffer,
 			return -1;
 
 		if ((token = get_token(&bufp, delim)) != NULL)
-			strncpy(name, token, sizeof(name) - 1);
+				strscpy(name, token);
 
 		if ((token = get_token(&bufp, delim)) != NULL)
 			offset = simple_strtoul(token, &temp, 10);
@@ -2110,7 +2110,7 @@ static ssize_t md_proc_write(struct file *file, const char *buffer,
 			erased = simple_strtol(token, &temp, 10);
 
 		if ((token = get_token(&bufp, delim)) != NULL)
-			strncpy(id, token, sizeof(id) - 1);
+				strscpy(id, token);
 
 		result = import_slot(array_dev, slot, name, offset, size, erased, id);
 	}
@@ -2244,7 +2244,7 @@ static int __init md_init(void)
 		return (-1);
 	}
 
-	if ((md_wq = alloc_workqueue("md", WQ_MEM_RECLAIM, 0)) == NULL) {
+	if ((md_wq = alloc_workqueue("md", WQ_MEM_RECLAIM | WQ_PERCPU, 0)) == NULL) {
 		printk("md: unable to alloc_workqueue for md\n");
 		return -ENOMEM;
 	}
