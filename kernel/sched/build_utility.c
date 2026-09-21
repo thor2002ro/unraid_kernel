@@ -54,6 +54,10 @@
 #include "stats.h"
 #include "autogroup.h"
 
+#ifdef CONFIG_SCHED_BORE
+#include <linux/sched/bore.h>
+#endif /* CONFIG_SCHED_BORE */
+
 #include "clock.c"
 
 #ifdef CONFIG_CGROUP_CPUACCT
