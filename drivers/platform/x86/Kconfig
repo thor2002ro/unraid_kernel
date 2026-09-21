@@ -1066,6 +1066,16 @@ config OXP_EC
 		handheld devices. This includes fan speed, fan controls, and
 		disabling the default TDP behavior of the device.
 
+config ZOTAC_ZONE_PLATFORM
+	tristate "Zotac Zone platform driver"
+	select FW_ATTR_CLASS
+	select ACPI_PLATFORM_PROFILE
+	help
+	  Support for fans and PPT on Zotac Zone devices.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called zotac-zone.
+
 source "drivers/platform/x86/tuxedo/Kconfig"
 
 endif # X86_PLATFORM_DEVICES

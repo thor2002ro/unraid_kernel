@@ -93,6 +93,8 @@ struct asus_armoury_priv {
 
 	u32 mini_led_dev_id;
 	u32 gpu_mux_dev_id;
+
+	bool requires_fan_curve;
 };
 
 static struct asus_armoury_priv asus_armoury = {
@@ -215,6 +217,22 @@ static int armoury_set_devstate(struct kobj_attribute *attr,
 {
 	u32 result;
 	int err;
+
+	/* On some models, PPT changes require an active fan curve */
+	if (asus_armoury.requires_fan_curve) {
+		switch (dev_id) {
+		case ASUS_WMI_DEVID_PPT_PL1_SPL:
+		case ASUS_WMI_DEVID_PPT_PL2_SPPT:
+		case ASUS_WMI_DEVID_PPT_PL3_FPPT:
+		case ASUS_WMI_DEVID_PPT_APU_SPPT:
+		case ASUS_WMI_DEVID_PPT_PLAT_SPPT:
+			if (!asus_wmi_custom_fan_curve_is_enabled()) {
+				pr_warn_once("PPT change requires an active fan curve on this model. Enable a custom fan curve first.\n");
+				return -EBUSY;
+			}
+			break;
+		}
+	}
 
 	/*
 	 * Prevent developers from bricking devices or issuing dangerous
@@ -1009,6 +1027,8 @@ static void init_rog_tunables(void)
 		pr_info("No power data available for this system\n");
 		return;
 	}
+
+	asus_armoury.requires_fan_curve = power_data->requires_fan_curve;
 
 	/* Initialize AC power tunables */
 	ac_limits = power_data->ac_data;
