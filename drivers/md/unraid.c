@@ -22,6 +22,7 @@
  */
 
 #include "md_unraid.h"
+#include <linux/mm.h>
 
 /*
  * The following can be used to debug the driver
@@ -635,7 +636,7 @@ static void raid6_generate_dd(struct stripe_head *sh, int faila, int failb)
 	        (unsigned long long)sh->sector);
 
 	check_srcs(sh, faila, failb);
-	raid6_2data_recov(disks, BUFFER_SIZE, faila, failb, sh->srcs);
+	raid6_recov_2data(disks, BUFFER_SIZE, faila, failb, sh->srcs);
 	set_buff_uptodate(&sh->col[faila]);
 	set_buff_locked(&sh->col[faila]);
 	set_buff_uptodate(&sh->col[failb]);
@@ -656,7 +657,7 @@ static void raid6_generate_dp(struct stripe_head *sh, int faila)
 		memcpy(sh->srcs[pd_idx], sh->srcs[qd_idx], BUFFER_SIZE);
 	}
 	else {
-		raid6_datap_recov(disks, BUFFER_SIZE, faila, sh->srcs);
+		raid6_recov_datap(disks, BUFFER_SIZE, faila, sh->srcs);
 	}
 	set_buff_uptodate(&sh->col[faila]);
 	set_buff_locked(&sh->col[faila]);
@@ -739,7 +740,7 @@ static void raid5_generate_d(struct stripe_head *sh, int dd_idx)
 		BUG_ON(!buff_uptodate(col));
 
 		/* no point xor'ing buffer full of zeros */
-		if (sh->srcs[i] == raid6_get_zero_page())
+		if (sh->srcs[i] == page_address(ZERO_PAGE(0)))
 			continue;
 
 		ptr[count++] = sh->srcs[i];
@@ -898,7 +899,7 @@ static int check_parity5(struct stripe_head *sh)
 		BUG_ON(!buff_uptodate(col));
 
 		/* no point xor'ing buffer full of zeros */
-		if (sh->srcs[i] == raid6_get_zero_page())
+		if (sh->srcs[i] == page_address(ZERO_PAGE(0)))
 			continue;
 
 		ptr[count++] = sh->srcs[i];
@@ -1847,7 +1848,7 @@ static int grow_buffers(struct stripe_head *sh, int num)
 		}
 		else {
 			sh->col[i].page = NULL;
-			sh->srcs[i] = raid6_get_zero_page();
+			sh->srcs[i] = page_address(ZERO_PAGE(0));
 		}
 	}
 	return 0;
