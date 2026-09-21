@@ -218,6 +218,15 @@ config EXTCON_USBC_TUSB320
 	  support using a TUSB320.
 
 config EXTCON_RTK_TYPE_C
+
+config EXTCON_STEAMDECK
+	tristate "Steam Deck extcon support"
+	depends on MFD_STEAMDECK
+	help
+	  Say Y here to enable support of USB Type C cable detection extcon
+	  support on Steam Deck devices
+
+config EXTCON_RTK_TYPE_C
 	tristate "Realtek RTD SoC extcon Type-C Driver"
 	depends on ARCH_REALTEK || COMPILE_TEST
 	depends on TYPEC

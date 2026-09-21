@@ -231,7 +231,11 @@ static inline int iwl_api_to_core(int api)
 	if (iwl_api_is_core_number(api))
 		return api - API_IS_CORE_START;
 
-	return api - API_TO_CORE_OFFS;
+	if (api >= API_TO_CORE_OFFS) {
+          return api - API_TO_CORE_OFFS;
+	}
+	printk("api: %d\n", api);
+	return api;
 }
 
 #define FW_API_FMT			"%s%d"
