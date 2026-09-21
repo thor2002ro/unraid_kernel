@@ -1,0 +1,27 @@
+
+# Copyright (C) 2005-2026 Junjiro R. Okajima
+
+mmap(2) -- File Memory Mapping
+----------------------------------------------------------------------
+In aufs, the file-mapped pages are handled by a branch fs directly, no
+interaction with aufs. It means aufs_mmap() calls the branch fs's
+->mmap().
+This approach is simple and good, but there is one problem.
+Under /proc, several entries show the mmapped files by its path (with
+device and inode number), and the printed path will be the path on the
+branch fs's instead of virtual aufs's.
+This is not a problem in most cases, but some utilities such like
+lsof(1) (and its user) may expect the path on aufs.
+
+To address this issue, aufs used to take an approach to add a new
+member 'vm_prfile' into struct vm_area_struct (and struct
+vm_region). It was not an ideal solution but worked well for a long
+time. One big disadvantage is that it requires to follow every changes
+around 'vm_file' in every mainline releases.
+
+In linux-v6.7 (and v6.8), VFS internal functions file_user_path() and
+file_user_inode() were introduced for FMODE_BACKING and Overlayfs.
+They are good customization points and aufs gave up 'vm_prfile'
+approach and switched to modifiying file_user_{path,inode}() since
+aufs6.12. It also requires to changes to 'vm_file' in mainline, but it
+will be much smaller than the approach aufs used to take.

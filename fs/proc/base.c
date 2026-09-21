@@ -1765,8 +1765,8 @@ static int proc_exe_link(struct dentry *dentry, struct path *exe_path,
 
 	exe_file = get_task_exe_file(task);
 	if (exe_file) {
-		*exe_path = exe_file->f_path;
-		path_get(&exe_file->f_path);
+		*exe_path = *file_user_path(exe_file);
+		path_get(exe_path);
 		fput(exe_file);
 		return 0;
 	} else

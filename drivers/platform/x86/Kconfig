@@ -167,6 +167,11 @@ config ACER_WIRELESS
           If you choose to compile this driver as a module the module will be
           called acer-wireless.
 
+config ACPI_CALL
+	tristate "acpi_call module"
+	help
+	  This embeds acpi_call module into the kernel
+
 config ACER_WMI
 	tristate "Acer WMI Laptop Extras"
 	depends on BACKLIGHT_CLASS_DEVICE
